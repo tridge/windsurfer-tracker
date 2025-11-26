@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track Review - Windsurfer Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+        #map {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            right: 300px;
+            bottom: 80px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: #2c3e50;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 20px;
+            z-index: 1000;
+        }
+
+        #controls label {
+            font-size: 14px;
+        }
+
+        #controls select, #controls input {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        #controls button {
+            padding: 8px 16px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #controls button:hover {
+            background: #2980b9;
+        }
+
+        #sidebar {
+            position: absolute;
+            top: 60px;
+            right: 0;
+            width: 300px;
+            bottom: 80px;
+            background: #f5f5f5;
+            overflow-y: auto;
+            padding: 15px;
+            border-left: 1px solid #ddd;
+        }
+
+        #sidebar h3 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .user-item:hover {
+            border-color: #3498db;
+        }
+
+        .user-item.selected {
+            border-color: #2ecc71;
+            background: #e8f8f0;
+        }
+
+        .user-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-name {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .user-stats {
+            font-size: 12px;
+            color: #666;
+        }
+
+        #timeline {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            background: #2c3e50;
+            padding: 10px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        #time-display {
+            color: white;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .time-slider-container {
+            position: relative;
+            width: 100%;
+            height: 30px;
+        }
+
+        .time-slider {
+            position: absolute;
+            width: 100%;
+            pointer-events: none;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            background: transparent;
+            top: 10px;
+        }
+
+        .time-slider::-webkit-slider-thumb {
+            pointer-events: auto;
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #3498db;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .time-slider::-moz-range-thumb {
+            pointer-events: auto;
+            width: 20px;
+            height: 20px;
+            background: #3498db;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        #start-slider::-webkit-slider-thumb {
+            background: #2ecc71;
+        }
+
+        #start-slider::-moz-range-thumb {
+            background: #2ecc71;
+        }
+
+        #end-slider::-webkit-slider-thumb {
+            background: #e74c3c;
+        }
+
+        #end-slider::-moz-range-thumb {
+            background: #e74c3c;
+        }
+
+        .slider-track {
+            position: absolute;
+            width: 100%;
+            height: 8px;
+            background: #555;
+            border-radius: 4px;
+            top: 10px;
+        }
+
+        .slider-range {
+            position: absolute;
+            height: 8px;
+            background: #3498db;
+            border-radius: 4px;
+            top: 10px;
+        }
+
+        .time-labels {
+            display: flex;
+            justify-content: space-between;
+            color: #bdc3c7;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+
+        #playback-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        #playback-controls button {
+            padding: 5px 15px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .speed-legend {
+            position: absolute;
+            bottom: 100px;
+            left: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+
+        .speed-legend h4 {
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .speed-gradient {
+            width: 150px;
+            height: 15px;
+            background: linear-gradient(to right, #3498db, #2ecc71, #f1c40f, #e74c3c);
+            border-radius: 3px;
+        }
+
+        .speed-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            margin-top: 3px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            z-index: 2000;
+            display: none;
+        }
+
+        #status {
+            color: #bdc3c7;
+            font-size: 12px;
+        }
+
+        /* Hamburger menu button (hidden on desktop) */
+        #sidebar-toggle {
+            display: none;
+            position: fixed;
+            top: 70px;
+            right: 15px;
+            z-index: 1001;
+            width: 44px;
+            height: 44px;
+            background: #2c3e50;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        #sidebar-toggle span {
+            display: block;
+            width: 24px;
+            height: 3px;
+            background: white;
+            border-radius: 2px;
+            transition: transform 0.3s, opacity 0.3s;
+        }
+
+        #sidebar-toggle.open span:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+        #sidebar-toggle.open span:nth-child(2) {
+            opacity: 0;
+        }
+        #sidebar-toggle.open span:nth-child(3) {
+            transform: rotate(-45deg) translate(5px, -5px);
+        }
+
+        /* Overlay when drawer is open */
+        #sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 80px;
+            background: black;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 1000;
+            transition: opacity 0.3s;
+        }
+
+        #sidebar-overlay.visible {
+            opacity: 0.5;
+            pointer-events: auto;
+        }
+
+        /* Race selector styles */
+        .race-item {
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .race-item:hover {
+            border-color: #3498db;
+        }
+
+        .race-item.selected {
+            border-color: #2ecc71;
+            background: #e8f8f0;
+        }
+
+        .race-time {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .race-stats {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        #race-selector {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* Mobile responsive layout */
+        @media (max-width: 768px) {
+            #sidebar-toggle {
+                display: flex;
+            }
+
+            #sidebar-overlay {
+                display: block;
+            }
+
+            #sidebar {
+                position: fixed;
+                right: -320px;
+                transition: right 0.3s ease-in-out;
+                z-index: 1002;
+                box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+            }
+
+            #sidebar.open {
+                right: 0;
+            }
+
+            #map {
+                right: 0;
+                top: 110px;
+                bottom: 140px;
+            }
+
+            #controls {
+                position: fixed;
+                flex-wrap: wrap;
+                height: auto;
+                min-height: 60px;
+                padding: 10px;
+                gap: 8px;
+            }
+
+            #controls label {
+                font-size: 11px;
+            }
+
+            #controls > a {
+                font-size: 11px;
+                padding: 5px 8px !important;
+            }
+
+            #controls button {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+
+            #timeline {
+                position: fixed;
+                height: auto;
+                min-height: 130px;
+                padding: 8px 10px;
+            }
+
+            #time-display {
+                font-size: 12px;
+                margin-bottom: 5px;
+            }
+
+            .time-slider-container {
+                height: 40px;
+            }
+
+            .time-slider::-webkit-slider-thumb {
+                width: 28px;
+                height: 28px;
+            }
+
+            .time-slider::-moz-range-thumb {
+                width: 28px;
+                height: 28px;
+            }
+
+            #playback-controls {
+                flex-wrap: wrap;
+                margin-top: 5px;
+            }
+
+            #playback-controls button {
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+
+            .speed-legend {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <a href="index.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
+        <label>Date: <input type="date" id="date-picker"></label>
+        <button id="load-btn">Load Tracks</button>
+        <label>
+            <input type="checkbox" id="speed-color" checked> Color by speed
+        </label>
+        <label>
+            <input type="checkbox" id="show-markers" checked> Show position markers
+        </label>
+        <label>
+            <input type="checkbox" id="filter-outliers" checked> Filter outliers
+        </label>
+        <label>
+            <input type="checkbox" id="show-outliers"> Show outliers (red)
+        </label>
+        <span id="status"></span>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Hamburger menu button (mobile only) -->
+    <button id="sidebar-toggle" aria-label="Toggle sidebar">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <!-- Overlay when drawer is open (mobile only) -->
+    <div id="sidebar-overlay"></div>
+
+    <div id="sidebar">
+        <div id="race-selector">
+            <h3>Select Log</h3>
+            <div id="race-list">
+                <p style="color:#666">Select a date to see logs</p>
+            </div>
+        </div>
+        <h3>Users</h3>
+        <div style="margin-bottom:10px;">
+            <button id="show-all-btn" style="padding:5px 10px;margin-right:5px;">Show All</button>
+            <button id="hide-all-btn" style="padding:5px 10px;">Hide All</button>
+        </div>
+        <div id="user-list">
+            <p style="color:#666">Select a log to see users</p>
+        </div>
+    </div>
+
+    <div id="timeline">
+        <div id="time-display">
+            <span style="color:#2ecc71">Start: --:--:--</span> &nbsp;|&nbsp;
+            <span style="color:#e74c3c">End: --:--:--</span> &nbsp;|&nbsp;
+            Duration: --:--
+        </div>
+        <div class="time-slider-container">
+            <div class="slider-track"></div>
+            <div class="slider-range" id="slider-range"></div>
+            <input type="range" class="time-slider" id="start-slider" min="0" max="100" value="0">
+            <input type="range" class="time-slider" id="end-slider" min="0" max="100" value="100">
+        </div>
+        <div class="time-labels">
+            <span id="label-start">--:--:--</span>
+            <span id="label-end">--:--:--</span>
+        </div>
+        <div id="playback-controls">
+            <button id="play-btn">▶ Play</button>
+            <button id="speed-1x" class="speed-btn">1x</button>
+            <button id="speed-5x" class="speed-btn">5x</button>
+            <button id="speed-20x" class="speed-btn">20x</button>
+            <button id="reset-range-btn" style="background:#95a5a6">Reset Range</button>
+        </div>
+    </div>
+
+    <div class="speed-legend">
+        <h4>Speed (knots)</h4>
+        <div class="speed-gradient"></div>
+        <div class="speed-labels">
+            <span>0</span>
+            <span>5</span>
+            <span>10</span>
+            <span>15+</span>
+        </div>
+    </div>
+
+    <div id="loading">Loading tracks...</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([-36.85, 174.88], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // State
+        let allData = [];
+        let userData = {};
+        let userOverrides = {};  // Name mappings from users.json
+        let trackLayers = {};
+        let markerLayers = {};
+        let pointLayers = {};
+        let outlierLayers = {};  // Outlier markers per user
+        let selectedUsers = new Set();
+        let playbackInterval = null;
+        let playbackSpeed = 1;
+        let minTime = 0;
+        let maxTime = 0;
+        let rangeStartTime = 0;  // User-selected start time
+        let rangeEndTime = 0;    // User-selected end time
+        let currentSummary = null;  // Summary data for selected date
+        let currentLogFile = null;  // Currently loaded log file
+
+        // Mobile drawer toggle
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+        function toggleSidebar() {
+            sidebar.classList.toggle('open');
+            sidebarToggle.classList.toggle('open');
+            sidebarOverlay.classList.toggle('visible');
+        }
+
+        function closeSidebarIfMobile() {
+            if (window.innerWidth <= 768) {
+                sidebar.classList.remove('open');
+                sidebarToggle.classList.remove('open');
+                sidebarOverlay.classList.remove('visible');
+            }
+        }
+
+        sidebarToggle.addEventListener('click', toggleSidebar);
+        sidebarOverlay.addEventListener('click', toggleSidebar);
+
+        // Calculate distance between two points using Haversine formula (returns km)
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Filter outliers from track positions using physics-based detection
+        function filterOutliers(positions) {
+            const SPEED_MARGIN_KNOTS = 20;
+            const filtered = [];
+            const outliers = [];
+
+            for (let i = 0; i < positions.length; i++) {
+                const pos = positions[i];
+
+                if (i === 0) {
+                    filtered.push(pos);
+                    continue;
+                }
+
+                const prev = filtered[filtered.length - 1];
+                const timeDelta = pos.ts - prev.ts;
+
+                if (timeDelta > 0) {
+                    const distanceKm = haversineDistance(prev.lat, prev.lon, pos.lat, pos.lon);
+                    const distanceM = distanceKm * 1000;
+                    const impliedSpeedMs = distanceM / timeDelta;
+                    const impliedSpeedKnots = impliedSpeedMs * 1.94384;
+                    const prevSpeedKnots = (prev.spd || 0);  // spd is already in knots
+                    const currSpeedKnots = (pos.spd || 0);   // spd is already in knots
+                    const maxAllowed = Math.max(prevSpeedKnots, currSpeedKnots) + SPEED_MARGIN_KNOTS;
+
+                    if (impliedSpeedKnots > maxAllowed) {
+                        outliers.push(pos);
+                        continue;
+                    }
+                }
+
+                filtered.push(pos);
+            }
+
+            return { filtered, outliers };
+        }
+
+        // Load user overrides (name mappings)
+        async function loadUserOverrides() {
+            try {
+                const response = await fetch('users.json?' + Date.now());
+                if (response.ok) {
+                    const data = await response.json();
+                    userOverrides = data.users || {};
+                }
+            } catch (e) {
+                console.log('No users.json found');
+            }
+        }
+
+        // Get display name for a user ID
+        function getDisplayName(userId) {
+            if (userOverrides[userId] && userOverrides[userId].name) {
+                return userOverrides[userId].name;
+            }
+            return userId;
+        }
+
+        // Load user overrides on startup
+        loadUserOverrides();
+
+        // User colors
+        const userColors = [
+            '#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f39c12',
+            '#1abc9c', '#e91e63', '#00bcd4', '#ff5722', '#795548'
+        ];
+
+        // Speed to color (0-15+ knots)
+        function speedToColor(speedKnots) {
+            const knots = speedKnots;  // spd is already in knots
+            const ratio = Math.min(knots / 15, 1);
+
+            if (ratio < 0.33) {
+                // Blue to green
+                const t = ratio / 0.33;
+                return interpolateColor('#3498db', '#2ecc71', t);
+            } else if (ratio < 0.66) {
+                // Green to yellow
+                const t = (ratio - 0.33) / 0.33;
+                return interpolateColor('#2ecc71', '#f1c40f', t);
+            } else {
+                // Yellow to red
+                const t = (ratio - 0.66) / 0.34;
+                return interpolateColor('#f1c40f', '#e74c3c', t);
+            }
+        }
+
+        function interpolateColor(c1, c2, t) {
+            const r1 = parseInt(c1.slice(1,3), 16);
+            const g1 = parseInt(c1.slice(3,5), 16);
+            const b1 = parseInt(c1.slice(5,7), 16);
+            const r2 = parseInt(c2.slice(1,3), 16);
+            const g2 = parseInt(c2.slice(3,5), 16);
+            const b2 = parseInt(c2.slice(5,7), 16);
+
+            const r = Math.round(r1 + (r2 - r1) * t);
+            const g = Math.round(g1 + (g2 - g1) * t);
+            const b = Math.round(b1 + (b2 - b1) * t);
+
+            return `rgb(${r},${g},${b})`;
+        }
+
+        // Set default date to today (use local date, not UTC)
+        const d = new Date();
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        document.getElementById('date-picker').value = today;
+
+        // Load summary for a date (phase 1)
+        async function loadSummary() {
+            const dateStr = document.getElementById('date-picker').value;
+            if (!dateStr) return;
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('status').textContent = 'Loading summary...';
+
+            const dateParts = dateStr.split('-');
+            const logDate = `${dateParts[0]}_${dateParts[1]}_${dateParts[2]}`;
+
+            // Clear previous state
+            currentSummary = null;
+            currentLogFile = null;
+            allData = [];
+            userData = {};
+            selectedUsers = new Set();
+            document.getElementById('user-list').innerHTML = '<p style="color:#666">Select a log to see users</p>';
+
+            try {
+                // Try to fetch summary file
+                const summaryUrl = `logs/${logDate}_summary.json?${Date.now()}`;
+                const response = await fetch(summaryUrl);
+
+                if (response.ok) {
+                    currentSummary = await response.json();
+                    updateRaceList();
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('status').textContent = `Found ${currentSummary.logs.length} log(s) for this date`;
+                } else {
+                    // No summary file - fall back to direct loading
+                    document.getElementById('race-list').innerHTML = '<p style="color:#666">No summary available - loading all data...</p>';
+                    await loadTracksLegacy(logDate);
+                }
+            } catch (e) {
+                console.error('Error loading summary:', e);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').textContent = 'Error loading data';
+                document.getElementById('race-list').innerHTML = '<p style="color:#666">Error loading logs</p>';
+            }
+        }
+
+        // Update race list UI
+        function updateRaceList() {
+            const container = document.getElementById('race-list');
+            container.innerHTML = '';
+
+            if (!currentSummary || !currentSummary.logs || currentSummary.logs.length === 0) {
+                container.innerHTML = '<p style="color:#666">No logs found</p>';
+                return;
+            }
+
+            // Logs are already sorted by start_ts descending in the summary
+            currentSummary.logs.forEach((log, index) => {
+                const div = document.createElement('div');
+                div.className = 'race-item';
+                div.dataset.index = index;
+
+                const startTime = new Date(log.start_ts * 1000).toLocaleTimeString();
+                const endTime = new Date(log.end_ts * 1000).toLocaleTimeString();
+                const duration = Math.round((log.end_ts - log.start_ts) / 60);
+                const sailorCount = Object.keys(log.sailors).length;
+
+                div.innerHTML = `
+                    <div class="race-time">Log ${currentSummary.logs.length - index}: ${startTime} - ${endTime}</div>
+                    <div class="race-stats">
+                        Duration: ${duration} min | ${sailorCount} sailors | ${log.point_count.toLocaleString()} points
+                    </div>
+                `;
+
+                div.addEventListener('click', () => {
+                    // Clear previous selection
+                    container.querySelectorAll('.race-item').forEach(el => el.classList.remove('selected'));
+                    div.classList.add('selected');
+                    loadRace(log);
+                    closeSidebarIfMobile();
+                });
+
+                container.appendChild(div);
+            });
+        }
+
+        // Load a specific race/log file (phase 2)
+        async function loadRace(logEntry) {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('status').textContent = `Loading ${logEntry.file}...`;
+
+            currentLogFile = logEntry.file;
+            allData = [];
+            userData = {};
+            selectedUsers = new Set();
+
+            try {
+                const response = await fetch(`logs/${logEntry.file}`);
+                if (!response.ok) throw new Error('Failed to load');
+
+                const text = await response.text();
+                const lines = text.trim().split('\n');
+
+                for (const line of lines) {
+                    try {
+                        const entry = JSON.parse(line);
+                        if (entry.lat && entry.lon && entry.ts) {
+                            allData.push(entry);
+                        }
+                    } catch (e) {}
+                }
+
+                if (allData.length === 0) {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('status').textContent = 'No data found in this log';
+                    return;
+                }
+
+                // Sort by timestamp
+                allData.sort((a, b) => a.ts - b.ts);
+
+                // Group by user
+                for (const entry of allData) {
+                    const id = entry.id;
+                    if (!userData[id]) {
+                        userData[id] = [];
+                    }
+                    userData[id].push(entry);
+                }
+
+                // Calculate time range
+                minTime = allData[0].ts;
+                maxTime = allData[allData.length - 1].ts;
+                rangeStartTime = minTime;
+                rangeEndTime = maxTime;
+
+                document.getElementById('start-slider').value = 0;
+                document.getElementById('end-slider').value = 100;
+                updateSliderRange();
+                updateTimeDisplay();
+
+                // Update user list
+                updateUserList();
+
+                // Draw tracks
+                drawTracks();
+
+                // Fit map to data
+                fitMapToData();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').textContent = `Loaded ${allData.length} points from ${Object.keys(userData).length} users`;
+
+            } catch (e) {
+                console.error('Error loading log:', e);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').textContent = 'Failed to load log';
+            }
+        }
+
+        // Legacy function for when no summary exists
+        async function loadTracksLegacy(logDate) {
+            allData = [];
+            userData = {};
+
+            // Try to load main file and rotated files
+            const baseUrl = `logs/${logDate}.jsonl`;
+            const filesToTry = [baseUrl];
+
+            // Try numbered rotations
+            for (let i = 1; i <= 10; i++) {
+                filesToTry.push(`${baseUrl}.${i}`);
+            }
+
+            for (const file of filesToTry) {
+                try {
+                    const response = await fetch(file);
+                    if (!response.ok) continue;
+
+                    const text = await response.text();
+                    const lines = text.trim().split('\n');
+
+                    for (const line of lines) {
+                        try {
+                            const entry = JSON.parse(line);
+                            if (entry.lat && entry.lon && entry.ts) {
+                                allData.push(entry);
+                            }
+                        } catch (e) {}
+                    }
+
+                    document.getElementById('status').textContent = `Loaded ${file}...`;
+                } catch (e) {}
+            }
+
+            if (allData.length === 0) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').textContent = 'No data found for this date';
+                document.getElementById('race-list').innerHTML = '<p style="color:#666">No logs found</p>';
+                return;
+            }
+
+            // Sort by timestamp
+            allData.sort((a, b) => a.ts - b.ts);
+
+            // Group by user
+            for (const entry of allData) {
+                const id = entry.id;
+                if (!userData[id]) {
+                    userData[id] = [];
+                }
+                userData[id].push(entry);
+            }
+
+            // Calculate time range
+            minTime = allData[0].ts;
+            maxTime = allData[allData.length - 1].ts;
+            rangeStartTime = minTime;
+            rangeEndTime = maxTime;
+
+            document.getElementById('start-slider').value = 0;
+            document.getElementById('end-slider').value = 100;
+            updateSliderRange();
+            updateTimeDisplay();
+
+            // Update user list
+            updateUserList();
+
+            // Show a single "all data" entry in log list
+            document.getElementById('race-list').innerHTML = `
+                <div class="race-item selected">
+                    <div class="race-time">All Data (Legacy Mode)</div>
+                    <div class="race-stats">
+                        ${Object.keys(userData).length} sailors | ${allData.length.toLocaleString()} points
+                    </div>
+                </div>
+            `;
+
+            // Start with no users selected by default
+            selectedUsers = new Set();
+
+            // Draw tracks
+            drawTracks();
+
+            // Fit map to data
+            fitMapToData();
+
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('status').textContent = `Loaded ${allData.length} points from ${Object.keys(userData).length} users`;
+        }
+
+        function updateUserList() {
+            const container = document.getElementById('user-list');
+            container.innerHTML = '';
+
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const speeds = entries.map(e => e.spd || 0);
+                const maxSpeed = Math.max(...speeds);
+                const avgSpeed = speeds.reduce((a,b) => a+b, 0) / speeds.length;
+                const points = entries.length;
+
+                const div = document.createElement('div');
+                div.className = 'user-item';
+                div.dataset.userId = userId;
+
+                const color = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                div.innerHTML = `
+                    <div class="user-color" style="background:${color}"></div>
+                    <div class="user-info">
+                        <div class="user-name">${getDisplayName(userId)}</div>
+                        <div class="user-stats">
+                            ${points} pts | Max: ${maxSpeed.toFixed(1)} kts | Avg: ${avgSpeed.toFixed(1)} kts
+                        </div>
+                    </div>
+                `;
+
+                div.addEventListener('click', () => toggleUser(userId, div));
+                div.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    zoomToUser(userId);
+                });
+                container.appendChild(div);
+            }
+        }
+
+        function toggleUser(userId, element) {
+            if (selectedUsers.has(userId)) {
+                selectedUsers.delete(userId);
+                element.classList.remove('selected');
+            } else {
+                selectedUsers.add(userId);
+                element.classList.add('selected');
+            }
+            resetPlaybackToSelection();
+
+            // Auto-fit map to show all selected tracks
+            if (selectedUsers.size > 0) {
+                fitMapToData();
+            }
+        }
+
+        function resetPlaybackToSelection() {
+            // Stop any active playback
+            if (playbackInterval) {
+                clearInterval(playbackInterval);
+                playbackInterval = null;
+                document.getElementById('play-btn').textContent = '▶ Play';
+            }
+
+            updateTimeDisplay();
+            drawTracks();
+        }
+
+        function updateSliderRange() {
+            const startSlider = document.getElementById('start-slider');
+            const endSlider = document.getElementById('end-slider');
+            const sliderRange = document.getElementById('slider-range');
+
+            const startVal = parseFloat(startSlider.value);
+            const endVal = parseFloat(endSlider.value);
+
+            // Update the visual range indicator
+            sliderRange.style.left = startVal + '%';
+            sliderRange.style.width = (endVal - startVal) + '%';
+
+            // Update times from slider values
+            rangeStartTime = minTime + (maxTime - minTime) * (startVal / 100);
+            rangeEndTime = minTime + (maxTime - minTime) * (endVal / 100);
+
+            // Update the labels
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
+            document.getElementById('label-start').textContent = fmtTime(minTime);
+            document.getElementById('label-end').textContent = fmtTime(maxTime);
+        }
+
+        function updateTimeDisplay() {
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
+
+            const durationSec = rangeEndTime - rangeStartTime;
+            const durationMin = Math.floor(durationSec / 60);
+            const durationRemSec = Math.floor(durationSec % 60);
+            const durationStr = `${durationMin}:${String(durationRemSec).padStart(2, '0')}`;
+
+            document.getElementById('time-display').innerHTML =
+                `<span style="color:#2ecc71">Start: ${fmtTime(rangeStartTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#e74c3c">End: ${fmtTime(rangeEndTime)}</span> &nbsp;|&nbsp;` +
+                `Duration: ${durationStr}`;
+        }
+
+        function drawTracks() {
+            // Clear existing layers
+            for (const layer of Object.values(trackLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(markerLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(pointLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(outlierLayers)) {
+                map.removeLayer(layer);
+            }
+            trackLayers = {};
+            markerLayers = {};
+            pointLayers = {};
+            outlierLayers = {};
+
+            const useSpeedColor = document.getElementById('speed-color').checked;
+            const showMarkers = document.getElementById('show-markers').checked;
+            const doFilterOutliers = document.getElementById('filter-outliers').checked;
+            const showOutliersMarkers = document.getElementById('show-outliers').checked;
+
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) {
+                    colorIdx++;
+                    continue;
+                }
+
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                // Filter entries within the selected time range
+                let timeFiltered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime);
+                if (timeFiltered.length < 2) continue;
+
+                // Apply outlier filtering if enabled
+                let filtered = timeFiltered;
+                let outliers = [];
+                if (doFilterOutliers) {
+                    const result = filterOutliers(timeFiltered);
+                    filtered = result.filtered;
+                    outliers = result.outliers;
+                }
+
+                if (filtered.length < 2) continue;
+
+                // Draw outlier markers if enabled
+                if (showOutliersMarkers && outliers.length > 0) {
+                    const outlierGroup = L.layerGroup();
+                    for (const point of outliers) {
+                        const time = new Date(point.ts * 1000).toLocaleTimeString();
+                        const speedKnots = (point.spd || 0).toFixed(1);
+
+                        const marker = L.circleMarker([point.lat, point.lon], {
+                            radius: 6,
+                            fillColor: '#ff0000',
+                            color: '#ff0000',
+                            fillOpacity: 0.7,
+                            weight: 2
+                        });
+
+                        marker.bindTooltip(`Outlier: ${time}<br>Speed: ${speedKnots} kn`, {
+                            permanent: false
+                        });
+
+                        outlierGroup.addLayer(marker);
+                    }
+                    outlierGroup.addTo(map);
+                    outlierLayers[userId] = outlierGroup;
+                }
+
+                if (useSpeedColor) {
+                    // Draw segments colored by speed
+                    const layerGroup = L.layerGroup();
+
+                    for (let i = 1; i < filtered.length; i++) {
+                        const prev = filtered[i-1];
+                        const curr = filtered[i];
+                        const color = speedToColor(curr.spd || 0);
+
+                        const line = L.polyline(
+                            [[prev.lat, prev.lon], [curr.lat, curr.lon]],
+                            { color: color, weight: 3, opacity: 0.8 }
+                        );
+                        layerGroup.addLayer(line);
+                    }
+
+                    layerGroup.addTo(map);
+                    trackLayers[userId] = layerGroup;
+                } else {
+                    // Draw single color track
+                    const coords = filtered.map(e => [e.lat, e.lon]);
+                    const polyline = L.polyline(coords, {
+                        color: userColor,
+                        weight: 3,
+                        opacity: 0.8
+                    }).addTo(map);
+                    trackLayers[userId] = polyline;
+                }
+
+                // Add interactive point markers for each track point
+                const pointGroup = L.layerGroup();
+                for (const point of filtered) {
+                    const speedKnots = (point.spd || 0).toFixed(1);
+                    const time = new Date(point.ts * 1000).toLocaleTimeString();
+                    const color = useSpeedColor ? speedToColor(point.spd || 0) : userColor;
+
+                    const pointMarker = L.circleMarker([point.lat, point.lon], {
+                        radius: 4,
+                        fillColor: color,
+                        color: color,
+                        weight: 1,
+                        fillOpacity: 0.6,
+                        opacity: 0.6
+                    });
+
+                    // Build warnings for battery issues
+                    let warnings = '';
+                    if (point.flg) {
+                        if (point.flg.ps) {
+                            warnings += '<br><span style="color:#e74c3c">⚠️ Battery Saver ON</span>';
+                        }
+                        if (point.flg.bo === false) {
+                            warnings += '<br><span style="color:#f39c12">⚠️ Battery Optimization ON</span>';
+                        }
+                    }
+
+                    pointMarker.bindTooltip(`
+                        <b>${getDisplayName(userId)}</b><br>
+                        Time: ${time}<br>
+                        Speed: ${speedKnots} kts<br>
+                        Heading: ${point.hdg || 0}°<br>
+                        Signal: ${point.sig || '?'}<br>
+                        Battery: ${point.bat || '?'}%${warnings}
+                    `, { sticky: true });
+
+                    pointGroup.addLayer(pointMarker);
+                }
+                pointGroup.addTo(map);
+                pointLayers[userId] = pointGroup;
+
+                // Add current position marker
+                if (showMarkers && filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    const speedKnots = (last.spd || 0).toFixed(1);
+
+                    // Build warnings for battery issues
+                    let markerWarnings = '';
+                    if (last.flg) {
+                        if (last.flg.ps) {
+                            markerWarnings += '<br><span style="color:#e74c3c">⚠️ Battery Saver ON</span>';
+                        }
+                        if (last.flg.bo === false) {
+                            markerWarnings += '<br><span style="color:#f39c12">⚠️ Battery Optimization ON</span>';
+                        }
+                    }
+
+                    const marker = L.circleMarker([last.lat, last.lon], {
+                        radius: 8,
+                        fillColor: userColor,
+                        color: '#fff',
+                        weight: 2,
+                        fillOpacity: 1
+                    }).bindPopup(`
+                        <b>${getDisplayName(userId)}</b><br>
+                        Speed: ${speedKnots} kts<br>
+                        Heading: ${last.hdg || 0}°<br>
+                        Battery: ${last.bat || '?'}%${markerWarnings}
+                    `).addTo(map);
+                    markerLayers[userId] = marker;
+                }
+            }
+        }
+
+        function fitMapToData() {
+            const allCoords = [];
+            for (const userId of selectedUsers) {
+                if (userData[userId]) {
+                    for (const entry of userData[userId]) {
+                        allCoords.push([entry.lat, entry.lon]);
+                    }
+                }
+            }
+            if (allCoords.length > 0) {
+                map.fitBounds(allCoords, { padding: [50, 50] });
+            }
+        }
+
+        function zoomToUser(userId) {
+            if (!userData[userId]) return;
+
+            const entries = userData[userId];
+            if (entries.length === 0) return;
+
+            // Select only this user
+            selectedUsers.clear();
+            document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
+
+            selectedUsers.add(userId);
+            const element = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+            if (element) element.classList.add('selected');
+
+            // Reset playback to show all of this user's data
+            resetPlaybackToSelection();
+
+            // Zoom to all of user's points
+            const coords = entries.map(e => [e.lat, e.lon]);
+            map.fitBounds(coords, { padding: [50, 50] });
+        }
+
+        function getSelectedTimeRange() {
+            // Get time range for selected users only
+            let selMinTime = Infinity;
+            let selMaxTime = -Infinity;
+
+            for (const userId of selectedUsers) {
+                if (userData[userId] && userData[userId].length > 0) {
+                    const entries = userData[userId];
+                    selMinTime = Math.min(selMinTime, entries[0].ts);
+                    selMaxTime = Math.max(selMaxTime, entries[entries.length - 1].ts);
+                }
+            }
+
+            // Fall back to global range if no users selected
+            if (selMinTime === Infinity) {
+                return { min: minTime, max: maxTime };
+            }
+
+            return { min: selMinTime, max: selMaxTime };
+        }
+
+        function timeToSliderValue(timestamp) {
+            // Convert timestamp to slider value (0-100) based on global range
+            if (maxTime === minTime) return 100;
+            return ((timestamp - minTime) / (maxTime - minTime)) * 100;
+        }
+
+        function sliderValueToTime(value) {
+            // Convert slider value (0-100) to timestamp based on global range
+            return minTime + (maxTime - minTime) * (value / 100);
+        }
+
+        // Event listeners
+        document.getElementById('load-btn').addEventListener('click', loadSummary);
+
+        document.getElementById('start-slider').addEventListener('input', (e) => {
+            const startVal = parseFloat(e.target.value);
+            const endVal = parseFloat(document.getElementById('end-slider').value);
+            // Don't let start go past end
+            if (startVal > endVal) {
+                e.target.value = endVal;
+            }
+            updateSliderRange();
+            updateTimeDisplay();
+            drawTracks();
+        });
+
+        document.getElementById('end-slider').addEventListener('input', (e) => {
+            const endVal = parseFloat(e.target.value);
+            const startVal = parseFloat(document.getElementById('start-slider').value);
+            // Don't let end go before start
+            if (endVal < startVal) {
+                e.target.value = startVal;
+            }
+            updateSliderRange();
+            updateTimeDisplay();
+            drawTracks();
+        });
+
+        document.getElementById('speed-color').addEventListener('change', () => {
+            drawTracks();
+        });
+
+        document.getElementById('show-markers').addEventListener('change', () => {
+            drawTracks();
+        });
+
+        document.getElementById('filter-outliers').addEventListener('change', () => {
+            drawTracks();
+        });
+
+        document.getElementById('show-outliers').addEventListener('change', () => {
+            drawTracks();
+        });
+
+        document.getElementById('reset-range-btn').addEventListener('click', () => {
+            document.getElementById('start-slider').value = 0;
+            document.getElementById('end-slider').value = 100;
+            updateSliderRange();
+            updateTimeDisplay();
+            drawTracks();
+        });
+
+        // Playback controls - animate through the selected range
+        let playbackCurrentTime = 0;
+
+        document.getElementById('play-btn').addEventListener('click', function() {
+            if (playbackInterval) {
+                clearInterval(playbackInterval);
+                playbackInterval = null;
+                this.textContent = '▶ Play';
+                // Reset to show full range
+                drawTracks();
+            } else {
+                if (selectedUsers.size === 0) {
+                    alert('Select at least one user to play back');
+                    return;
+                }
+
+                this.textContent = '⏸ Pause';
+
+                // Start playback from start of range
+                playbackCurrentTime = rangeStartTime;
+
+                playbackInterval = setInterval(() => {
+                    // Advance time (playbackSpeed seconds per 100ms tick)
+                    playbackCurrentTime += playbackSpeed;
+
+                    if (playbackCurrentTime >= rangeEndTime) {
+                        playbackCurrentTime = rangeEndTime;
+                        clearInterval(playbackInterval);
+                        playbackInterval = null;
+                        document.getElementById('play-btn').textContent = '▶ Play';
+                    }
+
+                    // Draw tracks up to current playback time
+                    drawTracksUpTo(playbackCurrentTime);
+                }, 100);
+            }
+        });
+
+        // Draw tracks up to a specific time (for playback animation)
+        function drawTracksUpTo(upToTime) {
+            // Clear existing layers
+            for (const layer of Object.values(trackLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(markerLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(pointLayers)) {
+                map.removeLayer(layer);
+            }
+            for (const layer of Object.values(outlierLayers)) {
+                map.removeLayer(layer);
+            }
+            trackLayers = {};
+            markerLayers = {};
+            pointLayers = {};
+            outlierLayers = {};
+
+            const useSpeedColor = document.getElementById('speed-color').checked;
+            const showMarkers = document.getElementById('show-markers').checked;
+            const doFilterOutliers = document.getElementById('filter-outliers').checked;
+
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) {
+                    colorIdx++;
+                    continue;
+                }
+
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                // Filter: start from rangeStartTime, end at upToTime
+                let timeFiltered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= upToTime);
+                if (timeFiltered.length < 2) continue;
+
+                // Apply outlier filtering if enabled
+                let filtered = timeFiltered;
+                if (doFilterOutliers) {
+                    const result = filterOutliers(timeFiltered);
+                    filtered = result.filtered;
+                }
+
+                if (filtered.length < 2) continue;
+
+                if (useSpeedColor) {
+                    const layerGroup = L.layerGroup();
+                    for (let i = 1; i < filtered.length; i++) {
+                        const prev = filtered[i-1];
+                        const curr = filtered[i];
+                        const color = speedToColor(curr.spd || 0);
+                        const line = L.polyline(
+                            [[prev.lat, prev.lon], [curr.lat, curr.lon]],
+                            { color: color, weight: 3, opacity: 0.8 }
+                        );
+                        layerGroup.addLayer(line);
+                    }
+                    layerGroup.addTo(map);
+                    trackLayers[userId] = layerGroup;
+                } else {
+                    const coords = filtered.map(e => [e.lat, e.lon]);
+                    const polyline = L.polyline(coords, {
+                        color: userColor,
+                        weight: 3,
+                        opacity: 0.8
+                    }).addTo(map);
+                    trackLayers[userId] = polyline;
+                }
+
+                // Add current position marker
+                if (showMarkers && filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    const marker = L.circleMarker([last.lat, last.lon], {
+                        radius: 8,
+                        fillColor: userColor,
+                        color: '#fff',
+                        weight: 2,
+                        fillOpacity: 1
+                    }).addTo(map);
+                    markerLayers[userId] = marker;
+                }
+            }
+
+            // Update time display during playback
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
+            document.getElementById('time-display').innerHTML =
+                `<span style="color:#2ecc71">Start: ${fmtTime(rangeStartTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#f39c12">Playing: ${fmtTime(upToTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#e74c3c">End: ${fmtTime(rangeEndTime)}</span>`;
+        }
+
+        document.getElementById('speed-1x').addEventListener('click', () => playbackSpeed = 1);
+        document.getElementById('speed-5x').addEventListener('click', () => playbackSpeed = 5);
+        document.getElementById('speed-20x').addEventListener('click', () => playbackSpeed = 20);
+
+        document.getElementById('show-all-btn').addEventListener('click', () => {
+            selectedUsers = new Set(Object.keys(userData));
+            document.querySelectorAll('.user-item').forEach(el => el.classList.add('selected'));
+            resetPlaybackToSelection();
+            fitMapToData();
+        });
+
+        document.getElementById('hide-all-btn').addEventListener('click', () => {
+            selectedUsers.clear();
+            document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
+            resetPlaybackToSelection();
+        });
+
+        // Load today's summary on start
+        loadSummary();
+    </script>
+</body>
+</html>

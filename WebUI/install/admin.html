@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Guide - Windsurfer Tracker</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #cc0000;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #cc0000;
+            padding-bottom: 8px;
+            margin-top: 40px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 25px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .step {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .step-number {
+            display: inline-block;
+            background: #cc0000;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .step h3 {
+            display: inline;
+            vertical-align: middle;
+            margin-top: 0;
+        }
+        .step p, .step ul, .step ol {
+            margin: 15px 0 0 40px;
+        }
+        code {
+            background: #e8e8e8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .info {
+            background: #e8f4fd;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .danger {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .feature-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .feature-item h4 {
+            margin: 10px 0 5px 0;
+            color: #cc0000;
+        }
+        .feature-item p {
+            margin: 0;
+            font-size: 0.9em;
+            color: #666;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            background: white;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+        .btn-example {
+            display: inline-block;
+            background: #cc0000;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; Back to Installation</a>
+
+    <h1>Admin Guide</h1>
+    <p>This guide covers administration features for race organisers, including course setup, user management, and preparing for race day.</p>
+
+    <div class="info">
+        <strong>Admin Access:</strong> To access admin features, click the <strong>Admin</strong> button on the tracking map at <a href="https://track.tridgell.net">https://track.tridgell.net</a> and enter the admin password.
+    </div>
+
+    <h2>Quick Reference</h2>
+
+    <div class="feature-list">
+        <div class="feature-item">
+            <h4>Set Course</h4>
+            <p>Define start, marks, and finish</p>
+        </div>
+        <div class="feature-item">
+            <h4>Edit Users</h4>
+            <p>Change display names and roles</p>
+        </div>
+        <div class="feature-item">
+            <h4>Clear Tracks</h4>
+            <p>Reset before each race</p>
+        </div>
+        <div class="feature-item">
+            <h4>Monitor</h4>
+            <p>Watch positions in real-time</p>
+        </div>
+    </div>
+
+    <h2>Entering Admin Mode</h2>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Open the Tracking Map</h3>
+        <p>Go to <a href="https://track.tridgell.net">https://track.tridgell.net</a> in your web browser.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Click Admin Button</h3>
+        <p>Click the <span class="btn-example">Admin</span> button in the top-right corner of the map.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Enter Password</h3>
+        <p>Enter the admin password. Once authenticated, you'll see additional admin controls appear.</p>
+    </div>
+
+    <h2>Setting Up the Course</h2>
+
+    <p>The course defines the start line, race marks, and finish line that are displayed on the map.</p>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Enter Edit Course Mode</h3>
+        <p>In admin mode, click the <strong>"Edit Course"</strong> button. The map will enter course editing mode.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Set the Start Position</h3>
+        <p>Click on the map where the start line should be. A green marker will appear.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Add Course Marks</h3>
+        <p>Click on the map to add each mark in order. Yellow markers will appear for each mark. Add as many marks as needed for your course.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">4</span>
+        <h3>Set the Finish Position</h3>
+        <p>By double clicking the last point you add becomes the
+        finish with a checkered flag</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">5</span>
+        <h3>Save the Course</h3>
+        <p>Click <strong>"Save Course"</strong> to save your changes. The course will be visible to all users viewing the map.</p>
+    </div>
+
+    <div class="info">
+        <strong>Tip:</strong> You can edit the course at any time. Changes take effect immediately for all viewers.
+    </div>
+
+    <h2>Editing User Names and Roles</h2>
+
+    <p>You can change how participants appear on the map by editing their display name and role.</p>
+
+    <h3>Why Edit Users?</h3>
+    <ul>
+        <li><strong>Display names:</strong> Change "S42" to "John Smith" for easier identification</li>
+        <li><strong>Sail Colours:</strong>Add the sail color for easy identification on the water</li>
+        <li><strong>Roles:</strong> Correct a user who registered with the wrong role (sailor, support, spectator)</li>
+        <li><strong>OwnTracks users:</strong> iPhone users appear with auto-generated IDs that you may want to rename</li>
+    </ul>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Find the User</h3>
+        <p>Click on a user's marker on the map, or find them in the sailor list on the left side of the screen.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Click Edit</h3>
+        <p>In admin mode, you'll see an <strong>"Edit"</strong> button in the user's popup or list entry. Click it.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Change Name or Role</h3>
+        <p>In the edit dialog:</p>
+        <ul>
+            <li><strong>Display Name:</strong> Enter a friendly name (e.g., "John Smith")</li>
+            <li><strong>Role:</strong> Select Sailor, Support, or Spectator</li>
+        </ul>
+        <p>Leave the name blank to use the original ID.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">4</span>
+        <h3>Save Changes</h3>
+        <p>Click <strong>"Save"</strong>. The changes appear immediately on the map for all viewers.</p>
+    </div>
+
+    <table>
+        <tr>
+            <th>Role</th>
+            <th>Icon</th>
+            <th>Description</th>
+        </tr>
+        <tr>
+            <td>Sailor</td>
+            <td>Windsurfer</td>
+            <td>Race participants</td>
+        </tr>
+        <tr>
+            <td>Support</td>
+            <td>Powerboat</td>
+            <td>Safety boats, chase boats</td>
+        </tr>
+        <tr>
+            <td>Spectator</td>
+            <td>Binoculars</td>
+            <td>Observers, media</td>
+        </tr>
+    </table>
+
+    <h2>Clearing Track Logs</h2>
+
+    <p>Before each race, you should clear the track logs to start fresh. This removes the historical track lines from the map.</p>
+
+    <div class="danger">
+        <strong>Important:</strong> Clear tracks <em>before</em> the race starts, not during! Clearing tracks removes all historical position data.
+    </div>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Enter Admin Mode</h3>
+        <p>Click Admin and enter the password if not already in admin mode.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Click Clear Tracks</h3>
+        <p>Click the <strong>"Clear Tracks"</strong> button in the admin panel.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Confirm</h3>
+        <p>Confirm the action when prompted. All track history will be cleared, but current positions remain visible.</p>
+    </div>
+
+    <div class="info">
+        <strong>What Gets Cleared:</strong>
+        <ul style="margin-bottom: 0;">
+            <li>Track lines (position history) on the map</li>
+            <li>Today's track log file on the server</li>
+        </ul>
+        <strong>What Remains:</strong>
+        <ul style="margin-bottom: 0;">
+            <li>Current live positions</li>
+            <li>User name/role overrides</li>
+            <li>Course definition</li>
+        </ul>
+    </div>
+
+    <h2>Race Day Checklist</h2>
+
+    <div class="step">
+        <h3>Before the Race</h3>
+        <ol style="margin-left: 20px;">
+            <li>Verify the course is set correctly</li>
+            <li>Clear track logs from any previous testing or races</li>
+            <li>Check that all participants appear on the map</li>
+            <li>Edit any user names that need clarification</li>
+            <li>Confirm support boats are showing with correct role</li>
+        </ol>
+    </div>
+
+    <div class="step">
+        <h3>During the Race</h3>
+        <ol style="margin-left: 20px;">
+            <li>Monitor the map for participant positions</li>
+            <li>Watch for <strong>ASSIST</strong> alerts (flashing red markers)</li>
+            <li>Check that all expected participants are transmitting</li>
+        </ol>
+    </div>
+
+    <div class="step">
+        <h3>After the Race</h3>
+        <ol style="margin-left: 20px;">
+            <li>Track logs are automatically saved on the server</li>
+            <li>Clear tracks before the next race if running multiple races</li>
+        </ol>
+    </div>
+
+    <h2>Troubleshooting</h2>
+
+    <h3>User not appearing on map</h3>
+    <ul>
+        <li>Check they have mobile signal/data connection</li>
+        <li>Verify their app is configured with correct server and password</li>
+        <li>Ask them to check their ACK rate (should be > 0%)</li>
+        <li>For iPhone users, ensure OwnTracks has "Always" location permission</li>
+    </ul>
+
+    <h3>Track lines not showing</h3>
+    <ul>
+        <li>Enable "Show Tracks" in the map controls</li>
+        <li>Tracks only appear after multiple position updates</li>
+        <li>Check if tracks were recently cleared</li>
+    </ul>
+
+    <h3>Course not visible</h3>
+    <ul>
+        <li>Ensure you clicked "Save Course" after editing</li>
+        <li>Refresh the browser page</li>
+        <li>Check that course points are within the visible map area</li>
+    </ul>
+
+    <p style="margin-top: 40px; text-align: center;">
+        <a href="index.html" class="back-link">&larr; Back to Installation</a>
+    </p>
+</body>
+</html>

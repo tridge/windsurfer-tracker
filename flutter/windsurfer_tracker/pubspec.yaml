@@ -1,0 +1,52 @@
+name: windsurfer_tracker
+description: GPS tracker for windsurfing races
+publish_to: 'none'
+version: 1.8.14+23
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Location
+  geolocator: ^11.0.0
+
+  # UDP networking
+  udp: ^5.0.3
+
+  # Preferences
+  shared_preferences: ^2.2.2
+
+  # Battery info
+  battery_plus: ^5.0.2
+
+  # Vibration
+  vibration: ^3.1.4
+
+  # Keep screen awake
+  wakelock_plus: ^1.1.4
+
+  # Permission handling
+  permission_handler: ^11.1.0
+
+  # Package info for version
+  package_info_plus: ^8.0.0
+
+  # Date formatting
+  intl: ^0.19.0
+
+  # HTTP for server communication
+  http: ^1.1.0
+
+  # Foreground service for background tracking
+  flutter_foreground_task: ^8.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

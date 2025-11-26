@@ -1,0 +1,44 @@
+# Build outputs
+*.apk
+*.ipa
+*.so
+*.dill
+
+# IDE
+.idea/
+*.iml
+
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+**/ephemeral/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android
+*.jks
+*.keystore
+key.properties
+keystore.properties
+local.properties
+.gradle/
+android/app/build/
+
+# iOS signing
+keys/
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+
+# Logs and temp
+*.log
+*.pcap
+current_positions.json
+
+# OS
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android Installation - Windsurfer Tracker</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #34a853;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #34a853;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .step {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .step-number {
+            display: inline-block;
+            background: #34a853;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .step h3 {
+            display: inline;
+            vertical-align: middle;
+        }
+        .step p {
+            margin: 15px 0 0 40px;
+        }
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .config-table th, .config-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .config-table th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+        .config-table code {
+            background: #e8e8e8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .info {
+            background: #e8f4fd;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .btn {
+            display: inline-block;
+            background: #34a853;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .btn:hover {
+            background: #2d9249;
+        }
+        img.screenshot {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; Back to Installation Options</a>
+
+    <h1>Android Installation</h1>
+    <p>Follow these steps to install and configure the Windsurfer Tracker app on your Android phone.</p>
+
+    <div class="warning">
+        <strong>Password Required:</strong> You will need the server password from the race organisers before you can start tracking.
+    </div>
+
+    <h2>Installation</h2>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Download the APK</h3>
+        <p>Download the Windsurfer Tracker app:</p>
+        <p style="margin-left: 40px;">
+            <a href="https://track.tridgell.net/app/tracker.apk" class="btn">Download Tracker APK</a>
+        </p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Allow Installation from Unknown Sources</h3>
+        <p>When you try to install, Android will ask you to allow installation from unknown sources. This is required because the app is not from the Play Store.</p>
+        <p>Tap <strong>"Settings"</strong> when prompted, then enable <strong>"Allow from this source"</strong>.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Install the App</h3>
+        <p>Open the downloaded APK file and tap <strong>"Install"</strong>. Once installed, tap <strong>"Open"</strong> to launch the app.</p>
+    </div>
+
+    <h2>Configuration</h2>
+
+    <div class="step">
+        <span class="step-number">4</span>
+        <h3>Open Settings</h3>
+        <p>Tap the <strong>"Settings"</strong> button (gear icon) in the app.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">5</span>
+        <h3>Enter Your Details</h3>
+        <p>Configure the following settings:</p>
+
+        <table class="config-table">
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>ID</td>
+                <td>Your sail number or name (e.g., <code>S42</code> or <code>John</code>)</td>
+            </tr>
+            <tr>
+                <td>Role</td>
+                <td>Select <code>Sailor</code> (or Support/Spectator if applicable)</td>
+            </tr>
+            <tr>
+                <td>Server Address</td>
+                <td><code>track.tridgell.net</code></td>
+            </tr>
+            <tr>
+                <td>Server Port</td>
+                <td><code>41234</code></td>
+            </tr>
+            <tr>
+                <td>Password</td>
+                <td>Enter the password from the race organisers</td>
+            </tr>
+        </table>
+
+        <p>Tap <strong>"Save"</strong> when done.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">6</span>
+        <h3>Grant Permissions</h3>
+        <p>The app needs location permission to track your position. When prompted:</p>
+        <ul style="margin-left: 40px;">
+            <li>Tap <strong>"Allow"</strong> for location access</li>
+            <li>Select <strong>"Allow all the time"</strong> for background location (recommended)</li>
+            <li>Allow notifications (optional but helpful)</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <span class="step-number">7</span>
+        <h3>Start Tracking</h3>
+        <p>Tap the large <strong>"Start Tracking"</strong> button. The app will begin sending your position to the server every 10 seconds.</p>
+    </div>
+
+    <h2>Testing Your Setup</h2>
+
+    <div class="success">
+        <strong>Verify It's Working:</strong>
+        <ol>
+            <li>Start tracking on your phone</li>
+            <li>Open <a href="https://track.tridgell.net" target="_blank">https://track.tridgell.net</a> in a web browser</li>
+            <li>You should see your position appear on the map within a few seconds</li>
+            <li>The "ACK Rate" on your phone should show a percentage (ideally 80-100%)</li>
+        </ol>
+    </div>
+
+    <h2>During the Race</h2>
+
+    <div class="info">
+        <ul style="margin: 0; padding-left: 20px;">
+            <li><strong>Keep the app running</strong> - don't close it or the tracking will stop</li>
+            <li><strong>Lock screen is OK</strong> - the app continues tracking in the background</li>
+            <li><strong>Request Assistance</strong> - if you need help on the water, long-press the green "Request Assistance" button</li>
+            <li><strong>Battery</strong> - the app is designed to be efficient, but consider bringing a power bank for long races</li>
+        </ul>
+    </div>
+
+    <h2>Troubleshooting</h2>
+
+    <div class="step">
+        <h3>ACK Rate shows 0%</h3>
+        <p style="margin-left: 0;">This means the app cannot reach the server. Check:</p>
+        <ul>
+            <li>Server address is exactly <code>track.tridgell.net</code></li>
+            <li>Port is <code>41234</code></li>
+            <li>Password is correct</li>
+            <li>You have mobile data or WiFi connection</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3>Position not showing on map</h3>
+        <p style="margin-left: 0;">Make sure:</p>
+        <ul>
+            <li>Location permission is set to "Allow all the time"</li>
+            <li>GPS is enabled on your phone</li>
+            <li>You're outdoors with a clear view of the sky</li>
+        </ul>
+    </div>
+
+    <p style="margin-top: 40px; text-align: center;">
+        <a href="index.html" class="back-link">&larr; Back to Installation Options</a>
+    </p>
+</body>
+</html>
