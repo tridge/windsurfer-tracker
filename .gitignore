@@ -1,44 +1,58 @@
-# Build outputs
-*.apk
-*.ipa
-*.so
-*.dill
 
-# IDE
-.idea/
-*.iml
 
-# Flutter/Dart
-.dart_tool/
-.packages
-build/
-**/ephemeral/
-.flutter-plugins
-.flutter-plugins-dependencies
+
+
+
+
 
 # Android
+# Build outputs
+# Claude Code local settings
+# Flutter/Dart
+# IDE
+# Logs and temp
+# OS
+# iOS signing
+**/ephemeral/
+*.apk
+*.cer
+*.dill
+*.iml
+*.ipa
 *.jks
 *.keystore
+*.log
+*.mobileprovision
+*.p12
+*.p8
+*.pcap
+*.so
+.DS_Store
+.claude/settings.local.json
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.gradle/
+.idea/
+.packages
+/build_apk.sh
+/build_flutter_apk.sh
+/generate_icons.py
+/increment_patch_version.py
+/increment_version.py
+/install_apk.sh
+/install_apk_emulator.sh
+/install_flutter_apk.sh
+/logs.sh
+/publish.sh
+/publish_test.sh
+/start_emulator.sh
+/test.sh
+android/app/build/
+build/
+current_positions.json
 key.properties
+keys/
 keystore.properties
 local.properties
-.gradle/
-android/app/build/
-
-# iOS signing
-keys/
-*.p8
-*.p12
-*.cer
-*.mobileprovision
-
-# Logs and temp
-*.log
-*.pcap
-current_positions.json
-
-# OS
-.DS_Store
-
-# Claude Code local settings
-.claude/settings.local.json
+/app/
