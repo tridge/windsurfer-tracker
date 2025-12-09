@@ -13,7 +13,7 @@ import os
 import threading
 from datetime import datetime, date
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 
@@ -1040,7 +1040,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
 def run_http_server(port: int):
     """Run HTTP server in a thread."""
-    server = HTTPServer(('0.0.0.0', port), AdminHTTPHandler)
+    server = ThreadingHTTPServer(('0.0.0.0', port), AdminHTTPHandler)
     print(f"Admin HTTP server listening on port {port}")
     server.serve_forever()
 
