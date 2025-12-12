@@ -1822,8 +1822,21 @@
                 return;
             }
 
+            // Sort by timestamp to ensure correct order
+            points.sort((a, b) => a.ts - b.ts);
+
+            // Deduplicate points with same timestamp
+            const uniquePoints = [];
+            let lastTs = -1;
+            for (const p of points) {
+                if (p.ts !== lastTs) {
+                    uniquePoints.push(p);
+                    lastTs = p.ts;
+                }
+            }
+
             // Filter outliers
-            const { filtered, outliers } = filterOutliers(points);
+            const { filtered, outliers } = filterOutliers(uniquePoints);
 
             // Create polyline from filtered points
             const latlngs = filtered.map(p => [p.lat, p.lon]);
