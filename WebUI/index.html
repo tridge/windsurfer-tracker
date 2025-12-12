@@ -731,7 +731,7 @@
     </div>
     
     <div class="drawing-mode-indicator" id="drawingIndicator">
-        🎯 Click map: Start → Marks → Finish (double-click to finish)
+        🎯 Click map: Start → Marks → Finish (double-click to save)
     </div>
 
     <!-- User edit dialog -->
@@ -1115,21 +1115,24 @@
                 alert('Need at least a start and finish point');
                 return;
             }
-            
+
             // Replace last marker with finish icon
             const lastMarker = drawingMarkers[drawingMarkers.length - 1];
             lastMarker.setIcon(createFinishIcon());
-            
+
             // Done drawing
             drawingMode = false;
             document.getElementById('btnDrawCourse').textContent = '✏️ Draw Course';
             document.getElementById('drawingIndicator').classList.remove('visible');
-            
+
             map.off('click', onDrawingClick);
             map.off('dblclick', onDrawingComplete);
             map.getContainer().style.cursor = '';
-            
+
             updateCourseInfo();
+
+            // Auto-save the course
+            saveCourse();
         }
         
         function updateDrawingLine() {
@@ -1211,7 +1214,7 @@
         function updateCourseInfo() {
             const info = document.getElementById('courseInfo');
             if (drawingPoints.length > 0) {
-                info.textContent = `Drawing: ${drawingPoints.length} points (double-click to finish)`;
+                info.textContent = `Drawing: ${drawingPoints.length} points (double-click to save)`;
             } else if (courseData && courseData.start) {
                 const markCount = courseData.marks ? courseData.marks.length : 0;
                 info.textContent = `Course set: Start + ${markCount} marks + Finish`;
