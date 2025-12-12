@@ -1250,7 +1250,7 @@
                     continue;
                 }
 
-                const prev = filtered[filtered.length - 1];
+                const prev = positions[i - 1];
                 const timeDelta = pos.ts - prev.ts;
 
                 if (timeDelta > 0) {
