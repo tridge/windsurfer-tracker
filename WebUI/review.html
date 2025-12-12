@@ -1138,9 +1138,21 @@
                             weight: 2
                         });
 
-                        marker.bindTooltip(`Outlier: ${time}<br>Speed: ${speedKnots} kn`, {
-                            permanent: false
-                        });
+                        let tooltipText = `Outlier: ${time}<br>Speed: ${speedKnots} kn`;
+                        if (point.ast) {
+                            tooltipText += '<br><span style="color:#ff0000">🆘 ASSIST REQUESTED</span>';
+                            // Add larger assist circle
+                            const assistMarker = L.circleMarker([point.lat, point.lon], {
+                                radius: 12,
+                                fillColor: 'transparent',
+                                color: '#ff0000',
+                                weight: 3,
+                                fillOpacity: 0,
+                                opacity: 0.9
+                            });
+                            outlierGroup.addLayer(assistMarker);
+                        }
+                        marker.bindTooltip(tooltipText, { permanent: false });
 
                         outlierGroup.addLayer(marker);
                     }
@@ -1193,8 +1205,24 @@
                         opacity: 0.6
                     });
 
-                    // Build warnings for battery issues
+                    // Add red circle around points where assist was requested
+                    if (point.ast) {
+                        const assistMarker = L.circleMarker([point.lat, point.lon], {
+                            radius: 10,
+                            fillColor: 'transparent',
+                            color: '#ff0000',
+                            weight: 2,
+                            fillOpacity: 0,
+                            opacity: 0.9
+                        });
+                        pointGroup.addLayer(assistMarker);
+                    }
+
+                    // Build warnings for battery issues and assist
                     let warnings = '';
+                    if (point.ast) {
+                        warnings += '<br><span style="color:#ff0000">🆘 ASSIST REQUESTED</span>';
+                    }
                     if (point.flg) {
                         if (point.flg.ps) {
                             warnings += '<br><span style="color:#e74c3c">⚠️ Battery Saver ON</span>';
