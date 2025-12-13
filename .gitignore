@@ -51,6 +51,7 @@
 android/app/build/
 build/
 current_positions.json
+WebUI/config.js
 key.properties
 keys/
 keystore.properties

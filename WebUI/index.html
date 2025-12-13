@@ -6,6 +6,21 @@
     <title>Windsurfer Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.14.1/dist/Leaflet.GoogleMutant.js"></script>
+    <script>
+        // Try to load config.js for Google Maps API key
+        var GMAPS_API_KEY = null;
+    </script>
+    <script src="config.js" onerror=""></script>
+    <script>
+        // Load Google Maps API if key is available
+        if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
+            var script = document.createElement('script');
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY;
+            script.async = true;
+            document.head.appendChild(script);
+        }
+    </script>
     <style>
         * {
             margin: 0;
@@ -362,6 +377,39 @@
             width: 100%;
         }
 
+        .menu-submenu {
+            display: none;
+            background: #f9f9f9;
+            border-top: 1px solid #eee;
+        }
+
+        .menu-submenu.visible {
+            display: block;
+        }
+
+        .menu-submenu-item {
+            padding: 10px 16px 10px 42px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .menu-submenu-item:hover {
+            background: #f0f0f0;
+        }
+
+        .menu-submenu-item.selected {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .menu-submenu-item.selected::before {
+            content: '✓';
+            margin-right: 4px;
+        }
+
         /* Admin button (now inside admin panel) */
         .admin-btn {
             display: none;
@@ -668,6 +716,16 @@
             <span>🏷</span>
             <span>Show Labels</span>
         </div>
+        <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
+            <span>🗺️</span>
+            <span>Map Type ▼</span>
+        </div>
+        <div class="menu-submenu" id="mapSubmenu">
+            <div class="menu-submenu-item selected" data-maptype="osm" onclick="setMapType('osm')">OpenStreetMap</div>
+            <div class="menu-submenu-item" data-maptype="roads" onclick="setMapType('roads')">Google Roads</div>
+            <div class="menu-submenu-item" data-maptype="satellite" onclick="setMapType('satellite')">Google Satellite</div>
+            <div class="menu-submenu-item" data-maptype="hybrid" onclick="setMapType('hybrid')">Google Hybrid</div>
+        </div>
         <div class="menu-item">
             <a href="review.html">
                 <span>📊</span>
@@ -766,15 +824,86 @@
     <script>
         // Initialize map centered on Auckland
         const map = L.map('map').setView([-36.8485, 174.7633], 13);
-        
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+
+        // Map layers
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
             maxZoom: 19,
             maxNativeZoom: 19
-        }).addTo(map);
-        
+        });
+
+        let googleLayers = {};
+        let currentMapType = localStorage.getItem('mapType') || 'osm';
+        let currentLayer = null;
+
+        // Initialize with saved preference
+        function initMapLayers() {
+            // Show map type menu item if Google Maps is available
+            if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE' && typeof google !== 'undefined') {
+                document.getElementById('menuMapType').style.display = '';
+
+                // Create Google layers for each type
+                googleLayers.roads = L.gridLayer.googleMutant({ type: 'roadmap', maxZoom: 21 });
+                googleLayers.satellite = L.gridLayer.googleMutant({ type: 'satellite', maxZoom: 21 });
+                googleLayers.hybrid = L.gridLayer.googleMutant({ type: 'hybrid', maxZoom: 21 });
+
+                // Apply saved map type
+                setMapType(currentMapType, true);
+            } else {
+                osmLayer.addTo(map);
+                currentLayer = osmLayer;
+                currentMapType = 'osm';
+            }
+        }
+
+        function toggleMapSubmenu() {
+            const submenu = document.getElementById('mapSubmenu');
+            submenu.classList.toggle('visible');
+        }
+
+        function setMapType(mapType, isInit) {
+            // Remove current layer
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+            }
+
+            // Add new layer
+            if (mapType === 'osm') {
+                currentLayer = osmLayer;
+            } else if (googleLayers[mapType]) {
+                currentLayer = googleLayers[mapType];
+            } else {
+                // Fallback to OSM
+                currentLayer = osmLayer;
+                mapType = 'osm';
+            }
+            currentLayer.addTo(map);
+            currentMapType = mapType;
+            localStorage.setItem('mapType', mapType);
+
+            // Update menu selection
+            document.querySelectorAll('#mapSubmenu .menu-submenu-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.maptype === mapType);
+            });
+
+            // Close submenu unless initializing
+            if (!isInit) {
+                document.getElementById('mapSubmenu').classList.remove('visible');
+            }
+        }
+
+        // Initialize map layers after Google Maps API loads (or immediately if not using it)
+        if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
+            // Wait for Google Maps API to load
+            window.addEventListener('load', function() {
+                setTimeout(initMapLayers, 500);
+            });
+        } else {
+            initMapLayers();
+        }
+
         // Allow extra zoom beyond tile native resolution
-        map.setMaxZoom(20);
+        map.setMaxZoom(21);
         
         // Custom scale control
         function updateScale() {

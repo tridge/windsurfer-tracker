@@ -281,6 +281,21 @@
             font-size: 12px;
         }
 
+        #map-type-select {
+            padding: 6px 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            background: #3498db;
+            color: white;
+            cursor: pointer;
+        }
+
+        #map-type-select option {
+            background: white;
+            color: #333;
+        }
+
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -488,6 +503,12 @@
         <label>
             <input type="checkbox" id="show-outliers"> Show outliers (red)
         </label>
+        <select id="map-type-select" onchange="setMapType(this.value)" style="display:none">
+            <option value="osm">OpenStreetMap</option>
+            <option value="roads">Google Roads</option>
+            <option value="satellite">Google Satellite</option>
+            <option value="hybrid">Google Hybrid</option>
+        </select>
         <span id="status"></span>
     </div>
 
@@ -559,12 +580,100 @@
     <div id="loading">Loading tracks...</div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.14.1/dist/Leaflet.GoogleMutant.js"></script>
+    <!-- Google Maps API key (optional - create config.js from config.js.example) -->
+    <script>
+        var GMAPS_API_KEY = null;
+    </script>
+    <script src="config.js" onerror=""></script>
+    <script>
+        // Load Google Maps API dynamically if API key is configured
+        if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
+            var script = document.createElement('script');
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY;
+            script.async = true;
+            document.head.appendChild(script);
+        }
+    </script>
     <script>
         // Initialize map
         const map = L.map('map').setView([-36.85, 174.88], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
+
+        // Map layers
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        });
+        let googleLayers = {};
+        let currentMapType = localStorage.getItem('mapType') || 'osm';
+        let currentLayer = null;
+
+        // Initialize map layers after Google Maps API loads
+        function initMapLayers() {
+            if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE' && typeof google !== 'undefined') {
+                // Show map type selector
+                document.getElementById('map-type-select').style.display = '';
+
+                // Create Google layers for each type
+                googleLayers.roads = L.gridLayer.googleMutant({ type: 'roadmap', maxZoom: 21 });
+                googleLayers.satellite = L.gridLayer.googleMutant({ type: 'satellite', maxZoom: 21 });
+                googleLayers.hybrid = L.gridLayer.googleMutant({ type: 'hybrid', maxZoom: 21 });
+
+                // Apply saved map type
+                setMapType(currentMapType);
+            } else {
+                // No Google Maps available, use OSM only
+                osmLayer.addTo(map);
+                currentLayer = osmLayer;
+                currentMapType = 'osm';
+            }
+        }
+
+        function setMapType(mapType) {
+            // Remove current layer
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+            }
+
+            // Add new layer
+            if (mapType === 'osm') {
+                currentLayer = osmLayer;
+            } else if (googleLayers[mapType]) {
+                currentLayer = googleLayers[mapType];
+            } else {
+                // Fallback to OSM
+                currentLayer = osmLayer;
+                mapType = 'osm';
+            }
+            currentLayer.addTo(map);
+            currentMapType = mapType;
+            localStorage.setItem('mapType', mapType);
+
+            // Update select dropdown
+            document.getElementById('map-type-select').value = mapType;
+        }
+
+        // Initialize layers - wait for Google Maps to load if configured
+        if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
+            // Wait for Google Maps to load
+            const checkGoogle = setInterval(() => {
+                if (typeof google !== 'undefined') {
+                    clearInterval(checkGoogle);
+                    initMapLayers();
+                }
+            }, 100);
+            // Timeout fallback - use OSM if Google doesn't load
+            setTimeout(() => {
+                clearInterval(checkGoogle);
+                if (!currentLayer) {
+                    osmLayer.addTo(map);
+                    currentLayer = osmLayer;
+                }
+            }, 5000);
+        } else {
+            osmLayer.addTo(map);
+            currentLayer = osmLayer;
+        }
 
         // State
         let allData = [];

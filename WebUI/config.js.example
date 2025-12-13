@@ -1,0 +1,5 @@
+// Copy this file to config.js and add your Google Maps API key
+// Get an API key at: https://console.cloud.google.com/apis/credentials
+// Enable "Maps JavaScript API" for your project
+
+var GMAPS_API_KEY = 'YOUR_API_KEY_HERE';
