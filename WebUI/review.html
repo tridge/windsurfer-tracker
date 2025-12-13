@@ -2168,8 +2168,10 @@
         let graphHighlightMarkers = [];
 
         function clearGraphHighlight() {
-            // Remove highlight markers from map
+            // Remove highlight markers from map (close tooltips first to ensure cleanup)
             for (const marker of graphHighlightMarkers) {
+                marker.closeTooltip();
+                marker.unbindTooltip();
                 map.removeLayer(marker);
             }
             graphHighlightMarkers = [];
@@ -2195,8 +2197,10 @@
             const ratio = Math.max(0, Math.min(1, mouseX / width));
             const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
 
-            // Clear previous highlight markers
+            // Clear previous highlight markers (close tooltips first to ensure cleanup)
             for (const marker of graphHighlightMarkers) {
+                marker.closeTooltip();
+                marker.unbindTooltip();
                 map.removeLayer(marker);
             }
             graphHighlightMarkers = [];
