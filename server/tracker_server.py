@@ -399,6 +399,7 @@ class PositionTracker:
                 track_entry = {
                     "id": sailor_id,
                     "ts": ts,
+                    "recv_ts": recv_time,
                     "lat": lat,
                     "lon": lon,
                     "spd": speed,
@@ -780,6 +781,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         track_entry = {
                             "id": sailor_id,
                             "ts": pos_ts,
+                            "recv_ts": recv_time,
                             "lat": pos_lat,
                             "lon": pos_lon,
                             "spd": speed,
@@ -1212,6 +1214,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         track_entry = {
                             "id": sailor_id,
                             "ts": pos_ts,
+                            "recv_ts": recv_time,
                             "lat": pos_lat,
                             "lon": pos_lon,
                             "spd": speed,

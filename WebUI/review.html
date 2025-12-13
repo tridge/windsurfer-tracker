@@ -57,6 +57,39 @@
             background: #2980b9;
         }
 
+        .graphs-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .graphs-dropdown-content {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #2c3e50;
+            border: 1px solid #3498db;
+            border-radius: 4px;
+            padding: 8px 12px;
+            z-index: 1001;
+            white-space: nowrap;
+            margin-top: 4px;
+        }
+
+        .graphs-dropdown-content.show {
+            display: block;
+        }
+
+        .graphs-dropdown-content label {
+            display: block;
+            padding: 4px 0;
+            cursor: pointer;
+        }
+
+        .graphs-dropdown-content label:hover {
+            color: #3498db;
+        }
+
         #sidebar {
             position: absolute;
             top: 60px;
@@ -396,6 +429,194 @@
 
         /* Battery graph panel visibility is controlled by JavaScript for dynamic height */
 
+        /* Signal graph panel */
+        #signal-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #signal-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #signal-graph-resize:hover,
+        #signal-graph-resize.dragging {
+            background: linear-gradient(to bottom, #27ae60, transparent);
+        }
+
+        #signal-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #signal-graph-resize:hover::after,
+        #signal-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #signal-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #signal-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .signal-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #bdc3c7;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .signal-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        .signal-x-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        /* Latency graph panel */
+        #latency-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #latency-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #latency-graph-resize:hover,
+        #latency-graph-resize.dragging {
+            background: linear-gradient(to bottom, #e67e22, transparent);
+        }
+
+        #latency-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #latency-graph-resize:hover::after,
+        #latency-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #latency-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #latency-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .latency-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #bdc3c7;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .latency-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        .latency-x-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -584,21 +805,29 @@
                 display: none;
             }
 
-            #battery-graph-panel {
+            #battery-graph-panel,
+            #signal-graph-panel,
+            #latency-graph-panel {
                 right: 0;
             }
 
-            .battery-graph-title {
+            .battery-graph-title,
+            .signal-graph-title,
+            .latency-graph-title {
                 font-size: 10px;
             }
 
-            .battery-y-axis {
+            .battery-y-axis,
+            .signal-y-axis,
+            .latency-y-axis {
                 font-size: 8px;
                 width: 25px;
                 left: 5px;
             }
 
-            #battery-graph-container {
+            #battery-graph-container,
+            #signal-graph-container,
+            #latency-graph-container {
                 padding: 8px 35px 20px 35px;
             }
         }
@@ -621,9 +850,14 @@
         <label>
             <input type="checkbox" id="show-outliers"> Show outliers (red)
         </label>
-        <label>
-            <input type="checkbox" id="show-battery-graph"> Battery graph
-        </label>
+        <div class="graphs-dropdown">
+            <button id="graphs-btn">Graphs ▼</button>
+            <div id="graphs-dropdown-content" class="graphs-dropdown-content">
+                <label><input type="checkbox" id="show-battery-graph"> Battery</label>
+                <label><input type="checkbox" id="show-signal-graph"> Signal</label>
+                <label><input type="checkbox" id="show-latency-graph"> Latency</label>
+            </div>
+        </div>
         <select id="map-type-select" onchange="setMapType(this.value)" style="display:none">
             <option value="osm">OpenStreetMap</option>
             <option value="roads">Google Roads</option>
@@ -651,6 +885,46 @@
             <div class="battery-x-axis">
                 <span id="battery-time-start">--:--</span>
                 <span id="battery-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal graph panel -->
+    <div id="signal-graph-panel">
+        <div id="signal-graph-resize"></div>
+        <div id="signal-graph-container">
+            <div class="signal-graph-title">Signal Strength</div>
+            <div class="signal-y-axis">
+                <span>4</span>
+                <span>3</span>
+                <span>2</span>
+                <span>1</span>
+                <span>0</span>
+            </div>
+            <canvas id="signal-graph"></canvas>
+            <div class="signal-x-axis">
+                <span id="signal-time-start">--:--</span>
+                <span id="signal-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latency graph panel -->
+    <div id="latency-graph-panel">
+        <div id="latency-graph-resize"></div>
+        <div id="latency-graph-container">
+            <div class="latency-graph-title">Network Latency (seconds)</div>
+            <div class="latency-y-axis" id="latency-y-labels">
+                <span>10</span>
+                <span>7.5</span>
+                <span>5</span>
+                <span>2.5</span>
+                <span>0</span>
+            </div>
+            <canvas id="latency-graph"></canvas>
+            <div class="latency-x-axis">
+                <span id="latency-time-start">--:--</span>
+                <span id="latency-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -1287,6 +1561,8 @@
             updateTimeDisplay();
             drawTracks();
             drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
         }
 
         function updateSliderRange() {
@@ -1636,25 +1912,282 @@
             }
         }
 
-        // Battery graph hover highlighting
-        let batteryHighlightMarkers = [];
-        let batteryHighlightLine = null;
+        function drawSignalGraph() {
+            // Only draw if signal graph is visible
+            if (!document.getElementById('show-signal-graph').checked) return;
 
-        function clearBatteryHighlight() {
-            // Remove highlight markers from map
-            for (const marker of batteryHighlightMarkers) {
-                map.removeLayer(marker);
+            const canvas = document.getElementById('signal-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+            document.getElementById('signal-time-start').textContent = fmtTime(rangeStartTime);
+            document.getElementById('signal-time-end').textContent = fmtTime(rangeEndTime);
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
             }
-            batteryHighlightMarkers = [];
 
-            // Redraw graph without highlight line
-            if (document.getElementById('show-battery-graph').checked) {
-                drawBatteryGraph();
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see signal graph', width / 2, height / 2);
+                return;
+            }
+
+            // Draw signal line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime);
+                if (filtered.length < 2) continue;
+
+                // Draw the signal line
+                ctx.strokeStyle = userColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const entry of filtered) {
+                    if (entry.sig === undefined || entry.sig === null) continue;
+
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (entry.sig / 4) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    if (last.sig !== undefined && last.sig !== null) {
+                        const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                        const y = height - (last.sig / 4) * height;
+                        const sigBars = '▂▄▆█'.slice(0, Math.max(1, Math.min(4, last.sig)));
+                        ctx.fillStyle = userColor;
+                        ctx.font = 'bold 10px sans-serif';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(`${getDisplayName(userId)}: ${sigBars}`, Math.min(x, width - 5), y - 5);
+                    }
+                }
             }
         }
 
-        function showBatteryHighlight(mouseX) {
-            const canvas = document.getElementById('battery-graph');
+        function drawLatencyGraph() {
+            // Only draw if latency graph is visible
+            if (!document.getElementById('show-latency-graph').checked) return;
+
+            const canvas = document.getElementById('latency-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+            document.getElementById('latency-time-start').textContent = fmtTime(rangeStartTime);
+            document.getElementById('latency-time-end').textContent = fmtTime(rangeEndTime);
+
+            // Calculate max latency for Y axis scaling (use absolute value to handle negative latencies)
+            let maxLatency = 10; // Default max 10 seconds
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.recv_ts && entry.ts) {
+                        const latency = Math.abs(entry.recv_ts - entry.ts);
+                        if (latency < 300) { // Ignore >5min (extreme clock sync issues)
+                            maxLatency = Math.max(maxLatency, latency);
+                        }
+                    }
+                }
+            }
+            // Round up to nice number
+            maxLatency = Math.ceil(maxLatency / 5) * 5;
+            if (maxLatency < 10) maxLatency = 10;
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('latency-y-labels');
+            yLabels.innerHTML = `
+                <span>${maxLatency}</span>
+                <span>${(maxLatency * 0.75).toFixed(1)}</span>
+                <span>${(maxLatency * 0.5).toFixed(1)}</span>
+                <span>${(maxLatency * 0.25).toFixed(1)}</span>
+                <span>0</span>
+            `;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see latency graph', width / 2, height / 2);
+                return;
+            }
+
+            // Check if any data has recv_ts
+            let hasLatencyData = false;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                if (entries.some(e => e.recv_ts !== undefined)) {
+                    hasLatencyData = true;
+                    break;
+                }
+            }
+
+            if (!hasLatencyData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No latency data (requires server update)', width / 2, height / 2);
+                return;
+            }
+
+            // Draw latency line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime);
+                if (filtered.length < 2) continue;
+
+                // Draw the latency line (use absolute value, dashed for negative)
+                ctx.strokeStyle = userColor;
+                ctx.lineWidth = 2;
+
+                let started = false;
+                let lastWasNegative = false;
+                for (const entry of filtered) {
+                    if (entry.recv_ts === undefined || entry.ts === undefined) continue;
+                    const rawLatency = entry.recv_ts - entry.ts;
+                    const latency = Math.abs(rawLatency);
+                    if (latency > 300) continue; // Skip extreme values
+
+                    const isNegative = rawLatency < 0;
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (latency / maxLatency) * height;
+
+                    // Switch line style when sign changes
+                    if (started && isNegative !== lastWasNegative) {
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                    }
+
+                    // Use dashed line for negative latencies (clock ahead)
+                    ctx.setLineDash(isNegative ? [4, 2] : []);
+
+                    if (!started) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                    lastWasNegative = isNegative;
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    if (last.recv_ts !== undefined && last.ts !== undefined) {
+                        const rawLatency = last.recv_ts - last.ts;
+                        const latency = Math.abs(rawLatency);
+                        if (latency <= 300) {
+                            const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                            const y = height - (latency / maxLatency) * height;
+                            ctx.fillStyle = userColor;
+                            ctx.font = 'bold 10px sans-serif';
+                            ctx.textAlign = 'right';
+                            const sign = rawLatency < 0 ? '-' : '';
+                            ctx.fillText(`${getDisplayName(userId)}: ${sign}${latency.toFixed(1)}s`, Math.min(x, width - 5), y - 5);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Graph hover highlighting (shared between battery, signal, and latency graphs)
+        let graphHighlightMarkers = [];
+
+        function clearGraphHighlight() {
+            // Remove highlight markers from map
+            for (const marker of graphHighlightMarkers) {
+                map.removeLayer(marker);
+            }
+            graphHighlightMarkers = [];
+
+            // Redraw graphs without highlight
+            if (document.getElementById('show-battery-graph').checked) {
+                drawBatteryGraph();
+            }
+            if (document.getElementById('show-signal-graph').checked) {
+                drawSignalGraph();
+            }
+            if (document.getElementById('show-latency-graph').checked) {
+                drawLatencyGraph();
+            }
+        }
+
+        function showGraphHighlight(mouseX, sourceGraph) {
+            const canvas = document.getElementById(sourceGraph);
             const rect = canvas.getBoundingClientRect();
             const width = rect.width;
 
@@ -1663,10 +2196,10 @@
             const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
 
             // Clear previous highlight markers
-            for (const marker of batteryHighlightMarkers) {
+            for (const marker of graphHighlightMarkers) {
                 map.removeLayer(marker);
             }
-            batteryHighlightMarkers = [];
+            graphHighlightMarkers = [];
 
             // Find and highlight position for each selected user
             let colorIdx = 0;
@@ -1701,7 +2234,7 @@
                     opacity: 1
                 });
 
-                // Add tooltip with battery info
+                // Add tooltip with info
                 const time = new Date(closest.ts * 1000).toLocaleTimeString();
                 let tooltipHtml = `
                     <b>${getDisplayName(userId)}</b><br>
@@ -1713,6 +2246,23 @@
                 if (closest.sig !== undefined && closest.sig !== null) {
                     const sigBars = '▂▄▆█'.slice(0, Math.max(1, Math.min(4, closest.sig)));
                     tooltipHtml += `<br>Signal: ${sigBars} (${closest.sig})`;
+                }
+
+                // Add latency if available
+                if (closest.recv_ts !== undefined && closest.ts !== undefined) {
+                    const latency = closest.recv_ts - closest.ts;
+                    if (Math.abs(latency) < 300) {
+                        let latencyColor, latencyText;
+                        if (latency < 0) {
+                            // Negative = phone clock ahead of server
+                            latencyColor = '#9b59b6'; // Purple for clock ahead
+                            latencyText = `${latency.toFixed(1)}s (clock ahead)`;
+                        } else {
+                            latencyColor = latency > 5 ? '#e74c3c' : latency > 2 ? '#f39c12' : '#2ecc71';
+                            latencyText = `${latency.toFixed(1)}s`;
+                        }
+                        tooltipHtml += `<br>Latency: <span style="color:${latencyColor}">${latencyText}</span>`;
+                    }
                 }
 
                 // Add battery saver warning if active
@@ -1728,19 +2278,52 @@
                 marker.bindTooltip(tooltipHtml, { permanent: true, direction: 'top', offset: [0, -10] });
 
                 marker.addTo(map);
-                batteryHighlightMarkers.push(marker);
+                graphHighlightMarkers.push(marker);
             }
 
-            // Redraw graph with highlight line
-            drawBatteryGraphWithHighlight(mouseX);
+            // Redraw graphs with highlight line
+            drawGraphsWithHighlight(mouseX, ratio);
         }
 
-        function drawBatteryGraphWithHighlight(highlightX) {
-            // First draw the normal graph
-            drawBatteryGraph();
+        function drawGraphsWithHighlight(highlightX, ratio) {
+            const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
 
-            // Then draw highlight line
-            const canvas = document.getElementById('battery-graph');
+            // Draw battery graph with highlight if visible
+            if (document.getElementById('show-battery-graph').checked) {
+                drawBatteryGraph();
+                drawHighlightOnGraph('battery-graph', highlightX, ratio, timestamp, 'bat', 100);
+            }
+
+            // Draw signal graph with highlight if visible
+            if (document.getElementById('show-signal-graph').checked) {
+                drawSignalGraph();
+                drawHighlightOnGraph('signal-graph', highlightX, ratio, timestamp, 'sig', 4);
+            }
+
+            // Draw latency graph with highlight if visible
+            if (document.getElementById('show-latency-graph').checked) {
+                drawLatencyGraph();
+                // Calculate current max latency for proper scaling (use absolute value)
+                let maxLatency = 10;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.recv_ts && entry.ts) {
+                            const latency = Math.abs(entry.recv_ts - entry.ts);
+                            if (latency < 300) {
+                                maxLatency = Math.max(maxLatency, latency);
+                            }
+                        }
+                    }
+                }
+                maxLatency = Math.ceil(maxLatency / 5) * 5;
+                if (maxLatency < 10) maxLatency = 10;
+                drawLatencyHighlightOnGraph('latency-graph', highlightX, ratio, timestamp, maxLatency);
+            }
+        }
+
+        function drawLatencyHighlightOnGraph(canvasId, highlightX, ratio, timestamp, maxLatency) {
+            const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
             const rect = canvas.getBoundingClientRect();
             const height = rect.height;
@@ -1757,9 +2340,6 @@
 
             // Draw dots at intersection points
             let colorIdx = 0;
-            const ratio = highlightX / rect.width;
-            const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
-
             for (const [userId, entries] of Object.entries(userData)) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
@@ -1780,9 +2360,66 @@
                     }
                 }
 
-                if (closest.bat !== undefined && closest.bat !== null) {
+                if (closest.recv_ts !== undefined && closest.ts !== undefined) {
+                    const latency = Math.abs(closest.recv_ts - closest.ts);
+                    if (latency < 300) {
+                        const x = ((closest.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
+                        const y = height - (latency / maxLatency) * height;
+
+                        ctx.beginPath();
+                        ctx.arc(x * window.devicePixelRatio, y * window.devicePixelRatio, 6 * window.devicePixelRatio, 0, Math.PI * 2);
+                        ctx.fillStyle = userColor;
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 2 * window.devicePixelRatio;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        function drawHighlightOnGraph(canvasId, highlightX, ratio, timestamp, dataField, maxValue) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const height = rect.height;
+
+            // Draw vertical highlight line
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            ctx.moveTo(highlightX * window.devicePixelRatio, 0);
+            ctx.lineTo(highlightX * window.devicePixelRatio, height * window.devicePixelRatio);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw dots at intersection points
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime);
+                if (filtered.length === 0) continue;
+
+                // Find closest entry
+                let closest = filtered[0];
+                let closestDist = Math.abs(filtered[0].ts - timestamp);
+                for (const entry of filtered) {
+                    const dist = Math.abs(entry.ts - timestamp);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closest = entry;
+                    }
+                }
+
+                const value = closest[dataField];
+                if (value !== undefined && value !== null) {
                     const x = ((closest.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
-                    const y = height - (closest.bat / 100) * height;
+                    const y = height - (value / maxValue) * height;
 
                     ctx.beginPath();
                     ctx.arc(x * window.devicePixelRatio, y * window.devicePixelRatio, 6 * window.devicePixelRatio, 0, Math.PI * 2);
@@ -1795,33 +2432,125 @@
             }
         }
 
-        // Set up battery graph mouse events
+        // Set up graph mouse events
         document.getElementById('battery-graph').addEventListener('mousemove', (e) => {
             const rect = e.target.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
-            showBatteryHighlight(mouseX);
+            showGraphHighlight(mouseX, 'battery-graph');
         });
 
         document.getElementById('battery-graph').addEventListener('mouseleave', () => {
-            clearBatteryHighlight();
+            clearGraphHighlight();
         });
 
-        // Battery graph resize functionality
+        document.getElementById('signal-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'signal-graph');
+        });
+
+        document.getElementById('signal-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
+        document.getElementById('latency-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'latency-graph');
+        });
+
+        document.getElementById('latency-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
+        // Graph resize functionality
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
+        let signalGraphHeight = parseInt(localStorage.getItem('signalGraphHeight')) || 150;
+        let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
         const batteryPanel = document.getElementById('battery-graph-panel');
-        const resizeHandle = document.getElementById('battery-graph-resize');
+        const signalPanel = document.getElementById('signal-graph-panel');
+        const latencyPanel = document.getElementById('latency-graph-panel');
+        const batteryResizeHandle = document.getElementById('battery-graph-resize');
+        const signalResizeHandle = document.getElementById('signal-graph-resize');
+        const latencyResizeHandle = document.getElementById('latency-graph-resize');
         let isResizing = false;
+        let resizingPanel = null;
         let startY = 0;
         let startHeight = 0;
 
-        // Apply saved height
+        // Apply saved heights
         batteryPanel.style.height = batteryGraphHeight + 'px';
+        signalPanel.style.height = signalGraphHeight + 'px';
+        latencyPanel.style.height = latencyGraphHeight + 'px';
 
-        resizeHandle.addEventListener('mousedown', (e) => {
+        function updateGraphPositions() {
+            const mapEl = document.getElementById('map');
+            const batteryVisible = document.getElementById('show-battery-graph').checked;
+            const signalVisible = document.getElementById('show-signal-graph').checked;
+            const latencyVisible = document.getElementById('show-latency-graph').checked;
+
+            let totalHeight = 80; // timeline height
+            let currentBottom = 80;
+
+            // Stack from bottom: latency, signal, battery
+            if (latencyVisible) {
+                latencyPanel.style.display = 'block';
+                latencyPanel.style.bottom = currentBottom + 'px';
+                currentBottom += latencyGraphHeight;
+                totalHeight += latencyGraphHeight;
+            } else {
+                latencyPanel.style.display = 'none';
+            }
+
+            if (signalVisible) {
+                signalPanel.style.display = 'block';
+                signalPanel.style.bottom = currentBottom + 'px';
+                currentBottom += signalGraphHeight;
+                totalHeight += signalGraphHeight;
+            } else {
+                signalPanel.style.display = 'none';
+            }
+
+            if (batteryVisible) {
+                batteryPanel.style.display = 'block';
+                batteryPanel.style.bottom = currentBottom + 'px';
+                totalHeight += batteryGraphHeight;
+            } else {
+                batteryPanel.style.display = 'none';
+            }
+
+            mapEl.style.bottom = totalHeight + 'px';
+            map.invalidateSize();
+        }
+
+        batteryResizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
+            resizingPanel = 'battery';
             startY = e.clientY;
             startHeight = batteryPanel.offsetHeight;
-            resizeHandle.classList.add('dragging');
+            batteryResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        signalResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'signal';
+            startY = e.clientY;
+            startHeight = signalPanel.offsetHeight;
+            signalResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        latencyResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'latency';
+            startY = e.clientY;
+            startHeight = latencyPanel.offsetHeight;
+            latencyResizeHandle.classList.add('dragging');
             document.body.style.cursor = 'ns-resize';
             document.body.style.userSelect = 'none';
             e.preventDefault();
@@ -1832,26 +2561,38 @@
 
             const deltaY = startY - e.clientY;
             const newHeight = Math.max(80, Math.min(400, startHeight + deltaY));
-            batteryPanel.style.height = newHeight + 'px';
-            batteryGraphHeight = newHeight;
 
-            // Update map bottom position
-            document.getElementById('map').style.bottom = (80 + newHeight) + 'px';
+            if (resizingPanel === 'battery') {
+                batteryPanel.style.height = newHeight + 'px';
+                batteryGraphHeight = newHeight;
+            } else if (resizingPanel === 'signal') {
+                signalPanel.style.height = newHeight + 'px';
+                signalGraphHeight = newHeight;
+            } else if (resizingPanel === 'latency') {
+                latencyPanel.style.height = newHeight + 'px';
+                latencyGraphHeight = newHeight;
+            }
 
-            // Update map size
-            map.invalidateSize();
+            updateGraphPositions();
 
-            // Redraw graph at new size
+            // Redraw graphs at new size
             drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
         });
 
         document.addEventListener('mouseup', () => {
             if (isResizing) {
                 isResizing = false;
-                resizeHandle.classList.remove('dragging');
+                batteryResizeHandle.classList.remove('dragging');
+                signalResizeHandle.classList.remove('dragging');
+                latencyResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('batteryGraphHeight', batteryGraphHeight);
+                localStorage.setItem('signalGraphHeight', signalGraphHeight);
+                localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
+                resizingPanel = null;
             }
         });
 
@@ -1912,6 +2653,21 @@
         // Event listeners
         document.getElementById('load-btn').addEventListener('click', loadSummary);
 
+        // Graphs dropdown toggle
+        document.getElementById('graphs-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('graphs-dropdown-content').classList.toggle('show');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('graphs-dropdown-content');
+            const btn = document.getElementById('graphs-btn');
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.classList.remove('show');
+            }
+        });
+
         document.getElementById('start-slider').addEventListener('input', (e) => {
             const startVal = parseFloat(e.target.value);
             const endVal = parseFloat(document.getElementById('end-slider').value);
@@ -1923,6 +2679,8 @@
             updateTimeDisplay();
             drawTracks();
             drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
         });
 
         document.getElementById('end-slider').addEventListener('input', (e) => {
@@ -1936,6 +2694,8 @@
             updateTimeDisplay();
             drawTracks();
             drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
         });
 
         document.getElementById('speed-color').addEventListener('change', () => {
@@ -1955,17 +2715,24 @@
         });
 
         document.getElementById('show-battery-graph').addEventListener('change', (e) => {
-            const mapEl = document.getElementById('map');
-            const panel = document.getElementById('battery-graph-panel');
+            updateGraphPositions();
             if (e.target.checked) {
-                panel.style.display = 'block';
-                mapEl.style.bottom = (80 + batteryGraphHeight) + 'px';
                 drawBatteryGraph();
-            } else {
-                panel.style.display = 'none';
-                mapEl.style.bottom = '80px';
             }
-            map.invalidateSize();
+        });
+
+        document.getElementById('show-signal-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawSignalGraph();
+            }
+        });
+
+        document.getElementById('show-latency-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawLatencyGraph();
+            }
         });
 
         document.getElementById('reset-range-btn').addEventListener('click', () => {
@@ -1975,6 +2742,8 @@
             updateTimeDisplay();
             drawTracks();
             drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
         });
 
         // Playback controls - animate through the selected range
