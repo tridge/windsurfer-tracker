@@ -1746,7 +1746,20 @@
                     // Full content (initial load or server doesn't support Range)
                     const contentLength = response.headers.get('Content-Length');
                     if (contentLength) {
-                        trackLogBytesRead = parseInt(contentLength);
+                        const newLength = parseInt(contentLength);
+                        // If we already read data and server returned full content,
+                        // it ignored our Range request - skip if same size, reload if larger
+                        if (trackLogBytesRead > 0) {
+                            if (newLength <= trackLogBytesRead) {
+                                // No new data
+                                return;
+                            }
+                            // File grew but server doesn't support Range - clear and reload
+                            for (const id in sailorTrackData) {
+                                sailorTrackData[id] = [];
+                            }
+                        }
+                        trackLogBytesRead = newLength;
                     }
                 }
                 
