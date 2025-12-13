@@ -175,8 +175,8 @@
             <p>Reset before each race</p>
         </div>
         <div class="feature-item">
-            <h4>Monitor</h4>
-            <p>Watch positions in real-time</p>
+            <h4>Track Review</h4>
+            <p>Analyze race with graphs</p>
         </div>
     </div>
 
@@ -248,7 +248,7 @@
         <li><strong>Display names:</strong> Change "S42" to "John Smith" for easier identification</li>
         <li><strong>Sail Colours:</strong>Add the sail color for easy identification on the water</li>
         <li><strong>Roles:</strong> Correct a user who registered with the wrong role (sailor, support, spectator)</li>
-        <li><strong>OwnTracks users:</strong> iPhone users appear with auto-generated IDs that you may want to rename</li>
+        <li><strong>Auto-generated IDs:</strong> Users may appear with auto-generated IDs that you may want to rename</li>
     </ul>
 
     <div class="step">
@@ -369,8 +369,34 @@
         <h3>After the Race</h3>
         <ol style="margin-left: 20px;">
             <li>Track logs are automatically saved on the server</li>
+            <li>Use Track Review to analyze the race</li>
             <li>Clear tracks before the next race if running multiple races</li>
         </ol>
+    </div>
+
+    <h2>Track Review</h2>
+
+    <p>After a race, use the Track Review page to analyze tracks in detail. Access it at <a href="https://track.tridgell.net/review.html">https://track.tridgell.net/review.html</a>.</p>
+
+    <h3>Features</h3>
+    <ul>
+        <li><strong>Date selection:</strong> Review tracks from any day</li>
+        <li><strong>Time range slider:</strong> Focus on specific portions of the race</li>
+        <li><strong>Speed coloring:</strong> Tracks colored from green (slow) to red (fast)</li>
+        <li><strong>Outlier filtering:</strong> Remove GPS glitches automatically</li>
+    </ul>
+
+    <h3>Available Graphs</h3>
+    <p>Enable graphs from the "Graphs" dropdown to visualize:</p>
+    <ul>
+        <li><strong>Speed:</strong> Speed over time in knots</li>
+        <li><strong>Battery:</strong> Battery level over time</li>
+        <li><strong>Signal:</strong> Mobile signal strength (0-4 bars)</li>
+        <li><strong>Latency:</strong> Network delay from phone to server</li>
+    </ul>
+
+    <div class="info">
+        <strong>Tip:</strong> Click on any graph to highlight the corresponding position on the map. Drag the bottom edge of a graph to resize it.
     </div>
 
     <h2>Troubleshooting</h2>
@@ -380,7 +406,7 @@
         <li>Check they have mobile signal/data connection</li>
         <li>Verify their app is configured with correct server and password</li>
         <li>Ask them to check their ACK rate (should be > 0%)</li>
-        <li>For iPhone users, ensure OwnTracks has "Always" location permission</li>
+        <li>For iPhone users, ensure the app has "Always" location permission</li>
     </ul>
 
     <h3>Track lines not showing</h3>

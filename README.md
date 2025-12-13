@@ -8,6 +8,7 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 - **Multiple roles** - Track sailors (windsurfers), support boats, and spectators with distinct icons
 - **Emergency assist** - One-touch "Request Assist" button with audio alerts in the web UI
 - **Track history** - View historical tracks for each participant with incremental loading
+- **Track review** - Detailed analysis page with speed, battery, signal, and latency graphs
 - **Course management** - Draw, save, and display race courses with start, marks, and finish
 - **Course distance** - Automatic calculation and display of course length in km
 - **Reliable protocol** - UDP with acknowledgements, designed for unreliable mobile connections
@@ -52,6 +53,17 @@ Single-page Leaflet map application that:
 - Plays audio alerts when assist is requested
 - Shows course length in the legend
 
+### Track Review (`WebUI/review.html`)
+
+Post-race analysis page that:
+- Loads track data from daily log files
+- Displays interactive graphs (speed, battery, signal, latency)
+- Time range slider to focus on specific portions of the track
+- Outlier filtering to remove GPS glitches
+- Speed-based track coloring (green→yellow→red)
+- Click on graphs to highlight corresponding position on map
+- Drag to resize graphs
+
 ## Installation
 
 ### Prerequisites
@@ -88,6 +100,7 @@ The server will be available at `http://localhost:41234`
 | `-d, --log-dir` | logs/ | Directory for daily track logs |
 | `-c, --current` | current_positions.json | Current positions file |
 | `--course-file` | course.json | Course file path |
+| `--users-file` | users.json | User overrides file path |
 | `--no-http` | | Disable HTTP server |
 | `--no-track-logs` | | Disable daily track logging |
 | `--no-current` | | Disable current positions file |
@@ -165,6 +178,57 @@ python3 server/test_client.py -H localhost --delay 2
 | `--duration` | 0 | Duration in seconds (0 = forever) |
 | `--assist` | | Entity ID to set assist flag |
 | `-v, --verbose` | | Verbose output |
+
+## Track Review
+
+Access the track review page at `/review.html` on your server. This page provides post-race analysis tools:
+
+### Usage
+
+1. Select a date from the dropdown (defaults to today)
+2. Check users to display their tracks
+3. Use the time slider to focus on a specific time range
+4. Enable graphs from the Graphs dropdown (Speed, Battery, Signal, Latency)
+
+### Options
+
+- **Color by speed** - Color track segments from green (slow) to red (fast)
+- **Show pos markers** - Display markers at each logged position
+- **Filter outliers** - Remove GPS glitches based on speed threshold
+- **Show outliers** - Display filtered points as red markers
+
+### Graph Interaction
+
+- Click on a graph to highlight the corresponding position on the map
+- Drag the bottom edge of a graph panel to resize it
+- Graphs automatically rescale based on the selected time range
+
+### Latency Graph
+
+The latency graph shows network delay (time from GPS fix to server receipt). High latency spikes often indicate:
+- Android Doze mode (battery optimization when screen is off)
+- Poor mobile network coverage
+- Network congestion
+
+## User Overrides
+
+Admins can customize display names and roles for any tracker client via the Web UI.
+
+### Via Web UI
+
+1. Enter Admin mode (click Admin button, enter password)
+2. Click on any tracker marker on the map
+3. Click the "Edit" button in the popup
+4. Set a display name and/or override the role
+5. Click Save
+
+### API Endpoints
+
+- `GET /api/users` - List all user overrides (requires admin auth)
+- `POST /api/admin/user/{id}` - Set override for a user (requires admin auth)
+- `DELETE /api/admin/user/{id}` - Remove override for a user (requires admin auth)
+
+Overrides are stored in `users.json`.
 
 ## JSON Packet Format
 
@@ -246,11 +310,13 @@ windsurfer-tracker/
 │   └── test_client.py       # Test client simulator
 ├── android/                  # Android app source
 ├── WebUI/
-│   └── index.html           # Web-based map UI
+│   ├── index.html           # Live tracking map UI
+│   └── review.html          # Post-race track review
 ├── flutter/                  # Flutter app source (MPL 2.0)
 ├── logs/                     # Daily track logs (YYYY_MM_DD.jsonl)
 ├── current_positions.json   # Current positions for web UI
-└── course.json              # Saved course data
+├── course.json              # Saved course data
+└── users.json               # User display name/role overrides
 ```
 
 ## License
