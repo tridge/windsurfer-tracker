@@ -2074,6 +2074,15 @@
             }
         }
 
+        // Calculate network latency for an entry
+        // For 1Hz batched positions, use batch_ts (when batch was sent) instead of ts
+        function getNetworkLatency(entry) {
+            if (entry.recv_ts === undefined) return null;
+            // Use batch_ts if available (for batched 1Hz positions), otherwise use ts
+            const sendTime = entry.batch_ts !== undefined ? entry.batch_ts : entry.ts;
+            return entry.recv_ts - sendTime;
+        }
+
         function drawLatencyGraph() {
             // Only draw if latency graph is visible
             if (!document.getElementById('show-latency-graph').checked) return;
@@ -2103,11 +2112,9 @@
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
-                    if (entry.recv_ts && entry.ts) {
-                        const latency = Math.abs(entry.recv_ts - entry.ts);
-                        if (latency < 300) { // Ignore >5min (extreme clock sync issues)
-                            maxLatency = Math.max(maxLatency, latency);
-                        }
+                    const latency = getNetworkLatency(entry);
+                    if (latency !== null && Math.abs(latency) < 300) {
+                        maxLatency = Math.max(maxLatency, Math.abs(latency));
                     }
                 }
             }
@@ -2182,8 +2189,8 @@
                 let started = false;
                 let lastWasNegative = false;
                 for (const entry of filtered) {
-                    if (entry.recv_ts === undefined || entry.ts === undefined) continue;
-                    const rawLatency = entry.recv_ts - entry.ts;
+                    const rawLatency = getNetworkLatency(entry);
+                    if (rawLatency === null) continue;
                     const latency = Math.abs(rawLatency);
                     if (latency > 300) continue; // Skip extreme values
 
@@ -2216,8 +2223,8 @@
                 // Draw user label at the end of the line
                 if (filtered.length > 0) {
                     const last = filtered[filtered.length - 1];
-                    if (last.recv_ts !== undefined && last.ts !== undefined) {
-                        const rawLatency = last.recv_ts - last.ts;
+                    const rawLatency = getNetworkLatency(last);
+                    if (rawLatency !== null) {
                         const latency = Math.abs(rawLatency);
                         if (latency <= 300) {
                             const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
@@ -2322,20 +2329,18 @@
                 }
 
                 // Add latency if available
-                if (closest.recv_ts !== undefined && closest.ts !== undefined) {
-                    const latency = closest.recv_ts - closest.ts;
-                    if (Math.abs(latency) < 300) {
-                        let latencyColor, latencyText;
-                        if (latency < 0) {
-                            // Negative = phone clock ahead of server
-                            latencyColor = '#9b59b6'; // Purple for clock ahead
-                            latencyText = `${latency.toFixed(1)}s (clock ahead)`;
-                        } else {
-                            latencyColor = latency > 5 ? '#e74c3c' : latency > 2 ? '#f39c12' : '#2ecc71';
-                            latencyText = `${latency.toFixed(1)}s`;
-                        }
-                        tooltipHtml += `<br>Latency: <span style="color:${latencyColor}">${latencyText}</span>`;
+                const latency = getNetworkLatency(closest);
+                if (latency !== null && Math.abs(latency) < 300) {
+                    let latencyColor, latencyText;
+                    if (latency < 0) {
+                        // Negative = phone clock ahead of server
+                        latencyColor = '#9b59b6'; // Purple for clock ahead
+                        latencyText = `${latency.toFixed(1)}s (clock ahead)`;
+                    } else {
+                        latencyColor = latency > 5 ? '#e74c3c' : latency > 2 ? '#f39c12' : '#2ecc71';
+                        latencyText = `${latency.toFixed(1)}s`;
                     }
+                    tooltipHtml += `<br>Latency: <span style="color:${latencyColor}">${latencyText}</span>`;
                 }
 
                 // Add battery saver warning if active
@@ -2381,11 +2386,9 @@
                 for (const [userId, entries] of Object.entries(userData)) {
                     if (!selectedUsers.has(userId)) continue;
                     for (const entry of entries) {
-                        if (entry.recv_ts && entry.ts) {
-                            const latency = Math.abs(entry.recv_ts - entry.ts);
-                            if (latency < 300) {
-                                maxLatency = Math.max(maxLatency, latency);
-                            }
+                        const latency = getNetworkLatency(entry);
+                        if (latency !== null && Math.abs(latency) < 300) {
+                            maxLatency = Math.max(maxLatency, Math.abs(latency));
                         }
                     }
                 }
@@ -2433,8 +2436,9 @@
                     }
                 }
 
-                if (closest.recv_ts !== undefined && closest.ts !== undefined) {
-                    const latency = Math.abs(closest.recv_ts - closest.ts);
+                const rawLatency = getNetworkLatency(closest);
+                if (rawLatency !== null) {
+                    const latency = Math.abs(rawLatency);
                     if (latency < 300) {
                         const x = ((closest.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
                         const y = height - (latency / maxLatency) * height;

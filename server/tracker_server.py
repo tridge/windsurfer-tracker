@@ -775,6 +775,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             # Log all positions if 1Hz array format
             if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and _daily_logger:
+                # batch_ts = timestamp of last position (when batch was sent)
+                batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
                 for pos in pos_array[:-1]:
                     if len(pos) >= 3:
                         pos_ts, pos_lat, pos_lon = pos[0], pos[1], pos[2]
@@ -793,6 +795,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             "ver": version,
                             "flg": flags
                         }
+                        if batch_ts is not None:
+                            track_entry["batch_ts"] = batch_ts
                         if battery_drain_rate is not None:
                             track_entry["bdr"] = battery_drain_rate
                         _daily_logger.write(track_entry)
@@ -1207,6 +1211,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
 
             # If 1Hz array format, log ALL positions to daily track log
             if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and daily_logger:
+                # batch_ts = timestamp of last position (when batch was sent)
+                batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
                 # Log all positions EXCEPT the last one (which was already logged by process_position)
                 for i, pos in enumerate(pos_array[:-1]):
                     if len(pos) >= 3:
@@ -1226,6 +1232,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             "ver": version,
                             "flg": flags
                         }
+                        if batch_ts is not None:
+                            track_entry["batch_ts"] = batch_ts
                         if battery_drain_rate is not None:
                             track_entry["bdr"] = battery_drain_rate
                         daily_logger.write(track_entry)
