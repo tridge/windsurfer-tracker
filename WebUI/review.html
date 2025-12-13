@@ -2037,19 +2037,20 @@
             document.getElementById('speed-time-start').textContent = fmtTime(rangeStartTime);
             document.getElementById('speed-time-end').textContent = fmtTime(rangeEndTime);
 
-            // Calculate max speed for Y axis scaling
+            // Calculate max speed for Y axis scaling (only from visible time range)
             let maxSpeed = 20; // Default max 20 knots
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
                     if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
                         maxSpeed = Math.max(maxSpeed, entry.spd);
                     }
                 }
             }
-            // Round up to nice number
-            maxSpeed = Math.ceil(maxSpeed / 10) * 10;
-            if (maxSpeed < 20) maxSpeed = 20;
+            // Round up to nice number (5 knot increments, min 10)
+            maxSpeed = Math.ceil(maxSpeed / 5) * 5;
+            if (maxSpeed < 10) maxSpeed = 10;
 
             // Update Y axis labels
             const yLabels = document.getElementById('speed-y-labels');
@@ -2347,11 +2348,12 @@
             document.getElementById('latency-time-start').textContent = fmtTime(rangeStartTime);
             document.getElementById('latency-time-end').textContent = fmtTime(rangeEndTime);
 
-            // Calculate max latency for Y axis scaling (use absolute value to handle negative latencies)
+            // Calculate max latency for Y axis scaling (only from visible time range)
             let maxLatency = 10; // Default max 10 seconds
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
                     const latency = getNetworkLatency(entry);
                     if (latency !== null && Math.abs(latency) < 300) {
                         maxLatency = Math.max(maxLatency, Math.abs(latency));
@@ -2612,18 +2614,19 @@
             // Draw speed graph with highlight if visible
             if (document.getElementById('show-speed-graph').checked) {
                 drawSpeedGraph();
-                // Calculate current max speed for proper scaling
+                // Calculate current max speed for proper scaling (only from visible time range)
                 let maxSpeed = 20;
                 for (const [userId, entries] of Object.entries(userData)) {
                     if (!selectedUsers.has(userId)) continue;
                     for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
                         if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
                             maxSpeed = Math.max(maxSpeed, entry.spd);
                         }
                     }
                 }
-                maxSpeed = Math.ceil(maxSpeed / 10) * 10;
-                if (maxSpeed < 20) maxSpeed = 20;
+                maxSpeed = Math.ceil(maxSpeed / 5) * 5;
+                if (maxSpeed < 10) maxSpeed = 10;
                 drawHighlightOnGraph('speed-graph', highlightX, ratio, timestamp, 'spd', maxSpeed);
             }
 
@@ -2642,11 +2645,12 @@
             // Draw latency graph with highlight if visible
             if (document.getElementById('show-latency-graph').checked) {
                 drawLatencyGraph();
-                // Calculate current max latency for proper scaling (use absolute value)
+                // Calculate current max latency for proper scaling (only from visible time range)
                 let maxLatency = 10;
                 for (const [userId, entries] of Object.entries(userData)) {
                     if (!selectedUsers.has(userId)) continue;
                     for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
                         const latency = getNetworkLatency(entry);
                         if (latency !== null && Math.abs(latency) < 300) {
                             maxLatency = Math.max(maxLatency, Math.abs(latency));
