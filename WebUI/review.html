@@ -390,6 +390,103 @@
         }
 
         /* Battery graph panel */
+        #speed-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #speed-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #speed-graph-resize:hover,
+        #speed-graph-resize.dragging {
+            background: linear-gradient(to bottom, #3498db, transparent);
+        }
+
+        #speed-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #speed-graph-resize:hover::after,
+        #speed-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #speed-graph-panel.visible {
+            display: block;
+        }
+
+        #speed-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #speed-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .speed-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 60px;
+            color: #3498db;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .speed-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            color: #7f8c8d;
+            font-size: 11px;
+            text-align: right;
+            padding-right: 5px;
+        }
+
+        .speed-time-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #7f8c8d;
+            font-size: 11px;
+        }
+
         #battery-graph-panel {
             position: absolute;
             bottom: 80px;
@@ -865,18 +962,21 @@
                 display: none;
             }
 
+            #speed-graph-panel,
             #battery-graph-panel,
             #signal-graph-panel,
             #latency-graph-panel {
                 right: 0;
             }
 
+            .speed-graph-title,
             .battery-graph-title,
             .signal-graph-title,
             .latency-graph-title {
                 font-size: 10px;
             }
 
+            .speed-y-axis,
             .battery-y-axis,
             .signal-y-axis,
             .latency-y-axis {
@@ -885,6 +985,7 @@
                 left: 5px;
             }
 
+            #speed-graph-container,
             #battery-graph-container,
             #signal-graph-container,
             #latency-graph-container {
@@ -910,6 +1011,7 @@
         <div class="graphs-dropdown">
             <button id="graphs-btn">Graphs ▼</button>
             <div id="graphs-dropdown-content" class="graphs-dropdown-content">
+                <label><input type="checkbox" id="show-speed-graph"> Speed</label>
                 <label><input type="checkbox" id="show-battery-graph"> Battery</label>
                 <label><input type="checkbox" id="show-signal-graph"> Signal</label>
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
@@ -937,6 +1039,26 @@
     </div>
 
     <div id="map"></div>
+
+    <!-- Speed graph panel -->
+    <div id="speed-graph-panel">
+        <div id="speed-graph-resize"></div>
+        <div id="speed-graph-container">
+            <div class="speed-graph-title">Speed (knots)</div>
+            <div class="speed-y-axis" id="speed-y-labels">
+                <span>40</span>
+                <span>30</span>
+                <span>20</span>
+                <span>10</span>
+                <span>0</span>
+            </div>
+            <canvas id="speed-graph"></canvas>
+            <div class="speed-time-axis">
+                <span id="speed-time-start">--:--</span>
+                <span id="speed-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
 
     <!-- Battery graph panel -->
     <div id="battery-graph-panel">
@@ -1629,6 +1751,8 @@
 
             updateTimeDisplay();
             drawTracks();
+            drawSpeedGraph();
+            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -1886,6 +2010,122 @@
             }
             if (allCoords.length > 0) {
                 map.fitBounds(allCoords, { padding: [50, 50] });
+            }
+        }
+
+        function drawSpeedGraph() {
+            // Only draw if speed graph is visible
+            if (!document.getElementById('show-speed-graph').checked) return;
+
+            const canvas = document.getElementById('speed-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+            document.getElementById('speed-time-start').textContent = fmtTime(rangeStartTime);
+            document.getElementById('speed-time-end').textContent = fmtTime(rangeEndTime);
+
+            // Calculate max speed for Y axis scaling
+            let maxSpeed = 20; // Default max 20 knots
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
+                        maxSpeed = Math.max(maxSpeed, entry.spd);
+                    }
+                }
+            }
+            // Round up to nice number
+            maxSpeed = Math.ceil(maxSpeed / 10) * 10;
+            if (maxSpeed < 20) maxSpeed = 20;
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('speed-y-labels');
+            yLabels.innerHTML = `
+                <span>${maxSpeed}</span>
+                <span>${(maxSpeed * 0.75).toFixed(0)}</span>
+                <span>${(maxSpeed * 0.5).toFixed(0)}</span>
+                <span>${(maxSpeed * 0.25).toFixed(0)}</span>
+                <span>0</span>
+            `;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see speed graph', width / 2, height / 2);
+                return;
+            }
+
+            // Draw speed line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime);
+                if (filtered.length < 2) continue;
+
+                // Draw the speed line
+                ctx.strokeStyle = userColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const entry of filtered) {
+                    if (entry.spd === undefined || entry.spd === null) continue;
+
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (entry.spd / maxSpeed) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    if (last.spd !== undefined && last.spd !== null) {
+                        const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                        const y = height - (last.spd / maxSpeed) * height;
+                        ctx.fillStyle = userColor;
+                        ctx.font = 'bold 10px sans-serif';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(`${getDisplayName(userId)}: ${last.spd.toFixed(1)} kts`, Math.min(x, width - 5), y - 5);
+                    }
+                }
             }
         }
 
@@ -2253,6 +2493,9 @@
             graphHighlightMarkers = [];
 
             // Redraw graphs without highlight
+            if (document.getElementById('show-speed-graph').checked) {
+                drawSpeedGraph();
+            }
             if (document.getElementById('show-battery-graph').checked) {
                 drawBatteryGraph();
             }
@@ -2365,6 +2608,24 @@
 
         function drawGraphsWithHighlight(highlightX, ratio) {
             const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
+
+            // Draw speed graph with highlight if visible
+            if (document.getElementById('show-speed-graph').checked) {
+                drawSpeedGraph();
+                // Calculate current max speed for proper scaling
+                let maxSpeed = 20;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
+                            maxSpeed = Math.max(maxSpeed, entry.spd);
+                        }
+                    }
+                }
+                maxSpeed = Math.ceil(maxSpeed / 10) * 10;
+                if (maxSpeed < 20) maxSpeed = 20;
+                drawHighlightOnGraph('speed-graph', highlightX, ratio, timestamp, 'spd', maxSpeed);
+            }
 
             // Draw battery graph with highlight if visible
             if (document.getElementById('show-battery-graph').checked) {
@@ -2510,6 +2771,16 @@
         }
 
         // Set up graph mouse events
+        document.getElementById('speed-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'speed-graph');
+        });
+
+        document.getElementById('speed-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
         document.getElementById('battery-graph').addEventListener('mousemove', (e) => {
             const rect = e.target.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -2541,12 +2812,15 @@
         });
 
         // Graph resize functionality
+        let speedGraphHeight = parseInt(localStorage.getItem('speedGraphHeight')) || 150;
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
         let signalGraphHeight = parseInt(localStorage.getItem('signalGraphHeight')) || 150;
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
+        const speedPanel = document.getElementById('speed-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
         const signalPanel = document.getElementById('signal-graph-panel');
         const latencyPanel = document.getElementById('latency-graph-panel');
+        const speedResizeHandle = document.getElementById('speed-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
         const signalResizeHandle = document.getElementById('signal-graph-resize');
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
@@ -2556,12 +2830,14 @@
         let startHeight = 0;
 
         // Apply saved heights
+        speedPanel.style.height = speedGraphHeight + 'px';
         batteryPanel.style.height = batteryGraphHeight + 'px';
         signalPanel.style.height = signalGraphHeight + 'px';
         latencyPanel.style.height = latencyGraphHeight + 'px';
 
         function updateGraphPositions() {
             const mapEl = document.getElementById('map');
+            const speedVisible = document.getElementById('show-speed-graph').checked;
             const batteryVisible = document.getElementById('show-battery-graph').checked;
             const signalVisible = document.getElementById('show-signal-graph').checked;
             const latencyVisible = document.getElementById('show-latency-graph').checked;
@@ -2569,7 +2845,7 @@
             let totalHeight = 80; // timeline height
             let currentBottom = 80;
 
-            // Stack from bottom: latency, signal, battery
+            // Stack from bottom: latency, signal, battery, speed
             if (latencyVisible) {
                 latencyPanel.style.display = 'block';
                 latencyPanel.style.bottom = currentBottom + 'px';
@@ -2591,14 +2867,34 @@
             if (batteryVisible) {
                 batteryPanel.style.display = 'block';
                 batteryPanel.style.bottom = currentBottom + 'px';
+                currentBottom += batteryGraphHeight;
                 totalHeight += batteryGraphHeight;
             } else {
                 batteryPanel.style.display = 'none';
             }
 
+            if (speedVisible) {
+                speedPanel.style.display = 'block';
+                speedPanel.style.bottom = currentBottom + 'px';
+                totalHeight += speedGraphHeight;
+            } else {
+                speedPanel.style.display = 'none';
+            }
+
             mapEl.style.bottom = totalHeight + 'px';
             map.invalidateSize();
         }
+
+        speedResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'speed';
+            startY = e.clientY;
+            startHeight = speedGraphHeight;
+            speedResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
 
         batteryResizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
@@ -2639,7 +2935,10 @@
             const deltaY = startY - e.clientY;
             const newHeight = Math.max(80, Math.min(400, startHeight + deltaY));
 
-            if (resizingPanel === 'battery') {
+            if (resizingPanel === 'speed') {
+                speedPanel.style.height = newHeight + 'px';
+                speedGraphHeight = newHeight;
+            } else if (resizingPanel === 'battery') {
                 batteryPanel.style.height = newHeight + 'px';
                 batteryGraphHeight = newHeight;
             } else if (resizingPanel === 'signal') {
@@ -2653,6 +2952,8 @@
             updateGraphPositions();
 
             // Redraw graphs at new size
+            drawSpeedGraph();
+            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -2661,11 +2962,13 @@
         document.addEventListener('mouseup', () => {
             if (isResizing) {
                 isResizing = false;
+                speedResizeHandle.classList.remove('dragging');
                 batteryResizeHandle.classList.remove('dragging');
                 signalResizeHandle.classList.remove('dragging');
                 latencyResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
+                localStorage.setItem('speedGraphHeight', speedGraphHeight);
                 localStorage.setItem('batteryGraphHeight', batteryGraphHeight);
                 localStorage.setItem('signalGraphHeight', signalGraphHeight);
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
@@ -2784,6 +3087,7 @@
             updateSliderRange();
             updateTimeDisplay();
             drawTracks();
+            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -2799,6 +3103,7 @@
             updateSliderRange();
             updateTimeDisplay();
             drawTracks();
+            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -2818,6 +3123,13 @@
 
         document.getElementById('show-outliers').addEventListener('change', () => {
             drawTracks();
+        });
+
+        document.getElementById('show-speed-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawSpeedGraph();
+            }
         });
 
         document.getElementById('show-battery-graph').addEventListener('change', (e) => {
@@ -2847,6 +3159,7 @@
             updateSliderRange();
             updateTimeDisplay();
             drawTracks();
+            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
