@@ -1033,7 +1033,7 @@
                             sailorTracks[id].setLatLngs([]);
                         }
                     }
-                    trackLogBytesRead = 0;
+                    trackLogLastModified = null;
                     alert('Tracks cleared');
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
@@ -1692,19 +1692,19 @@
             return `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}_${String(d.getDate()).padStart(2, '0')}`;
         }
         
-        // Track how much of the log file we've read
-        let trackLogBytesRead = 0;
+        // Track last modified time for conditional requests
+        let trackLogLastModified = null;
         
-        // Load track data from log file (incremental using Range requests)
+        // Load track data from log file (uses If-Modified-Since and deduplication)
         async function loadTrackData() {
             const logDate = getTodayLogDate();
             
             // If date changed, reset everything
             if (currentLogDate !== logDate) {
                 currentLogDate = logDate;
-                trackLogBytesRead = 0;
+                trackLogLastModified = null;
                 trackDataLoaded = false;
-                
+
                 // Clear existing track data
                 for (const id in sailorTrackData) {
                     sailorTrackData[id] = [];
@@ -1713,54 +1713,29 @@
             
             try {
                 const url = `logs/${logDate}.jsonl`;
-                
-                // Use Range request to fetch only new data
+
+                // Use conditional request - only download if file changed
                 const headers = {};
-                if (trackLogBytesRead > 0) {
-                    headers['Range'] = `bytes=${trackLogBytesRead}-`;
+                if (trackLogLastModified) {
+                    headers['If-Modified-Since'] = trackLogLastModified;
                 }
-                
+
                 const response = await fetch(url, { headers });
-                
+
                 if (response.status === 404) {
                     // No log file yet today
                     return;
                 }
-                
-                if (response.status === 416) {
-                    // Range not satisfiable - file hasn't grown
+
+                if (response.status === 304) {
+                    // Not modified - no new data
                     return;
                 }
-                
-                if (response.status === 206) {
-                    // Partial content - got new data
-                    const contentRange = response.headers.get('Content-Range');
-                    // Format: "bytes start-end/total"
-                    if (contentRange) {
-                        const match = contentRange.match(/bytes \d+-(\d+)\/(\d+)/);
-                        if (match) {
-                            trackLogBytesRead = parseInt(match[1]) + 1;
-                        }
-                    }
-                } else if (response.status === 200) {
-                    // Full content (initial load or server doesn't support Range)
-                    const contentLength = response.headers.get('Content-Length');
-                    if (contentLength) {
-                        const newLength = parseInt(contentLength);
-                        // If we already read data and server returned full content,
-                        // it ignored our Range request - skip if same size, reload if larger
-                        if (trackLogBytesRead > 0) {
-                            if (newLength <= trackLogBytesRead) {
-                                // No new data
-                                return;
-                            }
-                            // File grew but server doesn't support Range - clear and reload
-                            for (const id in sailorTrackData) {
-                                sailorTrackData[id] = [];
-                            }
-                        }
-                        trackLogBytesRead = newLength;
-                    }
+
+                // Save Last-Modified for next request
+                const lastMod = response.headers.get('Last-Modified');
+                if (lastMod) {
+                    trackLogLastModified = lastMod;
                 }
                 
                 const text = await response.text();
@@ -1771,17 +1746,23 @@
                 const lines = text.trim().split('\n').filter(l => l);
                 let newPoints = 0;
                 
-                // Parse each line and append to track data
+                // Parse each line and append to track data (with deduplication)
                 for (const line of lines) {
                     try {
                         const entry = JSON.parse(line);
                         const id = entry.id;
-                        
+
                         if (!sailorTrackData[id]) {
                             sailorTrackData[id] = [];
                         }
-                        
-                        sailorTrackData[id].push({
+
+                        // Skip if we already have this timestamp for this user
+                        const existing = sailorTrackData[id];
+                        if (existing.length > 0 && existing[existing.length - 1].ts >= entry.ts) {
+                            continue;
+                        }
+
+                        existing.push({
                             lat: entry.lat,
                             lon: entry.lon,
                             ts: entry.ts,
@@ -1793,9 +1774,9 @@
                         // Skip malformed lines
                     }
                 }
-                
+
                 trackDataLoaded = true;
-                
+
                 // Update any visible tracks if we got new data
                 if (newPoints > 0) {
                     for (const id in showTrack) {
