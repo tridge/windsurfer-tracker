@@ -518,7 +518,67 @@
             color: #999;
             cursor: not-allowed;
         }
-        
+
+        .about-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .about-modal.show {
+            display: flex;
+        }
+
+        .about-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .about-content h2 {
+            margin: 0 0 20px 0;
+            color: #2c3e50;
+        }
+
+        .about-content p {
+            margin: 15px 0;
+            color: #555;
+        }
+
+        .about-content a {
+            color: #3498db;
+            text-decoration: none;
+        }
+
+        .about-content a:hover {
+            text-decoration: underline;
+        }
+
+        .about-content button {
+            margin-top: 20px;
+            padding: 10px 30px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .about-content button:hover {
+            background: #2980b9;
+        }
+
         .drawing-mode-indicator {
             position: fixed;
             top: 50px;
@@ -735,6 +795,21 @@
         <div class="menu-item" id="menuAdmin" onclick="toggleAdminMode()">
             <span>⚙️</span>
             <span>Admin</span>
+        </div>
+        <div class="menu-item" onclick="showAbout()">
+            <span>ℹ️</span>
+            <span>About</span>
+        </div>
+    </div>
+
+    <!-- About modal -->
+    <div id="about-modal" class="about-modal">
+        <div class="about-content">
+            <h2>Windsurfer Tracker</h2>
+            <p>GPS tracking system for windsurfing races</p>
+            <p><a href="https://track.tridgell.net/install" target="_blank">Install App (Android/iPhone)</a></p>
+            <p><a href="https://github.com/tridge/windsurfer-tracker" target="_blank">Source Code on GitHub</a></p>
+            <button onclick="hideAbout()">Close</button>
         </div>
     </div>
 
@@ -1035,6 +1110,22 @@
         // Menu state
         let menuOpen = false;
         let showLabels = localStorage.getItem('showLabels') === 'true';
+
+        function showAbout() {
+            document.getElementById('about-modal').classList.add('show');
+            document.getElementById('menuPanel').classList.remove('visible');
+        }
+
+        function hideAbout() {
+            document.getElementById('about-modal').classList.remove('show');
+        }
+
+        // Close about modal when clicking outside
+        document.getElementById('about-modal').addEventListener('click', function(e) {
+            if (e.target.id === 'about-modal') {
+                hideAbout();
+            }
+        });
 
         function toggleMenu() {
             const menuPanel = document.getElementById('menuPanel');

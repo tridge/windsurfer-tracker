@@ -90,6 +90,66 @@
             color: #3498db;
         }
 
+        .about-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .about-modal.show {
+            display: flex;
+        }
+
+        .about-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .about-content h2 {
+            margin: 0 0 20px 0;
+            color: #2c3e50;
+        }
+
+        .about-content p {
+            margin: 15px 0;
+            color: #555;
+        }
+
+        .about-content a {
+            color: #3498db;
+            text-decoration: none;
+        }
+
+        .about-content a:hover {
+            text-decoration: underline;
+        }
+
+        .about-content button {
+            margin-top: 20px;
+            padding: 10px 30px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .about-content button:hover {
+            background: #2980b9;
+        }
+
         #sidebar {
             position: absolute;
             top: 60px;
@@ -838,18 +898,15 @@
         <a href="index.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
         <label>Date: <input type="date" id="date-picker"></label>
         <button id="load-btn">Load Tracks</button>
-        <label>
-            <input type="checkbox" id="speed-color" checked> Color by speed
-        </label>
-        <label>
-            <input type="checkbox" id="show-markers" checked> Show position markers
-        </label>
-        <label>
-            <input type="checkbox" id="filter-outliers" checked> Filter outliers
-        </label>
-        <label>
-            <input type="checkbox" id="show-outliers"> Show outliers (red)
-        </label>
+        <div class="graphs-dropdown">
+            <button id="options-btn">Options ▼</button>
+            <div id="options-dropdown-content" class="graphs-dropdown-content">
+                <label><input type="checkbox" id="speed-color" checked> Color by speed</label>
+                <label><input type="checkbox" id="show-markers" checked> Show markers</label>
+                <label><input type="checkbox" id="filter-outliers" checked> Filter outliers</label>
+                <label><input type="checkbox" id="show-outliers"> Show outliers (red)</label>
+            </div>
+        </div>
         <div class="graphs-dropdown">
             <button id="graphs-btn">Graphs ▼</button>
             <div id="graphs-dropdown-content" class="graphs-dropdown-content">
@@ -864,7 +921,19 @@
             <option value="satellite">Google Satellite</option>
             <option value="hybrid">Google Hybrid</option>
         </select>
+        <button id="about-btn">About</button>
         <span id="status"></span>
+    </div>
+
+    <!-- About modal -->
+    <div id="about-modal" class="about-modal">
+        <div class="about-content">
+            <h2>Windsurfer Tracker</h2>
+            <p>GPS tracking system for windsurfing races</p>
+            <p><a href="https://track.tridgell.net/install" target="_blank">Install App (Android/iPhone)</a></p>
+            <p><a href="https://github.com/tridge/windsurfer-tracker" target="_blank">Source Code on GitHub</a></p>
+            <button id="about-close-btn">Close</button>
+        </div>
     </div>
 
     <div id="map"></div>
@@ -2657,18 +2726,47 @@
         // Event listeners
         document.getElementById('load-btn').addEventListener('click', loadSummary);
 
+        // Options dropdown toggle
+        document.getElementById('options-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('options-dropdown-content').classList.toggle('show');
+            document.getElementById('graphs-dropdown-content').classList.remove('show');
+        });
+
         // Graphs dropdown toggle
         document.getElementById('graphs-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             document.getElementById('graphs-dropdown-content').classList.toggle('show');
+            document.getElementById('options-dropdown-content').classList.remove('show');
         });
 
-        // Close dropdown when clicking outside
+        // Close dropdowns when clicking outside
         document.addEventListener('click', (e) => {
-            const dropdown = document.getElementById('graphs-dropdown-content');
-            const btn = document.getElementById('graphs-btn');
-            if (!dropdown.contains(e.target) && e.target !== btn) {
-                dropdown.classList.remove('show');
+            const graphsDropdown = document.getElementById('graphs-dropdown-content');
+            const graphsBtn = document.getElementById('graphs-btn');
+            const optionsDropdown = document.getElementById('options-dropdown-content');
+            const optionsBtn = document.getElementById('options-btn');
+
+            if (!graphsDropdown.contains(e.target) && e.target !== graphsBtn) {
+                graphsDropdown.classList.remove('show');
+            }
+            if (!optionsDropdown.contains(e.target) && e.target !== optionsBtn) {
+                optionsDropdown.classList.remove('show');
+            }
+        });
+
+        // About modal
+        document.getElementById('about-btn').addEventListener('click', () => {
+            document.getElementById('about-modal').classList.add('show');
+        });
+
+        document.getElementById('about-close-btn').addEventListener('click', () => {
+            document.getElementById('about-modal').classList.remove('show');
+        });
+
+        document.getElementById('about-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'about-modal') {
+                document.getElementById('about-modal').classList.remove('show');
             }
         });
 
