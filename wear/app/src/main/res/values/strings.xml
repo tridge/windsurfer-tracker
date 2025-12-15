@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Windsurfer Tracker</string>
+    <string name="tracking">TRACKING</string>
+    <string name="stopped">STOPPED</string>
+    <string name="tap_to_start">Tap to start</string>
+    <string name="tap_to_stop">Tap to stop</string>
+    <string name="settings">Settings</string>
+    <string name="server">Server</string>
+    <string name="sailor_id">Sailor ID</string>
+    <string name="role">Role</string>
+    <string name="save">Save</string>
+    <string name="knots">kts</string>
+    <string name="notification_title">Tracking Active</string>
+    <string name="notification_text">GPS position reporting every 10s</string>
+</resources>
