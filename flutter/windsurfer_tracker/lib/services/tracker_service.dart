@@ -77,6 +77,9 @@ class TrackerService {
   DateTime? _lastAckTime;
   TrackerPosition? _lastPosition;
 
+  // Track acknowledged sequence numbers to stop retransmissions
+  final Set<int> _acknowledgedSeqs = {};
+
   // DNS caching
   InternetAddress? _cachedServerAddress;
   DateTime? _lastDnsLookupTime;
@@ -253,6 +256,7 @@ class TrackerService {
     _sequenceNumber = 0;
     _packetsAcked = 0;
     _packetsSent = 0;
+    _acknowledgedSeqs.clear();
 
     // Start periodic location timer (in case stream doesn't fire often enough)
     _startPeriodicLocationCheck();
@@ -374,6 +378,12 @@ class TrackerService {
 
     // Send with retries
     for (int attempt = 0; attempt < TrackerConfig.udpRetryCount; attempt++) {
+      // Stop retrying if we already got an ACK for this sequence
+      if (_acknowledgedSeqs.contains(seq)) {
+        debugPrint('Stopping retries for seq=$seq - already acknowledged');
+        return;
+      }
+
       try {
         _socket?.send(data, address, serverPort);
         _packetsSent++;
@@ -410,6 +420,12 @@ class TrackerService {
           // Don't count as successful ACK
           return;
         }
+
+        // Mark this sequence as acknowledged to stop retransmissions
+        _acknowledgedSeqs.add(ackSeq);
+
+        // Clean up old sequence numbers (keep only recent ones)
+        _acknowledgedSeqs.removeWhere((seq) => seq < _sequenceNumber - 100);
 
         _lastAckTime = DateTime.now();
         _packetsAcked++;
