@@ -125,9 +125,17 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         // Check if we should auto-resume tracking
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         if (prefs.getBoolean("tracking_active", false)) {
-            // Was tracking before - restart (go through battery check first)
+            // Was tracking before - restart (but verify permissions first)
             Log.d(TAG, "Auto-resuming tracking from saved state")
-            checkBatteryOptimization()
+            // Must check location permission before starting foreground service on Android 14+
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED) {
+                checkBatteryOptimization()
+            } else {
+                // Permission was revoked - clear tracking state
+                Log.d(TAG, "Location permission revoked, cannot auto-resume")
+                prefs.edit().putBoolean("tracking_active", false).apply()
+            }
         }
     }
 
