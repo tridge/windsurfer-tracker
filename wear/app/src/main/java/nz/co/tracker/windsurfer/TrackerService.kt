@@ -333,14 +333,7 @@ class TrackerService : LifecycleService() {
 
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val isPowerSaveApi = powerManager.isPowerSaveMode
-        // On Wear OS, also check Settings.Global.LOW_POWER which is used for battery saver
-        val isLowPowerSetting = try {
-            android.provider.Settings.Global.getInt(contentResolver, "low_power", 0) == 1
-        } catch (e: Exception) {
-            false
-        }
-        val isPowerSaveMode = isPowerSaveApi || isLowPowerSetting
+        val isPowerSaveMode = powerManager.isPowerSaveMode
         val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
 
         val signalLevel = try {
@@ -453,14 +446,7 @@ class TrackerService : LifecycleService() {
 
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val isPowerSaveApi = powerManager.isPowerSaveMode
-        // On Wear OS, also check Settings.Global.LOW_POWER which is used for battery saver
-        val isLowPowerSetting = try {
-            android.provider.Settings.Global.getInt(contentResolver, "low_power", 0) == 1
-        } catch (e: Exception) {
-            false
-        }
-        val isPowerSaveMode = isPowerSaveApi || isLowPowerSetting
+        val isPowerSaveMode = powerManager.isPowerSaveMode
         val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
 
         val signalLevel = try {
