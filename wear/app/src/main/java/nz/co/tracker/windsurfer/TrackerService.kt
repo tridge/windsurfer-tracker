@@ -312,6 +312,7 @@ class TrackerService : LifecycleService() {
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isPowerSaveMode = powerManager.isPowerSaveMode
+        val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
 
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
@@ -351,6 +352,7 @@ class TrackerService : LifecycleService() {
         // Build flags object
         val flags = JSONObject().apply {
             put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
+            put("bo", isBatteryOptIgnored)  // Battery optimization ignored for this app
         }
 
         val packet = JSONObject().apply {
@@ -423,6 +425,7 @@ class TrackerService : LifecycleService() {
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isPowerSaveMode = powerManager.isPowerSaveMode
+        val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
 
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
@@ -475,6 +478,7 @@ class TrackerService : LifecycleService() {
         // Build flags object
         val flags = JSONObject().apply {
             put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
+            put("bo", isBatteryOptIgnored)  // Battery optimization ignored for this app
         }
 
         val packet = JSONObject().apply {

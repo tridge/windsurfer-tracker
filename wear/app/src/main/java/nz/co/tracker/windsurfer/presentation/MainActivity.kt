@@ -7,11 +7,14 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Log
 import android.widget.Toast
@@ -102,7 +105,7 @@ class MainActivity : ComponentActivity() {
                 // Request background location separately (Android 10+ requirement)
                 requestBackgroundLocation()
             } else {
-                startTracking()
+                checkBatteryOptimizationAndStart()
             }
         } else {
             Toast.makeText(this, "Location permission required", Toast.LENGTH_LONG).show()
@@ -113,10 +116,17 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startTracking()
+            checkBatteryOptimizationAndStart()
         } else {
             Toast.makeText(this, "Background location required for tracking", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private val batteryOptimizationRequest = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Start tracking regardless of result - user made their choice
+        startTracking()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -188,8 +198,27 @@ class MainActivity : ComponentActivity() {
 
     private fun checkPermissionsAndStart() {
         when {
-            hasLocationPermissions() -> startTracking()
+            hasLocationPermissions() -> checkBatteryOptimizationAndStart()
             else -> requestLocationPermissions()
+        }
+    }
+
+    private fun checkBatteryOptimizationAndStart() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            // Request battery optimization exemption
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                batteryOptimizationRequest.launch(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open battery optimization settings", e)
+                Toast.makeText(this, "Please disable battery optimization in Settings", Toast.LENGTH_LONG).show()
+                startTracking()
+            }
+        } else {
+            startTracking()
         }
     }
 
