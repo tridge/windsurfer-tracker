@@ -362,6 +362,7 @@ class TrackerService {
       'role': role,
       'flg': flags,  // Status flags
       'ver': version,
+      'os': '${Platform.operatingSystem == 'ios' ? 'iOS' : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
     };
 
     if (password.isNotEmpty) {

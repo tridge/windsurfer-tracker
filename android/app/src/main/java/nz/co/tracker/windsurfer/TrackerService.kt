@@ -453,6 +453,7 @@ class TrackerService : LifecycleService() {
             put("role", role)
             put("flg", flags)  // Status flags
             put("ver", BuildConfig.VERSION_STRING)
+            put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {
                 put("pwd", currentPassword)
             }
@@ -601,6 +602,7 @@ class TrackerService : LifecycleService() {
             put("role", role)
             put("flg", flags)
             put("ver", BuildConfig.VERSION_STRING)
+            put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {
                 put("pwd", currentPassword)
             }

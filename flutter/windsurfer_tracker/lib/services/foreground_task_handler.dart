@@ -507,6 +507,7 @@ class TrackerTaskHandler extends TaskHandler {
       'role': _role,
       'flg': flags,
       'ver': _version,
+      'os': '${Platform.operatingSystem == 'ios' ? 'iOS' : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
       'chg': isCharging,
     };
 
@@ -631,6 +632,7 @@ class TrackerTaskHandler extends TaskHandler {
       'role': _role,
       'flg': flags,
       'ver': _version,
+      'os': '${Platform.operatingSystem == 'ios' ? 'iOS' : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
       'chg': isCharging,
     };
 

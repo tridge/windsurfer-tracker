@@ -390,6 +390,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("role", role)
             put("ver", BuildConfig.VERSION_STRING)
+            put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
             if (password.isNotEmpty()) {
                 put("pwd", password)
@@ -515,6 +516,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("role", role)
             put("ver", BuildConfig.VERSION_STRING)
+            put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
             if (password.isNotEmpty()) {
                 put("pwd", password)

@@ -431,6 +431,7 @@ class IOSTrackerService {
       'sig': -1,
       'role': _role,
       'ver': _version,
+      'os': '${Platform.operatingSystem == 'ios' ? 'iOS' : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
       'ps': isPowerSaveMode,
       'chg': isCharging,
     };
@@ -617,6 +618,7 @@ class IOSTrackerService {
       'sig': -1,
       'role': _role,
       'ver': _version,
+      'os': '${Platform.operatingSystem == 'ios' ? 'iOS' : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
       'ps': isPowerSaveMode,
       'chg': isCharging,
     };
