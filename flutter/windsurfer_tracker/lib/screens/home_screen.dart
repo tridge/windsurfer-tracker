@@ -468,14 +468,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showSettings() async {
+    // Save old values to detect changes
+    final oldSailorId = widget.prefs.sailorId;
+    final oldServerHost = widget.prefs.serverHost;
+    final oldServerPort = widget.prefs.serverPort;
+    final oldRole = widget.prefs.role;
+    final oldPassword = widget.prefs.password;
     final oldHighFrequencyMode = widget.prefs.highFrequencyMode;
+
     final saved = await SettingsDialog.show(context, widget.prefs);
     if (saved == true) {
-      final newHighFrequencyMode = widget.prefs.highFrequencyMode;
-      // Auto-restart tracking if 1Hz mode changed while tracking
-      if (_isTracking && newHighFrequencyMode != oldHighFrequencyMode) {
-        final modeStr = newHighFrequencyMode ? '1Hz' : 'normal';
-        _showMessage('Restarting tracking in $modeStr mode...');
+      // Check if any settings changed while tracking
+      final settingsChanged = widget.prefs.sailorId != oldSailorId ||
+          widget.prefs.serverHost != oldServerHost ||
+          widget.prefs.serverPort != oldServerPort ||
+          widget.prefs.role != oldRole ||
+          widget.prefs.password != oldPassword ||
+          widget.prefs.highFrequencyMode != oldHighFrequencyMode;
+
+      if (_isTracking && settingsChanged) {
+        _showMessage('Restarting tracking with new settings...');
         await _stopTracking();
         await Future.delayed(const Duration(milliseconds: 500));
         _startTracking();
@@ -605,6 +617,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       child: Column(
         children: [
+          // 1Hz Mode indicator
+          if (widget.prefs.highFrequencyMode)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00AAAA),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                '1Hz MODE',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
           _buildStatusRow('Position', _formatPosition()),
           const Divider(),
           Row(

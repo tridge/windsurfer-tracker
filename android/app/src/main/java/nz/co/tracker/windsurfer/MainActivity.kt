@@ -498,11 +498,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.statusGroup.visibility = View.VISIBLE
             binding.configGroup.visibility = View.GONE
             updateAssistButton(service.isAssistActive())
-            
+
+            // Show 1Hz indicator if high frequency mode is enabled
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            val highFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
+            binding.tv1HzIndicator.visibility = if (highFrequencyMode) View.VISIBLE else View.GONE
+
             service.getLastLocation()?.let { loc ->
                 updateLocationDisplay(loc)
             }
-            
+
             updateConnectionStatus(service.getAckRate())
         } else {
             // Service is not tracking - show config screen
@@ -754,6 +759,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             checkForUpdatesManual()
         }
 
+        // Save old values to detect changes
+        val oldSailorId = prefs.getString("sailor_id", "") ?: ""
+        val oldRole = prefs.getString("role", "sailor") ?: "sailor"
+        val oldServerHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+        val oldServerPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
+        val oldPassword = prefs.getString("password", "") ?: ""
         val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
 
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
@@ -789,11 +800,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
                     // Validation passed, save settings
                     val newHighFrequencyMode = highFrequencyCheckbox.isChecked
+                    val newRole = roleValues[selectedRoleIndex]
+                    val newServerHost = serverInput.text.toString()
+                    val newServerPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
+
                     prefs.edit().apply {
                         putString("sailor_id", sailorId)
-                        putString("role", roleValues[selectedRoleIndex])
-                        putString("server_host", serverInput.text.toString())
-                        putInt("server_port", portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT)
+                        putString("role", newRole)
+                        putString("server_host", newServerHost)
+                        putInt("server_port", newServerPort)
                         putString("password", password)
                         putBoolean("high_frequency_mode", newHighFrequencyMode)
                         apply()
@@ -803,11 +818,17 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         loadPreferences()
                     }
 
-                    // Auto-restart tracking if 1Hz mode changed while tracking
+                    // Auto-restart tracking if any settings changed while tracking
                     val isTracking = trackerService?.isTracking() == true
-                    if (isTracking && newHighFrequencyMode != oldHighFrequencyMode) {
-                        val modeStr = if (newHighFrequencyMode) "1Hz" else "normal"
-                        Toast.makeText(this@MainActivity, "Restarting tracking in $modeStr mode...", Toast.LENGTH_SHORT).show()
+                    val settingsChanged = sailorId != oldSailorId ||
+                        newRole != oldRole ||
+                        newServerHost != oldServerHost ||
+                        newServerPort != oldServerPort ||
+                        password != oldPassword ||
+                        newHighFrequencyMode != oldHighFrequencyMode
+
+                    if (isTracking && settingsChanged) {
+                        Toast.makeText(this@MainActivity, "Restarting tracking with new settings...", Toast.LENGTH_SHORT).show()
                         stopTrackerService()
                         // Brief delay to ensure clean stop before restart
                         binding.root.postDelayed({

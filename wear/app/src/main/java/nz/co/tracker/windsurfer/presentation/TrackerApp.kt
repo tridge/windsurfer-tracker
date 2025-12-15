@@ -41,6 +41,7 @@ fun TrackerApp(
                     signalLevel = signalLevel,
                     ackRate = ackRate,
                     sailorId = settings.sailorId,
+                    highFrequencyMode = settings.highFrequencyMode,
                     onToggleTracking = onToggleTracking,
                     onAssistLongPress = onAssistToggle,
                     onSettingsLongPress = {

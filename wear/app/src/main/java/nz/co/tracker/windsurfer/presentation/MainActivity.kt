@@ -160,6 +160,12 @@ class MainActivity : ComponentActivity() {
                 onSaveSettings = { newSettings ->
                     lifecycleScope.launch {
                         settingsRepository.updateSettings(newSettings)
+                        // Restart tracking if already running to apply new settings
+                        if (isTracking.value) {
+                            Log.d(TAG, "Restarting tracking to apply new settings")
+                            stopTracking()
+                            startTracking()
+                        }
                     }
                 }
             )

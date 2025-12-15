@@ -93,6 +93,18 @@
         android:padding="8dp"
         app:layout_constraintTop_toTopOf="parent">
 
+        <!-- 1Hz Mode Indicator -->
+        <TextView
+            android:id="@+id/tv1HzIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1Hz MODE"
+            android:textSize="14sp"
+            android:textColor="#00AAAA"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp" />
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
