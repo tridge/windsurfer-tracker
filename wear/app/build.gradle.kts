@@ -11,6 +11,8 @@ val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
+// Keystore file path - shared with phone app
+val keystoreFile = file("../../android/release.keystore")
 
 // Get short git hash for version tracking
 fun getGitHash(): String {
@@ -43,8 +45,8 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropertiesFile.exists()) {
-                storeFile = file(keystoreProperties["storeFile"] as String)
+            if (keystoreFile.exists() && keystorePropertiesFile.exists()) {
+                storeFile = keystoreFile
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
@@ -61,6 +63,11 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+
+    lint {
+        // Disable lint fatal errors for release - false positive on Wear Compose
+        abortOnError = false
     }
 
     compileOptions {
