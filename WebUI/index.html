@@ -2340,6 +2340,8 @@
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
 
                 const versionStr = sailor.ver || 'Unknown';
+                const osStr = sailor.os || '';
+                const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
 
                 // Calculate sampling rate from track data
                 const trackPoints = sailorTrackData[id] || [];
@@ -2372,7 +2374,7 @@
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                     Signal: ${sigStr}<br>
                     Updated: ${timeAgo(sailor.last_seen)}<br>
-                    Version: <span style="color:#666;font-size:11px">${versionStr}</span>${samplingStr}${powerSaveWarning}${batOptWarning}
+                    Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">
                         <label>
                             <input type="checkbox" ${trackChecked} onchange="toggleTrack('${id}', this.checked)">
