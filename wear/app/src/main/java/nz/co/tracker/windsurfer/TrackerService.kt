@@ -82,6 +82,9 @@ class TrackerService : LifecycleService() {
     // Track acknowledged sequence numbers to stop retransmissions
     private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
+    // Wake lock to keep tracking alive during battery saver
+    private var wakeLock: PowerManager.WakeLock? = null
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -241,6 +244,16 @@ class TrackerService : LifecycleService() {
         // Clear acknowledged sequences from previous session
         acknowledgedSeqs.clear()
 
+        // Acquire wake lock to keep tracking alive during battery saver
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "WindsurferTracker::TrackingWakeLock"
+        ).apply {
+            acquire()
+        }
+        Log.d(TAG, "Wake lock acquired")
+
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
         serviceScope.launch {
@@ -278,6 +291,15 @@ class TrackerService : LifecycleService() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         socket?.close()
         socket = null
+
+        // Release wake lock
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "Wake lock released")
+            }
+        }
+        wakeLock = null
     }
 
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
