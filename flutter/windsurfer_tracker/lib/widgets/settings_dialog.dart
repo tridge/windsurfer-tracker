@@ -251,7 +251,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               },
             ),
             const Text(
-              '1Hz Mode (experimental)',
+              '1Hz Mode',
               style: TextStyle(fontSize: 14, color: Colors.black),
             ),
           ],

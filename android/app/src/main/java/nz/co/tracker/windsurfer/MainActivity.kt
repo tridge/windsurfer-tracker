@@ -714,7 +714,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
         // 1Hz mode checkbox
         val highFrequencyCheckbox = android.widget.CheckBox(this).apply {
-            text = "1Hz Mode (experimental)"
+            text = "1Hz Mode"
             isChecked = prefs.getBoolean("high_frequency_mode", false)
             setTextColor(0xFF000000.toInt())
             textSize = 14f
