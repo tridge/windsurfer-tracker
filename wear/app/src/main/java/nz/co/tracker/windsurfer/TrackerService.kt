@@ -309,6 +309,10 @@ class TrackerService : LifecycleService() {
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 
+        // Get power/battery saver status
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isPowerSaveMode = powerManager.isPowerSaveMode
+
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
             telephonyManager.signalStrength?.level ?: -1
@@ -344,6 +348,11 @@ class TrackerService : LifecycleService() {
 
         previousLocation = location
 
+        // Build flags object
+        val flags = JSONObject().apply {
+            put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
+        }
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("sq", seq)
@@ -357,6 +366,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("role", role)
             put("ver", BuildConfig.VERSION_STRING)
+            put("flg", flags)
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }
@@ -410,6 +420,10 @@ class TrackerService : LifecycleService() {
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 
+        // Get power/battery saver status
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isPowerSaveMode = powerManager.isPowerSaveMode
+
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
             telephonyManager.signalStrength?.level ?: -1
@@ -458,6 +472,11 @@ class TrackerService : LifecycleService() {
         val numPositions = positionBuffer.size
         positionBuffer.clear()
 
+        // Build flags object
+        val flags = JSONObject().apply {
+            put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
+        }
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("sq", seq)
@@ -470,6 +489,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("role", role)
             put("ver", BuildConfig.VERSION_STRING)
+            put("flg", flags)
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }
