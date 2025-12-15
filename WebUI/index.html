@@ -1237,7 +1237,7 @@
         }
         
         async function clearTracks() {
-            if (!confirm('Clear all track data for today? This cannot be undone.')) return;
+            if (!confirm('Clear all track data? Old tracks are available via review page.')) return;
             
             try {
                 const response = await fetch(`${API_BASE}/api/admin/clear-tracks`, {
@@ -1411,7 +1411,7 @@
         }
         
         async function deleteCourse() {
-            if (!confirm('Delete the course? This cannot be undone.')) return;
+            if (!confirm('Delete the course?')) return;
             
             try {
                 const response = await fetch(`${API_BASE}/api/admin/course`, {
