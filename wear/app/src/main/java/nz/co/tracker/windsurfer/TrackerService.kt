@@ -79,6 +79,9 @@ class TrackerService : LifecycleService() {
     private val packetsAcked = AtomicInteger(0)
     private val packetsSent = AtomicInteger(0)
 
+    // Track acknowledged sequence numbers to stop retransmissions
+    private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -235,6 +238,9 @@ class TrackerService : LifecycleService() {
             return
         }
 
+        // Clear acknowledged sequences from previous session
+        acknowledgedSeqs.clear()
+
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
         serviceScope.launch {
@@ -366,6 +372,12 @@ class TrackerService : LifecycleService() {
             }
 
             repeat(UDP_RETRY_COUNT) { attempt ->
+                // Stop retrying if we already got an ACK for this sequence
+                if (acknowledgedSeqs.contains(seq)) {
+                    Log.d(TAG, "Stopping retries for seq=$seq - already acknowledged")
+                    return@launch
+                }
+
                 try {
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
                     socket?.send(dgram)
@@ -473,6 +485,12 @@ class TrackerService : LifecycleService() {
             }
 
             repeat(UDP_RETRY_COUNT) { attempt ->
+                // Stop retrying if we already got an ACK for this sequence
+                if (acknowledgedSeqs.contains(seq)) {
+                    Log.d(TAG, "Stopping retries for seq=$seq - already acknowledged")
+                    return@launch
+                }
+
                 try {
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
                     socket?.send(dgram)
@@ -506,6 +524,13 @@ class TrackerService : LifecycleService() {
                     val ackSeq = ack.optInt("ack", -1)
 
                     if (ackSeq > 0) {
+                        // Mark this sequence as acknowledged to stop retransmissions
+                        acknowledgedSeqs.add(ackSeq)
+
+                        // Clean up old sequence numbers (keep only recent ones)
+                        val currentSeq = sequenceNumber.get()
+                        acknowledgedSeqs.removeIf { it < currentSeq - 100 }
+
                         lastAckTime.set(System.currentTimeMillis())
                         packetsAcked.incrementAndGet()
 
