@@ -355,7 +355,8 @@ class PositionTracker:
             f"bat={bat_str} sig={sig_str} "
             f"ver={version} "
             f"time={format_timestamp(ts)} "
-            f"[{source}]"
+            f"[{source}] "
+            f"ip={src_ip}"
             f"{dup_marker}{assist_marker}"
         )
         print(log_line)
@@ -428,6 +429,25 @@ _course_file: Path | None = None
 _users_file: Path | None = None
 _user_overrides: dict[str, dict] = {}  # id -> {"name": "...", "role": "..."}
 
+# Rate limiting for password guessing protection
+# Maps IP address -> timestamp of last failed auth attempt
+_failed_auth_times: dict[str, float] = {}
+_RATE_LIMIT_SECONDS = 5.0
+
+
+def is_rate_limited(ip: str) -> bool:
+    """Check if an IP is rate limited due to recent failed auth."""
+    if ip in _failed_auth_times:
+        elapsed = time.time() - _failed_auth_times[ip]
+        if elapsed < _RATE_LIMIT_SECONDS:
+            return True
+    return False
+
+
+def record_failed_auth(ip: str):
+    """Record a failed authentication attempt for rate limiting."""
+    _failed_auth_times[ip] = time.time()
+
 
 def load_user_overrides(users_file: Path) -> dict[str, dict]:
     """Load user overrides from JSON file."""
@@ -491,30 +511,56 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self._send_json({"error": "Not found"}, 404)
     
+    def _get_client_ip(self) -> str:
+        """Get client IP address, preferring X-Forwarded-For for proxied requests."""
+        return self.headers.get('X-Forwarded-For', self.client_address[0])
+
     def _check_auth(self) -> bool:
-        """Check admin password from header."""
+        """Check admin password from header with rate limiting."""
+        client_ip = self._get_client_ip()
+
+        # Check rate limiting first
+        if is_rate_limited(client_ip):
+            print(f"[HTTP] Admin auth rate-limited for {client_ip}")
+            return False
+
         password = self.headers.get('X-Admin-Password', '')
-        return password == _admin_password
+        if password != _admin_password:
+            record_failed_auth(client_ip)
+            print(f"[HTTP] Admin auth failed from {client_ip}")
+            return False
+        return True
 
     def _check_owntracks_auth(self) -> tuple[bool, str]:
-        """Check OwnTracks authentication (HTTP Basic Auth). Returns (success, reason)."""
+        """Check OwnTracks authentication (HTTP Basic Auth) with rate limiting. Returns (success, reason)."""
         import base64
+        client_ip = self._get_client_ip()
+
+        # Check rate limiting first
+        if is_rate_limited(client_ip):
+            return False, "rate-limited"
+
         auth_header = self.headers.get('Authorization', '')
         if not auth_header:
+            record_failed_auth(client_ip)
             return False, "no Authorization header"
         if not auth_header.startswith('Basic '):
+            record_failed_auth(client_ip)
             return False, f"invalid auth type (expected Basic, got {auth_header.split()[0] if auth_header else 'none'})"
         try:
             credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
             if ':' not in credentials:
+                record_failed_auth(client_ip)
                 return False, "malformed credentials (no colon separator)"
             username, password = credentials.split(':', 1)
             # Use OwnTracks password if set, otherwise fall back to admin password
             expected = _owntracks_password if _owntracks_password else _admin_password
             if password != expected:
+                record_failed_auth(client_ip)
                 return False, f"wrong password for user '{username}'"
             return True, "ok"
         except Exception as e:
+            record_failed_auth(client_ip)
             return False, f"auth decode error: {e}"
     
     def do_OPTIONS(self):
@@ -708,7 +754,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         Accepts the same JSON format as UDP packets, returns ACK response.
         Uses tracker password for authentication if configured.
         """
-        client_ip = self.headers.get('X-Forwarded-For', self.client_address[0])
+        client_ip = self._get_client_ip()
         recv_time = time.time()
 
         try:
@@ -730,10 +776,17 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             flags = packet.get("flg", {})
             battery_drain_rate = packet.get("bdr")
 
-            # Check password if required
+            # Check rate limiting and password if required
             if _tracker_password:
+                # Check rate limiting first
+                if is_rate_limited(client_ip):
+                    print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
+                    self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                    return
+
                 packet_pwd = packet.get("pwd", "")
                 if packet_pwd != _tracker_password:
+                    record_failed_auth(client_ip)
                     print(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
                     self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                     return
@@ -1176,11 +1229,20 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 lat = packet.get("lat", 0.0)
                 lon = packet.get("lon", 0.0)
 
-            # Check password if required
+            # Check rate limiting and password if required
             if tracker_password:
+                client_ip = addr[0]
+                # Check rate limiting first
+                if is_rate_limited(client_ip):
+                    print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                    sock.sendto(error_ack, addr)
+                    continue
+
                 packet_pwd = packet.get("pwd", "")
                 if packet_pwd != tracker_password:
-                    print(f"[{addr[0]}:{addr[1]}] Auth failed for {sailor_id} (bad password: '{packet_pwd}')")
+                    record_failed_auth(client_ip)
+                    print(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
                     # Send error ACK so client knows authentication failed
                     error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
