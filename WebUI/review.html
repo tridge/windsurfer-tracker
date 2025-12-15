@@ -992,6 +992,42 @@
                 padding: 8px 35px 20px 35px;
             }
         }
+
+        /* Scale control styling */
+        .custom-scale {
+            position: fixed;
+            bottom: 175px;
+            left: 20px;
+            z-index: 1001;
+            background: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            font-size: 14px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: calc(100vw - 20px);
+        }
+
+        .scale-bar {
+            height: 10px;
+            background: repeating-linear-gradient(
+                90deg,
+                #333 0px,
+                #333 25%,
+                #fff 25%,
+                #fff 50%
+            );
+            border: 2px solid #333;
+            min-width: 80px;
+            max-width: 200px;
+        }
+
+        .scale-text {
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -1039,6 +1075,11 @@
     </div>
 
     <div id="map"></div>
+
+    <div class="custom-scale" id="customScale">
+        <div class="scale-bar" id="scaleBar"></div>
+        <span class="scale-text" id="scaleText">100m</span>
+    </div>
 
     <!-- Speed graph panel -->
     <div id="speed-graph-panel">
@@ -1280,6 +1321,51 @@
             osmLayer.addTo(map);
             currentLayer = osmLayer;
         }
+
+        // Custom scale control
+        function updateScale() {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+
+            // Calculate meters per pixel at current zoom and latitude
+            // At zoom 0, the world is 256 pixels wide = 40075km at equator
+            const metersPerPixel = 40075016.686 * Math.cos(center.lat * Math.PI / 180) / Math.pow(2, zoom + 8);
+
+            // Find a nice round distance that fits in ~80-200 pixels
+            const distances = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+            let bestDist = distances[0];
+            let bestWidth = bestDist / metersPerPixel;
+
+            for (const dist of distances) {
+                const width = dist / metersPerPixel;
+                if (width >= 80 && width <= 200) {
+                    bestDist = dist;
+                    bestWidth = width;
+                    break;
+                }
+                if (width < 200) {
+                    bestDist = dist;
+                    bestWidth = width;
+                }
+            }
+
+            // Update the scale bar
+            document.getElementById('scaleBar').style.width = bestWidth + 'px';
+
+            // Format the distance text
+            let text;
+            if (bestDist >= 1000) {
+                text = (bestDist / 1000) + ' km';
+            } else {
+                text = bestDist + ' m';
+            }
+            document.getElementById('scaleText').textContent = text;
+        }
+
+        // Update scale on zoom/move
+        map.on('zoomend', updateScale);
+        map.on('moveend', updateScale);
+        updateScale();  // Initial update
 
         // State
         let allData = [];
