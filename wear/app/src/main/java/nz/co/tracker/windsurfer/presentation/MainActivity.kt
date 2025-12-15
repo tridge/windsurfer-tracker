@@ -10,6 +10,8 @@ import android.location.Location
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.telephony.TelephonyManager
 import android.util.Log
 import android.widget.Toast
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
     // UI state
     private val isTracking = mutableStateOf(false)
+    private val isAssistActive = mutableStateOf(false)
     private val speedKnots = mutableFloatStateOf(0f)
     private val batteryPercent = mutableIntStateOf(100)
     private val signalLevel = mutableIntStateOf(-1)
@@ -70,7 +73,14 @@ class MainActivity : ComponentActivity() {
             }
 
             isTracking.value = trackerService?.isTracking() == true
-            Log.d(TAG, "Service connected, tracking=${isTracking.value}")
+
+            // Sync assist state - push local state to service (for case when assist activated before service started)
+            if (isAssistActive.value) {
+                trackerService?.requestAssist(true)
+            } else {
+                isAssistActive.value = trackerService?.isAssistActive() == true
+            }
+            Log.d(TAG, "Service connected, tracking=${isTracking.value}, assist=${isAssistActive.value}")
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -129,12 +139,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             TrackerApp(
                 isTracking = isTracking.value,
+                isAssistActive = isAssistActive.value,
                 speedKnots = speedKnots.floatValue,
                 batteryPercent = batteryPercent.intValue,
                 signalLevel = signalLevel.intValue,
                 ackRate = ackRate.floatValue,
                 settings = settings.value,
                 onToggleTracking = { toggleTracking() },
+                onAssistToggle = { toggleAssist() },
                 onSaveSettings = { newSettings ->
                     lifecycleScope.launch {
                         settingsRepository.updateSettings(newSettings)
@@ -234,9 +246,29 @@ class MainActivity : ComponentActivity() {
         }
 
         isTracking.value = false
+        isAssistActive.value = false
         speedKnots.floatValue = 0f
         ackRate.floatValue = 0f
         Log.d(TAG, "Stopped tracking")
+    }
+
+    private fun toggleAssist() {
+        val newState = !isAssistActive.value
+        isAssistActive.value = newState
+
+        // If activating assist and not already tracking, start tracking first
+        if (newState && !isTracking.value) {
+            checkPermissionsAndStart()
+        }
+
+        trackerService?.requestAssist(newState)
+
+        // Haptic feedback
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        val duration = if (newState) 300L else 100L  // Long vibration to activate, short to cancel
+        vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+
+        Log.d(TAG, "Assist ${if (newState) "ACTIVATED" else "cancelled"}")
     }
 
     private fun updateBatteryAndSignal() {

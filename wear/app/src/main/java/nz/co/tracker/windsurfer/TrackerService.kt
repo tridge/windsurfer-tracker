@@ -73,6 +73,7 @@ class TrackerService : LifecycleService() {
 
     // State
     private val isRunning = AtomicBoolean(false)
+    private val assistRequested = AtomicBoolean(false)
     private val sequenceNumber = AtomicInteger(0)
     private val lastAckTime = AtomicLong(0)
     private val packetsAcked = AtomicInteger(0)
@@ -345,7 +346,7 @@ class TrackerService : LifecycleService() {
             put("lon", location.longitude)
             put("spd", speedMs * 1.94384)  // m/s to knots
             put("hdg", bearing.toInt())
-            put("ast", false)  // No assist button on watch (yet)
+            put("ast", assistRequested.get())
             put("bat", batteryPercent)
             put("sig", signalLevel)
             put("role", role)
@@ -536,6 +537,18 @@ class TrackerService : LifecycleService() {
     fun getLastAckTime(): Long = lastAckTime.get()
 
     fun isTracking(): Boolean = isRunning.get()
+
+    fun isAssistActive(): Boolean = assistRequested.get()
+
+    fun requestAssist(enabled: Boolean) {
+        assistRequested.set(enabled)
+        Log.d(TAG, "Assist ${if (enabled) "ENABLED" else "disabled"}")
+
+        // Send immediate position update when requesting assist
+        if (enabled) {
+            lastLocation?.let { sendPosition(it) }
+        }
+    }
 
     fun stopService() {
         stopTracking()

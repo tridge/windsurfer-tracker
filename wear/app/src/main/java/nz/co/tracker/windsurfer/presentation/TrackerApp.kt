@@ -1,6 +1,5 @@
 package nz.co.tracker.windsurfer.presentation
 
-import android.location.Location
 import androidx.compose.runtime.*
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
@@ -16,12 +15,14 @@ sealed class Screen(val route: String) {
 @Composable
 fun TrackerApp(
     isTracking: Boolean,
+    isAssistActive: Boolean,
     speedKnots: Float,
     batteryPercent: Int,
     signalLevel: Int,
     ackRate: Float,
     settings: TrackerSettings,
     onToggleTracking: () -> Unit,
+    onAssistToggle: () -> Unit,
     onSaveSettings: (TrackerSettings) -> Unit
 ) {
     WindsurferTrackerTheme {
@@ -34,13 +35,15 @@ fun TrackerApp(
             composable(Screen.Tracking.route) {
                 TrackingScreen(
                     isTracking = isTracking,
+                    isAssistActive = isAssistActive,
                     speedKnots = speedKnots,
                     batteryPercent = batteryPercent,
                     signalLevel = signalLevel,
                     ackRate = ackRate,
                     sailorId = settings.sailorId,
                     onToggleTracking = onToggleTracking,
-                    onLongPress = {
+                    onAssistLongPress = onAssistToggle,
+                    onSettingsLongPress = {
                         navController.navigate(Screen.Settings.route)
                     }
                 )
