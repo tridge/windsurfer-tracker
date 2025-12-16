@@ -807,26 +807,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Position tracking not enabled"}, 500)
                 return
 
-            # Process position through shared tracker
-            _position_tracker.process_position(
-                sailor_id=sailor_id,
-                lat=lat,
-                lon=lon,
-                speed=speed,
-                heading=heading,
-                ts=ts,
-                assist=assist,
-                battery=battery,
-                signal=signal,
-                role=role,
-                version=version,
-                flags=flags,
-                src_ip=client_ip,
-                source="POST",
-                battery_drain_rate=battery_drain_rate
-            )
-
-            # Log all positions if 1Hz array format
+            # If 1Hz array format, log ALL positions FIRST (in chronological order)
+            # This must happen before process_position to ensure correct timestamp ordering
             if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and _daily_logger:
                 # batch_ts = timestamp of last position (when batch was sent)
                 batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
@@ -853,6 +835,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         if battery_drain_rate is not None:
                             track_entry["bdr"] = battery_drain_rate
                         _daily_logger.write(track_entry)
+
+            # Process position through shared tracker (logs last position)
+            _position_tracker.process_position(
+                sailor_id=sailor_id,
+                lat=lat,
+                lon=lon,
+                speed=speed,
+                heading=heading,
+                ts=ts,
+                assist=assist,
+                battery=battery,
+                signal=signal,
+                role=role,
+                version=version,
+                flags=flags,
+                src_ip=client_ip,
+                source="POST",
+                battery_drain_rate=battery_drain_rate
+            )
 
             # Send ACK response (same format as UDP)
             self._send_json({"ack": seq, "ts": int(recv_time)})
@@ -1252,30 +1253,12 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
             sock.sendto(ack, addr)
 
-            # Process position through shared tracker (uses last position for live display)
-            position_tracker.process_position(
-                sailor_id=sailor_id,
-                lat=lat,
-                lon=lon,
-                speed=speed,
-                heading=heading,
-                ts=ts,
-                assist=assist,
-                battery=battery,
-                signal=signal,
-                role=role,
-                version=version,
-                flags=flags,
-                src_ip=addr[0],
-                source="UDP",
-                battery_drain_rate=battery_drain_rate
-            )
-
-            # If 1Hz array format, log ALL positions to daily track log
+            # If 1Hz array format, log ALL positions to daily track log FIRST (in chronological order)
+            # This must happen before process_position to ensure correct timestamp ordering
             if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and daily_logger:
                 # batch_ts = timestamp of last position (when batch was sent)
                 batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
-                # Log all positions EXCEPT the last one (which was already logged by process_position)
+                # Log all positions EXCEPT the last one (which will be logged by process_position)
                 for i, pos in enumerate(pos_array[:-1]):
                     if len(pos) >= 3:
                         pos_ts, pos_lat, pos_lon = pos[0], pos[1], pos[2]
@@ -1299,6 +1282,26 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         if battery_drain_rate is not None:
                             track_entry["bdr"] = battery_drain_rate
                         daily_logger.write(track_entry)
+
+            # Process position through shared tracker (uses last position for live display)
+            # This also logs the last position to the daily log
+            position_tracker.process_position(
+                sailor_id=sailor_id,
+                lat=lat,
+                lon=lon,
+                speed=speed,
+                heading=heading,
+                ts=ts,
+                assist=assist,
+                battery=battery,
+                signal=signal,
+                role=role,
+                version=version,
+                flags=flags,
+                src_ip=addr[0],
+                source="UDP",
+                battery_drain_rate=battery_drain_rate
+            )
 
             # Write to legacy log file (JSON lines format for easy parsing later)
             if log_fh:
