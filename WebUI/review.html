@@ -2407,7 +2407,8 @@
                     else minBat = Math.max(0, maxBat - 10);
                 }
             }
-            const batRange = maxBat - minBat;
+            // Ensure batRange is never 0 (prevents division by zero)
+            const batRange = Math.max(10, maxBat - minBat);
 
             // Update Y axis labels
             const yLabels = document.getElementById('battery-y-labels');
@@ -2439,6 +2440,15 @@
                 return;
             }
 
+            // No battery data available
+            if (!hasBatData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No battery data available', width / 2, height / 2);
+                return;
+            }
+
             // Draw battery line for each selected user
             let colorIdx = 0;
             for (const [userId, entries] of Object.entries(userData)) {
@@ -2458,7 +2468,7 @@
 
                 let started = false;
                 for (const entry of filtered) {
-                    if (entry.bat === undefined || entry.bat === null) continue;
+                    if (entry.bat === undefined || entry.bat === null || entry.bat < 0) continue;
 
                     const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
                     const y = height - ((entry.bat - minBat) / batRange) * height;
@@ -2475,7 +2485,7 @@
                 // Draw user label at the end of the line
                 if (filtered.length > 0) {
                     const last = filtered[filtered.length - 1];
-                    if (last.bat !== undefined && last.bat !== null) {
+                    if (last.bat !== undefined && last.bat !== null && last.bat >= 0) {
                         const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
                         const y = height - ((last.bat - minBat) / batRange) * height;
                         ctx.fillStyle = userColor;
