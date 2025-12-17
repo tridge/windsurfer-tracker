@@ -326,7 +326,7 @@ class PositionTracker:
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
-                         os_version: str | None = None) -> bool:
+                         os_version: str | None = None, skip_log: bool = False) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -400,8 +400,8 @@ class PositionTracker:
             if self.positions_file:
                 write_current_positions(self.current_positions, self.positions_file, _user_overrides)
 
-            # Write to daily track log
-            if self.daily_logger:
+            # Write to daily track log (unless skip_log is True, e.g., for batch entries)
+            if self.daily_logger and not skip_log:
                 track_entry = {
                     "id": sailor_id,
                     "ts": ts,
@@ -818,36 +818,33 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Position tracking not enabled"}, 500)
                 return
 
-            # If 1Hz array format, log ALL positions FIRST (in chronological order)
-            # This must happen before process_position to ensure correct timestamp ordering
-            if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and _daily_logger:
-                # batch_ts = timestamp of last position (when batch was sent)
-                batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
-                for pos in pos_array[:-1]:
-                    if len(pos) >= 3:
-                        pos_ts, pos_lat, pos_lon = pos[0], pos[1], pos[2]
-                        track_entry = {
-                            "id": sailor_id,
-                            "ts": pos_ts,
-                            "recv_ts": recv_time,
-                            "lat": pos_lat,
-                            "lon": pos_lon,
-                            "spd": speed,
-                            "hdg": heading,
-                            "ast": assist,
-                            "bat": battery,
-                            "sig": signal,
-                            "role": role,
-                            "ver": version,
-                            "flg": flags
-                        }
-                        if batch_ts is not None:
-                            track_entry["batch_ts"] = batch_ts
-                        if battery_drain_rate is not None:
-                            track_entry["bdr"] = battery_drain_rate
-                        _daily_logger.write(track_entry)
+            # If 1Hz array format, log as single entry with pos array (more compact)
+            has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+            if has_batch and _daily_logger:
+                track_entry = {
+                    "id": sailor_id,
+                    "ts": ts,  # timestamp of last position (for sorting)
+                    "recv_ts": recv_time,
+                    "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
+                    "spd": speed,
+                    "hdg": heading,
+                    "ast": assist,
+                    "bat": battery,
+                    "sig": signal,
+                    "role": role,
+                    "ver": version,
+                    "flg": flags
+                }
+                if battery_drain_rate is not None:
+                    track_entry["bdr"] = battery_drain_rate
+                if heart_rate is not None and heart_rate > 0:
+                    track_entry["hr"] = heart_rate
+                if os_version:
+                    track_entry["os"] = os_version
+                _daily_logger.write(track_entry)
 
-            # Process position through shared tracker (logs last position)
+            # Process position through shared tracker (updates live display)
+            # skip_log if we already logged the batch above
             _position_tracker.process_position(
                 sailor_id=sailor_id,
                 lat=lat,
@@ -865,7 +862,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 source="POST",
                 battery_drain_rate=battery_drain_rate,
                 heart_rate=heart_rate,
-                os_version=os_version
+                os_version=os_version,
+                skip_log=has_batch
             )
 
             # Send ACK response (same format as UDP)
@@ -1268,38 +1266,33 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
             sock.sendto(ack, addr)
 
-            # If 1Hz array format, log ALL positions to daily track log FIRST (in chronological order)
-            # This must happen before process_position to ensure correct timestamp ordering
-            if pos_array and isinstance(pos_array, list) and len(pos_array) > 1 and daily_logger:
-                # batch_ts = timestamp of last position (when batch was sent)
-                batch_ts = pos_array[-1][0] if len(pos_array[-1]) > 0 else None
-                # Log all positions EXCEPT the last one (which will be logged by process_position)
-                for i, pos in enumerate(pos_array[:-1]):
-                    if len(pos) >= 3:
-                        pos_ts, pos_lat, pos_lon = pos[0], pos[1], pos[2]
-                        track_entry = {
-                            "id": sailor_id,
-                            "ts": pos_ts,
-                            "recv_ts": recv_time,
-                            "lat": pos_lat,
-                            "lon": pos_lon,
-                            "spd": speed,
-                            "hdg": heading,
-                            "ast": assist,
-                            "bat": battery,
-                            "sig": signal,
-                            "role": role,
-                            "ver": version,
-                            "flg": flags
-                        }
-                        if batch_ts is not None:
-                            track_entry["batch_ts"] = batch_ts
-                        if battery_drain_rate is not None:
-                            track_entry["bdr"] = battery_drain_rate
-                        daily_logger.write(track_entry)
+            # If 1Hz array format, log as single entry with pos array (more compact)
+            has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+            if has_batch and daily_logger:
+                track_entry = {
+                    "id": sailor_id,
+                    "ts": ts,  # timestamp of last position (for sorting)
+                    "recv_ts": recv_time,
+                    "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
+                    "spd": speed,
+                    "hdg": heading,
+                    "ast": assist,
+                    "bat": battery,
+                    "sig": signal,
+                    "role": role,
+                    "ver": version,
+                    "flg": flags
+                }
+                if battery_drain_rate is not None:
+                    track_entry["bdr"] = battery_drain_rate
+                if heart_rate is not None and heart_rate > 0:
+                    track_entry["hr"] = heart_rate
+                if os_version:
+                    track_entry["os"] = os_version
+                daily_logger.write(track_entry)
 
-            # Process position through shared tracker (uses last position for live display)
-            # This also logs the last position to the daily log
+            # Process position through shared tracker (updates live display)
+            # skip_log if we already logged the batch above
             position_tracker.process_position(
                 sailor_id=sailor_id,
                 lat=lat,
@@ -1317,7 +1310,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 source="UDP",
                 battery_drain_rate=battery_drain_rate,
                 heart_rate=heart_rate,
-                os_version=os_version
+                os_version=os_version,
+                skip_log=has_batch
             )
 
             # Write to legacy log file (JSON lines format for easy parsing later)

@@ -1503,6 +1503,34 @@
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
 
+        // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
+        function expandEntry(entry) {
+            if (entry.pos && Array.isArray(entry.pos)) {
+                // New compact format: pos array [[ts, lat, lon], ...]
+                // Expand into individual entries, each inheriting all metadata
+                return entry.pos.map(([ts, lat, lon]) => ({
+                    id: entry.id,
+                    ts: ts,
+                    lat: lat,
+                    lon: lon,
+                    spd: entry.spd,
+                    hdg: entry.hdg,
+                    bat: entry.bat,
+                    sig: entry.sig,
+                    hr: entry.hr,
+                    role: entry.role,
+                    ver: entry.ver,
+                    flg: entry.flg,
+                    ast: entry.ast,
+                    bdr: entry.bdr,
+                    os: entry.os,
+                    recv_ts: entry.recv_ts
+                }));
+            }
+            // Old format: single position with lat/lon directly
+            return [entry];
+        }
+
         // Mobile drawer toggle
         const sidebarToggle = document.getElementById('sidebar-toggle');
         const sidebar = document.getElementById('sidebar');
@@ -1747,8 +1775,12 @@
                 for (const line of lines) {
                     try {
                         const entry = JSON.parse(line);
-                        if (entry.lat && entry.lon && entry.ts) {
-                            allData.push(entry);
+                        // Expand pos array entries (new format) or use directly (old format)
+                        const expanded = expandEntry(entry);
+                        for (const e of expanded) {
+                            if (e.lat && e.lon && e.ts) {
+                                allData.push(e);
+                            }
                         }
                     } catch (e) {}
                 }
@@ -1826,8 +1858,12 @@
                     for (const line of lines) {
                         try {
                             const entry = JSON.parse(line);
-                            if (entry.lat && entry.lon && entry.ts) {
-                                allData.push(entry);
+                            // Expand pos array entries (new format) or use directly (old format)
+                            const expanded = expandEntry(entry);
+                            for (const e of expanded) {
+                                if (e.lat && e.lon && e.ts) {
+                                    allData.push(e);
+                                }
                             }
                         } catch (e) {}
                     }

@@ -1976,20 +1976,40 @@
                             sailorTrackData[id] = [];
                         }
 
-                        // Skip if we already have this timestamp for this user
-                        const existing = sailorTrackData[id];
-                        if (existing.length > 0 && existing[existing.length - 1].ts >= entry.ts) {
-                            continue;
+                        // Expand pos array if present (1Hz batch format)
+                        let positions;
+                        if (entry.pos && Array.isArray(entry.pos)) {
+                            // New compact format: expand pos array
+                            positions = entry.pos.map(([ts, lat, lon]) => ({
+                                lat: lat,
+                                lon: lon,
+                                ts: ts,
+                                spd: entry.spd,
+                                hdg: entry.hdg
+                            }));
+                        } else if (entry.lat && entry.lon && entry.ts) {
+                            // Old format: single position
+                            positions = [{
+                                lat: entry.lat,
+                                lon: entry.lon,
+                                ts: entry.ts,
+                                spd: entry.spd,
+                                hdg: entry.hdg
+                            }];
+                        } else {
+                            continue;  // Skip entries without position data
                         }
 
-                        existing.push({
-                            lat: entry.lat,
-                            lon: entry.lon,
-                            ts: entry.ts,
-                            spd: entry.spd,
-                            hdg: entry.hdg
-                        });
-                        newPoints++;
+                        // Add each position with deduplication
+                        const existing = sailorTrackData[id];
+                        for (const pos of positions) {
+                            // Skip if we already have this timestamp for this user
+                            if (existing.length > 0 && existing[existing.length - 1].ts >= pos.ts) {
+                                continue;
+                            }
+                            existing.push(pos);
+                            newPoints++;
+                        }
                     } catch (e) {
                         // Skip malformed lines
                     }
