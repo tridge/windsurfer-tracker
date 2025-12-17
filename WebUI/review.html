@@ -2376,6 +2376,49 @@
             document.getElementById('battery-time-start').textContent = fmtTime(rangeStartTime);
             document.getElementById('battery-time-end').textContent = fmtTime(rangeEndTime);
 
+            // Calculate battery range for Y axis scaling (only from visible time range)
+            let maxBat = 0;
+            let minBat = 100;
+            let hasBatData = false;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                    if (entry.bat !== undefined && entry.bat !== null && entry.bat >= 0) {
+                        maxBat = Math.max(maxBat, entry.bat);
+                        minBat = Math.min(minBat, entry.bat);
+                        hasBatData = true;
+                    }
+                }
+            }
+
+            // Set sensible defaults and add padding
+            if (!hasBatData) {
+                maxBat = 100;
+                minBat = 0;
+            } else {
+                // Keep max at 100 if close, otherwise add padding
+                maxBat = maxBat > 95 ? 100 : Math.ceil((maxBat + 5) / 5) * 5;
+                // Round min down to nearest 5%
+                minBat = Math.floor(minBat / 5) * 5;
+                // Ensure at least 10% range for readability
+                if (maxBat - minBat < 10) {
+                    if (maxBat < 100) maxBat = Math.min(100, minBat + 10);
+                    else minBat = Math.max(0, maxBat - 10);
+                }
+            }
+            const batRange = maxBat - minBat;
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('battery-y-labels');
+            yLabels.innerHTML = `
+                <span>${maxBat}</span>
+                <span>${Math.round(minBat + batRange * 0.75)}</span>
+                <span>${Math.round(minBat + batRange * 0.5)}</span>
+                <span>${Math.round(minBat + batRange * 0.25)}</span>
+                <span>${minBat}</span>
+            `;
+
             // Draw grid lines
             ctx.strokeStyle = '#34495e';
             ctx.lineWidth = 1;
@@ -2418,7 +2461,7 @@
                     if (entry.bat === undefined || entry.bat === null) continue;
 
                     const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                    const y = height - (entry.bat / 100) * height;
+                    const y = height - ((entry.bat - minBat) / batRange) * height;
 
                     if (!started) {
                         ctx.moveTo(x, y);
@@ -2434,7 +2477,7 @@
                     const last = filtered[filtered.length - 1];
                     if (last.bat !== undefined && last.bat !== null) {
                         const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                        const y = height - (last.bat / 100) * height;
+                        const y = height - ((last.bat - minBat) / batRange) * height;
                         ctx.fillStyle = userColor;
                         ctx.font = 'bold 10px sans-serif';
                         ctx.textAlign = 'right';
@@ -2571,7 +2614,8 @@
             document.getElementById('latency-time-end').textContent = fmtTime(rangeEndTime);
 
             // Calculate max latency for Y axis scaling (only from visible time range)
-            let maxLatency = 10; // Default max 10 seconds
+            let maxLatency = 0;
+            let hasLatencyValues = false;
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
@@ -2579,20 +2623,35 @@
                     const latency = getNetworkLatency(entry);
                     if (latency !== null && Math.abs(latency) < 300) {
                         maxLatency = Math.max(maxLatency, Math.abs(latency));
+                        hasLatencyValues = true;
                     }
                 }
             }
-            // Round up to nice number
-            maxLatency = Math.ceil(maxLatency / 5) * 5;
-            if (maxLatency < 10) maxLatency = 10;
+
+            // Set sensible defaults and add padding
+            if (!hasLatencyValues || maxLatency === 0) {
+                maxLatency = 10;
+            } else {
+                // Add 10% padding above max
+                maxLatency = maxLatency * 1.1;
+                // Round to nice number based on magnitude
+                if (maxLatency < 2) {
+                    maxLatency = Math.ceil(maxLatency * 4) / 4;  // Round to 0.25s
+                    if (maxLatency < 0.5) maxLatency = 0.5;
+                } else if (maxLatency < 5) {
+                    maxLatency = Math.ceil(maxLatency);  // Round to 1s
+                } else {
+                    maxLatency = Math.ceil(maxLatency / 2) * 2;  // Round to 2s
+                }
+            }
 
             // Update Y axis labels
             const yLabels = document.getElementById('latency-y-labels');
             yLabels.innerHTML = `
-                <span>${maxLatency}</span>
-                <span>${(maxLatency * 0.75).toFixed(1)}</span>
-                <span>${(maxLatency * 0.5).toFixed(1)}</span>
-                <span>${(maxLatency * 0.25).toFixed(1)}</span>
+                <span>${maxLatency.toFixed(maxLatency < 2 ? 2 : 0)}</span>
+                <span>${(maxLatency * 0.75).toFixed(maxLatency < 2 ? 2 : 1)}</span>
+                <span>${(maxLatency * 0.5).toFixed(maxLatency < 2 ? 2 : 1)}</span>
+                <span>${(maxLatency * 0.25).toFixed(maxLatency < 2 ? 2 : 1)}</span>
                 <span>0</span>
             `;
 
@@ -3009,7 +3068,33 @@
             // Draw battery graph with highlight if visible
             if (document.getElementById('show-battery-graph').checked) {
                 drawBatteryGraph();
-                drawHighlightOnGraph('battery-graph', highlightX, ratio, timestamp, 'bat', 100);
+                // Calculate battery range for proper scaling
+                let maxBat = 0;
+                let minBat = 100;
+                let hasBatData = false;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                        if (entry.bat !== undefined && entry.bat !== null && entry.bat >= 0) {
+                            maxBat = Math.max(maxBat, entry.bat);
+                            minBat = Math.min(minBat, entry.bat);
+                            hasBatData = true;
+                        }
+                    }
+                }
+                if (!hasBatData) {
+                    maxBat = 100;
+                    minBat = 0;
+                } else {
+                    maxBat = maxBat > 95 ? 100 : Math.ceil((maxBat + 5) / 5) * 5;
+                    minBat = Math.floor(minBat / 5) * 5;
+                    if (maxBat - minBat < 10) {
+                        if (maxBat < 100) maxBat = Math.min(100, minBat + 10);
+                        else minBat = Math.max(0, maxBat - 10);
+                    }
+                }
+                drawHighlightOnGraph('battery-graph', highlightX, ratio, timestamp, 'bat', maxBat, minBat);
             }
 
             // Draw signal graph with highlight if visible
@@ -3022,7 +3107,8 @@
             if (document.getElementById('show-latency-graph').checked) {
                 drawLatencyGraph();
                 // Calculate current max latency for proper scaling (only from visible time range)
-                let maxLatency = 10;
+                let maxLatency = 0;
+                let hasLatencyValues = false;
                 for (const [userId, entries] of Object.entries(userData)) {
                     if (!selectedUsers.has(userId)) continue;
                     for (const entry of entries) {
@@ -3030,11 +3116,23 @@
                         const latency = getNetworkLatency(entry);
                         if (latency !== null && Math.abs(latency) < 300) {
                             maxLatency = Math.max(maxLatency, Math.abs(latency));
+                            hasLatencyValues = true;
                         }
                     }
                 }
-                maxLatency = Math.ceil(maxLatency / 5) * 5;
-                if (maxLatency < 10) maxLatency = 10;
+                if (!hasLatencyValues || maxLatency === 0) {
+                    maxLatency = 10;
+                } else {
+                    maxLatency = maxLatency * 1.1;
+                    if (maxLatency < 2) {
+                        maxLatency = Math.ceil(maxLatency * 4) / 4;
+                        if (maxLatency < 0.5) maxLatency = 0.5;
+                    } else if (maxLatency < 5) {
+                        maxLatency = Math.ceil(maxLatency);
+                    } else {
+                        maxLatency = Math.ceil(maxLatency / 2) * 2;
+                    }
+                }
                 drawLatencyHighlightOnGraph('latency-graph', highlightX, ratio, timestamp, maxLatency);
             }
 
