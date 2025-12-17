@@ -325,7 +325,8 @@ class PositionTracker:
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
-                         battery_drain_rate: float | None = None, heart_rate: int | None = None) -> bool:
+                         battery_drain_rate: float | None = None, heart_rate: int | None = None,
+                         os_version: str | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -391,6 +392,8 @@ class PositionTracker:
                     pos_data["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
                     pos_data["hr"] = heart_rate
+                if os_version:
+                    pos_data["os"] = os_version
                 self.current_positions[sailor_id] = pos_data
 
             # Write current positions file
@@ -418,6 +421,8 @@ class PositionTracker:
                     track_entry["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
                     track_entry["hr"] = heart_rate
+                if os_version:
+                    track_entry["os"] = os_version
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -780,6 +785,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             version = packet.get("ver", "?")
             flags = packet.get("flg", {})
             battery_drain_rate = packet.get("bdr")
+            os_version = packet.get("os")  # OS version string (optional)
 
             # Check rate limiting and password if required
             if _tracker_password:
@@ -858,7 +864,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 src_ip=client_ip,
                 source="POST",
                 battery_drain_rate=battery_drain_rate,
-                heart_rate=heart_rate
+                heart_rate=heart_rate,
+                os_version=os_version
             )
 
             # Send ACK response (same format as UDP)
@@ -1222,6 +1229,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             version = packet.get("ver", "?")
             flags = packet.get("flg", {})
             battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
+            os_version = packet.get("os")  # OS version string (optional)
 
             # Check for 1Hz array format vs old single position format
             pos_array = packet.get("pos")  # [[ts, lat, lon], ...]
@@ -1308,7 +1316,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 src_ip=addr[0],
                 source="UDP",
                 battery_drain_rate=battery_drain_rate,
-                heart_rate=heart_rate
+                heart_rate=heart_rate,
+                os_version=os_version
             )
 
             # Write to legacy log file (JSON lines format for easy parsing later)
