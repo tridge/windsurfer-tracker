@@ -2342,6 +2342,7 @@
                 const versionStr = sailor.ver || 'Unknown';
                 const osStr = sailor.os || '';
                 const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
+                const heartRateLine = (sailor.hr && sailor.hr > 0) ? `<br>Heart Rate: <span style="color:#e91e63">${sailor.hr} bpm</span>` : '';
 
                 // Calculate sampling rate from track data
                 const trackPoints = sailorTrackData[id] || [];
@@ -2372,7 +2373,7 @@
                     Heading: ${sailor.hdg}°<br>
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
-                    Signal: ${sigStr}<br>
+                    Signal: ${sigStr}${heartRateLine}<br>
                     Updated: ${timeAgo(sailor.last_seen)}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">

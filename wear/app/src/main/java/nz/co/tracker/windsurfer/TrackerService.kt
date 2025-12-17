@@ -4,6 +4,10 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Binder
@@ -84,6 +88,23 @@ class TrackerService : LifecycleService() {
 
     // Wake lock to keep tracking alive during battery saver
     private var wakeLock: PowerManager.WakeLock? = null
+
+    // Heart rate sensor
+    private var sensorManager: SensorManager? = null
+    private var heartRateSensor: Sensor? = null
+    private var lastHeartRate: Int = -1  // -1 means not available
+    private val heartRateListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
+                val hr = event.values[0].toInt()
+                if (hr > 0) {
+                    lastHeartRate = hr
+                    Log.d(TAG, "Heart rate: $hr bpm")
+                }
+            }
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -254,6 +275,16 @@ class TrackerService : LifecycleService() {
         }
         Log.d(TAG, "Wake lock acquired")
 
+        // Start heart rate sensor if available
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        heartRateSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        if (heartRateSensor != null) {
+            sensorManager?.registerListener(heartRateListener, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            Log.d(TAG, "Heart rate sensor registered")
+        } else {
+            Log.d(TAG, "Heart rate sensor not available")
+        }
+
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
         serviceScope.launch {
@@ -291,6 +322,10 @@ class TrackerService : LifecycleService() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         socket?.close()
         socket = null
+
+        // Unregister heart rate sensor
+        sensorManager?.unregisterListener(heartRateListener)
+        lastHeartRate = -1
 
         // Release wake lock
         wakeLock?.let {
@@ -392,6 +427,9 @@ class TrackerService : LifecycleService() {
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
+            if (lastHeartRate > 0) {
+                put("hr", lastHeartRate)
+            }
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }
@@ -518,6 +556,9 @@ class TrackerService : LifecycleService() {
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
+            if (lastHeartRate > 0) {
+                put("hr", lastHeartRate)
+            }
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }

@@ -325,7 +325,7 @@ class PositionTracker:
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
-                         battery_drain_rate: float | None = None) -> bool:
+                         battery_drain_rate: float | None = None, heart_rate: int | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -389,6 +389,8 @@ class PositionTracker:
                 }
                 if battery_drain_rate is not None:
                     pos_data["bdr"] = battery_drain_rate
+                if heart_rate is not None and heart_rate > 0:
+                    pos_data["hr"] = heart_rate
                 self.current_positions[sailor_id] = pos_data
 
             # Write current positions file
@@ -414,6 +416,8 @@ class PositionTracker:
                 }
                 if battery_drain_rate is not None:
                     track_entry["bdr"] = battery_drain_rate
+                if heart_rate is not None and heart_rate > 0:
+                    track_entry["hr"] = heart_rate
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -771,6 +775,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             assist = packet.get("ast", False)
             battery = packet.get("bat", -1)
             signal = packet.get("sig", -1)
+            heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
             role = packet.get("role", "sailor")
             version = packet.get("ver", "?")
             flags = packet.get("flg", {})
@@ -852,7 +857,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 flags=flags,
                 src_ip=client_ip,
                 source="POST",
-                battery_drain_rate=battery_drain_rate
+                battery_drain_rate=battery_drain_rate,
+                heart_rate=heart_rate
             )
 
             # Send ACK response (same format as UDP)
@@ -1211,6 +1217,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             assist = packet.get("ast", False)
             battery = packet.get("bat", -1)
             signal = packet.get("sig", -1)
+            heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
             role = packet.get("role", "sailor")
             version = packet.get("ver", "?")
             flags = packet.get("flg", {})
@@ -1300,7 +1307,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 flags=flags,
                 src_ip=addr[0],
                 source="UDP",
-                battery_drain_rate=battery_drain_rate
+                battery_drain_rate=battery_drain_rate,
+                heart_rate=heart_rate
             )
 
             # Write to legacy log file (JSON lines format for easy parsing later)

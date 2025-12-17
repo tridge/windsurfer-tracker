@@ -244,7 +244,8 @@ class MainActivity : ComponentActivity() {
         locationPermissionRequest.launch(
             arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.BODY_SENSORS  // Optional - for heart rate
             )
         )
     }
