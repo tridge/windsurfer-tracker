@@ -11,7 +11,8 @@ import time
 import argparse
 import os
 import threading
-from datetime import datetime, date
+import email.utils
+from datetime import datetime, date, timezone
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
@@ -508,13 +509,31 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
     def _send_file(self, filepath: Path, content_type: str):
-        """Send a static file."""
+        """Send a static file with Last-Modified header and If-Modified-Since support."""
         try:
+            stat_info = filepath.stat()
+            last_modified = email.utils.formatdate(stat_info.st_mtime, usegmt=True)
+
+            # Check If-Modified-Since header for conditional GET
+            ims = self.headers.get('If-Modified-Since')
+            if ims:
+                try:
+                    ims_time = email.utils.parsedate_to_datetime(ims)
+                    file_time = datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc)
+                    if file_time <= ims_time:
+                        self.send_response(304)
+                        self.end_headers()
+                        return
+                except (ValueError, TypeError):
+                    pass  # Invalid date format, proceed with full response
+
             with open(filepath, 'rb') as f:
                 content = f.read()
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', len(content))
+            self.send_header('Last-Modified', last_modified)
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(content)
         except FileNotFoundError:
@@ -633,6 +652,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     '.css': 'text/css',
                     '.js': 'application/javascript',
                     '.json': 'application/json',
+                    '.jsonl': 'application/jsonlines',
+                    '.gz': 'application/gzip',
                     '.png': 'image/png',
                     '.jpg': 'image/jpeg',
                     '.jpeg': 'image/jpeg',
@@ -1129,6 +1150,74 @@ def run_summary_generator(log_dir: Path, interval: int = 60):
         time.sleep(interval)
 
 
+def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: int = 20):
+    """Background thread to compress log files for efficient serving.
+
+    Creates two compressed files every `interval` seconds if source changed:
+    1. YYYY_MM_DD_live.jsonl.gz - Rolling window of last `live_window_minutes` (for live tracking)
+    2. YYYY_MM_DD.jsonl.gz - Full compressed log (for historical review)
+
+    Uses atomic writes (temp file + rename) for concurrent read safety.
+    """
+    import gzip
+
+    print(f"[COMPRESS] Background compressor started (interval: {interval}s, live window: {live_window_minutes}min)")
+    last_mtime: dict[str, float] = {}
+
+    while True:
+        try:
+            today = date.today()
+            log_file = log_dir / f"{today.strftime('%Y_%m_%d')}.jsonl"
+            live_gz_file = log_dir / f"{today.strftime('%Y_%m_%d')}_live.jsonl.gz"
+            full_gz_file = log_dir / f"{today.strftime('%Y_%m_%d')}.jsonl.gz"
+
+            if log_file.exists():
+                current_mtime = log_file.stat().st_mtime
+                cached_mtime = last_mtime.get(log_file.name, 0)
+
+                if current_mtime > cached_mtime:
+                    cutoff_ts = int(time.time()) - (live_window_minutes * 60)
+                    live_lines = 0
+                    total_lines = 0
+
+                    # Generate rolling live file (last N minutes only)
+                    tmp_live = live_gz_file.parent / f"{live_gz_file.name}.tmp"
+                    with open(log_file, 'r') as f_in:
+                        with gzip.open(tmp_live, 'wt') as f_out:
+                            for line in f_in:
+                                total_lines += 1
+                                try:
+                                    entry = json.loads(line)
+                                    # Check timestamp - use 'ts' field or 'recv_ts'
+                                    entry_ts = entry.get('ts', 0)
+                                    if entry_ts >= cutoff_ts:
+                                        f_out.write(line)
+                                        live_lines += 1
+                                except json.JSONDecodeError:
+                                    pass
+                    tmp_live.rename(live_gz_file)
+
+                    # Generate full compressed file (for review page)
+                    tmp_full = full_gz_file.parent / f"{full_gz_file.name}.tmp"
+                    with open(log_file, 'rb') as f_in:
+                        with gzip.open(tmp_full, 'wb') as f_out:
+                            f_out.write(f_in.read())
+                    tmp_full.rename(full_gz_file)
+
+                    last_mtime[log_file.name] = current_mtime
+
+                    # Log stats
+                    orig_size = log_file.stat().st_size
+                    live_size = live_gz_file.stat().st_size
+                    full_size = full_gz_file.stat().st_size
+                    print(f"[COMPRESS] Updated: live={live_size:,}B ({live_lines}/{total_lines} entries), "
+                          f"full={full_size:,}B (from {orig_size:,}B)")
+
+        except Exception as e:
+            print(f"[COMPRESS] Error: {e}")
+        time.sleep(interval)
+
+
 def run_server(port: int, log_file: Path | None, positions_file: Path | None, log_dir: Path | None,
                http_port: int | None = None, admin_password: str = "admin", course_file: Path | None = None,
                static_dir: Path | None = None, owntracks_password: str | None = None,
@@ -1195,6 +1284,10 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     if log_dir:
         summary_thread = threading.Thread(target=run_summary_generator, args=(log_dir,), daemon=True)
         summary_thread.start()
+
+        # Start background log compressor for efficient .gz serving
+        compressor_thread = threading.Thread(target=run_log_compressor, args=(log_dir,), daemon=True)
+        compressor_thread.start()
 
     # Open legacy log file if specified
     log_fh = None

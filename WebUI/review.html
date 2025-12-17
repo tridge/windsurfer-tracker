@@ -1755,6 +1755,33 @@
             });
         }
 
+        // Helper to fetch and decompress a file (tries .gz first, falls back to uncompressed)
+        async function fetchLogFile(url) {
+            const canDecompress = typeof DecompressionStream !== 'undefined';
+
+            // Try compressed version first
+            if (canDecompress) {
+                try {
+                    const gzUrl = url + '.gz';
+                    const response = await fetch(gzUrl);
+                    if (response.ok) {
+                        const ds = new DecompressionStream('gzip');
+                        const decompressed = response.body.pipeThrough(ds);
+                        return await new Response(decompressed).text();
+                    }
+                } catch (e) {
+                    // Fall through to uncompressed
+                }
+            }
+
+            // Try uncompressed
+            const response = await fetch(url);
+            if (response.ok) {
+                return await response.text();
+            }
+            return null;
+        }
+
         // Load a specific race/log file (phase 2)
         async function loadRace(logEntry) {
             document.getElementById('loading').style.display = 'block';
@@ -1766,10 +1793,9 @@
             selectedUsers = new Set();
 
             try {
-                const response = await fetch(`logs/${logEntry.file}`);
-                if (!response.ok) throw new Error('Failed to load');
+                const text = await fetchLogFile(`logs/${logEntry.file}`);
+                if (!text) throw new Error('Failed to load');
 
-                const text = await response.text();
                 const lines = text.trim().split('\n');
 
                 for (const line of lines) {
@@ -1849,10 +1875,9 @@
 
             for (const file of filesToTry) {
                 try {
-                    const response = await fetch(file);
-                    if (!response.ok) continue;
+                    const text = await fetchLogFile(file);
+                    if (!text) continue;
 
-                    const text = await response.text();
                     const lines = text.trim().split('\n');
 
                     for (const line of lines) {

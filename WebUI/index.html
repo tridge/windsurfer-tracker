@@ -1914,11 +1914,12 @@
         
         // Track last modified time for conditional requests
         let trackLogLastModified = null;
-        
-        // Load track data from log file (uses If-Modified-Since and deduplication)
+
+        // Load track data from rolling 20-minute live log file
+        // Uses compressed _live.jsonl.gz for bandwidth efficiency
         async function loadTrackData() {
             const logDate = getTodayLogDate();
-            
+
             // If date changed, reset everything
             if (currentLogDate !== logDate) {
                 currentLogDate = logDate;
@@ -1930,9 +1931,10 @@
                     sailorTrackData[id] = [];
                 }
             }
-            
+
             try {
-                const url = `logs/${logDate}.jsonl`;
+                // Fetch the rolling 20-minute live file (much smaller than full log)
+                const url = `logs/${logDate}_live.jsonl.gz`;
 
                 // Use conditional request - only download if file changed
                 const headers = {};
@@ -1943,8 +1945,8 @@
                 const response = await fetch(url, { headers });
 
                 if (response.status === 404) {
-                    // No log file yet today
-                    return;
+                    // No live file yet - try full log as fallback
+                    return loadTrackDataFallback();
                 }
 
                 if (response.status === 304) {
@@ -1957,16 +1959,35 @@
                 if (lastMod) {
                     trackLogLastModified = lastMod;
                 }
-                
-                const text = await response.text();
+
+                // Decompress gzip
+                let text;
+                if (typeof DecompressionStream !== 'undefined') {
+                    try {
+                        const ds = new DecompressionStream('gzip');
+                        const decompressed = response.body.pipeThrough(ds);
+                        text = await new Response(decompressed).text();
+                    } catch (e) {
+                        console.log('Decompression failed:', e);
+                        return loadTrackDataFallback();
+                    }
+                } else {
+                    // Browser doesn't support DecompressionStream - use fallback
+                    return loadTrackDataFallback();
+                }
+
                 if (!text.trim()) {
                     return;
                 }
-                
+
+                // REPLACE track data (not append) since this is a rolling window
+                for (const id in sailorTrackData) {
+                    sailorTrackData[id] = [];
+                }
+
                 const lines = text.trim().split('\n').filter(l => l);
-                let newPoints = 0;
-                
-                // Parse each line and append to track data (with deduplication)
+
+                // Parse each line and populate track data
                 for (const line of lines) {
                     try {
                         const entry = JSON.parse(line);
@@ -1979,16 +2000,12 @@
                         // Expand pos array if present (1Hz batch format)
                         let positions;
                         if (entry.pos && Array.isArray(entry.pos)) {
-                            // New compact format: expand pos array
                             positions = entry.pos.map(([ts, lat, lon]) => ({
-                                lat: lat,
-                                lon: lon,
-                                ts: ts,
+                                lat, lon, ts,
                                 spd: entry.spd,
                                 hdg: entry.hdg
                             }));
                         } else if (entry.lat && entry.lon && entry.ts) {
-                            // Old format: single position
                             positions = [{
                                 lat: entry.lat,
                                 lon: entry.lon,
@@ -1997,37 +2014,78 @@
                                 hdg: entry.hdg
                             }];
                         } else {
-                            continue;  // Skip entries without position data
+                            continue;
                         }
 
-                        // Add each position with deduplication
-                        const existing = sailorTrackData[id];
-                        for (const pos of positions) {
-                            // Skip if we already have this timestamp for this user
-                            if (existing.length > 0 && existing[existing.length - 1].ts >= pos.ts) {
-                                continue;
-                            }
-                            existing.push(pos);
-                            newPoints++;
-                        }
+                        sailorTrackData[id].push(...positions);
                     } catch (e) {
                         // Skip malformed lines
                     }
                 }
 
+                // Sort each track by timestamp
+                for (const id in sailorTrackData) {
+                    sailorTrackData[id].sort((a, b) => a.ts - b.ts);
+                }
+
                 trackDataLoaded = true;
 
-                // Update any visible tracks if we got new data
-                if (newPoints > 0) {
-                    for (const id in showTrack) {
-                        if (showTrack[id]) {
-                            updateTrackDisplay(id);
-                        }
+                // Update all visible tracks
+                for (const id in showTrack) {
+                    if (showTrack[id]) {
+                        updateTrackDisplay(id);
                     }
                 }
-                
+
             } catch (error) {
                 console.log('Error loading track data:', error);
+            }
+        }
+
+        // Fallback for older browsers or when live file not available
+        async function loadTrackDataFallback() {
+            const logDate = getTodayLogDate();
+            try {
+                const response = await fetch(`logs/${logDate}.jsonl`);
+                if (!response.ok) return;
+
+                const text = await response.text();
+                if (!text.trim()) return;
+
+                // Clear and replace track data
+                for (const id in sailorTrackData) {
+                    sailorTrackData[id] = [];
+                }
+
+                const lines = text.trim().split('\n').filter(l => l);
+                for (const line of lines) {
+                    try {
+                        const entry = JSON.parse(line);
+                        const id = entry.id;
+                        if (!sailorTrackData[id]) sailorTrackData[id] = [];
+
+                        let positions;
+                        if (entry.pos && Array.isArray(entry.pos)) {
+                            positions = entry.pos.map(([ts, lat, lon]) => ({ lat, lon, ts, spd: entry.spd, hdg: entry.hdg }));
+                        } else if (entry.lat && entry.lon && entry.ts) {
+                            positions = [{ lat: entry.lat, lon: entry.lon, ts: entry.ts, spd: entry.spd, hdg: entry.hdg }];
+                        } else {
+                            continue;
+                        }
+                        sailorTrackData[id].push(...positions);
+                    } catch (e) {}
+                }
+
+                for (const id in sailorTrackData) {
+                    sailorTrackData[id].sort((a, b) => a.ts - b.ts);
+                }
+
+                trackDataLoaded = true;
+                for (const id in showTrack) {
+                    if (showTrack[id]) updateTrackDisplay(id);
+                }
+            } catch (error) {
+                console.log('Fallback track load failed:', error);
             }
         }
         
