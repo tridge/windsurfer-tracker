@@ -2157,13 +2157,18 @@
                         }
                     }
 
+                    let hrText = '';
+                    if (point.hr !== undefined && point.hr > 0) {
+                        hrText = `<br>Heart Rate: <span style="color:#e91e63">${point.hr} bpm</span>`;
+                    }
+
                     pointMarker.bindTooltip(`
                         <b>${getDisplayName(userId)}</b><br>
                         Time: ${time}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${point.hdg || 0}°<br>
                         Signal: ${point.sig || '?'}<br>
-                        Battery: ${point.bat || '?'}%${warnings}
+                        Battery: ${point.bat || '?'}%${hrText}${warnings}
                     `, { sticky: true });
 
                     pointGroup.addLayer(pointMarker);
@@ -2187,6 +2192,11 @@
                         }
                     }
 
+                    let markerHrText = '';
+                    if (last.hr !== undefined && last.hr > 0) {
+                        markerHrText = `<br>Heart Rate: <span style="color:#e91e63">${last.hr} bpm</span>`;
+                    }
+
                     const marker = L.circleMarker([last.lat, last.lon], {
                         radius: 8,
                         fillColor: userColor,
@@ -2197,7 +2207,7 @@
                         <b>${getDisplayName(userId)}</b><br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${last.hdg || 0}°<br>
-                        Battery: ${last.bat || '?'}%${markerWarnings}
+                        Battery: ${last.bat || '?'}%${markerHrText}${markerWarnings}
                     `).addTo(map);
                     markerLayers[userId] = marker;
                 }
