@@ -774,6 +774,100 @@
             font-size: 10px;
         }
 
+        /* Heart rate graph panel */
+        #heartrate-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #heartrate-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #heartrate-graph-resize:hover,
+        #heartrate-graph-resize.dragging {
+            background: linear-gradient(to bottom, #e91e63, transparent);
+        }
+
+        #heartrate-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #heartrate-graph-resize:hover::after,
+        #heartrate-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #heartrate-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #heartrate-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .heartrate-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #e91e63;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .heartrate-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        .heartrate-x-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -965,14 +1059,16 @@
             #speed-graph-panel,
             #battery-graph-panel,
             #signal-graph-panel,
-            #latency-graph-panel {
+            #latency-graph-panel,
+            #heartrate-graph-panel {
                 right: 0;
             }
 
             .speed-graph-title,
             .battery-graph-title,
             .signal-graph-title,
-            .latency-graph-title {
+            .latency-graph-title,
+            .heartrate-graph-title {
                 font-size: 10px;
             }
 
@@ -988,7 +1084,8 @@
             #speed-graph-container,
             #battery-graph-container,
             #signal-graph-container,
-            #latency-graph-container {
+            #latency-graph-container,
+            #heartrate-graph-container {
                 padding: 8px 35px 20px 35px;
             }
         }
@@ -1051,6 +1148,7 @@
                 <label><input type="checkbox" id="show-battery-graph"> Battery</label>
                 <label><input type="checkbox" id="show-signal-graph"> Signal</label>
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
+                <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
             </div>
         </div>
         <select id="map-type-select" onchange="setMapType(this.value)" style="display:none">
@@ -1157,6 +1255,26 @@
             <div class="latency-x-axis">
                 <span id="latency-time-start">--:--</span>
                 <span id="latency-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Heart rate graph panel -->
+    <div id="heartrate-graph-panel">
+        <div id="heartrate-graph-resize"></div>
+        <div id="heartrate-graph-container">
+            <div class="heartrate-graph-title">Heart Rate (bpm)</div>
+            <div class="heartrate-y-axis" id="heartrate-y-labels">
+                <span>200</span>
+                <span>150</span>
+                <span>100</span>
+                <span>50</span>
+                <span>0</span>
+            </div>
+            <canvas id="heartrate-graph"></canvas>
+            <div class="heartrate-x-axis">
+                <span id="heartrate-time-start">--:--</span>
+                <span id="heartrate-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -1842,6 +1960,7 @@
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
+            drawHeartRateGraph();
         }
 
         function updateSliderRange() {
@@ -2568,6 +2687,146 @@
             }
         }
 
+        function drawHeartRateGraph() {
+            // Only draw if heart rate graph is visible
+            if (!document.getElementById('show-heartrate-graph').checked) return;
+
+            const canvas = document.getElementById('heartrate-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+            document.getElementById('heartrate-time-start').textContent = fmtTime(rangeStartTime);
+            document.getElementById('heartrate-time-end').textContent = fmtTime(rangeEndTime);
+
+            // Calculate heart rate range for Y axis scaling (only from visible time range)
+            let maxHR = 0;
+            let minHR = Infinity;
+            let hasHRData = false;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                    if (entry.hr !== undefined && entry.hr > 0) {
+                        maxHR = Math.max(maxHR, entry.hr);
+                        minHR = Math.min(minHR, entry.hr);
+                        hasHRData = true;
+                    }
+                }
+            }
+
+            // Set sensible defaults and add padding
+            if (!hasHRData || maxHR === 0) {
+                maxHR = 200;
+                minHR = 0;
+            } else {
+                // Add 10% padding above max
+                maxHR = Math.ceil((maxHR * 1.1) / 10) * 10;
+                // Round min down to nearest 10, with some padding below
+                minHR = Math.max(0, Math.floor((minHR * 0.9) / 10) * 10);
+                // Ensure at least 40 bpm range for readability
+                if (maxHR - minHR < 40) {
+                    const mid = (maxHR + minHR) / 2;
+                    maxHR = Math.ceil((mid + 20) / 10) * 10;
+                    minHR = Math.max(0, Math.floor((mid - 20) / 10) * 10);
+                }
+            }
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('heartrate-y-labels');
+            const range = maxHR - minHR;
+            yLabels.innerHTML = `
+                <span>${maxHR}</span>
+                <span>${Math.round(minHR + range * 0.75)}</span>
+                <span>${Math.round(minHR + range * 0.5)}</span>
+                <span>${Math.round(minHR + range * 0.25)}</span>
+                <span>${minHR}</span>
+            `;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see heart rate graph', width / 2, height / 2);
+                return;
+            }
+
+            if (!hasHRData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No heart rate data available', width / 2, height / 2);
+                return;
+            }
+
+            // Draw heart rate line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range and having HR data
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime && e.hr !== undefined && e.hr > 0);
+                if (filtered.length < 2) continue;
+
+                // Draw the heart rate line
+                ctx.strokeStyle = '#e91e63'; // Pink color for heart rate
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const entry of filtered) {
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - ((entry.hr - minHR) / range) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - ((last.hr - minHR) / range) * height;
+                    ctx.fillStyle = '#e91e63';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`${getDisplayName(userId)}: ${last.hr} bpm`, Math.min(x, width - 5), y - 5);
+                }
+            }
+        }
+
         // Graph hover highlighting (shared between battery, signal, and latency graphs)
         let graphHighlightMarkers = [];
 
@@ -2592,6 +2851,9 @@
             }
             if (document.getElementById('show-latency-graph').checked) {
                 drawLatencyGraph();
+            }
+            if (document.getElementById('show-heartrate-graph').checked) {
+                drawHeartRateGraph();
             }
         }
 
@@ -2674,6 +2936,11 @@
                     tooltipHtml += `<br>Latency: <span style="color:${latencyColor}">${latencyText}</span>`;
                 }
 
+                // Add heart rate if available
+                if (closest.hr !== undefined && closest.hr > 0) {
+                    tooltipHtml += `<br>Heart Rate: <span style="color:#e91e63">${closest.hr} bpm</span>`;
+                }
+
                 // Add battery saver warning if active
                 if (closest.flg) {
                     if (closest.flg.ps) {
@@ -2747,6 +3014,39 @@
                 if (maxLatency < 10) maxLatency = 10;
                 drawLatencyHighlightOnGraph('latency-graph', highlightX, ratio, timestamp, maxLatency);
             }
+
+            // Draw heart rate graph with highlight if visible
+            if (document.getElementById('show-heartrate-graph').checked) {
+                drawHeartRateGraph();
+                // Calculate heart rate range for proper scaling (only from visible time range)
+                let maxHR = 0;
+                let minHR = Infinity;
+                let hasHRData = false;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                        if (entry.hr !== undefined && entry.hr > 0) {
+                            maxHR = Math.max(maxHR, entry.hr);
+                            minHR = Math.min(minHR, entry.hr);
+                            hasHRData = true;
+                        }
+                    }
+                }
+                if (!hasHRData || maxHR === 0) {
+                    maxHR = 200;
+                    minHR = 0;
+                } else {
+                    maxHR = Math.ceil((maxHR * 1.1) / 10) * 10;
+                    minHR = Math.max(0, Math.floor((minHR * 0.9) / 10) * 10);
+                    if (maxHR - minHR < 40) {
+                        const mid = (maxHR + minHR) / 2;
+                        maxHR = Math.ceil((mid + 20) / 10) * 10;
+                        minHR = Math.max(0, Math.floor((mid - 20) / 10) * 10);
+                    }
+                }
+                drawHighlightOnGraph('heartrate-graph', highlightX, ratio, timestamp, 'hr', maxHR, minHR);
+            }
         }
 
         function drawLatencyHighlightOnGraph(canvasId, highlightX, ratio, timestamp, maxLatency) {
@@ -2806,11 +3106,12 @@
             }
         }
 
-        function drawHighlightOnGraph(canvasId, highlightX, ratio, timestamp, dataField, maxValue) {
+        function drawHighlightOnGraph(canvasId, highlightX, ratio, timestamp, dataField, maxValue, minValue = 0) {
             const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
             const rect = canvas.getBoundingClientRect();
             const height = rect.height;
+            const valueRange = maxValue - minValue;
 
             // Draw vertical highlight line
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
@@ -2847,7 +3148,7 @@
                 const value = closest[dataField];
                 if (value !== undefined && value !== null) {
                     const x = ((closest.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
-                    const y = height - (value / maxValue) * height;
+                    const y = height - ((value - minValue) / valueRange) * height;
 
                     ctx.beginPath();
                     ctx.arc(x * window.devicePixelRatio, y * window.devicePixelRatio, 6 * window.devicePixelRatio, 0, Math.PI * 2);
@@ -2901,19 +3202,32 @@
             clearGraphHighlight();
         });
 
+        document.getElementById('heartrate-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'heartrate-graph');
+        });
+
+        document.getElementById('heartrate-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
         // Graph resize functionality
         let speedGraphHeight = parseInt(localStorage.getItem('speedGraphHeight')) || 150;
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
         let signalGraphHeight = parseInt(localStorage.getItem('signalGraphHeight')) || 150;
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
+        let heartrateGraphHeight = parseInt(localStorage.getItem('heartrateGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
         const signalPanel = document.getElementById('signal-graph-panel');
         const latencyPanel = document.getElementById('latency-graph-panel');
+        const heartratePanel = document.getElementById('heartrate-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
         const signalResizeHandle = document.getElementById('signal-graph-resize');
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
+        const heartrateResizeHandle = document.getElementById('heartrate-graph-resize');
         let isResizing = false;
         let resizingPanel = null;
         let startY = 0;
@@ -2924,6 +3238,7 @@
         batteryPanel.style.height = batteryGraphHeight + 'px';
         signalPanel.style.height = signalGraphHeight + 'px';
         latencyPanel.style.height = latencyGraphHeight + 'px';
+        heartratePanel.style.height = heartrateGraphHeight + 'px';
 
         function updateGraphPositions() {
             const mapEl = document.getElementById('map');
@@ -2931,11 +3246,21 @@
             const batteryVisible = document.getElementById('show-battery-graph').checked;
             const signalVisible = document.getElementById('show-signal-graph').checked;
             const latencyVisible = document.getElementById('show-latency-graph').checked;
+            const heartrateVisible = document.getElementById('show-heartrate-graph').checked;
 
             let totalHeight = 80; // timeline height
             let currentBottom = 80;
 
-            // Stack from bottom: latency, signal, battery, speed
+            // Stack from bottom: heartrate, latency, signal, battery, speed
+            if (heartrateVisible) {
+                heartratePanel.style.display = 'block';
+                heartratePanel.style.bottom = currentBottom + 'px';
+                currentBottom += heartrateGraphHeight;
+                totalHeight += heartrateGraphHeight;
+            } else {
+                heartratePanel.style.display = 'none';
+            }
+
             if (latencyVisible) {
                 latencyPanel.style.display = 'block';
                 latencyPanel.style.bottom = currentBottom + 'px';
@@ -3019,6 +3344,17 @@
             e.preventDefault();
         });
 
+        heartrateResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'heartrate';
+            startY = e.clientY;
+            startHeight = heartratePanel.offsetHeight;
+            heartrateResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
 
@@ -3037,6 +3373,9 @@
             } else if (resizingPanel === 'latency') {
                 latencyPanel.style.height = newHeight + 'px';
                 latencyGraphHeight = newHeight;
+            } else if (resizingPanel === 'heartrate') {
+                heartratePanel.style.height = newHeight + 'px';
+                heartrateGraphHeight = newHeight;
             }
 
             updateGraphPositions();
@@ -3047,6 +3386,7 @@
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
+            drawHeartRateGraph();
         });
 
         document.addEventListener('mouseup', () => {
@@ -3056,12 +3396,14 @@
                 batteryResizeHandle.classList.remove('dragging');
                 signalResizeHandle.classList.remove('dragging');
                 latencyResizeHandle.classList.remove('dragging');
+                heartrateResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('speedGraphHeight', speedGraphHeight);
                 localStorage.setItem('batteryGraphHeight', batteryGraphHeight);
                 localStorage.setItem('signalGraphHeight', signalGraphHeight);
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
+                localStorage.setItem('heartrateGraphHeight', heartrateGraphHeight);
                 resizingPanel = null;
             }
         });
@@ -3181,6 +3523,7 @@
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
+            drawHeartRateGraph();
         });
 
         document.getElementById('end-slider').addEventListener('input', (e) => {
@@ -3197,6 +3540,7 @@
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
+            drawHeartRateGraph();
         });
 
         document.getElementById('speed-color').addEventListener('change', () => {
@@ -3243,6 +3587,13 @@
             }
         });
 
+        document.getElementById('show-heartrate-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawHeartRateGraph();
+            }
+        });
+
         document.getElementById('reset-range-btn').addEventListener('click', () => {
             document.getElementById('start-slider').value = 0;
             document.getElementById('end-slider').value = 100;
@@ -3253,6 +3604,7 @@
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
+            drawHeartRateGraph();
         });
 
         // Playback controls - animate through the selected range
