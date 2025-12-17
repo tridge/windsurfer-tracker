@@ -3032,9 +3032,19 @@
                     tooltipHtml += `<br>Latency: <span style="color:${latencyColor}">${latencyText}</span>`;
                 }
 
-                // Add heart rate if available
-                if (closest.hr !== undefined && closest.hr > 0) {
-                    tooltipHtml += `<br>Heart Rate: <span style="color:#e91e63">${closest.hr} bpm</span>`;
+                // Add heart rate if available (search nearby entries since HR only sent every ~10 samples)
+                let hrValue = closest.hr;
+                if (hrValue === undefined || hrValue <= 0) {
+                    // Search nearby entries for HR data (within 15 seconds)
+                    for (const entry of filtered) {
+                        if (Math.abs(entry.ts - closest.ts) <= 15 && entry.hr !== undefined && entry.hr > 0) {
+                            hrValue = entry.hr;
+                            break;
+                        }
+                    }
+                }
+                if (hrValue !== undefined && hrValue > 0) {
+                    tooltipHtml += `<br>Heart Rate: <span style="color:#e91e63">${hrValue} bpm</span>`;
                 }
 
                 // Add battery saver warning if active
