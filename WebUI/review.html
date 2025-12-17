@@ -2242,29 +2242,46 @@
             document.getElementById('speed-time-start').textContent = fmtTime(rangeStartTime);
             document.getElementById('speed-time-end').textContent = fmtTime(rangeEndTime);
 
-            // Calculate max speed for Y axis scaling (only from visible time range)
-            let maxSpeed = 20; // Default max 20 knots
+            // Calculate speed range for Y axis scaling (only from visible time range)
+            let maxSpeed = 0;
+            let minSpeed = Infinity;
+            let hasSpeedData = false;
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
                     if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
-                    if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
+                    if (entry.spd !== undefined && entry.spd !== null && entry.spd >= 0) {
                         maxSpeed = Math.max(maxSpeed, entry.spd);
+                        minSpeed = Math.min(minSpeed, entry.spd);
+                        hasSpeedData = true;
                     }
                 }
             }
-            // Round up to nice number (5 knot increments, min 10)
-            maxSpeed = Math.ceil(maxSpeed / 5) * 5;
-            if (maxSpeed < 10) maxSpeed = 10;
+
+            // Set sensible defaults and add padding
+            if (!hasSpeedData || maxSpeed === 0) {
+                maxSpeed = 20;
+                minSpeed = 0;
+            } else {
+                // Add 10% padding above max
+                maxSpeed = Math.ceil((maxSpeed * 1.1) / 2) * 2;  // Round to nearest 2 knots
+                // Round min down, but keep at 0 for speed (negative speed doesn't make sense)
+                minSpeed = 0;
+                // Ensure at least 5 knot range for readability
+                if (maxSpeed - minSpeed < 5) {
+                    maxSpeed = minSpeed + 5;
+                }
+            }
+            const speedRange = maxSpeed - minSpeed;
 
             // Update Y axis labels
             const yLabels = document.getElementById('speed-y-labels');
             yLabels.innerHTML = `
                 <span>${maxSpeed}</span>
-                <span>${(maxSpeed * 0.75).toFixed(0)}</span>
-                <span>${(maxSpeed * 0.5).toFixed(0)}</span>
-                <span>${(maxSpeed * 0.25).toFixed(0)}</span>
-                <span>0</span>
+                <span>${(minSpeed + speedRange * 0.75).toFixed(0)}</span>
+                <span>${(minSpeed + speedRange * 0.5).toFixed(0)}</span>
+                <span>${(minSpeed + speedRange * 0.25).toFixed(0)}</span>
+                <span>${minSpeed}</span>
             `;
 
             // Draw grid lines
@@ -2309,7 +2326,7 @@
                     if (entry.spd === undefined || entry.spd === null) continue;
 
                     const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                    const y = height - (entry.spd / maxSpeed) * height;
+                    const y = height - ((entry.spd - minSpeed) / speedRange) * height;
 
                     if (!started) {
                         ctx.moveTo(x, y);
@@ -2325,7 +2342,7 @@
                     const last = filtered[filtered.length - 1];
                     if (last.spd !== undefined && last.spd !== null) {
                         const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                        const y = height - (last.spd / maxSpeed) * height;
+                        const y = height - ((last.spd - minSpeed) / speedRange) * height;
                         ctx.fillStyle = userColor;
                         ctx.font = 'bold 10px sans-serif';
                         ctx.textAlign = 'right';
@@ -2967,20 +2984,26 @@
             // Draw speed graph with highlight if visible
             if (document.getElementById('show-speed-graph').checked) {
                 drawSpeedGraph();
-                // Calculate current max speed for proper scaling (only from visible time range)
-                let maxSpeed = 20;
+                // Calculate speed range for proper scaling (only from visible time range)
+                let maxSpeed = 0;
+                let hasSpeedData = false;
                 for (const [userId, entries] of Object.entries(userData)) {
                     if (!selectedUsers.has(userId)) continue;
                     for (const entry of entries) {
                         if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
-                        if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
+                        if (entry.spd !== undefined && entry.spd !== null && entry.spd >= 0) {
                             maxSpeed = Math.max(maxSpeed, entry.spd);
+                            hasSpeedData = true;
                         }
                     }
                 }
-                maxSpeed = Math.ceil(maxSpeed / 5) * 5;
-                if (maxSpeed < 10) maxSpeed = 10;
-                drawHighlightOnGraph('speed-graph', highlightX, ratio, timestamp, 'spd', maxSpeed);
+                if (!hasSpeedData || maxSpeed === 0) {
+                    maxSpeed = 20;
+                } else {
+                    maxSpeed = Math.ceil((maxSpeed * 1.1) / 2) * 2;
+                    if (maxSpeed < 5) maxSpeed = 5;
+                }
+                drawHighlightOnGraph('speed-graph', highlightX, ratio, timestamp, 'spd', maxSpeed, 0);
             }
 
             // Draw battery graph with highlight if visible
