@@ -1,7 +1,7 @@
 name: windsurfer_tracker
 description: GPS tracker for windsurfing races
 publish_to: 'none'
-version: 1.8.17+26
+version: 1.8.18+27
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
