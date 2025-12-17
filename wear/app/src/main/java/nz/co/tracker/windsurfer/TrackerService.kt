@@ -369,7 +369,7 @@ class TrackerService : LifecycleService() {
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isPowerSaveMode = powerManager.isPowerSaveMode
-        val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
+        // Note: isIgnoringBatteryOptimizations() is unreliable on Wear OS - don't report it
 
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
@@ -406,10 +406,9 @@ class TrackerService : LifecycleService() {
 
         previousLocation = location
 
-        // Build flags object
+        // Build flags object (only power save mode - battery optimization unreliable on Wear OS)
         val flags = JSONObject().apply {
             put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
-            put("bo", isBatteryOptIgnored)  // Battery optimization ignored for this app
         }
 
         val packet = JSONObject().apply {
@@ -486,7 +485,7 @@ class TrackerService : LifecycleService() {
         // Get power/battery saver status
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isPowerSaveMode = powerManager.isPowerSaveMode
-        val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
+        // Note: isIgnoringBatteryOptimizations() is unreliable on Wear OS - don't report it
 
         val signalLevel = try {
             val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
@@ -536,10 +535,9 @@ class TrackerService : LifecycleService() {
         val numPositions = positionBuffer.size
         positionBuffer.clear()
 
-        // Build flags object
+        // Build flags object (only power save mode - battery optimization unreliable on Wear OS)
         val flags = JSONObject().apply {
             put("ps", isPowerSaveMode)  // Power save mode (system battery saver)
-            put("bo", isBatteryOptIgnored)  // Battery optimization ignored for this app
         }
 
         val packet = JSONObject().apply {
