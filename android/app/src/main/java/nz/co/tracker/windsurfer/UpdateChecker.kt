@@ -33,7 +33,7 @@ class UpdateChecker(private val context: Context) {
 
     companion object {
         private const val TAG = "UpdateChecker"
-        const val VERSION_URL = "https://track.tridgell.net/app/version.json"
+        const val VERSION_URL = "https://wstracker.org/app/version.json"
         const val PREFS_NAME = "update_prefs"
         const val PREF_SKIPPED_VERSION = "skipped_version"
     }

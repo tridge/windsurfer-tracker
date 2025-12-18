@@ -10,7 +10,7 @@ import 'package:battery_plus/battery_plus.dart';
 
 /// Configuration constants
 class TrackerConfig {
-  static const String defaultServerHost = 'track.tridgell.net';
+  static const String defaultServerHost = 'wstracker.org';
   static const int defaultServerPort = 41234;
   static const Duration locationInterval = Duration(seconds: 10);
   static const int udpRetryCount = 3;

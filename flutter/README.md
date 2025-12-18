@@ -78,7 +78,7 @@ Then archive and distribute via Xcode.
 ## Configuration
 
 Default settings (matching Android app):
-- Server: `track.tridgell.net`
+- Server: `wstracker.org`
 - Port: `41234`
 - Location interval: 10 seconds
 - UDP retry count: 3
@@ -89,7 +89,7 @@ Default settings (matching Android app):
 1. Build and install the app
 2. Configure server address in Settings
 3. Start tracking
-4. Verify your position appears on https://track.tridgell.net
+4. Verify your position appears on https://wstracker.org
 
 ## iOS Background Location Notes
 

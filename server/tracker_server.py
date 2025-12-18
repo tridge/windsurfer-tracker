@@ -1511,8 +1511,27 @@ def main():
         default=Path("users.json"),
         help="User overrides file path (default: users.json)"
     )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Root directory for data files (logs, course.json, users.json, current_positions.json)"
+    )
 
     args = parser.parse_args()
+
+    # If data-dir specified, make paths relative to it (unless explicitly overridden)
+    if args.data_dir:
+        data_dir = args.data_dir
+        # Only override defaults (check if user explicitly set these)
+        if args.current == Path("current_positions.json"):
+            args.current = data_dir / "current_positions.json"
+        if args.log_dir == Path("logs"):
+            args.log_dir = data_dir / "logs"
+        if args.course_file == Path("course.json"):
+            args.course_file = data_dir / "course.json"
+        if args.users_file == Path("users.json"):
+            args.users_file = data_dir / "users.json"
     positions_file = None if args.no_current else args.current
     log_dir = None if args.no_track_logs else args.log_dir
     http_port = None if args.no_http else (args.http_port or args.port)

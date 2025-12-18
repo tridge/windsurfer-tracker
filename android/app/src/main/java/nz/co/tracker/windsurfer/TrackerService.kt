@@ -33,7 +33,7 @@ class TrackerService : LifecycleService() {
         private const val CHANNEL_ID = "tracker_channel"
         
         // Configuration - could be moved to preferences
-        const val DEFAULT_SERVER_HOST = "track.tridgell.net"
+        const val DEFAULT_SERVER_HOST = "wstracker.org"
         const val DEFAULT_SERVER_PORT = 41234
         const val LOCATION_INTERVAL_MS = 10000L  // 10 seconds
         const val UDP_RETRY_COUNT = 3

@@ -8,7 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 /// Configuration constants matching Android app
 class TrackerConfig {
-  static const String defaultServerHost = 'track.tridgell.net';
+  static const String defaultServerHost = 'wstracker.org';
   static const int defaultServerPort = 41234;
   static const Duration locationInterval = Duration(seconds: 10);
   static const int udpRetryCount = 3;
