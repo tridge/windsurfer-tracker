@@ -33,8 +33,8 @@ android {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "1.8.19"
+        versionCode = 29
+        versionName = "1.8.20"
 
         // Add version info as build config fields
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
