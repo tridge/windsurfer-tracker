@@ -118,6 +118,7 @@ class TrackerService : LifecycleService() {
         fun onAckReceived(seq: Int)
         fun onPacketSent(seq: Int)
         fun onConnectionStatus(ackRate: Float)
+        fun onEventName(name: String)
     }
 
     private fun getServerAddress(): InetAddress? {
@@ -629,7 +630,13 @@ class TrackerService : LifecycleService() {
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
 
-                        Log.d(TAG, "Received ACK for seq=$ackSeq")
+                        // Extract event name from ACK if present
+                        val eventName = ack.optString("event", "")
+                        if (eventName.isNotEmpty()) {
+                            statusListener?.onEventName(eventName)
+                        }
+
+                        Log.d(TAG, "Received ACK for seq=$ackSeq${if (eventName.isNotEmpty()) " (event: $eventName)" else ""}")
                     }
                 } catch (e: java.net.SocketTimeoutException) {
                     // Normal timeout, continue

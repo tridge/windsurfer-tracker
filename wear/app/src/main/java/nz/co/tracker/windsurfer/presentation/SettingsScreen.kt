@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -19,6 +20,10 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
+import kotlinx.coroutines.launch
+import nz.co.tracker.windsurfer.EventFetcher
+import nz.co.tracker.windsurfer.EventInfo
+import nz.co.tracker.windsurfer.TrackerService
 import nz.co.tracker.windsurfer.TrackerSettings
 
 @Composable
@@ -44,8 +49,24 @@ fun SettingsScreen(
             }
         )
     }
+    var selectedEventId by remember { mutableStateOf(settings.eventId) }
+    var events by remember { mutableStateOf<List<EventInfo>>(emptyList()) }
+    var eventsLoading by remember { mutableStateOf(true) }
 
     val roles = listOf("sailor", "support", "spectator")
+    val eventFetcher = remember { EventFetcher() }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Fetch events when screen loads or server changes
+    LaunchedEffect(serverHost) {
+        eventsLoading = true
+        events = eventFetcher.fetchEvents(serverHost, TrackerService.DEFAULT_SERVER_PORT)
+        eventsLoading = false
+        // Ensure selected event exists in list
+        if (events.isNotEmpty() && events.none { it.eid == selectedEventId }) {
+            selectedEventId = events.first().eid
+        }
+    }
 
     // Launcher for server input
     val serverInputLauncher = rememberLauncherForActivityResult(
@@ -200,6 +221,57 @@ fun SettingsScreen(
                 )
             }
 
+            // Event selector
+            item {
+                Text(
+                    text = "Event",
+                    style = MaterialTheme.typography.caption1,
+                    color = MaterialTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            item {
+                if (eventsLoading) {
+                    Chip(
+                        onClick = { },
+                        label = { Text("Loading...", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                } else if (events.isEmpty()) {
+                    Chip(
+                        onClick = { },
+                        label = { Text("Event ID: $selectedEventId", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                } else {
+                    // Show current event with ability to cycle through
+                    val currentEvent = events.find { it.eid == selectedEventId } ?: events.first()
+                    Chip(
+                        onClick = {
+                            // Cycle to next event
+                            val currentIndex = events.indexOfFirst { it.eid == selectedEventId }
+                            val nextIndex = (currentIndex + 1) % events.size
+                            selectedEventId = events[nextIndex].eid
+                        },
+                        label = {
+                            Text(
+                                text = currentEvent.name,
+                                maxLines = 1,
+                                fontSize = 11.sp
+                            )
+                        },
+                        secondaryLabel = {
+                            Text("Tap to change", fontSize = 9.sp)
+                        },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                }
+            }
+
             // 1Hz Mode Toggle
             item {
                 ToggleChip(
@@ -272,6 +344,7 @@ fun SettingsScreen(
                                 sailorId = sailorId,
                                 role = roles[selectedRoleIndex],
                                 password = password,
+                                eventId = selectedEventId,
                                 highFrequencyMode = highFrequencyMode
                             )
                         )

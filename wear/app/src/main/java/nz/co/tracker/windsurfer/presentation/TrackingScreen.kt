@@ -29,6 +29,7 @@ fun TrackingScreen(
     signalLevel: Int,
     ackRate: Float,
     sailorId: String,
+    eventName: String,
     highFrequencyMode: Boolean,
     onToggleTracking: () -> Unit,
     onAssistLongPress: () -> Unit,
@@ -93,6 +94,17 @@ fun TrackingScreen(
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
+
+            // Event name (if available)
+            if (eventName.isNotEmpty()) {
+                Text(
+                    text = eventName,
+                    color = Color(0xFF6699FF),
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            }
 
             // Sailor ID and 1Hz indicator
             Row(

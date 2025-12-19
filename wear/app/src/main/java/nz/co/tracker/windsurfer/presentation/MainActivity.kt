@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private val batteryPercent = mutableIntStateOf(100)
     private val signalLevel = mutableIntStateOf(-1)
     private val ackRate = mutableFloatStateOf(0f)
+    private val eventName = mutableStateOf("")
     private val settings = mutableStateOf(TrackerSettings())
 
     private val serviceConnection = object : ServiceConnection {
@@ -72,6 +73,10 @@ class MainActivity : ComponentActivity() {
 
                 override fun onConnectionStatus(rate: Float) {
                     ackRate.floatValue = rate
+                }
+
+                override fun onEventName(name: String) {
+                    eventName.value = name
                 }
             }
 
@@ -154,6 +159,7 @@ class MainActivity : ComponentActivity() {
                 batteryPercent = batteryPercent.intValue,
                 signalLevel = signalLevel.intValue,
                 ackRate = ackRate.floatValue,
+                eventName = eventName.value,
                 settings = settings.value,
                 onToggleTracking = { toggleTracking() },
                 onAssistToggle = { toggleAssist() },
