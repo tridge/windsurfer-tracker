@@ -158,10 +158,10 @@ fun SettingsScreen(
                 )
             }
 
-            // Sailor ID
+            // Your Name
             item {
                 Text(
-                    text = "ID",
+                    text = "Your Name",
                     style = MaterialTheme.typography.caption1,
                     color = MaterialTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
@@ -172,7 +172,7 @@ fun SettingsScreen(
                 Chip(
                     onClick = {
                         val intent = Intent(context, TextInputActivity::class.java).apply {
-                            putExtra(TextInputActivity.EXTRA_LABEL, "Sailor ID")
+                            putExtra(TextInputActivity.EXTRA_LABEL, "Your Name")
                             putExtra(TextInputActivity.EXTRA_CURRENT_VALUE, sailorId)
                             putExtra(TextInputActivity.EXTRA_INPUT_TYPE, TextInputActivity.INPUT_TYPE_TEXT)
                         }

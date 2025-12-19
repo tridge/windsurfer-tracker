@@ -20,7 +20,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Sailor ID"
+            android:text="Your Name"
             android:textStyle="bold"
             android:textSize="16sp"
             android:textColor="#000000" />
@@ -29,7 +29,7 @@
             android:id="@+id/etSailorId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="e.g. S07"
+            android:hint="e.g. John or S07"
             android:inputType="text"
             android:maxLength="10"
             android:text="S01"

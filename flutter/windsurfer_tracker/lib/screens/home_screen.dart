@@ -546,7 +546,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildConfigField('ID', widget.prefs.sailorId),
+        _buildConfigField('Your Name', widget.prefs.sailorId),
         const SizedBox(height: 12),
         _buildConfigField('Server', widget.prefs.serverHost),
         const SizedBox(height: 12),

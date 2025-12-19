@@ -465,11 +465,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val password = prefs.getString("password", "") ?: ""
 
         if (sailorId.isEmpty() && password.isEmpty()) {
-            Toast.makeText(this, "Sailor ID and password are required. Please configure in Settings.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Name and password are required. Please configure in Settings.", Toast.LENGTH_LONG).show()
             return
         }
         if (sailorId.isEmpty()) {
-            Toast.makeText(this, "Sailor ID is required. Please configure in Settings.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Your name is required. Please configure in Settings.", Toast.LENGTH_LONG).show()
             return
         }
         if (password.isEmpty()) {
@@ -627,8 +627,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         
-        val sailorIdLabel = android.widget.TextView(this).apply { 
-            text = "ID"
+        val sailorIdLabel = android.widget.TextView(this).apply {
+            text = "Your Name"
             setTextColor(0xFF000000.toInt())
             textSize = 16f
         }
@@ -915,11 +915,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     val password = passwordInput.text.toString()
 
                     if (sailorId.isEmpty() && password.isEmpty()) {
-                        Toast.makeText(this@MainActivity, "Sailor ID and password are required", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, "Name and password are required", Toast.LENGTH_LONG).show()
                         return@setOnClickListener
                     }
                     if (sailorId.isEmpty()) {
-                        Toast.makeText(this@MainActivity, "Sailor ID is required", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, "Your name is required", Toast.LENGTH_LONG).show()
                         return@setOnClickListener
                     }
                     if (password.isEmpty()) {

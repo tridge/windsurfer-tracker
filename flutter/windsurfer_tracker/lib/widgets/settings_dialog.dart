@@ -140,8 +140,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildLabel('ID'),
-            _buildTextField(_sailorIdController, 'Sailor ID'),
+            _buildLabel('Your Name'),
+            _buildTextField(_sailorIdController, 'e.g. John or S07'),
             const SizedBox(height: 16),
             _buildLabel('Role'),
             _buildRoleDropdown(),
