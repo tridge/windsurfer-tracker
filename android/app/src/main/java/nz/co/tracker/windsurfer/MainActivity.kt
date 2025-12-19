@@ -336,7 +336,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         isLoadingPreferences = true
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         binding.etSailorId.setText(prefs.getString("sailor_id", getDefaultSailorId()))
-        binding.etServerHost.setText(prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST))
+
+        // Migrate old server address for early beta testers
+        var serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+        if (serverHost == "track.tridgell.net") {
+            serverHost = "wstracker.org"
+            prefs.edit().putString("server_host", serverHost).apply()
+        }
+        binding.etServerHost.setText(serverHost)
+
         binding.etServerPort.setText(prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT).toString())
         isLoadingPreferences = false
     }

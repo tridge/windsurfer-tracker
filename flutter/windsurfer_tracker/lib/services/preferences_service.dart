@@ -20,6 +20,12 @@ class PreferencesService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+
+    // Migrate old server address for early beta testers
+    final host = _prefs!.getString(PrefsKeys.serverHost);
+    if (host == 'track.tridgell.net') {
+      await _prefs!.setString(PrefsKeys.serverHost, 'wstracker.org');
+    }
   }
 
   SharedPreferences get _p {
