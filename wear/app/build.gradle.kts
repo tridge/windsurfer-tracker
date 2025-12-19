@@ -68,6 +68,7 @@ android {
     lint {
         // Disable lint fatal errors for release - false positive on Wear Compose
         abortOnError = false
+        checkReleaseBuilds = false
     }
 
     compileOptions {

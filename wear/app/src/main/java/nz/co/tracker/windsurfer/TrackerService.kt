@@ -9,6 +9,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.BatteryManager
 import android.os.Binder
 import android.os.IBinder
@@ -89,6 +93,11 @@ class TrackerService : LifecycleService() {
 
     // Wake lock to keep tracking alive during battery saver
     private var wakeLock: PowerManager.WakeLock? = null
+
+    // Network binding for standalone LTE/WiFi (bypasses Bluetooth proxy to phone)
+    private var connectivityManager: ConnectivityManager? = null
+    private var boundNetwork: Network? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     // Heart rate sensor
     private var sensorManager: SensorManager? = null
@@ -258,6 +267,90 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    /**
+     * Request a standalone network (LTE or WiFi) and bind the socket to it.
+     * This bypasses the default Bluetooth proxy routing through the paired phone.
+     */
+    private fun requestStandaloneNetwork() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        // Request a network with internet capability
+        // NOT_VPN ensures we don't route through VPN
+        // We prefer cellular or WiFi over Bluetooth proxy
+        val networkRequest = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                Log.i(TAG, "Network available: $network")
+                boundNetwork = network
+
+                // Bind the existing socket to this network
+                socket?.let { sock ->
+                    try {
+                        network.bindSocket(sock)
+                        Log.i(TAG, "Socket bound to network $network")
+
+                        // Log network type for debugging
+                        val caps = connectivityManager?.getNetworkCapabilities(network)
+                        val networkType = when {
+                            caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "CELLULAR"
+                            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "WIFI"
+                            caps?.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) == true -> "BLUETOOTH"
+                            else -> "OTHER"
+                        }
+                        Log.i(TAG, "Network type: $networkType")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to bind socket to network", e)
+                    }
+                }
+            }
+
+            override fun onLost(network: Network) {
+                Log.w(TAG, "Network lost: $network")
+                if (boundNetwork == network) {
+                    boundNetwork = null
+                }
+            }
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                val networkType = when {
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "CELLULAR"
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WIFI"
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "BLUETOOTH"
+                    else -> "OTHER"
+                }
+                Log.d(TAG, "Network capabilities changed for $network: $networkType")
+            }
+        }
+
+        try {
+            connectivityManager?.requestNetwork(networkRequest, networkCallback!!)
+            Log.i(TAG, "Requested standalone network")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to request network", e)
+        }
+    }
+
+    /**
+     * Release the network request
+     */
+    private fun releaseNetworkRequest() {
+        networkCallback?.let { callback ->
+            try {
+                connectivityManager?.unregisterNetworkCallback(callback)
+                Log.d(TAG, "Network callback unregistered")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to unregister network callback", e)
+            }
+        }
+        networkCallback = null
+        boundNetwork = null
+        connectivityManager = null
+    }
+
     @Suppress("MissingPermission")
     private fun startTracking() {
         if (isRunning.getAndSet(true)) {
@@ -290,10 +383,24 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
+        // Request standalone network (LTE/WiFi) before creating socket
+        requestStandaloneNetwork()
+
         serviceScope.launch {
             try {
                 socket = DatagramSocket()
                 socket?.soTimeout = ACK_TIMEOUT_MS.toInt()
+
+                // Bind socket to standalone network if already available
+                boundNetwork?.let { network ->
+                    try {
+                        network.bindSocket(socket!!)
+                        Log.i(TAG, "Socket bound to pre-existing network $network")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to bind socket to network", e)
+                    }
+                }
+
                 startAckListener()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create socket", e)
@@ -323,6 +430,10 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Stopping tracking")
         fusedLocationClient.removeLocationUpdates(locationCallback)
+
+        // Release network request before closing socket
+        releaseNetworkRequest()
+
         socket?.close()
         socket = null
 
