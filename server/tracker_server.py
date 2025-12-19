@@ -245,6 +245,11 @@ class EventManager:
         with self._lock:
             return self.events.get(eid)
 
+    def list_events(self) -> list[int]:
+        """Get list of all event IDs."""
+        with self._lock:
+            return list(self.events.keys())
+
     def get_public_events(self) -> list[dict]:
         """Get list of active (non-archived) events without passwords."""
         with self._lock:
@@ -1893,14 +1898,35 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
         http_thread = threading.Thread(target=run_http_server, args=(http_port,), daemon=True)
         http_thread.start()
 
-    # Start background summary generator if track logging is enabled (legacy mode)
+    # Start background summary generator if track logging is enabled
     if log_dir and not _event_manager:
+        # Legacy mode - single log directory
         summary_thread = threading.Thread(target=run_summary_generator, args=(log_dir,), daemon=True)
         summary_thread.start()
 
         # Start background log compressor for efficient .gz serving
         compressor_thread = threading.Thread(target=run_log_compressor, args=(log_dir,), daemon=True)
         compressor_thread.start()
+    elif _event_manager:
+        # Multi-event mode - start summary/compressor for each event
+        for eid in _event_manager.list_events():
+            event_log_dir = _event_manager.get_event_data_dir(eid) / "logs"
+            if event_log_dir.exists():
+                summary_thread = threading.Thread(
+                    target=run_summary_generator,
+                    args=(event_log_dir,),
+                    daemon=True,
+                    name=f"summary-{eid}"
+                )
+                summary_thread.start()
+
+                compressor_thread = threading.Thread(
+                    target=run_log_compressor,
+                    args=(event_log_dir,),
+                    daemon=True,
+                    name=f"compressor-{eid}"
+                )
+                compressor_thread.start()
 
     # Open legacy log file if specified
     log_fh = None
