@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32" height="32" viewBox="-22 -22 44 44" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <clipPath id="boardClip">
+            <ellipse cx="0" cy="0" rx="6" ry="17"/>
+        </clipPath>
+    </defs>
+    <!-- Board body -->
+    <ellipse cx="0" cy="0" rx="6" ry="17" fill="#3b82f6" stroke="#1e40af" stroke-width="1"/>
+    <!-- White nose section -->
+    <ellipse cx="0" cy="-8" rx="6" ry="10" fill="white" clip-path="url(#boardClip)"/>
+    <!-- Color stripes -->
+    <g clip-path="url(#boardClip)">
+        <line x1="-8" y1="-8" x2="0" y2="-16" stroke="#f97316" stroke-width="2"/>
+        <line x1="-8" y1="-5" x2="2" y2="-15" stroke="#3b82f6" stroke-width="1.5"/>
+        <line x1="-8" y1="-3" x2="4" y2="-15" stroke="#06b6d4" stroke-width="1.5"/>
+    </g>
+    <!-- Mast track -->
+    <rect x="-0.75" y="-4" width="1.5" height="10" fill="#1e293b" rx="0.5"/>
+    <!-- Daggerboard case -->
+    <ellipse cx="0" cy="2" rx="2" ry="1.2" fill="#dc2626"/>
+    <!-- Tail plug -->
+    <circle cx="0" cy="14" r="1.5" fill="white" stroke="#cbd5e1" stroke-width="0.5"/>
+    <!-- Subtle outline -->
+    <ellipse cx="0" cy="0" rx="6" ry="17" fill="none" stroke="white" stroke-width="0.5" opacity="0.5"/>
+</svg>
