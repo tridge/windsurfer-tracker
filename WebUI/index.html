@@ -38,6 +38,31 @@
             opacity: 0.9;
         }
 
+        .header .tagline {
+            font-size: 1em;
+            opacity: 0.8;
+            margin-top: 8px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .header .install-link {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 6px;
+            color: white;
+            text-decoration: none;
+            font-size: 0.95em;
+            transition: background 0.2s;
+        }
+
+        .header .install-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
         .events-container {
             display: flex;
             flex-wrap: wrap;
@@ -141,6 +166,8 @@
     <div class="header">
         <h1>Windsurfer Tracker</h1>
         <p>Select an event to view live tracking</p>
+        <p class="tagline">Real-time GPS tracking for windsurfers. Track sailors, support boats, and spectators on a live map.</p>
+        <a href="install/" class="install-link">Get the App</a>
     </div>
 
     <div id="eventsContainer" class="events-container">
@@ -148,6 +175,8 @@
     </div>
 
     <div class="footer">
+        <a href="install/" class="manage-link">Install App</a>
+        &nbsp;&bull;&nbsp;
         <a href="manage.html" class="manage-link">Event Management</a>
     </div>
 
