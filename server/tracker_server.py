@@ -16,6 +16,7 @@ import sys
 import threading
 import email.utils
 from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
@@ -259,7 +260,8 @@ class EventManager:
                     result.append({
                         "eid": eid,
                         "name": event.get("name", f"Event {eid}"),
-                        "description": event.get("description", "")
+                        "description": event.get("description", ""),
+                        "timezone": event.get("timezone", "Australia/Sydney")
                     })
             # Sort by name
             result.sort(key=lambda e: e.get("name", ""))
@@ -279,7 +281,8 @@ class EventManager:
             return result
 
     def create_event(self, name: str, description: str,
-                     admin_password: str, tracker_password: str = "") -> int:
+                     admin_password: str, tracker_password: str = "",
+                     timezone: str = "Australia/Sydney") -> int:
         """Create new event, return event ID."""
         with self._lock:
             eid = self.next_eid
@@ -289,6 +292,7 @@ class EventManager:
                 "description": description,
                 "admin_password": admin_password,
                 "tracker_password": tracker_password,
+                "timezone": timezone,
                 "archived": False,
                 "created": time.time(),
                 "created_iso": datetime.now().isoformat()
@@ -296,18 +300,18 @@ class EventManager:
             self._save_events()
             # Create event data directory
             self._ensure_event_dir(eid)
-            print(f"[EVENTS] Created event {eid}: {name}")
+            print(f"[EVENTS] Created event {eid}: {name} (timezone: {timezone})")
             return eid
 
     def update_event(self, eid: int, updates: dict) -> bool:
-        """Update event properties (name, description, archived, passwords)."""
+        """Update event properties (name, description, archived, passwords, timezone)."""
         with self._lock:
             if eid not in self.events:
                 return False
             event = self.events[eid]
             # Only allow updating certain fields
             allowed_fields = ['name', 'description', 'archived',
-                              'admin_password', 'tracker_password']
+                              'admin_password', 'tracker_password', 'timezone']
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
@@ -368,18 +372,28 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
 class DailyLogger:
     """Handles daily log file rotation."""
 
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path, tz_name: str = "Australia/Sydney"):
         self.log_dir = log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.current_date = None
         self.log_fh = None
+        # Store timezone for date calculations
+        try:
+            self.tz = ZoneInfo(tz_name)
+        except Exception as e:
+            print(f"[WARNING] Invalid timezone '{tz_name}', using Australia/Sydney: {e}")
+            self.tz = ZoneInfo("Australia/Sydney")
         self._open_log_for_today()
 
     def _get_log_filename(self, d: date) -> Path:
         return self.log_dir / f"{d.strftime('%Y_%m_%d')}.jsonl"
 
+    def _get_today_in_tz(self) -> date:
+        """Get today's date in the configured timezone."""
+        return datetime.now(self.tz).date()
+
     def _open_log_for_today(self):
-        today = date.today()
+        today = self._get_today_in_tz()
         if self.current_date != today:
             if self.log_fh:
                 self.log_fh.close()
@@ -405,7 +419,7 @@ class DailyLogger:
         if self.log_fh:
             self.log_fh.close()
             self.log_fh = None
-        log_path = self._get_log_filename(date.today())
+        log_path = self._get_log_filename(self._get_today_in_tz())
         # Rotate the file instead of truncating
         rotate_file(log_path)
         # Open a fresh log file
@@ -593,8 +607,9 @@ class EventTracker:
         # Ensure directories exist
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create daily logger
-        self.daily_logger = DailyLogger(self.log_dir)
+        # Create daily logger with event timezone
+        event_tz = event_config.get('timezone', 'Australia/Sydney')
+        self.daily_logger = DailyLogger(self.log_dir, event_tz)
 
         # Load user overrides
         self.user_overrides = load_user_overrides(self.users_file)
@@ -1605,12 +1620,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             tracker_password = data.get('tracker_password', '')
+            timezone = data.get('timezone', 'Australia/Sydney')
 
             eid = _event_manager.create_event(
                 name=name,
                 description=description,
                 admin_password=admin_password,
-                tracker_password=tracker_password
+                tracker_password=tracker_password,
+                timezone=timezone
             )
 
             self._send_json({"success": True, "eid": eid})

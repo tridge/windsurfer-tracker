@@ -1428,6 +1428,9 @@
     <div id="sidebar-overlay"></div>
 
     <div id="sidebar">
+        <div id="timezone-display" style="display:none;background:#e8f4fd;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:13px;color:#1e40af;">
+            <strong>Timezone:</strong> <span id="event-timezone">-</span>
+        </div>
         <div id="race-selector">
             <h3>Select Log</h3>
             <div id="race-list">
@@ -1529,6 +1532,34 @@
             document.getElementById('eventModalOverlay').classList.remove('visible');
         }
 
+        // Event timezone (defaults to local, updated when event info is fetched)
+        let eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        // Get today's date in event timezone (for date picker)
+        function getTodayInEventTz() {
+            // Get current date parts in event timezone
+            const parts = new Date().toLocaleDateString('en-CA', { timeZone: eventTimezone });
+            return parts; // Format: YYYY-MM-DD (en-CA gives ISO format)
+        }
+
+        // Format time in event timezone
+        function formatTimeInTz(ts) {
+            return new Date(ts * 1000).toLocaleTimeString([], {
+                timeZone: eventTimezone,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function formatTimeShortInTz(ts) {
+            return new Date(ts * 1000).toLocaleTimeString([], {
+                timeZone: eventTimezone,
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
         // Fetch event name and update page title + header
         (async function() {
             try {
@@ -1542,6 +1573,15 @@
                         const headerEl = document.getElementById('eventHeaderName');
                         headerEl.textContent = event.name;
                         headerEl.style.display = 'inline-block';
+
+                        // Display and use event timezone
+                        if (event.timezone) {
+                            eventTimezone = event.timezone;
+                            document.getElementById('event-timezone').textContent = event.timezone;
+                            document.getElementById('timezone-display').style.display = 'block';
+                            // Update date picker to use event timezone
+                            document.getElementById('date-picker').value = getTodayInEventTz();
+                        }
                     }
                 }
             } catch (e) {
@@ -1856,10 +1896,8 @@
             return `rgb(${r},${g},${b})`;
         }
 
-        // Set default date to today (use local date, not UTC)
-        const d = new Date();
-        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        document.getElementById('date-picker').value = today;
+        // Set default date to today in event timezone
+        document.getElementById('date-picker').value = getTodayInEventTz();
 
         // Load summary for a date (phase 1)
         async function loadSummary() {
@@ -1919,8 +1957,8 @@
                 div.className = 'race-item';
                 div.dataset.index = index;
 
-                const startTime = new Date(log.start_ts * 1000).toLocaleTimeString();
-                const endTime = new Date(log.end_ts * 1000).toLocaleTimeString();
+                const startTime = formatTimeInTz(log.start_ts);
+                const endTime = formatTimeInTz(log.end_ts);
                 const duration = Math.round((log.end_ts - log.start_ts) / 60);
                 const sailorCount = Object.keys(log.sailors).length;
 
@@ -2229,22 +2267,19 @@
             rangeEndTime = minTime + (maxTime - minTime) * (endVal / 100);
 
             // Update the labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
-            document.getElementById('label-start').textContent = fmtTime(minTime);
-            document.getElementById('label-end').textContent = fmtTime(maxTime);
+            document.getElementById('label-start').textContent = formatTimeInTz(minTime);
+            document.getElementById('label-end').textContent = formatTimeInTz(maxTime);
         }
 
         function updateTimeDisplay() {
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
-
             const durationSec = rangeEndTime - rangeStartTime;
             const durationMin = Math.floor(durationSec / 60);
             const durationRemSec = Math.floor(durationSec % 60);
             const durationStr = `${durationMin}:${String(durationRemSec).padStart(2, '0')}`;
 
             document.getElementById('time-display').innerHTML =
-                `<span style="color:#2ecc71">Start: ${fmtTime(rangeStartTime)}</span> &nbsp;|&nbsp;` +
-                `<span style="color:#e74c3c">End: ${fmtTime(rangeEndTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#2ecc71">Start: ${formatTimeInTz(rangeStartTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#e74c3c">End: ${formatTimeInTz(rangeEndTime)}</span> &nbsp;|&nbsp;` +
                 `Duration: ${durationStr}`;
         }
 
@@ -2301,7 +2336,7 @@
                 if (showOutliersMarkers && outliers.length > 0) {
                     const outlierGroup = L.layerGroup();
                     for (const point of outliers) {
-                        const time = new Date(point.ts * 1000).toLocaleTimeString();
+                        const time = formatTimeInTz(point.ts);
                         const speedKnots = (point.spd || 0).toFixed(1);
 
                         const marker = L.circleMarker([point.lat, point.lon], {
@@ -2367,7 +2402,7 @@
                 const pointGroup = L.layerGroup();
                 for (const point of filtered) {
                     const speedKnots = (point.spd || 0).toFixed(1);
-                    const time = new Date(point.ts * 1000).toLocaleTimeString();
+                    const time = formatTimeInTz(point.ts);
                     const color = useSpeedColor ? speedToColor(point.spd || 0) : userColor;
 
                     const pointMarker = L.circleMarker([point.lat, point.lon], {
@@ -2497,9 +2532,8 @@
             ctx.clearRect(0, 0, width, height);
 
             // Update time axis labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('speed-time-start').textContent = fmtTime(rangeStartTime);
-            document.getElementById('speed-time-end').textContent = fmtTime(rangeEndTime);
+            document.getElementById('speed-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('speed-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
             // Calculate speed range for Y axis scaling (only from visible time range)
             let maxSpeed = 0;
@@ -2631,9 +2665,8 @@
             ctx.clearRect(0, 0, width, height);
 
             // Update time axis labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('battery-time-start').textContent = fmtTime(rangeStartTime);
-            document.getElementById('battery-time-end').textContent = fmtTime(rangeEndTime);
+            document.getElementById('battery-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('battery-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
             // Calculate battery range for Y axis scaling (only from visible time range)
             let maxBat = 0;
@@ -2776,9 +2809,8 @@
             ctx.clearRect(0, 0, width, height);
 
             // Update time axis labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('signal-time-start').textContent = fmtTime(rangeStartTime);
-            document.getElementById('signal-time-end').textContent = fmtTime(rangeEndTime);
+            document.getElementById('signal-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('signal-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
             // Draw grid lines
             ctx.strokeStyle = '#34495e';
@@ -2878,9 +2910,8 @@
             ctx.clearRect(0, 0, width, height);
 
             // Update time axis labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('latency-time-start').textContent = fmtTime(rangeStartTime);
-            document.getElementById('latency-time-end').textContent = fmtTime(rangeEndTime);
+            document.getElementById('latency-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('latency-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
             // Calculate max latency for Y axis scaling (only from visible time range)
             let maxLatency = 0;
@@ -3052,9 +3083,8 @@
             ctx.clearRect(0, 0, width, height);
 
             // Update time axis labels
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('heartrate-time-start').textContent = fmtTime(rangeStartTime);
-            document.getElementById('heartrate-time-end').textContent = fmtTime(rangeEndTime);
+            document.getElementById('heartrate-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('heartrate-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
             // Calculate heart rate range for Y axis scaling (only from visible time range)
             let maxHR = 0;
@@ -3253,7 +3283,7 @@
                 });
 
                 // Add tooltip with info
-                const time = new Date(closest.ts * 1000).toLocaleTimeString();
+                const time = formatTimeInTz(closest.ts);
                 let tooltipHtml = `
                     <b>${getDisplayName(userId)}</b><br>
                     Time: ${time}<br>
@@ -4131,11 +4161,10 @@
             }
 
             // Update time display during playback
-            const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
             document.getElementById('time-display').innerHTML =
-                `<span style="color:#2ecc71">Start: ${fmtTime(rangeStartTime)}</span> &nbsp;|&nbsp;` +
-                `<span style="color:#f39c12">Playing: ${fmtTime(upToTime)}</span> &nbsp;|&nbsp;` +
-                `<span style="color:#e74c3c">End: ${fmtTime(rangeEndTime)}</span>`;
+                `<span style="color:#2ecc71">Start: ${formatTimeInTz(rangeStartTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#f39c12">Playing: ${formatTimeInTz(upToTime)}</span> &nbsp;|&nbsp;` +
+                `<span style="color:#e74c3c">End: ${formatTimeInTz(rangeEndTime)}</span>`;
         }
 
         document.getElementById('speed-1x').addEventListener('click', () => playbackSpeed = 1);

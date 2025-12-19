@@ -359,6 +359,94 @@
                     <input type="text" id="trackerPassword" required placeholder="Required password for tracker clients">
                     <small>Required - tracker apps must send this password to connect</small>
                 </div>
+                <div class="form-group">
+                    <label for="eventTimezone">Timezone</label>
+                    <select id="eventTimezone">
+                        <optgroup label="Pacific / Oceania">
+                            <option value="Pacific/Auckland">New Zealand (GMT+12/+13 DST)</option>
+                            <option value="Pacific/Chatham">Chatham Islands (GMT+12:45/+13:45 DST)</option>
+                            <option value="Pacific/Fiji">Fiji (GMT+12/+13 DST)</option>
+                            <option value="Pacific/Tongatapu">Tonga (GMT+13)</option>
+                            <option value="Pacific/Noumea">New Caledonia (GMT+11)</option>
+                            <option value="Pacific/Guadalcanal">Solomon Islands (GMT+11)</option>
+                            <option value="Pacific/Port_Moresby">Papua New Guinea (GMT+10)</option>
+                            <option value="Pacific/Guam">Guam (GMT+10)</option>
+                            <option value="Pacific/Tahiti">Tahiti (GMT-10)</option>
+                            <option value="Pacific/Honolulu">Hawaii (GMT-10)</option>
+                            <option value="Pacific/Marquesas">Marquesas (GMT-9:30)</option>
+                            <option value="Pacific/Gambier">Gambier (GMT-9)</option>
+                        </optgroup>
+                        <optgroup label="Australia">
+                            <option value="Australia/Sydney" selected>Sydney/Canberra (GMT+10/+11 DST)</option>
+                            <option value="Australia/Melbourne">Melbourne (GMT+10/+11 DST)</option>
+                            <option value="Australia/Brisbane">Brisbane (GMT+10)</option>
+                            <option value="Australia/Hobart">Hobart (GMT+10/+11 DST)</option>
+                            <option value="Australia/Adelaide">Adelaide (GMT+9:30/+10:30 DST)</option>
+                            <option value="Australia/Darwin">Darwin (GMT+9:30)</option>
+                            <option value="Australia/Perth">Perth (GMT+8)</option>
+                            <option value="Australia/Lord_Howe">Lord Howe Island (GMT+10:30/+11 DST)</option>
+                            <option value="Australia/Eucla">Eucla (GMT+8:45)</option>
+                        </optgroup>
+                        <optgroup label="Asia">
+                            <option value="Asia/Tokyo">Japan (GMT+9)</option>
+                            <option value="Asia/Seoul">South Korea (GMT+9)</option>
+                            <option value="Asia/Shanghai">China (GMT+8)</option>
+                            <option value="Asia/Hong_Kong">Hong Kong (GMT+8)</option>
+                            <option value="Asia/Taipei">Taiwan (GMT+8)</option>
+                            <option value="Asia/Singapore">Singapore (GMT+8)</option>
+                            <option value="Asia/Manila">Philippines (GMT+8)</option>
+                            <option value="Asia/Kuala_Lumpur">Malaysia (GMT+8)</option>
+                            <option value="Asia/Jakarta">Indonesia West (GMT+7)</option>
+                            <option value="Asia/Bangkok">Thailand (GMT+7)</option>
+                            <option value="Asia/Ho_Chi_Minh">Vietnam (GMT+7)</option>
+                            <option value="Asia/Kolkata">India (GMT+5:30)</option>
+                            <option value="Asia/Dubai">UAE/Gulf (GMT+4)</option>
+                            <option value="Asia/Jerusalem">Israel (GMT+2/+3 DST)</option>
+                        </optgroup>
+                        <optgroup label="Europe">
+                            <option value="Europe/London">UK (GMT+0/+1 DST)</option>
+                            <option value="Europe/Dublin">Ireland (GMT+0/+1 DST)</option>
+                            <option value="Europe/Lisbon">Portugal (GMT+0/+1 DST)</option>
+                            <option value="Europe/Paris">France (GMT+1/+2 DST)</option>
+                            <option value="Europe/Berlin">Germany (GMT+1/+2 DST)</option>
+                            <option value="Europe/Amsterdam">Netherlands (GMT+1/+2 DST)</option>
+                            <option value="Europe/Rome">Italy (GMT+1/+2 DST)</option>
+                            <option value="Europe/Madrid">Spain (GMT+1/+2 DST)</option>
+                            <option value="Europe/Stockholm">Sweden (GMT+1/+2 DST)</option>
+                            <option value="Europe/Athens">Greece (GMT+2/+3 DST)</option>
+                            <option value="Europe/Helsinki">Finland (GMT+2/+3 DST)</option>
+                            <option value="Europe/Moscow">Russia/Moscow (GMT+3)</option>
+                        </optgroup>
+                        <optgroup label="Africa">
+                            <option value="Africa/Cairo">Egypt (GMT+2)</option>
+                            <option value="Africa/Johannesburg">South Africa (GMT+2)</option>
+                            <option value="Africa/Lagos">Nigeria (GMT+1)</option>
+                            <option value="Africa/Nairobi">Kenya (GMT+3)</option>
+                            <option value="Africa/Casablanca">Morocco (GMT+0/+1 DST)</option>
+                        </optgroup>
+                        <optgroup label="Americas">
+                            <option value="America/New_York">US Eastern (GMT-5/-4 DST)</option>
+                            <option value="America/Chicago">US Central (GMT-6/-5 DST)</option>
+                            <option value="America/Denver">US Mountain (GMT-7/-6 DST)</option>
+                            <option value="America/Phoenix">Arizona (GMT-7)</option>
+                            <option value="America/Los_Angeles">US Pacific (GMT-8/-7 DST)</option>
+                            <option value="America/Anchorage">Alaska (GMT-9/-8 DST)</option>
+                            <option value="America/Toronto">Canada Eastern (GMT-5/-4 DST)</option>
+                            <option value="America/Vancouver">Canada Pacific (GMT-8/-7 DST)</option>
+                            <option value="America/Mexico_City">Mexico City (GMT-6/-5 DST)</option>
+                            <option value="America/Sao_Paulo">Brazil (GMT-3)</option>
+                            <option value="America/Buenos_Aires">Argentina (GMT-3)</option>
+                            <option value="America/Santiago">Chile (GMT-4/-3 DST)</option>
+                            <option value="America/Lima">Peru (GMT-5)</option>
+                            <option value="America/Bogota">Colombia (GMT-5)</option>
+                            <option value="America/Caracas">Venezuela (GMT-4)</option>
+                        </optgroup>
+                        <optgroup label="Other">
+                            <option value="UTC">UTC (GMT+0)</option>
+                        </optgroup>
+                    </select>
+                    <small>Timezone for log file dates. DST (daylight saving) is handled automatically.</small>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
@@ -434,6 +522,7 @@
                         <div class="event-passwords">
                             <span>Admin: ${event.admin_password ? '***' : '(none)'}</span>
                             <span>Tracker: ${event.tracker_password ? '***' : '(none)'}</span>
+                            <span>TZ: ${escapeHtml(event.timezone || 'Australia/Sydney')}</span>
                         </div>
                         <div class="event-actions">
                             <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
@@ -455,6 +544,7 @@
             document.getElementById('saveBtn').textContent = 'Create';
             document.getElementById('eventId').value = '';
             document.getElementById('eventForm').reset();
+            document.getElementById('eventTimezone').value = 'Australia/Sydney';  // Reset to default
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
         }
@@ -480,6 +570,7 @@
                 document.getElementById('eventDescription').value = event.description || '';
                 document.getElementById('adminPassword').value = event.admin_password || '';
                 document.getElementById('trackerPassword').value = event.tracker_password || '';
+                document.getElementById('eventTimezone').value = event.timezone || 'Australia/Sydney';
                 document.getElementById('modalError').style.display = 'none';
                 document.getElementById('eventModal').classList.add('visible');
 
@@ -515,7 +606,8 @@
                 name: document.getElementById('eventName').value,
                 description: document.getElementById('eventDescription').value,
                 admin_password: adminPassword,
-                tracker_password: document.getElementById('trackerPassword').value
+                tracker_password: document.getElementById('trackerPassword').value,
+                timezone: document.getElementById('eventTimezone').value
             };
 
             try {
