@@ -261,6 +261,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTracking() {
+        // Clear event name - will be repopulated from first ACK
+        eventName.value = ""
+
         val currentSettings = settings.value
 
         val intent = Intent(this, TrackerService::class.java).apply {

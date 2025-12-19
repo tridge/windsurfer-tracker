@@ -328,6 +328,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startTracking() async {
+    // Clear event name - will be repopulated from first ACK
+    setState(() {
+      _eventName = '';
+    });
+
     final prefs = widget.prefs;
 
     if (Platform.isIOS) {

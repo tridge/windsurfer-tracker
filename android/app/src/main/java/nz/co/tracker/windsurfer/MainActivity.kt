@@ -454,6 +454,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun startTrackerService() {
+        // Clear event name - will be repopulated from first ACK
+        binding.tvEventName.text = ""
+        binding.tvEventName.visibility = View.GONE
+
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
         // Validate ID and password before starting
