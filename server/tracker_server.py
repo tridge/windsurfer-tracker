@@ -261,7 +261,10 @@ class EventManager:
                         "eid": eid,
                         "name": event.get("name", f"Event {eid}"),
                         "description": event.get("description", ""),
-                        "timezone": event.get("timezone", "Australia/Sydney")
+                        "timezone": event.get("timezone", "Australia/Sydney"),
+                        "home_location": event.get("home_location", ""),
+                        "home_lat": event.get("home_lat"),
+                        "home_lon": event.get("home_lon")
                     })
             # Sort by name
             result.sort(key=lambda e: e.get("name", ""))
@@ -282,7 +285,9 @@ class EventManager:
 
     def create_event(self, name: str, description: str,
                      admin_password: str, tracker_password: str = "",
-                     timezone: str = "Australia/Sydney") -> int:
+                     timezone: str = "Australia/Sydney",
+                     home_location: str = "", home_lat: float = None,
+                     home_lon: float = None) -> int:
         """Create new event, return event ID."""
         with self._lock:
             eid = self.next_eid
@@ -293,6 +298,9 @@ class EventManager:
                 "admin_password": admin_password,
                 "tracker_password": tracker_password,
                 "timezone": timezone,
+                "home_location": home_location,
+                "home_lat": home_lat,
+                "home_lon": home_lon,
                 "archived": False,
                 "created": time.time(),
                 "created_iso": datetime.now().isoformat()
@@ -300,18 +308,19 @@ class EventManager:
             self._save_events()
             # Create event data directory
             self._ensure_event_dir(eid)
-            print(f"[EVENTS] Created event {eid}: {name} (timezone: {timezone})")
+            print(f"[EVENTS] Created event {eid}: {name} (timezone: {timezone}, location: {home_location})")
             return eid
 
     def update_event(self, eid: int, updates: dict) -> bool:
-        """Update event properties (name, description, archived, passwords, timezone)."""
+        """Update event properties (name, description, archived, passwords, timezone, location)."""
         with self._lock:
             if eid not in self.events:
                 return False
             event = self.events[eid]
             # Only allow updating certain fields
             allowed_fields = ['name', 'description', 'archived',
-                              'admin_password', 'tracker_password', 'timezone']
+                              'admin_password', 'tracker_password', 'timezone',
+                              'home_location', 'home_lat', 'home_lon']
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
@@ -1621,13 +1630,19 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             tracker_password = data.get('tracker_password', '')
             timezone = data.get('timezone', 'Australia/Sydney')
+            home_location = data.get('home_location', '')
+            home_lat = data.get('home_lat')
+            home_lon = data.get('home_lon')
 
             eid = _event_manager.create_event(
                 name=name,
                 description=description,
                 admin_password=admin_password,
                 tracker_password=tracker_password,
-                timezone=timezone
+                timezone=timezone,
+                home_location=home_location,
+                home_lat=home_lat,
+                home_lon=home_lon
             )
 
             self._send_json({"success": True, "eid": eid})

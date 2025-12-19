@@ -361,7 +361,7 @@
                 </div>
                 <div class="form-group">
                     <label for="eventTimezone">Timezone</label>
-                    <select id="eventTimezone">
+                    <select id="eventTimezone" onchange="onTimezoneChange()">
                         <optgroup label="Pacific / Oceania">
                             <option value="Pacific/Auckland">New Zealand (GMT+12/+13 DST)</option>
                             <option value="Pacific/Chatham">Chatham Islands (GMT+12:45/+13:45 DST)</option>
@@ -447,6 +447,21 @@
                     </select>
                     <small>Timezone for log file dates. DST (daylight saving) is handled automatically.</small>
                 </div>
+                <div class="form-group">
+                    <label for="homeLocation">Home Location (for default map view)</label>
+                    <input type="text" id="homeLocation" placeholder="e.g., Wellington, New Zealand">
+                    <div style="display:flex;gap:10px;margin-top:8px;">
+                        <div style="flex:1;">
+                            <label for="homeLat" style="font-size:12px;color:#666;">Latitude</label>
+                            <input type="number" id="homeLat" step="0.0001" placeholder="-41.2866" style="width:100%;">
+                        </div>
+                        <div style="flex:1;">
+                            <label for="homeLon" style="font-size:12px;color:#666;">Longitude</label>
+                            <input type="number" id="homeLon" step="0.0001" placeholder="174.7756" style="width:100%;">
+                        </div>
+                    </div>
+                    <small>Auto-filled from timezone. Override if needed for exact race location.</small>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
@@ -458,6 +473,106 @@
     <script>
         const API_BASE = window.location.origin;
         let managerPassword = '';
+
+        // Timezone to default location mapping
+        const timezoneLocations = {
+            // Pacific / Oceania
+            'Pacific/Auckland': { name: 'Auckland, New Zealand', lat: -36.8485, lon: 174.7633 },
+            'Pacific/Chatham': { name: 'Chatham Islands', lat: -43.9500, lon: -176.5500 },
+            'Pacific/Fiji': { name: 'Suva, Fiji', lat: -18.1416, lon: 178.4419 },
+            'Pacific/Tongatapu': { name: "Nuku'alofa, Tonga", lat: -21.2087, lon: -175.1982 },
+            'Pacific/Noumea': { name: 'Noumea, New Caledonia', lat: -22.2758, lon: 166.4580 },
+            'Pacific/Guadalcanal': { name: 'Honiara, Solomon Islands', lat: -9.4289, lon: 159.9498 },
+            'Pacific/Port_Moresby': { name: 'Port Moresby, PNG', lat: -9.4438, lon: 147.1803 },
+            'Pacific/Guam': { name: 'Hagatna, Guam', lat: 13.4443, lon: 144.7937 },
+            'Pacific/Tahiti': { name: 'Papeete, Tahiti', lat: -17.5516, lon: -149.5585 },
+            'Pacific/Honolulu': { name: 'Honolulu, Hawaii', lat: 21.3069, lon: -157.8583 },
+            'Pacific/Marquesas': { name: 'Marquesas Islands', lat: -9.4500, lon: -139.4000 },
+            'Pacific/Gambier': { name: 'Gambier Islands', lat: -23.1167, lon: -134.9667 },
+            // Australia
+            'Australia/Sydney': { name: 'Sydney, Australia', lat: -33.8688, lon: 151.2093 },
+            'Australia/Melbourne': { name: 'Melbourne, Australia', lat: -37.8136, lon: 144.9631 },
+            'Australia/Brisbane': { name: 'Brisbane, Australia', lat: -27.4698, lon: 153.0251 },
+            'Australia/Hobart': { name: 'Hobart, Tasmania', lat: -42.8821, lon: 147.3272 },
+            'Australia/Adelaide': { name: 'Adelaide, Australia', lat: -34.9285, lon: 138.6007 },
+            'Australia/Darwin': { name: 'Darwin, Australia', lat: -12.4634, lon: 130.8456 },
+            'Australia/Perth': { name: 'Perth, Australia', lat: -31.9505, lon: 115.8605 },
+            'Australia/Lord_Howe': { name: 'Lord Howe Island', lat: -31.5553, lon: 159.0821 },
+            'Australia/Eucla': { name: 'Eucla, Australia', lat: -31.6833, lon: 128.8833 },
+            // Asia
+            'Asia/Tokyo': { name: 'Tokyo, Japan', lat: 35.6762, lon: 139.6503 },
+            'Asia/Seoul': { name: 'Seoul, South Korea', lat: 37.5665, lon: 126.9780 },
+            'Asia/Shanghai': { name: 'Shanghai, China', lat: 31.2304, lon: 121.4737 },
+            'Asia/Hong_Kong': { name: 'Hong Kong', lat: 22.3193, lon: 114.1694 },
+            'Asia/Taipei': { name: 'Taipei, Taiwan', lat: 25.0330, lon: 121.5654 },
+            'Asia/Singapore': { name: 'Singapore', lat: 1.3521, lon: 103.8198 },
+            'Asia/Manila': { name: 'Manila, Philippines', lat: 14.5995, lon: 120.9842 },
+            'Asia/Kuala_Lumpur': { name: 'Kuala Lumpur, Malaysia', lat: 3.1390, lon: 101.6869 },
+            'Asia/Jakarta': { name: 'Jakarta, Indonesia', lat: -6.2088, lon: 106.8456 },
+            'Asia/Bangkok': { name: 'Bangkok, Thailand', lat: 13.7563, lon: 100.5018 },
+            'Asia/Ho_Chi_Minh': { name: 'Ho Chi Minh City, Vietnam', lat: 10.8231, lon: 106.6297 },
+            'Asia/Kolkata': { name: 'Mumbai, India', lat: 19.0760, lon: 72.8777 },
+            'Asia/Dubai': { name: 'Dubai, UAE', lat: 25.2048, lon: 55.2708 },
+            'Asia/Jerusalem': { name: 'Tel Aviv, Israel', lat: 32.0853, lon: 34.7818 },
+            // Europe
+            'Europe/London': { name: 'London, UK', lat: 51.5074, lon: -0.1278 },
+            'Europe/Dublin': { name: 'Dublin, Ireland', lat: 53.3498, lon: -6.2603 },
+            'Europe/Lisbon': { name: 'Lisbon, Portugal', lat: 38.7223, lon: -9.1393 },
+            'Europe/Paris': { name: 'Paris, France', lat: 48.8566, lon: 2.3522 },
+            'Europe/Berlin': { name: 'Berlin, Germany', lat: 52.5200, lon: 13.4050 },
+            'Europe/Amsterdam': { name: 'Amsterdam, Netherlands', lat: 52.3676, lon: 4.9041 },
+            'Europe/Rome': { name: 'Rome, Italy', lat: 41.9028, lon: 12.4964 },
+            'Europe/Madrid': { name: 'Madrid, Spain', lat: 40.4168, lon: -3.7038 },
+            'Europe/Stockholm': { name: 'Stockholm, Sweden', lat: 59.3293, lon: 18.0686 },
+            'Europe/Athens': { name: 'Athens, Greece', lat: 37.9838, lon: 23.7275 },
+            'Europe/Helsinki': { name: 'Helsinki, Finland', lat: 60.1699, lon: 24.9384 },
+            'Europe/Moscow': { name: 'Moscow, Russia', lat: 55.7558, lon: 37.6173 },
+            // Africa
+            'Africa/Cairo': { name: 'Cairo, Egypt', lat: 30.0444, lon: 31.2357 },
+            'Africa/Johannesburg': { name: 'Cape Town, South Africa', lat: -33.9249, lon: 18.4241 },
+            'Africa/Lagos': { name: 'Lagos, Nigeria', lat: 6.5244, lon: 3.3792 },
+            'Africa/Nairobi': { name: 'Nairobi, Kenya', lat: -1.2921, lon: 36.8219 },
+            'Africa/Casablanca': { name: 'Casablanca, Morocco', lat: 33.5731, lon: -7.5898 },
+            // Americas
+            'America/New_York': { name: 'New York, USA', lat: 40.7128, lon: -74.0060 },
+            'America/Chicago': { name: 'Chicago, USA', lat: 41.8781, lon: -87.6298 },
+            'America/Denver': { name: 'Denver, USA', lat: 39.7392, lon: -104.9903 },
+            'America/Phoenix': { name: 'Phoenix, USA', lat: 33.4484, lon: -112.0740 },
+            'America/Los_Angeles': { name: 'Los Angeles, USA', lat: 34.0522, lon: -118.2437 },
+            'America/Anchorage': { name: 'Anchorage, Alaska', lat: 61.2181, lon: -149.9003 },
+            'America/Toronto': { name: 'Toronto, Canada', lat: 43.6532, lon: -79.3832 },
+            'America/Vancouver': { name: 'Vancouver, Canada', lat: 49.2827, lon: -123.1207 },
+            'America/Mexico_City': { name: 'Mexico City, Mexico', lat: 19.4326, lon: -99.1332 },
+            'America/Sao_Paulo': { name: 'Rio de Janeiro, Brazil', lat: -22.9068, lon: -43.1729 },
+            'America/Buenos_Aires': { name: 'Buenos Aires, Argentina', lat: -34.6037, lon: -58.3816 },
+            'America/Santiago': { name: 'Santiago, Chile', lat: -33.4489, lon: -70.6693 },
+            'America/Lima': { name: 'Lima, Peru', lat: -12.0464, lon: -77.0428 },
+            'America/Bogota': { name: 'Bogota, Colombia', lat: 4.7110, lon: -74.0721 },
+            'America/Caracas': { name: 'Caracas, Venezuela', lat: 10.4806, lon: -66.9036 },
+            // Other
+            'UTC': { name: 'Greenwich, UK', lat: 51.4772, lon: 0.0005 }
+        };
+
+        // Update location fields when timezone changes
+        function onTimezoneChange() {
+            const tz = document.getElementById('eventTimezone').value;
+            const loc = timezoneLocations[tz];
+            if (loc) {
+                document.getElementById('homeLocation').value = loc.name;
+                document.getElementById('homeLat').value = loc.lat;
+                document.getElementById('homeLon').value = loc.lon;
+            }
+        }
+
+        // Set location from timezone (for initial create)
+        function setLocationFromTimezone(tz) {
+            const loc = timezoneLocations[tz];
+            if (loc) {
+                document.getElementById('homeLocation').value = loc.name;
+                document.getElementById('homeLat').value = loc.lat;
+                document.getElementById('homeLon').value = loc.lon;
+            }
+        }
 
         function login() {
             managerPassword = document.getElementById('managerPassword').value;
@@ -523,6 +638,7 @@
                             <span>Admin: ${event.admin_password ? '***' : '(none)'}</span>
                             <span>Tracker: ${event.tracker_password ? '***' : '(none)'}</span>
                             <span>TZ: ${escapeHtml(event.timezone || 'Australia/Sydney')}</span>
+                            <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
                         </div>
                         <div class="event-actions">
                             <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
@@ -545,6 +661,7 @@
             document.getElementById('eventId').value = '';
             document.getElementById('eventForm').reset();
             document.getElementById('eventTimezone').value = 'Australia/Sydney';  // Reset to default
+            setLocationFromTimezone('Australia/Sydney');  // Set default location
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
         }
@@ -571,6 +688,13 @@
                 document.getElementById('adminPassword').value = event.admin_password || '';
                 document.getElementById('trackerPassword').value = event.tracker_password || '';
                 document.getElementById('eventTimezone').value = event.timezone || 'Australia/Sydney';
+                document.getElementById('homeLocation').value = event.home_location || '';
+                document.getElementById('homeLat').value = event.home_lat || '';
+                document.getElementById('homeLon').value = event.home_lon || '';
+                // If no location set, default from timezone
+                if (!event.home_location && !event.home_lat) {
+                    setLocationFromTimezone(event.timezone || 'Australia/Sydney');
+                }
                 document.getElementById('modalError').style.display = 'none';
                 document.getElementById('eventModal').classList.add('visible');
 
@@ -602,12 +726,18 @@
                 return false;
             }
 
+            const homeLat = document.getElementById('homeLat').value;
+            const homeLon = document.getElementById('homeLon').value;
+
             const data = {
                 name: document.getElementById('eventName').value,
                 description: document.getElementById('eventDescription').value,
                 admin_password: adminPassword,
                 tracker_password: document.getElementById('trackerPassword').value,
-                timezone: document.getElementById('eventTimezone').value
+                timezone: document.getElementById('eventTimezone').value,
+                home_location: document.getElementById('homeLocation').value,
+                home_lat: homeLat ? parseFloat(homeLat) : null,
+                home_lon: homeLon ? parseFloat(homeLon) : null
             };
 
             try {

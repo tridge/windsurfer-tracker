@@ -1389,6 +1389,11 @@
                         document.title = `${event.name} - Windsurfer Tracker`;
                         document.getElementById('eventBannerName').textContent = event.name;
                         document.getElementById('eventBanner').style.display = 'block';
+
+                        // Center map on event home location if available
+                        if (event.home_lat && event.home_lon) {
+                            map.setView([event.home_lat, event.home_lon], 13);
+                        }
                     }
                 }
             } catch (e) {

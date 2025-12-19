@@ -1582,6 +1582,11 @@
                             // Update date picker to use event timezone
                             document.getElementById('date-picker').value = getTodayInEventTz();
                         }
+
+                        // Center map on event home location if available
+                        if (event.home_lat && event.home_lon) {
+                            map.setView([event.home_lat, event.home_lon], 13);
+                        }
                     }
                 }
             } catch (e) {
