@@ -49,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _lastAckSeq = 0;
   double _ackRate = 0.0;
   String _lastUpdateTime = '--:--:--';
+  String _eventName = '';
 
   @override
   void initState() {
@@ -137,6 +138,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _lastAckSeq = data['seq'] as int;
           _ackRate = (data['ackRate'] as num).toDouble();
+          // Update event name if present in ACK
+          final eventName = data['eventName'] as String?;
+          if (eventName != null && eventName.isNotEmpty) {
+            _eventName = eventName;
+          }
         });
       } else if (type == 'packetSent') {
         // Could show packet sent indicator if desired
@@ -476,6 +482,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final oldServerPort = widget.prefs.serverPort;
     final oldRole = widget.prefs.role;
     final oldPassword = widget.prefs.password;
+    final oldEventId = widget.prefs.eventId;
     final oldHighFrequencyMode = widget.prefs.highFrequencyMode;
 
     final saved = await SettingsDialog.show(context, widget.prefs);
@@ -486,6 +493,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           widget.prefs.serverPort != oldServerPort ||
           widget.prefs.role != oldRole ||
           widget.prefs.password != oldPassword ||
+          widget.prefs.eventId != oldEventId ||
           widget.prefs.highFrequencyMode != oldHighFrequencyMode;
 
       if (_isTracking && settingsChanged) {
@@ -619,6 +627,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       child: Column(
         children: [
+          // Event name
+          if (_eventName.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0066CC),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _eventName,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
           // 1Hz Mode indicator
           if (widget.prefs.highFrequencyMode)
             Container(

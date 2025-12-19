@@ -12,12 +12,16 @@ import time
 import argparse
 import os
 import re
+import sys
 import threading
 import email.utils
 from datetime import datetime, date, timezone
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
+
+# Force line-buffered output for real-time logging with tail -f
+sys.stdout.reconfigure(line_buffering=True)
 
 
 def format_timestamp(ts: int) -> str:
@@ -1375,8 +1379,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     print(f"[POST] ERROR: Could not get tracker for event {eid}")
                     self._send_json({"error": "Could not initialize event tracker"}, 500)
                     return
+                event_name = event.get('name', f'Event {eid}')
 
             else:
+                event_name = None  # No event name in legacy mode
                 # Legacy single-event mode
                 # Check rate limiting and password if required
                 if _tracker_password:
@@ -1478,7 +1484,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 )
 
             # Send ACK response (same format as UDP)
-            self._send_json({"ack": seq, "ts": int(recv_time)})
+            ack_response = {"ack": seq, "ts": int(recv_time)}
+            if event_name:
+                ack_response["event"] = event_name
+            self._send_json(ack_response)
 
         except json.JSONDecodeError as e:
             print(f"[POST] JSON PARSE ERROR from {client_ip}: {e}")
@@ -1982,8 +1991,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     sock.sendto(error_ack, addr)
                     continue
 
-                # Send ACK
-                ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
+                # Send ACK with event name
+                event_name = event.get('name', f'Event {eid}')
+                ack = json.dumps({"ack": seq, "ts": int(recv_time), "event": event_name}).encode("utf-8")
                 sock.sendto(ack, addr)
 
                 # Process through event tracker
@@ -2099,13 +2109,48 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             daily_logger.close()
 
 
+def load_settings(settings_file: Path = Path("settings.json")) -> dict:
+    """Load settings from settings.json if it exists."""
+    defaults = {
+        "port": 41234,
+        "static_dir": "html",
+        "events_file": "events.json",
+        "manager_password": None,
+        "admin_password": None,
+        "tracker_password": None,
+        "log_dir": "logs",
+        "users_file": "users.json",
+        "course_file": "course.json",
+        "http_port": None,
+        "no_http": False,
+        "no_track_logs": False,
+    }
+
+    if settings_file.exists():
+        try:
+            with open(settings_file) as f:
+                file_settings = json.load(f)
+            defaults.update(file_settings)
+            print(f"Loaded settings from {settings_file}")
+        except Exception as e:
+            print(f"Warning: Could not load {settings_file}: {e}")
+
+    return defaults
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Windsurfer Tracker UDP Server")
+    # Load settings from settings.json first (if exists)
+    settings = load_settings()
+
+    parser = argparse.ArgumentParser(
+        description="Windsurfer Tracker UDP Server",
+        epilog="Settings can also be specified in settings.json. Command line args override file settings."
+    )
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=41234,
-        help="UDP port to listen on (default: 41234)"
+        default=None,
+        help=f"UDP port to listen on (default: {settings['port']})"
     )
     parser.add_argument(
         "-l", "--log",
@@ -2116,7 +2161,7 @@ def main():
     parser.add_argument(
         "-c", "--current",
         type=Path,
-        default=Path("current_positions.json"),
+        default=None,
         help="Current positions file for web UI (default: current_positions.json)"
     )
     parser.add_argument(
@@ -2127,12 +2172,13 @@ def main():
     parser.add_argument(
         "-d", "--log-dir",
         type=Path,
-        default=Path("logs"),
-        help="Directory for daily track logs (default: logs/)"
+        default=None,
+        help=f"Directory for daily track logs (default: {settings['log_dir']})"
     )
     parser.add_argument(
         "--no-track-logs",
         action="store_true",
+        default=None,
         help="Disable daily track logging"
     )
     parser.add_argument(
@@ -2144,13 +2190,14 @@ def main():
     parser.add_argument(
         "--no-http",
         action="store_true",
+        default=None,
         help="Disable HTTP admin API"
     )
     parser.add_argument(
         "--admin-password",
         type=str,
         default=None,
-        help="Admin password for HTTP API (required)"
+        help="Admin password for HTTP API (legacy single-event mode)"
     )
     parser.add_argument(
         "--tracker-password",
@@ -2161,20 +2208,20 @@ def main():
     parser.add_argument(
         "--course-file",
         type=Path,
-        default=Path("course.json"),
-        help="Course file path (default: course.json)"
+        default=None,
+        help=f"Course file path (default: {settings['course_file']})"
     )
     parser.add_argument(
         "--static-dir",
         type=Path,
         default=None,
-        help="Directory to serve static files from (e.g., web UI)"
+        help=f"Directory to serve static files from (default: {settings['static_dir']})"
     )
     parser.add_argument(
         "--users-file",
         type=Path,
-        default=Path("users.json"),
-        help="User overrides file path (default: users.json)"
+        default=None,
+        help=f"User overrides file path (default: {settings['users_file']})"
     )
     parser.add_argument(
         "--data-dir",
@@ -2191,47 +2238,63 @@ def main():
     parser.add_argument(
         "--events-file",
         type=Path,
-        default=Path("events.json"),
-        help="Events configuration file (default: events.json)"
+        default=None,
+        help=f"Events configuration file (default: {settings['events_file']})"
     )
 
     args = parser.parse_args()
 
-    # If data-dir specified, make paths relative to it (unless explicitly overridden)
+    # Merge: command line args override settings.json, which overrides built-in defaults
+    port = args.port if args.port is not None else settings['port']
+    static_dir = Path(args.static_dir) if args.static_dir else (Path(settings['static_dir']) if settings['static_dir'] else None)
+    events_file = Path(args.events_file) if args.events_file else Path(settings['events_file'])
+    manager_password = args.manager_password if args.manager_password else settings['manager_password']
+    admin_password = args.admin_password if args.admin_password else settings['admin_password']
+    tracker_password = args.tracker_password if args.tracker_password else settings['tracker_password']
+    log_dir = Path(args.log_dir) if args.log_dir else Path(settings['log_dir'])
+    users_file = Path(args.users_file) if args.users_file else Path(settings['users_file'])
+    course_file = Path(args.course_file) if args.course_file else Path(settings['course_file'])
+    current_file = args.current if args.current else Path("current_positions.json")
+
+    no_http = args.no_http if args.no_http is not None else settings.get('no_http', False)
+    no_track_logs = args.no_track_logs if args.no_track_logs is not None else settings.get('no_track_logs', False)
+    http_port_setting = args.http_port if args.http_port else settings.get('http_port')
+
+    # If data-dir specified, make paths relative to it
     if args.data_dir:
         data_dir = args.data_dir
-        # Only override defaults (check if user explicitly set these)
-        if args.current == Path("current_positions.json"):
-            args.current = data_dir / "current_positions.json"
-        if args.log_dir == Path("logs"):
-            args.log_dir = data_dir / "logs"
-        if args.course_file == Path("course.json"):
-            args.course_file = data_dir / "course.json"
-        if args.users_file == Path("users.json"):
-            args.users_file = data_dir / "users.json"
-        if args.events_file == Path("events.json"):
-            args.events_file = data_dir / "events.json"
-    positions_file = None if args.no_current else args.current
-    log_dir = None if args.no_track_logs else args.log_dir
-    http_port = None if args.no_http else (args.http_port or args.port)
+        if args.current is None:
+            current_file = data_dir / "current_positions.json"
+        if args.log_dir is None:
+            log_dir = data_dir / "logs"
+        if args.course_file is None:
+            course_file = data_dir / "course.json"
+        if args.users_file is None:
+            users_file = data_dir / "users.json"
+        if args.events_file is None:
+            events_file = data_dir / "events.json"
+
+    positions_file = None if args.no_current else current_file
+    log_dir_final = None if no_track_logs else log_dir
+    http_port = None if no_http else (http_port_setting or port)
 
     # Multi-event mode vs legacy mode password requirements
-    if args.manager_password:
+    if manager_password:
         # Multi-event mode - manager password provided
         if http_port is None:
-            parser.error("--manager-password requires HTTP to be enabled")
+            parser.error("manager_password requires HTTP to be enabled")
     else:
         # Legacy single-event mode - require admin password if HTTP is enabled
-        if http_port and not args.admin_password:
-            parser.error("--admin-password is required when HTTP is enabled (use --no-http to disable, or use --manager-password for multi-event mode)")
+        if http_port and not admin_password:
+            parser.error("admin_password is required when HTTP is enabled (use no_http: true to disable, or set manager_password for multi-event mode)")
 
-    run_server(args.port, args.log, positions_file, log_dir,
-               http_port=http_port, admin_password=args.admin_password or "",
-               course_file=args.course_file, static_dir=args.static_dir,
-               users_file=args.users_file,
-               tracker_password=args.tracker_password,
-               manager_password=args.manager_password,
-               events_file=args.events_file)
+    run_server(port, args.log, positions_file, log_dir_final,
+               http_port=http_port, admin_password=admin_password or "",
+               course_file=course_file, static_dir=static_dir,
+               users_file=users_file,
+               tracker_password=tracker_password,
+               manager_password=manager_password,
+               events_file=events_file)
 
 
 if __name__ == "__main__":

@@ -288,10 +288,14 @@ class IOSTrackerService {
 
         final ackRate = _packetsSent > 0 ? (_packetsAcked / _packetsSent) * 100 : 0.0;
 
+        // Extract event name if present
+        final eventName = ack['event'] as String?;
+
         _sendToUI({
           'type': 'ack',
           'seq': ackSeq,
           'ackRate': ackRate,
+          if (eventName != null && eventName.isNotEmpty) 'eventName': eventName,
         });
       }
     } catch (e) {
@@ -545,8 +549,15 @@ class IOSTrackerService {
           _lastAckTime = DateTime.now();
           _packetsAcked++;
           _ackedSequences.add(ackSeq);
-          _sendToUI({'type': 'ack', 'seq': ackSeq, 'method': 'HTTP'});
-          debugPrint('HTTP POST success, ACK seq=$ackSeq');
+          // Extract event name if present
+          final eventName = ack['event'] as String?;
+          _sendToUI({
+            'type': 'ack',
+            'seq': ackSeq,
+            'method': 'HTTP',
+            if (eventName != null && eventName.isNotEmpty) 'eventName': eventName,
+          });
+          debugPrint('HTTP POST success, ACK seq=$ackSeq${eventName != null ? " (event: $eventName)" : ""}');
           return true;
         }
       } else {

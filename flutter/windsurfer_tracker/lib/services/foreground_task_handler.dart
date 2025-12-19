@@ -273,14 +273,18 @@ class TrackerTaskHandler extends TaskHandler {
 
           final ackRate = _packetsSent > 0 ? _packetsAcked / _packetsSent : 0.0;
 
+          // Extract event name if present
+          final eventName = ack['event'] as String?;
+
           FlutterForegroundTask.sendDataToMain({
             'type': 'ack',
             'seq': ackSeq,
             'packetsAcked': _packetsAcked,
             'ackRate': ackRate,
+            if (eventName != null && eventName.isNotEmpty) 'eventName': eventName,
           });
 
-          debugPrint('Polled ACK for seq=$ackSeq');
+          debugPrint('Polled ACK for seq=$ackSeq${eventName != null ? " (event: $eventName)" : ""}');
         }
       } catch (e) {
         debugPrint('Failed to parse polled ACK: $e');
@@ -725,15 +729,19 @@ class TrackerTaskHandler extends TaskHandler {
 
         final ackRate = _packetsSent > 0 ? _packetsAcked / _packetsSent : 0.0;
 
+        // Extract event name if present
+        final eventName = ack['event'] as String?;
+
         // Notify main app
         FlutterForegroundTask.sendDataToMain({
           'type': 'ack',
           'seq': ackSeq,
           'packetsAcked': _packetsAcked,
           'ackRate': ackRate,
+          if (eventName != null && eventName.isNotEmpty) 'eventName': eventName,
         });
 
-        debugPrint('Received ACK for seq=$ackSeq');
+        debugPrint('Received ACK for seq=$ackSeq${eventName != null ? " (event: $eventName)" : ""}');
       }
     } catch (e) {
       debugPrint('Failed to parse ACK: $e');

@@ -314,7 +314,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
-                savePreferences()
+                if (!isLoadingPreferences) {
+                    savePreferences()
+                }
             }
         }
         binding.etSailorId.addTextChangedListener(saveOnChange)
@@ -327,11 +329,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         return ""
     }
 
+    // Flag to prevent TextWatcher from saving during loadPreferences()
+    private var isLoadingPreferences = false
+
     private fun loadPreferences() {
+        isLoadingPreferences = true
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         binding.etSailorId.setText(prefs.getString("sailor_id", getDefaultSailorId()))
         binding.etServerHost.setText(prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST))
         binding.etServerPort.setText(prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT).toString())
+        isLoadingPreferences = false
     }
     
     private fun savePreferences() {
@@ -695,6 +702,100 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(16, 16, 16, 16)
         }
 
+        // Event selector
+        val eventLabel = android.widget.TextView(this).apply {
+            text = "Event"
+            setPadding(0, 24, 0, 8)
+            setTextColor(0xFF000000.toInt())
+            textSize = 16f
+        }
+
+        var events: List<EventInfo> = emptyList()
+        var selectedEventId = prefs.getInt("event_id", 1)
+
+        val eventSpinner = android.widget.Spinner(this).apply {
+            setBackgroundColor(0xFFEEEEEE.toInt())
+        }
+
+        val eventLoadingText = android.widget.TextView(this).apply {
+            text = "Loading events..."
+            setTextColor(0xFF666666.toInt())
+            textSize = 14f
+            setPadding(0, 8, 0, 0)
+        }
+
+        // Function to fetch events from the current server
+        fun fetchEvents() {
+            val host = serverInput.text.toString().trim()
+            val port = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
+
+            if (host.isEmpty()) {
+                eventLoadingText.text = "Enter server address first"
+                return
+            }
+
+            eventLoadingText.text = "Loading events..."
+            eventSpinner.visibility = android.view.View.GONE
+
+            lifecycleScope.launch {
+                val fetcher = EventFetcher()
+                events = fetcher.fetchEvents(host, port)
+
+                if (events.isNotEmpty()) {
+                    val eventNames = events.map { "${it.name} (${it.eid})" }.toTypedArray()
+                    val adapter = android.widget.ArrayAdapter(
+                        this@MainActivity,
+                        android.R.layout.simple_spinner_dropdown_item,
+                        eventNames
+                    )
+                    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                    eventSpinner.adapter = adapter
+
+                    // Select current event
+                    val currentIndex = events.indexOfFirst { it.eid == selectedEventId }
+                    if (currentIndex >= 0) {
+                        eventSpinner.setSelection(currentIndex)
+                    }
+
+                    eventSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                        override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                            selectedEventId = events[position].eid
+                            (view as? android.widget.TextView)?.apply {
+                                textSize = 18f
+                                setTextColor(0xFF000000.toInt())
+                            }
+                        }
+                        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                    }
+
+                    eventLoadingText.text = ""
+                    eventSpinner.visibility = android.view.View.VISIBLE
+                } else {
+                    eventLoadingText.text = "Could not load events (using event ID: $selectedEventId)"
+                }
+            }
+        }
+
+        // Refetch events when server address or port changes
+        val serverChangeWatcher = object : android.text.TextWatcher {
+            private var debounceJob: kotlinx.coroutines.Job? = null
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                // Debounce to avoid fetching on every keystroke
+                debounceJob?.cancel()
+                debounceJob = lifecycleScope.launch {
+                    kotlinx.coroutines.delay(500)
+                    fetchEvents()
+                }
+            }
+        }
+        serverInput.addTextChangedListener(serverChangeWatcher)
+        portInput.addTextChangedListener(serverChangeWatcher)
+
+        // Initial fetch
+        fetchEvents()
+
         val passwordLabel = android.widget.TextView(this).apply {
             text = "Password"
             setPadding(0, 24, 0, 0)
@@ -764,6 +865,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(serverInput)
         layout.addView(portLabel)
         layout.addView(portInput)
+        layout.addView(eventLabel)
+        layout.addView(eventSpinner)
+        layout.addView(eventLoadingText)
         layout.addView(passwordLabel)
         layout.addView(passwordInput)
         layout.addView(showPasswordCheckbox)
@@ -784,6 +888,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val oldRole = prefs.getString("role", "sailor") ?: "sailor"
         val oldServerHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
         val oldServerPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
+        val oldEventId = prefs.getInt("event_id", 1)
         val oldPassword = prefs.getString("password", "") ?: ""
         val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
 
@@ -829,14 +934,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         putString("role", newRole)
                         putString("server_host", newServerHost)
                         putInt("server_port", newServerPort)
+                        putInt("event_id", selectedEventId)
                         putString("password", password)
                         putBoolean("high_frequency_mode", newHighFrequencyMode)
-                        apply()
+                        commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
                     }
-                    // Update the config fields if visible
-                    if (binding.configGroup.visibility == View.VISIBLE) {
-                        loadPreferences()
-                    }
+                    // Always update the binding fields to keep them in sync
+                    // (even when not visible, to prevent savePreferences() from overwriting)
+                    binding.etSailorId.setText(sailorId)
+                    binding.etServerHost.setText(newServerHost)
+                    binding.etServerPort.setText(newServerPort.toString())
 
                     // Auto-restart tracking if any settings changed while tracking
                     val isTracking = trackerService?.isTracking() == true
@@ -844,6 +951,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         newRole != oldRole ||
                         newServerHost != oldServerHost ||
                         newServerPort != oldServerPort ||
+                        selectedEventId != oldEventId ||
                         password != oldPassword ||
                         newHighFrequencyMode != oldHighFrequencyMode
 
@@ -900,6 +1008,13 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             val snackbar = Snackbar.make(binding.root, "Authentication error: $message", Snackbar.LENGTH_LONG)
             snackbar.anchorView = binding.btnAssist
             snackbar.show()
+        }
+    }
+
+    override fun onEventName(name: String) {
+        runOnUiThread {
+            binding.tvEventName.text = name
+            binding.tvEventName.visibility = View.VISIBLE
         }
     }
 }

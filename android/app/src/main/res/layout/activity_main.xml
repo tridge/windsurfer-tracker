@@ -93,6 +93,18 @@
         android:padding="8dp"
         app:layout_constraintTop_toTopOf="parent">
 
+        <!-- Event Name -->
+        <TextView
+            android:id="@+id/tvEventName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="18sp"
+            android:textColor="#0066AA"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp" />
+
         <!-- 1Hz Mode Indicator -->
         <TextView
             android:id="@+id/tv1HzIndicator"

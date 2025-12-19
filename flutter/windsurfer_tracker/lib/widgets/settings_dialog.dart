@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/preferences_service.dart';
-import '../services/tracker_service.dart';
+import '../services/event_service.dart';
+import '../services/foreground_task_handler.dart';
 
 /// Settings dialog matching Android app design
 class SettingsDialog extends StatefulWidget {
@@ -30,6 +32,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
   bool _highFrequencyMode = false;
   String _versionString = '';
 
+  // Event selection
+  List<EventInfo> _events = [];
+  int _selectedEventId = 1;
+  bool _eventsLoading = true;
+  String _eventsError = '';
+  Timer? _eventFetchDebounce;
+
   final _roleOptions = ['Sailor', 'Support', 'Spectator'];
   final _roleValues = ['sailor', 'support', 'spectator'];
 
@@ -46,7 +55,56 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _selectedRole = 'sailor';
     }
     _highFrequencyMode = widget.prefs.highFrequencyMode;
+    _selectedEventId = widget.prefs.eventId;
     _loadVersionInfo();
+    _fetchEvents();
+
+    // Listen for server changes to refetch events
+    _serverHostController.addListener(_onServerChanged);
+    _serverPortController.addListener(_onServerChanged);
+  }
+
+  void _onServerChanged() {
+    // Debounce to avoid fetching on every keystroke
+    _eventFetchDebounce?.cancel();
+    _eventFetchDebounce = Timer(const Duration(milliseconds: 500), () {
+      _fetchEvents();
+    });
+  }
+
+  Future<void> _fetchEvents() async {
+    final host = _serverHostController.text.trim();
+    if (host.isEmpty) {
+      setState(() {
+        _eventsLoading = false;
+        _eventsError = 'Enter server address first';
+      });
+      return;
+    }
+
+    setState(() {
+      _eventsLoading = true;
+      _eventsError = '';
+    });
+
+    final port = int.tryParse(_serverPortController.text) ?? TrackerConfig.defaultServerPort;
+    final events = await EventService.fetchEvents(host, port);
+
+    if (!mounted) return;
+
+    setState(() {
+      _eventsLoading = false;
+      _events = events;
+      if (events.isEmpty) {
+        _eventsError = 'Could not load events (using event ID: $_selectedEventId)';
+      } else {
+        _eventsError = '';
+        // Ensure selected event exists in list
+        if (!events.any((e) => e.eid == _selectedEventId)) {
+          _selectedEventId = events.first.eid;
+        }
+      }
+    });
   }
 
   Future<void> _loadVersionInfo() async {
@@ -62,6 +120,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   @override
   void dispose() {
+    _eventFetchDebounce?.cancel();
+    _serverHostController.removeListener(_onServerChanged);
+    _serverPortController.removeListener(_onServerChanged);
     _sailorIdController.dispose();
     _serverHostController.dispose();
     _serverPortController.dispose();
@@ -99,6 +160,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
               'Port',
               keyboardType: TextInputType.number,
             ),
+            const SizedBox(height: 16),
+            _buildLabel('Event'),
+            _buildEventSelector(),
             const SizedBox(height: 16),
             _buildLabel('Password'),
             _buildPasswordField(),
@@ -196,6 +260,47 @@ class _SettingsDialogState extends State<SettingsDialog> {
         onChanged: (value) {
           if (value != null) {
             setState(() => _selectedRole = value);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildEventSelector() {
+    if (_eventsLoading) {
+      return const Text(
+        'Loading events...',
+        style: TextStyle(fontSize: 14, color: Color(0xFF666666)),
+      );
+    }
+
+    if (_events.isEmpty) {
+      return Text(
+        _eventsError,
+        style: const TextStyle(fontSize: 14, color: Color(0xFF666666)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEEEEEE),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: DropdownButton<int>(
+        value: _selectedEventId,
+        isExpanded: true,
+        underline: const SizedBox(),
+        style: const TextStyle(fontSize: 16, color: Colors.black),
+        items: _events.map((event) {
+          return DropdownMenuItem(
+            value: event.eid,
+            child: Text('${event.name} (${event.eid})'),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) {
+            setState(() => _selectedEventId = value);
           }
         },
       ),
@@ -312,6 +417,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       serverPort: port,
       role: _selectedRole,
       password: password,
+      eventId: _selectedEventId,
       highFrequencyMode: _highFrequencyMode,
     );
 

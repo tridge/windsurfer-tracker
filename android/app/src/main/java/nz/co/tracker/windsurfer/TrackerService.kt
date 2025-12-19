@@ -138,6 +138,7 @@ class TrackerService : LifecycleService() {
         fun onPacketSent(seq: Int)
         fun onConnectionStatus(ackRate: Float)
         fun onAuthError(message: String)
+        fun onEventName(name: String)
     }
 
     /**
@@ -694,6 +695,12 @@ class TrackerService : LifecycleService() {
                         val ackRate = packetsAcked.get().toFloat() / maxOf(packetsSent.get(), 1)
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
+
+                        // Check for event name in ACK
+                        val eventName = ack.optString("event", "")
+                        if (eventName.isNotEmpty()) {
+                            statusListener?.onEventName(eventName)
+                        }
 
                         Log.d(TAG, "Received ACK for seq=$ackSeq")
                     }
