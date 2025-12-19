@@ -4,6 +4,7 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 
 ## Features
 
+- **Multi-event support** - Host multiple races/regattas with separate data, passwords, and courses
 - **Real-time GPS tracking** - Position updates every 10 seconds from Android and iOS devices
 - **Multiple roles** - Track sailors (windsurfers), support boats, and spectators with distinct icons
 - **Emergency assist** - One-touch "Request Assist" button with audio alerts in the web UI
@@ -15,17 +16,19 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 - **Battery & signal monitoring** - Track device battery level and signal strength
 - **Daily log rotation** - Automatic daily log files in JSONL format
 - **Admin controls** - Password-protected admin panel for course and track management
+- **Event management** - Web UI for creating and managing events
 
 ## Components
 
 ### Server (`server/tracker_server.py`)
 
 Python UDP/HTTP server that:
+- Manages multiple events with separate data and passwords
 - Receives position reports on UDP port 41234
 - Sends acknowledgements back to clients
-- Writes `current_positions.json` for the web UI (atomic writes)
-- Maintains daily track logs in `logs/YYYY_MM_DD.jsonl` format
-- Serves static files (Web UI) and provides admin API endpoints
+- Writes per-event `current_positions.json` for the web UI (atomic writes)
+- Maintains daily track logs per event in `{eid}/logs/YYYY_MM_DD.jsonl` format
+- Serves static files (Web UI) and provides admin/management API endpoints
 
 ### Android App (`android/`)
 
@@ -33,6 +36,7 @@ Native Kotlin app that:
 - Tracks GPS position every 10 seconds
 - Sends UDP packets with position, speed, heading, battery, signal strength
 - Supports multiple roles: sailor, support, spectator
+- Event selection from available events on server
 - Displays connection status (ACK rate)
 - Large "Request Assist" button for emergencies
 
@@ -40,13 +44,20 @@ Native Kotlin app that:
 
 Flutter app for iPhone that:
 - Same functionality as the Android app
+- Event selection from available events on server
 - Available via TestFlight (App Store release planned)
 - Uses Flutter for cross-platform development
 
-### Web UI (`WebUI/index.html`)
+### Web UI (`WebUI/`)
 
-Single-page Leaflet map application that:
-- Polls `current_positions.json` every 3 seconds
+Event-based web interface:
+- **index.html** - Event picker showing available events
+- **event.html** - Live tracking map for a specific event
+- **manage.html** - Event management for creating/editing events
+- **review.html** - Post-race track analysis
+
+The tracking map (`event.html`):
+- Polls per-event `current_positions.json` every 3 seconds
 - Displays different icons per role (windsurfer, powerboat, binoculars)
 - Shows track history from daily log files using Range requests
 - Admin panel for course management and track clearing
@@ -79,28 +90,44 @@ Post-race analysis page that:
 git clone <repository-url>
 cd windsurfer-tracker
 
+# Create settings.json for configuration
+cat > server/settings.json << EOF
+{
+  "manager_password": "your_manager_password",
+  "static_dir": "../WebUI",
+  "events_file": "events.json"
+}
+EOF
+
 # Start server (serves Web UI on same port)
 cd server
-python3 tracker_server.py --static-dir ../WebUI --admin-password yourpassword
+python3 tracker_server.py
 
 # Or with custom port
-python3 tracker_server.py --static-dir ../WebUI --admin-password yourpassword --port 8080
+python3 tracker_server.py --port 8080
 ```
 
 The server will be available at `http://localhost:41234`
 
+On first run, create your first event via the web UI at `/manage.html` or by creating `events.json` manually.
+
 ### Server Options
 
+The server reads configuration from `settings.json` (recommended) or command line arguments:
+
+**settings.json fields:**
+| Field | Description |
+|-------|-------------|
+| `manager_password` | Password for event management API |
+| `static_dir` | Directory to serve static files (Web UI) |
+| `events_file` | Path to events.json file |
+
+**Command line options:**
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-p, --port` | 41234 | UDP/HTTP port to listen on |
 | `--http-port` | (same as UDP) | Separate HTTP port if needed |
-| `--static-dir` | None | Directory to serve static files (Web UI) |
-| `--admin-password` | (required) | Password for admin API |
-| `-d, --log-dir` | logs/ | Directory for daily track logs |
-| `-c, --current` | current_positions.json | Current positions file |
-| `--course-file` | course.json | Course file path |
-| `--users-file` | users.json | User overrides file path |
+| `--settings` | settings.json | Path to settings file |
 | `--no-http` | | Disable HTTP server |
 | `--no-track-logs` | | Disable daily track logging |
 | `--no-current` | | Disable current positions file |
@@ -150,17 +177,17 @@ flutter build ios
 Use the included test client to simulate multiple participants:
 
 ```bash
-# Simulate 5 sailors, 1 support boat, 2 spectators
-python3 server/test_client.py -H localhost --num-sailors 5 --num-support 1 --num-spectators 2
+# Simulate 5 sailors, 1 support boat, 2 spectators for event 1
+python3 server/test_client.py -H localhost --eid 1 --num-sailors 5 --num-support 1 --num-spectators 2
 
 # Test assist flag for specific sailor
-python3 server/test_client.py -H localhost --assist S03
+python3 server/test_client.py -H localhost --eid 1 --assist S03
 
 # Custom location (Auckland area)
-python3 server/test_client.py -H localhost --start-loc "-36.85,174.76" --end-loc "-36.84,174.77"
+python3 server/test_client.py -H localhost --eid 1 --start-loc "-36.85,174.76" --end-loc "-36.84,174.77"
 
 # Faster updates for testing
-python3 server/test_client.py -H localhost --delay 2
+python3 server/test_client.py -H localhost --eid 1 --delay 2
 ```
 
 ### Test Client Options
@@ -169,6 +196,7 @@ python3 server/test_client.py -H localhost --delay 2
 |--------|---------|-------------|
 | `-H, --host` | 127.0.0.1 | Server hostname |
 | `-p, --port` | 41234 | Server port |
+| `--eid` | 1 | Event ID to send packets to |
 | `--num-sailors` | 5 | Number of sailors to simulate |
 | `--num-support` | 1 | Number of support boats |
 | `--num-spectators` | 2 | Number of spectators |
@@ -181,7 +209,7 @@ python3 server/test_client.py -H localhost --delay 2
 
 ## Track Review
 
-Access the track review page at `/review.html` on your server. This page provides post-race analysis tools:
+Access the track review page at `/review.html` on your server. Select your event, then use the post-race analysis tools:
 
 ### Usage
 
@@ -212,23 +240,24 @@ The latency graph shows network delay (time from GPS fix to server receipt). Hig
 
 ## User Overrides
 
-Admins can customize display names and roles for any tracker client via the Web UI.
+Admins can customize display names and roles for any tracker client via the Web UI. Each event has its own set of user overrides.
 
 ### Via Web UI
 
-1. Enter Admin mode (click Admin button, enter password)
-2. Click on any tracker marker on the map
-3. Click the "Edit" button in the popup
-4. Set a display name and/or override the role
-5. Click Save
+1. Select your event from the main page
+2. Enter Admin mode (click Admin button, enter event admin password)
+3. Click on any tracker marker on the map
+4. Click the "Edit" button in the popup
+5. Set a display name and/or override the role
+6. Click Save
 
 ### API Endpoints
 
-- `GET /api/users` - List all user overrides (requires admin auth)
-- `POST /api/admin/user/{id}` - Set override for a user (requires admin auth)
-- `DELETE /api/admin/user/{id}` - Remove override for a user (requires admin auth)
+- `GET /api/event/{eid}/users` - List all user overrides (requires admin auth)
+- `POST /api/event/{eid}/admin/user/{id}` - Set override for a user (requires admin auth)
+- `DELETE /api/event/{eid}/admin/user/{id}` - Remove override for a user (requires admin auth)
 
-Overrides are stored in `users.json`.
+Overrides are stored per-event in `html/{eid}/users.json`.
 
 ## JSON Packet Format
 
@@ -237,6 +266,7 @@ Overrides are stored in `users.json`.
 ```json
 {
   "id": "S07",
+  "eid": 1,
   "sq": 12345,
   "ts": 1732615200,
   "lat": -36.8485,
@@ -253,6 +283,7 @@ Overrides are stored in `users.json`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Participant identifier (e.g., "S07") |
+| `eid` | int | Event ID (defaults to 1 if not specified) |
 | `sq` | int | Sequence number for ACK matching |
 | `ts` | int | Unix timestamp (seconds) |
 | `lat` | float | Latitude in decimal degrees |
@@ -280,16 +311,27 @@ Overrides are stored in `users.json`.
 
 ## API Endpoints
 
-### Public
+### Event Management (requires X-Manager-Password header)
 
-- `GET /api/course` - Get current course data
+- `GET /api/events` - List all events (public, no auth)
+- `GET /api/manage/events` - List all events with passwords
+- `POST /api/manage/event` - Create new event
+- `PATCH /api/manage/event/{eid}` - Update event
+- `DELETE /api/manage/event/{eid}` - Archive/delete event
 
-### Admin (requires X-Admin-Password header)
+### Per-Event Public
 
-- `GET /api/auth/check` - Check admin authentication
-- `POST /api/admin/clear-tracks` - Clear today's track logs
-- `POST /api/admin/course` - Save course data
-- `DELETE /api/admin/course` - Delete course
+- `GET /api/event/{eid}/course` - Get course data for event
+
+### Per-Event Admin (requires X-Admin-Password header)
+
+- `GET /api/event/{eid}/auth/check` - Check admin authentication
+- `POST /api/event/{eid}/admin/clear-tracks` - Clear today's track logs
+- `POST /api/event/{eid}/admin/course` - Save course data
+- `DELETE /api/event/{eid}/admin/course` - Delete course
+- `GET /api/event/{eid}/users` - Get user overrides
+- `POST /api/event/{eid}/admin/user/{id}` - Set user override
+- `DELETE /api/event/{eid}/admin/user/{id}` - Remove user override
 
 ## Network Requirements
 
@@ -307,16 +349,26 @@ Overrides are stored in `users.json`.
 windsurfer-tracker/
 ├── server/
 │   ├── tracker_server.py    # Main UDP/HTTP server
-│   └── test_client.py       # Test client simulator
+│   ├── test_client.py       # Test client simulator
+│   ├── settings.json        # Server configuration
+│   └── events.json          # Event definitions (passwords)
 ├── android/                  # Android app source
+├── wear/                     # Wear OS app source
 ├── WebUI/
-│   ├── index.html           # Live tracking map UI
-│   └── review.html          # Post-race track review
+│   ├── index.html           # Event picker
+│   ├── event.html           # Live tracking map UI
+│   ├── manage.html          # Event management UI
+│   ├── review.html          # Post-race track review
+│   └── install/             # Installation guides
 ├── flutter/                  # Flutter app source (MPL 2.0)
-├── logs/                     # Daily track logs (YYYY_MM_DD.jsonl)
-├── current_positions.json   # Current positions for web UI
-├── course.json              # Saved course data
-└── users.json               # User display name/role overrides
+└── html/                     # Per-event data (created at runtime)
+    ├── 1/                    # Event ID 1
+    │   ├── logs/             # Daily track logs
+    │   ├── current_positions.json
+    │   ├── course.json
+    │   └── users.json
+    └── 2/                    # Event ID 2
+        └── ...
 ```
 
 ## License

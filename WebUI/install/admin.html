@@ -153,15 +153,23 @@
     <a href="index.html" class="back-link">&larr; Back to Installation</a>
 
     <h1>Admin Guide</h1>
-    <p>This guide covers administration features for race organisers, including course setup, user management, and preparing for race day.</p>
+    <p>This guide covers administration features for race organisers, including event management, course setup, user management, and preparing for race day.</p>
 
     <div class="info">
-        <strong>Admin Access:</strong> To access admin features, click the <strong>Admin</strong> button on the tracking map at <a href="https://wstracker.org">https://wstracker.org</a> and enter the admin password.
+        <strong>Two Types of Access:</strong>
+        <ul style="margin: 10px 0 0 20px;">
+            <li><strong>Manager password:</strong> Create and configure events at <a href="https://wstracker.org/manage.html">wstracker.org/manage.html</a></li>
+            <li><strong>Admin password:</strong> Per-event admin access for course setup, user editing, and track clearing</li>
+        </ul>
     </div>
 
     <h2>Quick Reference</h2>
 
     <div class="feature-list">
+        <div class="feature-item">
+            <h4>Create Events</h4>
+            <p>Set up new races/regattas</p>
+        </div>
         <div class="feature-item">
             <h4>Set Course</h4>
             <p>Define start, marks, and finish</p>
@@ -174,18 +182,62 @@
             <h4>Clear Tracks</h4>
             <p>Reset before each race</p>
         </div>
-        <div class="feature-item">
-            <h4>Track Review</h4>
-            <p>Analyze race with graphs</p>
-        </div>
     </div>
 
-    <h2>Entering Admin Mode</h2>
+    <h2>Creating and Managing Events</h2>
+
+    <p>Each race or regatta is an "event" with its own tracking data, passwords, and course. Events are managed at the Event Management page.</p>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Open Event Management</h3>
+        <p>Go to <a href="https://wstracker.org/manage.html">https://wstracker.org/manage.html</a> in your web browser.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Enter Manager Password</h3>
+        <p>Enter the manager password to access event management. This password is provided by the server administrator.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Create a New Event</h3>
+        <p>Click <strong>"Create Event"</strong> and fill in:</p>
+        <ul>
+            <li><strong>Event Name:</strong> The name of your race or regatta (e.g., "NZ Interdominion 2026")</li>
+            <li><strong>Description:</strong> Optional details about the event</li>
+            <li><strong>Admin Password:</strong> Password for course setup, user editing, and track clearing</li>
+            <li><strong>Tracker Password:</strong> Password that participants enter in their tracking apps</li>
+        </ul>
+    </div>
+
+    <div class="info">
+        <strong>Password Tips:</strong>
+        <ul style="margin: 10px 0 0 20px;">
+            <li>The <strong>tracker password</strong> should be easy to share with participants</li>
+            <li>The <strong>admin password</strong> should be kept private for race organisers only</li>
+            <li>Each event has its own passwords - they don't affect other events</li>
+        </ul>
+    </div>
+
+    <h3>Managing Existing Events</h3>
+
+    <p>From the Event Management page you can:</p>
+    <ul>
+        <li><strong>Edit:</strong> Change event name, description, or passwords</li>
+        <li><strong>Archive:</strong> Hide completed events from the public list (data is preserved)</li>
+        <li><strong>View:</strong> Open the live tracking map for the event</li>
+    </ul>
+
+    <h2>Entering Admin Mode (Per-Event)</h2>
+
+    <p>Each event has its own admin mode for course setup, user editing, and track management.</p>
 
     <div class="step">
         <span class="step-number">1</span>
         <h3>Open the Tracking Map</h3>
-        <p>Go to <a href="https://wstracker.org">https://wstracker.org</a> in your web browser.</p>
+        <p>Go to <a href="https://wstracker.org">https://wstracker.org</a> and select your event from the list.</p>
     </div>
 
     <div class="step">
@@ -196,8 +248,8 @@
 
     <div class="step">
         <span class="step-number">3</span>
-        <h3>Enter Password</h3>
-        <p>Enter the admin password. Once authenticated, you'll see additional admin controls appear.</p>
+        <h3>Enter Event Admin Password</h3>
+        <p>Enter the admin password for this event (set when the event was created). Once authenticated, you'll see additional admin controls appear.</p>
     </div>
 
     <h2>Setting Up the Course</h2>
@@ -376,7 +428,7 @@
 
     <h2>Track Review</h2>
 
-    <p>After a race, use the Track Review page to analyze tracks in detail. Access it at <a href="https://wstracker.org/review.html">https://wstracker.org/review.html</a>.</p>
+    <p>After a race, use the Track Review page to analyze tracks in detail. Access it at <a href="https://wstracker.org/review.html">https://wstracker.org/review.html</a> and select your event.</p>
 
     <h3>Features</h3>
     <ul>

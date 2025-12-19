@@ -130,7 +130,7 @@
     <p>Follow these steps to install and configure the Windsurfer Tracker app on your Android phone.</p>
 
     <div class="warning">
-        <strong>Password Required:</strong> You will need the server password from the race organisers before you can start tracking.
+        <strong>Event &amp; Password Required:</strong> You will need to know which <strong>event</strong> you're tracking and the <strong>password</strong> for that event. Ask the race organisers for these details.
     </div>
 
     <h2>Installation</h2>
@@ -167,6 +167,13 @@
 
     <div class="step">
         <span class="step-number">5</span>
+        <h3>Select Your Event</h3>
+        <p>Tap <strong>"Select Event"</strong> to see available events. Choose the event you're participating in.</p>
+        <p>If you don't see your event, check with the race organisers that it has been created.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">6</span>
         <h3>Enter Your Details</h3>
         <p>Configure the following settings:</p>
 
@@ -184,16 +191,8 @@
                 <td>Select <code>Sailor</code> (or Support/Spectator if applicable)</td>
             </tr>
             <tr>
-                <td>Server Address</td>
-                <td><code>wstracker.org</code></td>
-            </tr>
-            <tr>
-                <td>Server Port</td>
-                <td><code>41234</code></td>
-            </tr>
-            <tr>
                 <td>Password</td>
-                <td>Enter the password from the race organisers</td>
+                <td>Enter the event password from the race organisers</td>
             </tr>
         </table>
 
@@ -201,7 +200,7 @@
     </div>
 
     <div class="step">
-        <span class="step-number">6</span>
+        <span class="step-number">7</span>
         <h3>Grant Permissions</h3>
         <p>The app needs location permission to track your position. When prompted:</p>
         <ul style="margin-left: 40px;">
@@ -212,7 +211,7 @@
     </div>
 
     <div class="step">
-        <span class="step-number">7</span>
+        <span class="step-number">8</span>
         <h3>Start Tracking</h3>
         <p>Tap the large <strong>"Start Tracking"</strong> button. The app will begin sending your position to the server every 10 seconds.</p>
     </div>
@@ -224,6 +223,7 @@
         <ol>
             <li>Start tracking on your phone</li>
             <li>Open <a href="https://wstracker.org" target="_blank">https://wstracker.org</a> in a web browser</li>
+            <li>Select your event from the list</li>
             <li>You should see your position appear on the map within a few seconds</li>
             <li>The "ACK Rate" on your phone should show a percentage (ideally 80-100%)</li>
         </ol>
@@ -246,9 +246,8 @@
         <h3>ACK Rate shows 0%</h3>
         <p style="margin-left: 0;">This means the app cannot reach the server. Check:</p>
         <ul>
-            <li>Server address is exactly <code>wstracker.org</code></li>
-            <li>Port is <code>41234</code></li>
-            <li>Password is correct</li>
+            <li>You have selected the correct event</li>
+            <li>The event password is correct</li>
             <li>You have mobile data or WiFi connection</li>
         </ul>
     </div>
