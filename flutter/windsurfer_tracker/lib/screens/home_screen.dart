@@ -315,6 +315,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       sailorId: prefs.sailorId,
       role: prefs.role,
       password: prefs.password,
+      eventId: prefs.eventId,
       version: version,
       highFrequencyMode: prefs.highFrequencyMode,
     );
@@ -364,6 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       sailorId: prefs.sailorId,
       role: prefs.role,
       password: prefs.password,
+      eventId: prefs.eventId,
       highFrequencyMode: prefs.highFrequencyMode,
     );
 

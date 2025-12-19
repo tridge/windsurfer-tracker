@@ -64,6 +64,7 @@ class TrackerService : LifecycleService() {
     private var sailorId: String = ""
     private var role: String = "sailor"
     private var password: String = ""
+    private var eventId: Int = 1  // Event ID for multi-event support
     private var highFrequencyMode: Boolean = false
 
     // 1Hz mode position buffer
@@ -162,6 +163,7 @@ class TrackerService : LifecycleService() {
             sailorId = it.getStringExtra("sailor_id") ?: ""
             role = it.getStringExtra("role") ?: "sailor"
             password = it.getStringExtra("password") ?: ""
+            eventId = it.getIntExtra("event_id", 1)
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
             positionBuffer.clear()
         }
@@ -413,6 +415,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
             put("lat", location.latitude)
@@ -542,6 +545,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
             put("pos", posArray)  // Position array instead of lat/lon

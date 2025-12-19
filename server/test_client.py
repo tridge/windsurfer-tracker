@@ -626,12 +626,14 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
     return entities
 
 
-def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEntity, password: str = "") -> bool:
+def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEntity,
+                password: str = "", eid: int = 1) -> bool:
     """Send position packet and wait for ACK"""
     entity.seq += 1
 
     packet = {
         "id": entity.id,
+        "eid": eid,
         "sq": entity.seq,
         "ts": int(time.time()),
         "lat": round(entity.lat, 6),
@@ -653,12 +655,20 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
 
     try:
         ack_data, _ = sock.recvfrom(256)
+        # Check if response contains an error
+        try:
+            ack = json.loads(ack_data.decode('utf-8'))
+            if 'error' in ack:
+                return False  # Got error response
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
         return True
     except socket.timeout:
         return False
 
 
-def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: SimulatedEntity, password: str = "") -> bool:
+def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: SimulatedEntity,
+                    password: str = "", eid: int = 1) -> bool:
     """Send 1Hz batch position packet with pos array and wait for ACK"""
     entity.seq += 1
 
@@ -667,6 +677,7 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
 
     packet = {
         "id": entity.id,
+        "eid": eid,
         "sq": entity.seq,
         "ts": int(time.time()),  # Current timestamp (for sorting)
         "pos": pos_array,        # Array of [ts, lat, lon] positions
@@ -691,6 +702,13 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
 
     try:
         ack_data, _ = sock.recvfrom(256)
+        # Check if response contains an error
+        try:
+            ack = json.loads(ack_data.decode('utf-8'))
+            if 'error' in ack:
+                return False  # Got error response
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
         return True
     except socket.timeout:
         return False
@@ -715,6 +733,8 @@ def main():
                         help="Entity ID to set assist flag (e.g., S03)")
     parser.add_argument("--password", type=str, default="",
                         help="Password to include in packets")
+    parser.add_argument("--eid", type=int, default=1,
+                        help="Event ID to include in packets (default: 1)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     # New arguments
@@ -744,9 +764,9 @@ def main():
         if args.course_url:
             course_url = args.course_url
         else:
-            # Use same host as tracker server
+            # Use same host as tracker server - use event-specific endpoint
             protocol = "https" if args.port == 443 else "http"
-            course_url = f"{protocol}://{args.host}:{args.port}/api/course"
+            course_url = f"{protocol}://{args.host}:{args.port}/api/event/{args.eid}/course"
 
         course_waypoints = load_course_from_url(course_url)
         if course_waypoints:
@@ -762,6 +782,7 @@ def main():
             print(f"Loaded coastline with {len(coastline.land_polygons)} polygons")
 
     print(f"Starting simulation:")
+    print(f"  Event ID: {args.eid}")
     print(f"  Sailors: {args.num_sailors}")
     print(f"  Support: {args.num_support}")
     print(f"  Spectators: {args.num_spectators}")
@@ -874,12 +895,12 @@ def main():
             # Send 1Hz batch packets
             for entity in entities_1hz:
                 if entity.pos_buffer:  # Only send if we have positions
-                    if send_packet_1hz(sock, args.host, args.port, entity, args.password):
+                    if send_packet_1hz(sock, args.host, args.port, entity, args.password, args.eid):
                         acked += 1
 
             # Send regular packets
             for entity in entities_regular:
-                if send_packet(sock, args.host, args.port, entity, args.password):
+                if send_packet(sock, args.host, args.port, entity, args.password, args.eid):
                     acked += 1
 
             update_count += 1

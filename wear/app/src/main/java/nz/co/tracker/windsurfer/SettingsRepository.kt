@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +18,7 @@ data class TrackerSettings(
     val sailorId: String = "W01",  // W for Watch
     val role: String = "sailor",
     val password: String = "",
+    val eventId: Int = 1,  // Event ID for multi-event support
     val highFrequencyMode: Boolean = false  // 1Hz mode for racing
 )
 
@@ -27,6 +29,7 @@ class SettingsRepository(private val context: Context) {
         val SAILOR_ID = stringPreferencesKey("sailor_id")
         val ROLE = stringPreferencesKey("role")
         val PASSWORD = stringPreferencesKey("password")
+        val EVENT_ID = intPreferencesKey("event_id")
         val HIGH_FREQUENCY_MODE = booleanPreferencesKey("high_frequency_mode")
     }
 
@@ -36,6 +39,7 @@ class SettingsRepository(private val context: Context) {
             sailorId = prefs[PreferencesKeys.SAILOR_ID] ?: "W01",
             role = prefs[PreferencesKeys.ROLE] ?: "sailor",
             password = prefs[PreferencesKeys.PASSWORD] ?: "",
+            eventId = prefs[PreferencesKeys.EVENT_ID] ?: 1,
             highFrequencyMode = prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] ?: false
         )
     }
@@ -46,6 +50,7 @@ class SettingsRepository(private val context: Context) {
             prefs[PreferencesKeys.SAILOR_ID] = settings.sailorId
             prefs[PreferencesKeys.ROLE] = settings.role
             prefs[PreferencesKeys.PASSWORD] = settings.password
+            prefs[PreferencesKeys.EVENT_ID] = settings.eventId
             prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] = settings.highFrequencyMode
         }
     }

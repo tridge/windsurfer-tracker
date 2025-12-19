@@ -335,7 +335,7 @@ This project uses the following third-party resources:
 - **[Leaflet](https://leafletjs.com/)** - Open-source JavaScript library for interactive maps (BSD-2-Clause license)
 - **[OpenStreetMap](https://www.openstreetmap.org/)** - Map data © OpenStreetMap contributors (ODbL license)
 - **Windsurfer logo** - The app icon is based on the Windsurfer class logo, thanks to Windsurfing International
-- **[OwnTracks](https://owntracks.org/)** - Thanks to the OwnTracks project for inspiration and their excellent open-source phone apps which can be used as alternative tracking clients
+- **[OwnTracks](https://owntracks.org/)** - Thanks to the OwnTracks project for inspiration and ideas
 
 The Flutter app includes additional open-source packages; see the
 in-app licenses page for details.

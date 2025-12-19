@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Management - Windsurfer Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5em;
+        }
+
+        .header a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+        }
+
+        .header a:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .login-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            margin: 50px auto;
+        }
+
+        .login-panel h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .login-panel input {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .login-panel button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            background: #1e40af;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .login-panel button:hover {
+            background: #1e3a8a;
+        }
+
+        .events-section {
+            display: none;
+        }
+
+        .events-section.visible {
+            display: block;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .section-header h2 {
+            color: #333;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            font-size: 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: #1e40af;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1e3a8a;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+        }
+
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .event-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .event-card.archived {
+            opacity: 0.6;
+            background: #f9fafb;
+        }
+
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+
+        .event-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #1e40af;
+        }
+
+        .event-id {
+            font-size: 0.8em;
+            color: #999;
+            background: #f0f0f0;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .event-description {
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .event-passwords {
+            font-size: 0.9em;
+            color: #888;
+            margin-bottom: 15px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .event-passwords span {
+            background: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .event-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .event-actions .btn {
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .badge-archived {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.visible {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-content h2 {
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            height: 80px;
+            resize: vertical;
+        }
+
+        .form-group small {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .error-message {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Event Management</h1>
+        <a href="index.html">Back to Events</a>
+    </div>
+
+    <div class="container">
+        <!-- Login Panel -->
+        <div class="login-panel" id="loginPanel">
+            <h2>Manager Login</h2>
+            <div id="loginError" class="error-message" style="display:none"></div>
+            <input type="password" id="managerPassword" placeholder="Manager Password" autocomplete="current-password">
+            <button onclick="login()">Login</button>
+        </div>
+
+        <!-- Events Section (hidden until logged in) -->
+        <div class="events-section" id="eventsSection">
+            <div class="section-header">
+                <h2>Events</h2>
+                <button class="btn btn-primary" onclick="showCreateModal()">+ Create Event</button>
+            </div>
+            <div id="eventList" class="event-list">
+                <div class="loading">Loading events...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Event Modal -->
+    <div class="modal" id="eventModal">
+        <div class="modal-content">
+            <h2 id="modalTitle">Create Event</h2>
+            <div id="modalError" class="error-message" style="display:none"></div>
+            <form id="eventForm" onsubmit="return saveEvent(event)">
+                <input type="hidden" id="eventId">
+                <div class="form-group">
+                    <label for="eventName">Event Name *</label>
+                    <input type="text" id="eventName" required placeholder="e.g., NZ Interdominion 2026">
+                </div>
+                <div class="form-group">
+                    <label for="eventDescription">Description</label>
+                    <textarea id="eventDescription" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="adminPassword">Admin Password *</label>
+                    <input type="text" id="adminPassword" required placeholder="Password for event administration">
+                    <small>Used by race officials to manage course and clear tracks</small>
+                </div>
+                <div class="form-group">
+                    <label for="trackerPassword">Tracker Password</label>
+                    <input type="text" id="trackerPassword" placeholder="Optional password for tracker clients">
+                    <small>If set, tracker apps must send this password to connect</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let managerPassword = '';
+
+        function login() {
+            managerPassword = document.getElementById('managerPassword').value;
+            if (!managerPassword) {
+                showLoginError('Please enter the manager password');
+                return;
+            }
+
+            // Test the password
+            fetch(`${API_BASE}/api/manage/events`, {
+                headers: { 'X-Manager-Password': managerPassword }
+            })
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('loginPanel').style.display = 'none';
+                    document.getElementById('eventsSection').classList.add('visible');
+                    loadEvents();
+                } else {
+                    showLoginError('Invalid manager password');
+                    managerPassword = '';
+                }
+            })
+            .catch(e => {
+                showLoginError('Connection error: ' + e.message);
+            });
+        }
+
+        function showLoginError(msg) {
+            const el = document.getElementById('loginError');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        async function loadEvents() {
+            const container = document.getElementById('eventList');
+            try {
+                const response = await fetch(`${API_BASE}/api/manage/events`, {
+                    headers: { 'X-Manager-Password': managerPassword }
+                });
+                if (!response.ok) throw new Error('Failed to load events');
+
+                const data = await response.json();
+                const events = data.events || [];
+
+                if (events.length === 0) {
+                    container.innerHTML = '<p style="color:#666;text-align:center;padding:40px;">No events yet. Create your first event!</p>';
+                    return;
+                }
+
+                container.innerHTML = events.map(event => `
+                    <div class="event-card ${event.archived ? 'archived' : ''}">
+                        <div class="event-header">
+                            <div>
+                                <span class="event-name">${escapeHtml(event.name)}</span>
+                                ${event.archived
+                                    ? '<span class="badge badge-archived">Archived</span>'
+                                    : '<span class="badge badge-active">Active</span>'}
+                            </div>
+                            <span class="event-id">ID: ${event.eid}</span>
+                        </div>
+                        <div class="event-description">${escapeHtml(event.description || 'No description')}</div>
+                        <div class="event-passwords">
+                            <span>Admin: ${event.admin_password ? '***' : '(none)'}</span>
+                            <span>Tracker: ${event.tracker_password ? '***' : '(none)'}</span>
+                        </div>
+                        <div class="event-actions">
+                            <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
+                            <button class="btn btn-secondary" onclick="editEvent(${event.eid})">Edit</button>
+                            ${event.archived
+                                ? `<button class="btn btn-secondary" onclick="toggleArchive(${event.eid}, false)">Unarchive</button>`
+                                : `<button class="btn btn-danger" onclick="toggleArchive(${event.eid}, true)">Archive</button>`}
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (e) {
+                container.innerHTML = `<div class="error-message">Error loading events: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function showCreateModal() {
+            document.getElementById('modalTitle').textContent = 'Create Event';
+            document.getElementById('saveBtn').textContent = 'Create';
+            document.getElementById('eventId').value = '';
+            document.getElementById('eventForm').reset();
+            document.getElementById('modalError').style.display = 'none';
+            document.getElementById('eventModal').classList.add('visible');
+        }
+
+        async function editEvent(eid) {
+            // Fetch event details
+            try {
+                const response = await fetch(`${API_BASE}/api/manage/events`, {
+                    headers: { 'X-Manager-Password': managerPassword }
+                });
+                const data = await response.json();
+                const event = data.events.find(e => e.eid === eid);
+
+                if (!event) {
+                    alert('Event not found');
+                    return;
+                }
+
+                document.getElementById('modalTitle').textContent = 'Edit Event';
+                document.getElementById('saveBtn').textContent = 'Save';
+                document.getElementById('eventId').value = eid;
+                document.getElementById('eventName').value = event.name || '';
+                document.getElementById('eventDescription').value = event.description || '';
+                document.getElementById('adminPassword').value = event.admin_password || '';
+                document.getElementById('trackerPassword').value = event.tracker_password || '';
+                document.getElementById('modalError').style.display = 'none';
+                document.getElementById('eventModal').classList.add('visible');
+
+            } catch (e) {
+                alert('Error loading event: ' + e.message);
+            }
+        }
+
+        function hideModal() {
+            document.getElementById('eventModal').classList.remove('visible');
+        }
+
+        async function saveEvent(e) {
+            e.preventDefault();
+
+            const eid = document.getElementById('eventId').value;
+            const data = {
+                name: document.getElementById('eventName').value,
+                description: document.getElementById('eventDescription').value,
+                admin_password: document.getElementById('adminPassword').value,
+                tracker_password: document.getElementById('trackerPassword').value
+            };
+
+            try {
+                let response;
+                if (eid) {
+                    // Update existing event
+                    response = await fetch(`${API_BASE}/api/manage/event/${eid}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'X-Manager-Password': managerPassword,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    // Create new event
+                    response = await fetch(`${API_BASE}/api/manage/event`, {
+                        method: 'POST',
+                        headers: {
+                            'X-Manager-Password': managerPassword,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                }
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Save failed');
+                }
+
+                hideModal();
+                loadEvents();
+
+            } catch (err) {
+                document.getElementById('modalError').textContent = err.message;
+                document.getElementById('modalError').style.display = 'block';
+            }
+
+            return false;
+        }
+
+        async function toggleArchive(eid, archived) {
+            const action = archived ? 'archive' : 'unarchive';
+            if (!confirm(`Are you sure you want to ${action} this event?`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/manage/event/${eid}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'X-Manager-Password': managerPassword,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ archived })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Update failed');
+                }
+
+                loadEvents();
+
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Handle Enter key in password field
+        document.getElementById('managerPassword').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') login();
+        });
+    </script>
+</body>
+</html>

@@ -149,6 +149,16 @@ class TrackerService : LifecycleService() {
         return prefs.getString("password", "") ?: ""
     }
 
+    /**
+     * Get the current event ID from SharedPreferences.
+     * This is read on each send so settings changes take effect immediately.
+     * Defaults to 1 for backwards compatibility.
+     */
+    private fun getCurrentEventId(): Int {
+        val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
+        return prefs.getInt("event_id", 1)
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
@@ -434,11 +444,13 @@ class TrackerService : LifecycleService() {
             put("bo", isBatteryOptIgnored as Boolean)  // Battery optimization ignored for this app
         }
 
-        // Get current password from prefs (allows settings changes to take effect immediately)
+        // Get current password and event ID from prefs (allows settings changes to take effect immediately)
         val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
             put("lat", location.latitude)
@@ -584,11 +596,13 @@ class TrackerService : LifecycleService() {
         val numPositions = positionBuffer.size
         positionBuffer.clear()
 
-        // Get current password from prefs (allows settings changes to take effect immediately)
+        // Get current password and event ID from prefs (allows settings changes to take effect immediately)
         val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
             put("pos", posArray)  // Position array instead of lat/lon

@@ -74,6 +74,7 @@ void sendConfigToTask({
   required String sailorId,
   required String role,
   required String password,
+  required int eventId,
   required String version,
   required bool highFrequencyMode,
 }) {
@@ -84,6 +85,7 @@ void sendConfigToTask({
     'sailorId': sailorId,
     'role': role,
     'password': password,
+    'eventId': eventId,
     'version': version,
     'highFrequencyMode': highFrequencyMode,
   });
@@ -111,6 +113,7 @@ class TrackerTaskHandler extends TaskHandler {
   String _sailorId = 'Sailor';
   String _role = 'sailor';
   String _password = '';
+  int _eventId = 1;  // Event ID for multi-event support
   String _version = 'flutter';
   bool _highFrequencyMode = false;
 
@@ -314,6 +317,7 @@ class TrackerTaskHandler extends TaskHandler {
         _sailorId = data['sailorId'] as String? ?? _sailorId;
         _role = data['role'] as String? ?? _role;
         _password = data['password'] as String? ?? _password;
+        _eventId = data['eventId'] as int? ?? _eventId;
         _version = data['version'] as String? ?? _version;
         _highFrequencyMode = data['highFrequencyMode'] as bool? ?? _highFrequencyMode;
 
@@ -495,6 +499,7 @@ class TrackerTaskHandler extends TaskHandler {
     // Build packet
     final packet = {
       'id': _sailorId,
+      'eid': _eventId,
       'sq': seq,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'lat': position.latitude,
@@ -621,6 +626,7 @@ class TrackerTaskHandler extends TaskHandler {
     // Build packet with position array
     final packet = {
       'id': _sailorId,
+      'eid': _eventId,
       'sq': seq,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'pos': List<List<dynamic>>.from(_positionBuffer),  // [[ts, lat, lon], ...]

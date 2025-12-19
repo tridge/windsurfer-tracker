@@ -1125,11 +1125,149 @@
         .scale-text {
             white-space: nowrap;
         }
+
+        /* Event name in header */
+        .event-header-name {
+            color: #f0f0f0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 6px 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: none;
+        }
+
+        .event-header-name:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Event description modal */
+        .event-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10002;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .event-modal-overlay.visible {
+            display: flex;
+        }
+
+        .event-modal {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 30px rgba(0,0,0,0.3);
+            max-width: 600px;
+            max-height: 80vh;
+            width: 90%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .event-modal-header {
+            padding: 16px 20px;
+            background: #2c3e50;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .event-modal-header h2 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .event-modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            opacity: 0.8;
+        }
+
+        .event-modal-close:hover {
+            opacity: 1;
+        }
+
+        .event-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .event-modal-body p {
+            margin: 0;
+            line-height: 1.6;
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .event-modal-body a {
+            color: #1976D2;
+            text-decoration: none;
+        }
+
+        .event-modal-body a:hover {
+            text-decoration: underline;
+        }
+
+        .event-modal-footer {
+            padding: 12px 20px;
+            background: #f5f5f5;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+        }
+
+        .event-modal-footer a {
+            color: #666;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .event-modal-footer a:hover {
+            color: #333;
+        }
     </style>
 </head>
 <body>
+    <!-- Event description modal -->
+    <div class="event-modal-overlay" id="eventModalOverlay" onclick="hideEventModal(event)">
+        <div class="event-modal" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <h2 id="eventModalTitle"></h2>
+                <button class="event-modal-close" onclick="hideEventModal()">&times;</button>
+            </div>
+            <div class="event-modal-body">
+                <p id="eventModalDescription"></p>
+            </div>
+            <div class="event-modal-footer">
+                <a href="index.html">← Back to Events List</a>
+            </div>
+        </div>
+    </div>
+
     <div id="controls">
-        <a href="index.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
+        <a id="live-link" href="event.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
+        <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
+        <a href="index.html" style="color:#aaa;text-decoration:none;padding:8px 12px;margin-right:10px;font-size:12px;">📋 All Events</a>
         <label>Date: <input type="date" id="date-picker"></label>
         <button id="load-btn">Load Tracks</button>
         <div class="graphs-dropdown">
@@ -1361,6 +1499,56 @@
         }
     </script>
     <script>
+        // Event ID from URL parameter (default to 1 for backwards compatibility)
+        const urlParams = new URLSearchParams(window.location.search);
+        const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+        const DATA_BASE = `${EVENT_ID}/`;
+
+        // Store event info for modal
+        let currentEventInfo = null;
+
+        // Convert URLs in text to clickable links
+        function linkifyText(text) {
+            if (!text) return '';
+            const urlPattern = /(https?:\/\/[^\s<]+)/g;
+            return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+        }
+
+        // Show event description modal
+        function showEventModal() {
+            if (!currentEventInfo) return;
+            document.getElementById('eventModalTitle').textContent = currentEventInfo.name;
+            const description = currentEventInfo.description || 'No description available.';
+            document.getElementById('eventModalDescription').innerHTML = linkifyText(description);
+            document.getElementById('eventModalOverlay').classList.add('visible');
+        }
+
+        // Hide event description modal
+        function hideEventModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('eventModalOverlay').classList.remove('visible');
+        }
+
+        // Fetch event name and update page title + header
+        (async function() {
+            try {
+                const response = await fetch('/api/events');
+                if (response.ok) {
+                    const data = await response.json();
+                    const event = data.events.find(e => e.eid === EVENT_ID);
+                    if (event && event.name) {
+                        currentEventInfo = event;
+                        document.title = `${event.name} - Track Review`;
+                        const headerEl = document.getElementById('eventHeaderName');
+                        headerEl.textContent = event.name;
+                        headerEl.style.display = 'inline-block';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch event name:', e);
+            }
+        })();
+
         // Initialize map
         const map = L.map('map').setView([-36.85, 174.88], 13);
 
@@ -1606,7 +1794,7 @@
         // Load user overrides (name mappings)
         async function loadUserOverrides() {
             try {
-                const response = await fetch('users.json?' + Date.now());
+                const response = await fetch(`${DATA_BASE}users.json?` + Date.now());
                 if (response.ok) {
                     const data = await response.json();
                     userOverrides = data.users || {};
@@ -1694,7 +1882,7 @@
 
             try {
                 // Try to fetch summary file
-                const summaryUrl = `logs/${logDate}_summary.json?${Date.now()}`;
+                const summaryUrl = `${DATA_BASE}logs/${logDate}_summary.json?${Date.now()}`;
                 const response = await fetch(summaryUrl);
 
                 if (response.ok) {
@@ -1793,7 +1981,7 @@
             selectedUsers = new Set();
 
             try {
-                const text = await fetchLogFile(`logs/${logEntry.file}`);
+                const text = await fetchLogFile(`${DATA_BASE}logs/${logEntry.file}`);
                 if (!text) throw new Error('Failed to load');
 
                 const lines = text.trim().split('\n');
@@ -1865,7 +2053,7 @@
             userData = {};
 
             // Try to load main file and rotated files
-            const baseUrl = `logs/${logDate}.jsonl`;
+            const baseUrl = `${DATA_BASE}logs/${logDate}.jsonl`;
             const filesToTry = [baseUrl];
 
             // Try numbered rotations
@@ -3966,6 +4154,12 @@
             document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
             resetPlaybackToSelection();
         });
+
+        // Update live tracking link to include event ID
+        const liveLink = document.getElementById('live-link');
+        if (liveLink) {
+            liveLink.href = `event.html?eid=${EVENT_ID}`;
+        }
 
         // Load today's summary on start
         loadSummary();

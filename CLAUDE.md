@@ -18,7 +18,6 @@ Windsurfer Tracker is a GPS tracking system for windsurfing races. It uses UDP f
    - Runs an HTTP server on the same port for admin API and static file serving
    - Admin endpoints: `/api/admin/clear-tracks`, `/api/admin/course`, `/api/auth/check`
    - Public endpoints: `/api/course`
-   - OwnTracks endpoint: `/api/owntracks` (HTTP POST with Basic Auth)
 
 2. **Android App** (`android/`) - Native Kotlin app that:
    - Tracks GPS every 10 seconds
@@ -88,28 +87,6 @@ cd android
 - Course file: `course.json`
 - Android server config: `android/app/src/main/java/nz/co/tracker/windsurfer/TrackerService.kt`
 
-## OwnTracks Client Support
-
-The server supports [OwnTracks](https://owntracks.org/) clients via HTTP endpoint.
-
-### Server Setup
-
-```bash
-# With separate OwnTracks password
-python3 tracker_server.py --static-dir ../WebUI --owntracks-password secretpass
-
-# Uses admin password if --owntracks-password not specified
-```
-
-### OwnTracks App Configuration
-
-- **Mode**: HTTP
-- **URL**: `http://yourserver:41234/api/owntracks`
-- **Authentication**: Username (any), Password (admin password or --owntracks-password)
-- **TrackerID**: 2 characters (e.g., S1, o9)
-
-OwnTracks clients appear with ID prefix `OT-` (e.g., `OT-S1`), default to sailor role, and show version `owntracks`. The display name is auto-set from the topic field (e.g., `owntracks/user/Andrew` → "Andrew"). Role can be changed via Web UI admin.
-
 ## User Overrides
 
 Admins can customize display names and roles for any tracker client via the Web UI or API.
@@ -139,7 +116,7 @@ Overrides are stored in `users.json`:
   "updated": 1732615200,
   "updated_iso": "2024-11-26T12:00:00",
   "users": {
-    "OT-S1": {"name": "Andrew", "role": "sailor"},
+    "S01": {"name": "Andrew", "role": "sailor"},
     "S03": {"name": "Race Official"}
   }
 }

@@ -8,6 +8,7 @@ class PrefsKeys {
   static const String serverPort = 'server_port';
   static const String role = 'role';
   static const String password = 'password';
+  static const String eventId = 'event_id';
   static const String trackingActive = 'tracking_active';
   static const String batteryOptAsked = 'battery_opt_asked';
   static const String highFrequencyMode = 'high_frequency_mode';
@@ -50,6 +51,10 @@ class PreferencesService {
   String get password => _p.getString(PrefsKeys.password) ?? '';
   set password(String value) => _p.setString(PrefsKeys.password, value);
 
+  // Event ID (for multi-event support)
+  int get eventId => _p.getInt(PrefsKeys.eventId) ?? 1;
+  set eventId(int value) => _p.setInt(PrefsKeys.eventId, value);
+
   // Tracking active (for auto-resume)
   bool get trackingActive => _p.getBool(PrefsKeys.trackingActive) ?? false;
   set trackingActive(bool value) => _p.setBool(PrefsKeys.trackingActive, value);
@@ -69,6 +74,7 @@ class PreferencesService {
     required int serverPort,
     required String role,
     required String password,
+    int eventId = 1,
     required bool highFrequencyMode,
   }) async {
     await _p.setString(PrefsKeys.sailorId, sailorId);
@@ -76,6 +82,7 @@ class PreferencesService {
     await _p.setInt(PrefsKeys.serverPort, serverPort);
     await _p.setString(PrefsKeys.role, role);
     await _p.setString(PrefsKeys.password, password);
+    await _p.setInt(PrefsKeys.eventId, eventId);
     await _p.setBool(PrefsKeys.highFrequencyMode, highFrequencyMode);
   }
 }

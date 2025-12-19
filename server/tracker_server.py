@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Windsurfer Tracker - UDP Server with HTTP Admin API
+Windsurfer Tracker - Multi-Event UDP Server with HTTP Admin API
 Receives position reports from sailor apps, sends ACKs, logs data.
-Provides HTTP endpoints for admin functions and course management.
+Provides HTTP endpoints for admin functions, course management, and event management.
+Supports multiple concurrent events, each with its own data directory and passwords.
 """
 
 import socket
@@ -10,6 +11,7 @@ import json
 import time
 import argparse
 import os
+import re
 import threading
 import email.utils
 from datetime import datetime, date, timezone
@@ -181,6 +183,144 @@ def generate_log_summaries(log_dir: Path) -> int:
             print(f"[SUMMARY] Error writing {summary_file}: {e}")
 
     return updated_count
+
+
+class EventManager:
+    """Manages multiple events with their configurations and passwords."""
+
+    def __init__(self, events_file: Path, html_dir: Path):
+        self.events_file = events_file
+        self.html_dir = html_dir
+        self.events: dict[int, dict] = {}
+        self.manager_password: str = ""
+        self.next_eid: int = 1
+        self._lock = threading.Lock()
+        self._load_events()
+
+    def _load_events(self):
+        """Load events from JSON file."""
+        if not self.events_file.exists():
+            print(f"[EVENTS] No events file found at {self.events_file}")
+            return
+
+        try:
+            with open(self.events_file, 'r') as f:
+                data = json.load(f)
+            self.manager_password = data.get('manager_password', '')
+            self.next_eid = data.get('next_eid', 1)
+            # Load events, converting string keys to int
+            events_data = data.get('events', {})
+            for eid_str, event in events_data.items():
+                try:
+                    eid = int(eid_str)
+                    self.events[eid] = event
+                except ValueError:
+                    print(f"[EVENTS] Skipping invalid event ID: {eid_str}")
+            print(f"[EVENTS] Loaded {len(self.events)} events from {self.events_file}")
+        except Exception as e:
+            print(f"[EVENTS] Error loading events file: {e}")
+
+    def _save_events(self):
+        """Save events to JSON file (atomic write)."""
+        output = {
+            "next_eid": self.next_eid,
+            "manager_password": self.manager_password,
+            "events": {str(eid): event for eid, event in self.events.items()}
+        }
+        try:
+            tmp_file = self.events_file.with_suffix('.tmp')
+            with open(tmp_file, 'w') as f:
+                json.dump(output, f, indent=2)
+            tmp_file.rename(self.events_file)
+            print(f"[EVENTS] Saved {len(self.events)} events to {self.events_file}")
+        except Exception as e:
+            print(f"[EVENTS] Error saving events file: {e}")
+
+    def get_event(self, eid: int) -> dict | None:
+        """Get event by ID."""
+        with self._lock:
+            return self.events.get(eid)
+
+    def get_public_events(self) -> list[dict]:
+        """Get list of active (non-archived) events without passwords."""
+        with self._lock:
+            result = []
+            for eid, event in self.events.items():
+                if not event.get('archived', False):
+                    result.append({
+                        "eid": eid,
+                        "name": event.get("name", f"Event {eid}"),
+                        "description": event.get("description", "")
+                    })
+            # Sort by name
+            result.sort(key=lambda e: e.get("name", ""))
+            return result
+
+    def get_all_events(self) -> list[dict]:
+        """Get list of all events with full details (for manager)."""
+        with self._lock:
+            result = []
+            for eid, event in self.events.items():
+                result.append({
+                    "eid": eid,
+                    **event
+                })
+            # Sort by eid
+            result.sort(key=lambda e: e.get("eid", 0))
+            return result
+
+    def create_event(self, name: str, description: str,
+                     admin_password: str, tracker_password: str = "") -> int:
+        """Create new event, return event ID."""
+        with self._lock:
+            eid = self.next_eid
+            self.next_eid += 1
+            self.events[eid] = {
+                "name": name,
+                "description": description,
+                "admin_password": admin_password,
+                "tracker_password": tracker_password,
+                "archived": False,
+                "created": time.time(),
+                "created_iso": datetime.now().isoformat()
+            }
+            self._save_events()
+            # Create event data directory
+            self._ensure_event_dir(eid)
+            print(f"[EVENTS] Created event {eid}: {name}")
+            return eid
+
+    def update_event(self, eid: int, updates: dict) -> bool:
+        """Update event properties (name, description, archived, passwords)."""
+        with self._lock:
+            if eid not in self.events:
+                return False
+            event = self.events[eid]
+            # Only allow updating certain fields
+            allowed_fields = ['name', 'description', 'archived',
+                              'admin_password', 'tracker_password']
+            for field in allowed_fields:
+                if field in updates:
+                    event[field] = updates[field]
+            event['updated'] = time.time()
+            event['updated_iso'] = datetime.now().isoformat()
+            self._save_events()
+            print(f"[EVENTS] Updated event {eid}: {updates}")
+            return True
+
+    def _ensure_event_dir(self, eid: int):
+        """Ensure event data directory exists."""
+        event_dir = self.html_dir / str(eid)
+        logs_dir = event_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[EVENTS] Ensured directory exists: {event_dir}")
+
+    def get_event_data_dir(self, eid: int) -> Path:
+        """Get data directory for event, creating if needed."""
+        event_dir = self.html_dir / str(eid)
+        if not event_dir.exists():
+            self._ensure_event_dir(eid)
+        return event_dir
 
 
 def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None):
@@ -429,11 +569,130 @@ class PositionTracker:
         return not is_dup
 
 
+class EventTracker:
+    """Per-event tracker wrapping PositionTracker, DailyLogger, and user overrides."""
+
+    def __init__(self, eid: int, data_dir: Path, event_config: dict):
+        self.eid = eid
+        self.data_dir = data_dir
+        self.event_config = event_config
+        self.positions_file = data_dir / "current_positions.json"
+        self.course_file = data_dir / "course.json"
+        self.users_file = data_dir / "users.json"
+        self.log_dir = data_dir / "logs"
+
+        # Ensure directories exist
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create daily logger
+        self.daily_logger = DailyLogger(self.log_dir)
+
+        # Load user overrides
+        self.user_overrides = load_user_overrides(self.users_file)
+
+        # Create position tracker
+        self.position_tracker = PositionTracker(self.positions_file, self.daily_logger)
+
+        # Ensure current_positions.json exists
+        if not self.positions_file.exists():
+            write_current_positions({}, self.positions_file, self.user_overrides)
+
+        print(f"[EVENT {eid}] Initialized tracker for '{event_config.get('name', 'Unnamed')}'")
+
+    def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
+                         heading: int, ts: int, assist: bool, battery: int, signal: int,
+                         role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
+                         battery_drain_rate: float | None = None, heart_rate: int | None = None,
+                         os_version: str | None = None, skip_log: bool = False,
+                         pos_array: list | None = None) -> bool:
+        """Process a position update for this event."""
+        recv_time = time.time()
+
+        # If 1Hz array format, log as single entry with pos array (more compact)
+        has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+        if has_batch and self.daily_logger:
+            track_entry = {
+                "id": sailor_id,
+                "ts": ts,
+                "recv_ts": recv_time,
+                "pos": pos_array,
+                "spd": speed,
+                "hdg": heading,
+                "ast": assist,
+                "bat": battery,
+                "sig": signal,
+                "role": role,
+                "ver": version,
+                "flg": flags
+            }
+            if battery_drain_rate is not None:
+                track_entry["bdr"] = battery_drain_rate
+            if heart_rate is not None and heart_rate > 0:
+                track_entry["hr"] = heart_rate
+            if os_version:
+                track_entry["os"] = os_version
+            self.daily_logger.write(track_entry)
+
+        # Process through position tracker
+        # We pass user_overrides via the global for now (will refactor later)
+        result = self.position_tracker.process_position(
+            sailor_id=sailor_id,
+            lat=lat,
+            lon=lon,
+            speed=speed,
+            heading=heading,
+            ts=ts,
+            assist=assist,
+            battery=battery,
+            signal=signal,
+            role=role,
+            version=version,
+            flags=flags,
+            src_ip=src_ip,
+            source=f"[E{self.eid}]{source}",
+            battery_drain_rate=battery_drain_rate,
+            heart_rate=heart_rate,
+            os_version=os_version,
+            skip_log=has_batch or skip_log
+        )
+
+        # Write positions with event-specific user overrides
+        if result and self.positions_file:
+            write_current_positions(
+                self.position_tracker.current_positions,
+                self.positions_file,
+                self.user_overrides
+            )
+
+        return result
+
+    def clear_tracks(self):
+        """Clear tracks for this event."""
+        if self.daily_logger:
+            self.daily_logger.clear_today()
+        if self.positions_file and self.positions_file.exists():
+            self.positions_file.unlink()
+        self.position_tracker.clear()
+        # Recreate empty positions file
+        write_current_positions({}, self.positions_file, self.user_overrides)
+        print(f"[EVENT {self.eid}] Tracks cleared")
+
+    def close(self):
+        """Clean up resources."""
+        if self.daily_logger:
+            self.daily_logger.close()
+
+
 # Global references for HTTP handler to access
+# Multi-event mode globals
+_event_manager: EventManager | None = None
+_event_trackers: dict[int, EventTracker] = {}  # eid -> EventTracker
+_event_trackers_lock = threading.Lock()
+
+# Legacy single-event mode globals (for backwards compatibility)
 _daily_logger: DailyLogger | None = None
 _position_tracker: PositionTracker | None = None
 _admin_password: str = "admin"
-_owntracks_password: str | None = None  # Separate password for OwnTracks (None = use admin password)
 _tracker_password: str | None = None  # Password for UDP tracker packets (None = no password required)
 _course_file: Path | None = None
 _users_file: Path | None = None
@@ -457,6 +716,24 @@ def is_rate_limited(ip: str) -> bool:
 def record_failed_auth(ip: str):
     """Record a failed authentication attempt for rate limiting."""
     _failed_auth_times[ip] = time.time()
+
+
+def get_event_tracker(eid: int) -> EventTracker | None:
+    """Get or create an EventTracker for the given event ID."""
+    global _event_trackers
+
+    if not _event_manager:
+        return None
+
+    event = _event_manager.get_event(eid)
+    if not event:
+        return None
+
+    with _event_trackers_lock:
+        if eid not in _event_trackers:
+            data_dir = _event_manager.get_event_data_dir(eid)
+            _event_trackers[eid] = EventTracker(eid, data_dir, event)
+        return _event_trackers[eid]
 
 
 def load_user_overrides(users_file: Path) -> dict[str, dict]:
@@ -498,13 +775,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         """Override to prefix with [HTTP]"""
         print(f"[HTTP] {args[0]}")
     
-    def _send_json(self, data: dict, status: int = 200):
+    def _send_json(self, data: dict | list, status: int = 200):
         """Send JSON response."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'X-Admin-Password, Content-Type')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'X-Admin-Password, X-Manager-Password, Content-Type')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
         self.end_headers()
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
@@ -544,7 +821,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         return self.headers.get('X-Forwarded-For', self.client_address[0])
 
     def _check_auth(self) -> bool:
-        """Check admin password from header with rate limiting."""
+        """Check admin password from header with rate limiting (legacy single-event mode)."""
         client_ip = self._get_client_ip()
 
         # Check rate limiting first
@@ -559,44 +836,55 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _check_owntracks_auth(self) -> tuple[bool, str]:
-        """Check OwnTracks authentication (HTTP Basic Auth) with rate limiting. Returns (success, reason)."""
-        import base64
+    def _check_manager_auth(self) -> bool:
+        """Check manager password from header with rate limiting."""
         client_ip = self._get_client_ip()
 
-        # Check rate limiting first
         if is_rate_limited(client_ip):
-            return False, "rate-limited"
+            print(f"[HTTP] Manager auth rate-limited for {client_ip}")
+            return False
 
-        auth_header = self.headers.get('Authorization', '')
-        if not auth_header:
+        if not _event_manager:
+            print(f"[HTTP] Manager auth failed - multi-event mode not enabled")
+            return False
+
+        password = self.headers.get('X-Manager-Password', '')
+        if password != _event_manager.manager_password:
             record_failed_auth(client_ip)
-            return False, "no Authorization header"
-        if not auth_header.startswith('Basic '):
+            print(f"[HTTP] Manager auth failed from {client_ip}")
+            return False
+        return True
+
+    def _check_event_admin_auth(self, eid: int) -> bool:
+        """Check per-event admin password from header with rate limiting."""
+        client_ip = self._get_client_ip()
+
+        if is_rate_limited(client_ip):
+            print(f"[HTTP] Event {eid} admin auth rate-limited for {client_ip}")
+            return False
+
+        if not _event_manager:
+            # Fall back to legacy mode
+            return self._check_auth()
+
+        event = _event_manager.get_event(eid)
+        if not event:
+            print(f"[HTTP] Event {eid} not found")
+            return False
+
+        password = self.headers.get('X-Admin-Password', '')
+        if password != event.get('admin_password', ''):
             record_failed_auth(client_ip)
-            return False, f"invalid auth type (expected Basic, got {auth_header.split()[0] if auth_header else 'none'})"
-        try:
-            credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
-            if ':' not in credentials:
-                record_failed_auth(client_ip)
-                return False, "malformed credentials (no colon separator)"
-            username, password = credentials.split(':', 1)
-            # Use OwnTracks password if set, otherwise fall back to admin password
-            expected = _owntracks_password if _owntracks_password else _admin_password
-            if password != expected:
-                record_failed_auth(client_ip)
-                return False, f"wrong password for user '{username}'"
-            return True, "ok"
-        except Exception as e:
-            record_failed_auth(client_ip)
-            return False, f"auth decode error: {e}"
-    
+            print(f"[HTTP] Event {eid} admin auth failed from {client_ip}")
+            return False
+        return True
+
     def do_OPTIONS(self):
         """Handle CORS preflight."""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'X-Admin-Password, Content-Type')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'X-Admin-Password, X-Manager-Password, Content-Type')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
         self.end_headers()
     
     def do_GET(self):
@@ -623,11 +911,34 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"authenticated": False}, 401)
 
         elif path == '/api/users':
-            # Return user overrides (admin only)
+            # Return user overrides (admin only) - legacy single-event mode
             if not self._check_auth():
                 self._send_json({"error": "Unauthorized"}, 401)
                 return
             self._send_json({"users": _user_overrides})
+
+        elif path == '/api/events':
+            # Return list of active events (public endpoint)
+            if _event_manager:
+                self._send_json({"events": _event_manager.get_public_events()})
+            else:
+                # Legacy mode - return single default event
+                self._send_json({"events": [{"eid": 1, "name": "Default Event", "description": ""}]})
+
+        elif path == '/api/manage/events':
+            # Return full event list with details (manager only)
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            if _event_manager:
+                self._send_json({"events": _event_manager.get_all_events()})
+            else:
+                self._send_json({"error": "Multi-event mode not enabled"}, 400)
+
+        elif path.startswith('/api/event/'):
+            # Per-event API endpoints
+            self._handle_event_get(path)
+            return
 
         elif _static_dir:
             # Serve static files
@@ -666,7 +977,219 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Not found"}, 404)
         else:
             self._send_json({"error": "Not found"}, 404)
-    
+
+    def _parse_event_path(self, path: str) -> tuple[int | None, str]:
+        """Parse /api/event/{eid}/... path. Returns (eid, remaining_path) or (None, '') on error."""
+        # Pattern: /api/event/{eid}/...
+        match = re.match(r'^/api/event/(\d+)(/.*)?$', path)
+        if not match:
+            return None, ''
+        eid = int(match.group(1))
+        remaining = match.group(2) or ''
+        return eid, remaining
+
+    def _handle_event_get(self, path: str):
+        """Handle GET requests for per-event endpoints."""
+        eid, subpath = self._parse_event_path(path)
+        if eid is None:
+            self._send_json({"error": "Invalid event path"}, 400)
+            return
+
+        # Check if event exists
+        if _event_manager:
+            event = _event_manager.get_event(eid)
+            if not event:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+        else:
+            # Legacy mode - only allow eid=1
+            if eid != 1:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+
+        if subpath == '/course':
+            # Return course for this event (public)
+            tracker = get_event_tracker(eid)
+            if tracker and tracker.course_file.exists():
+                try:
+                    with open(tracker.course_file, 'r') as f:
+                        course = json.load(f)
+                    self._send_json(course)
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            elif _course_file and _course_file.exists() and eid == 1:
+                # Fall back to legacy course file for event 1
+                try:
+                    with open(_course_file, 'r') as f:
+                        course = json.load(f)
+                    self._send_json(course)
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"course": None})
+
+        elif subpath == '/auth/check':
+            # Check admin password for this event
+            if self._check_event_admin_auth(eid):
+                self._send_json({"authenticated": True})
+            else:
+                self._send_json({"authenticated": False}, 401)
+
+        elif subpath == '/users':
+            # Return user overrides for this event (admin only)
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            tracker = get_event_tracker(eid)
+            if tracker:
+                self._send_json({"users": tracker.user_overrides})
+            else:
+                self._send_json({"users": {}})
+
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def _handle_event_post(self, path: str):
+        """Handle POST requests for per-event endpoints."""
+        eid, subpath = self._parse_event_path(path)
+        if eid is None:
+            self._send_json({"error": "Invalid event path"}, 400)
+            return
+
+        # Check if event exists
+        if _event_manager:
+            event = _event_manager.get_event(eid)
+            if not event:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+            if event.get('archived'):
+                self._send_json({"error": f"Event {eid} is archived"}, 400)
+                return
+
+        # Admin endpoints require per-event admin auth
+        if not self._check_event_admin_auth(eid):
+            self._send_json({"error": "Unauthorized"}, 401)
+            return
+
+        if subpath == '/admin/clear-tracks':
+            tracker = get_event_tracker(eid)
+            if tracker:
+                tracker.clear_tracks()
+                self._send_json({"success": True, "message": f"Event {eid} tracks cleared"})
+            else:
+                self._send_json({"error": "Could not get event tracker"}, 500)
+
+        elif subpath == '/admin/course':
+            # Save course for this event
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                course = json.loads(body)
+                course['updated'] = time.time()
+                course['updated_iso'] = datetime.now().isoformat()
+
+                tracker = get_event_tracker(eid)
+                if tracker:
+                    tmp_file = tracker.course_file.with_suffix('.tmp')
+                    with open(tmp_file, 'w') as f:
+                        json.dump(course, f, indent=2)
+                    tmp_file.rename(tracker.course_file)
+                    print(f"[EVENT {eid}] Course saved: {len(course.get('marks', []))} marks")
+                    self._send_json({"success": True})
+                else:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath.startswith('/admin/user/'):
+            # Create or update a user override for this event
+            user_id = subpath[len('/admin/user/'):]
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                override = {}
+                if 'name' in data:
+                    override['name'] = str(data['name'])
+                if 'role' in data and data['role'] in ('sailor', 'support', 'spectator'):
+                    override['role'] = data['role']
+                if 'hidden' in data:
+                    override['hidden'] = bool(data['hidden'])
+
+                if override:
+                    tracker.user_overrides[user_id] = override
+                    save_user_overrides(tracker.users_file, tracker.user_overrides)
+                    # Refresh positions file
+                    write_current_positions(
+                        tracker.position_tracker.current_positions,
+                        tracker.positions_file,
+                        tracker.user_overrides
+                    )
+                    print(f"[EVENT {eid}] User override set for {user_id}: {override}")
+                    self._send_json({"success": True, "user_id": user_id, "override": override})
+                else:
+                    self._send_json({"error": "No valid fields (name, role)"}, 400)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def _handle_event_delete(self, path: str):
+        """Handle DELETE requests for per-event endpoints."""
+        eid, subpath = self._parse_event_path(path)
+        if eid is None:
+            self._send_json({"error": "Invalid event path"}, 400)
+            return
+
+        if not self._check_event_admin_auth(eid):
+            self._send_json({"error": "Unauthorized"}, 401)
+            return
+
+        if subpath == '/admin/course':
+            tracker = get_event_tracker(eid)
+            if tracker and tracker.course_file.exists():
+                rotate_file(tracker.course_file)
+                print(f"[EVENT {eid}] Course deleted (rotated)")
+            self._send_json({"success": True})
+
+        elif subpath.startswith('/admin/user/'):
+            user_id = subpath[len('/admin/user/'):]
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            tracker = get_event_tracker(eid)
+            if tracker and user_id in tracker.user_overrides:
+                del tracker.user_overrides[user_id]
+                save_user_overrides(tracker.users_file, tracker.user_overrides)
+                write_current_positions(
+                    tracker.position_tracker.current_positions,
+                    tracker.positions_file,
+                    tracker.user_overrides
+                )
+                print(f"[EVENT {eid}] User override removed for {user_id}")
+            self._send_json({"success": True, "user_id": user_id})
+
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
     def do_POST(self):
         """Handle POST requests."""
         path = urlparse(self.path).path
@@ -676,17 +1199,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._handle_tracker_post()
             return
 
-        # OwnTracks endpoint - has its own auth
-        if path == '/api/owntracks' or path == '/owntracks':
-            self._handle_owntracks()
-            return
-
         # iOS UDID collection endpoint - no auth required
         if path == '/api/udid':
             self._handle_udid_collection()
             return
 
-        # Admin endpoints require admin auth
+        # Per-event endpoints
+        if path.startswith('/api/event/'):
+            self._handle_event_post(path)
+            return
+
+        # Manager endpoint - create event
+        if path == '/api/manage/event':
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            self._handle_create_event()
+            return
+
+        # Legacy admin endpoints require admin auth
         if not self._check_auth():
             self._send_json({"error": "Unauthorized"}, 401)
             return
@@ -782,7 +1313,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         """Handle tracker position updates via HTTP POST (UDP fallback).
 
         Accepts the same JSON format as UDP packets, returns ACK response.
-        Uses tracker password for authentication if configured.
+        Supports multi-event mode via 'eid' field (defaults to 1).
+        Uses per-event tracker password for authentication if configured.
         """
         client_ip = self._get_client_ip()
         recv_time = time.time()
@@ -808,20 +1340,62 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             battery_drain_rate = packet.get("bdr")
             os_version = packet.get("os")  # OS version string (optional)
 
-            # Check rate limiting and password if required
-            if _tracker_password:
-                # Check rate limiting first
-                if is_rate_limited(client_ip):
-                    print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
-                    self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+            # Extract event ID (default to 1 for backwards compatibility)
+            eid = packet.get("eid", 1)
+
+            # Multi-event mode: look up event and check per-event password
+            if _event_manager:
+                event = _event_manager.get_event(eid)
+                if not event:
+                    print(f"[POST] Event {eid} not found for {sailor_id}")
+                    self._send_json({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}, 404)
+                    return
+                if event.get('archived'):
+                    print(f"[POST] Event {eid} is archived, rejecting {sailor_id}")
+                    self._send_json({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}, 400)
                     return
 
-                packet_pwd = packet.get("pwd", "")
-                if packet_pwd != _tracker_password:
-                    record_failed_auth(client_ip)
-                    print(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
-                    self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                # Check per-event tracker password
+                event_tracker_pwd = event.get('tracker_password', '')
+                if event_tracker_pwd:
+                    if is_rate_limited(client_ip):
+                        print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        return
+                    packet_pwd = packet.get("pwd", "")
+                    if packet_pwd != event_tracker_pwd:
+                        record_failed_auth(client_ip)
+                        print(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        return
+
+                # Get or create the event tracker
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    print(f"[POST] ERROR: Could not get tracker for event {eid}")
+                    self._send_json({"error": "Could not initialize event tracker"}, 500)
                     return
+
+            else:
+                # Legacy single-event mode
+                # Check rate limiting and password if required
+                if _tracker_password:
+                    if is_rate_limited(client_ip):
+                        print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        return
+                    packet_pwd = packet.get("pwd", "")
+                    if packet_pwd != _tracker_password:
+                        record_failed_auth(client_ip)
+                        print(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        return
+
+                if not _position_tracker:
+                    print(f"[POST] ERROR: Position tracking not enabled")
+                    self._send_json({"error": "Position tracking not enabled"}, 500)
+                    return
+                tracker = None  # Will use legacy globals
 
             # Check for 1Hz array format vs single position
             pos_array = packet.get("pos")
@@ -834,58 +1408,74 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 lat = packet.get("lat", 0.0)
                 lon = packet.get("lon", 0.0)
 
-            if not _position_tracker:
-                print(f"[POST] ERROR: Position tracking not enabled")
-                self._send_json({"error": "Position tracking not enabled"}, 500)
-                return
+            # Process through event tracker (multi-event) or legacy tracker
+            if tracker:
+                tracker.process_position(
+                    sailor_id=sailor_id,
+                    lat=lat,
+                    lon=lon,
+                    speed=speed,
+                    heading=heading,
+                    ts=ts,
+                    assist=assist,
+                    battery=battery,
+                    signal=signal,
+                    role=role,
+                    version=version,
+                    flags=flags,
+                    src_ip=client_ip,
+                    source="POST",
+                    battery_drain_rate=battery_drain_rate,
+                    heart_rate=heart_rate,
+                    os_version=os_version,
+                    pos_array=pos_array
+                )
+            else:
+                # Legacy single-event mode
+                has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+                if has_batch and _daily_logger:
+                    track_entry = {
+                        "id": sailor_id,
+                        "ts": ts,
+                        "recv_ts": recv_time,
+                        "pos": pos_array,
+                        "spd": speed,
+                        "hdg": heading,
+                        "ast": assist,
+                        "bat": battery,
+                        "sig": signal,
+                        "role": role,
+                        "ver": version,
+                        "flg": flags
+                    }
+                    if battery_drain_rate is not None:
+                        track_entry["bdr"] = battery_drain_rate
+                    if heart_rate is not None and heart_rate > 0:
+                        track_entry["hr"] = heart_rate
+                    if os_version:
+                        track_entry["os"] = os_version
+                    _daily_logger.write(track_entry)
 
-            # If 1Hz array format, log as single entry with pos array (more compact)
-            has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
-            if has_batch and _daily_logger:
-                track_entry = {
-                    "id": sailor_id,
-                    "ts": ts,  # timestamp of last position (for sorting)
-                    "recv_ts": recv_time,
-                    "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
-                    "spd": speed,
-                    "hdg": heading,
-                    "ast": assist,
-                    "bat": battery,
-                    "sig": signal,
-                    "role": role,
-                    "ver": version,
-                    "flg": flags
-                }
-                if battery_drain_rate is not None:
-                    track_entry["bdr"] = battery_drain_rate
-                if heart_rate is not None and heart_rate > 0:
-                    track_entry["hr"] = heart_rate
-                if os_version:
-                    track_entry["os"] = os_version
-                _daily_logger.write(track_entry)
-
-            # Process position through shared tracker (updates live display)
-            # skip_log if we already logged the batch above
-            _position_tracker.process_position(
-                sailor_id=sailor_id,
-                lat=lat,
-                lon=lon,
-                speed=speed,
-                heading=heading,
-                ts=ts,
-                assist=assist,
-                battery=battery,
-                signal=signal,
-                role=role,
-                version=version,
-                flags=flags,
-                src_ip=client_ip,
-                source="POST",
-                battery_drain_rate=battery_drain_rate,
-                heart_rate=heart_rate,
-                os_version=os_version,
-                skip_log=has_batch
-            )
+                _position_tracker.process_position(
+                    sailor_id=sailor_id,
+                    lat=lat,
+                    lon=lon,
+                    speed=speed,
+                    heading=heading,
+                    ts=ts,
+                    assist=assist,
+                    battery=battery,
+                    signal=signal,
+                    role=role,
+                    version=version,
+                    flags=flags,
+                    src_ip=client_ip,
+                    source="POST",
+                    battery_drain_rate=battery_drain_rate,
+                    heart_rate=heart_rate,
+                    os_version=os_version,
+                    skip_log=has_batch
+                )
 
             # Send ACK response (same format as UDP)
             self._send_json({"ack": seq, "ts": int(recv_time)})
@@ -978,126 +1568,92 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Location', '/install/flutter-ios.html?error=unknown')
             self.end_headers()
 
-    def _handle_owntracks(self):
-        """Handle OwnTracks location updates."""
-        # Get client info for logging
-        client_ip = self.headers.get('X-Forwarded-For', self.client_address[0])
-        user_agent = self.headers.get('User-Agent', 'unknown')
-
-        # Check authentication
-        auth_ok, auth_reason = self._check_owntracks_auth()
-        if not auth_ok:
-            print(f"[OwnTracks] AUTH FAILED from {client_ip}: {auth_reason} (User-Agent: {user_agent})")
-            self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="OwnTracks"')
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(b'[]')
-            return
-
+    def _handle_create_event(self):
+        """Handle event creation (manager endpoint)."""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
             data = json.loads(body)
 
-            # OwnTracks sends different message types
-            msg_type = data.get('_type', '')
-
-            if msg_type != 'location':
-                # Ignore non-location messages (waypoints, transitions, etc.)
-                print(f"[OwnTracks] Ignoring message type '{msg_type}' from {client_ip}")
-                self._send_json([])
+            if not _event_manager:
+                self._send_json({"error": "Multi-event mode not enabled"}, 400)
                 return
 
-            if not _position_tracker:
-                print(f"[OwnTracks] ERROR: Position tracking not enabled")
-                self._send_json({"error": "Position tracking not enabled"}, 500)
+            name = data.get('name', '').strip()
+            if not name:
+                self._send_json({"error": "Event name is required"}, 400)
                 return
 
-            # Map OwnTracks fields to internal format
-            tid = data.get('tid', '??')  # 2-char tracker ID
-            sailor_id = f"OT-{tid}"  # Prefix to distinguish OwnTracks clients
+            description = data.get('description', '')
+            admin_password = data.get('admin_password', '')
+            if not admin_password:
+                self._send_json({"error": "Admin password is required"}, 400)
+                return
 
-            # Extract username from topic field (e.g., "owntracks/user/AndrewOT" -> "AndrewOT")
-            topic = data.get('topic', '')
-            auto_set_name = False
-            if topic and '/' in topic:
-                topic_username = topic.rsplit('/', 1)[-1]
-                # Auto-create name override if not already set
-                if topic_username and sailor_id not in _user_overrides:
-                    _user_overrides[sailor_id] = {'name': topic_username}
-                    auto_set_name = True
-                    if _users_file:
-                        save_user_overrides(_users_file, _user_overrides)
-                    print(f"[OwnTracks] Auto-set name for {sailor_id}: {topic_username}")
+            tracker_password = data.get('tracker_password', '')
 
-            lat = data.get('lat', 0.0)
-            lon = data.get('lon', 0.0)
-            ts = data.get('tst', int(time.time()))
-
-            # vel is in km/h, convert to knots (÷ 1.852)
-            speed_kmh = data.get('vel', 0)
-            speed_kn = speed_kmh / 1.852 if speed_kmh and speed_kmh >= 0 else 0.0
-
-            heading = data.get('cog', 0)  # Course over ground
-            if heading is None or heading < 0:
-                heading = 0
-
-            battery = data.get('batt', -1)
-            if battery is None:
-                battery = -1
-
-            # Default role for OwnTracks clients is sailor
-            # Can be overridden via user overrides in Web UI
-            role = "sailor"
-
-            # Get client IP (prefer X-Forwarded-For for proxied requests)
-            src_ip = client_ip
-
-            # Process the position
-            _position_tracker.process_position(
-                sailor_id=sailor_id,
-                lat=lat,
-                lon=lon,
-                speed=speed_kn,
-                heading=int(heading),
-                ts=ts,
-                assist=False,  # OwnTracks doesn't have assist concept
-                battery=battery,
-                signal=-1,  # OwnTracks doesn't report signal
-                role=role,
-                version="owntracks",
-                flags={},  # OwnTracks doesn't have battery saver info
-                src_ip=src_ip,
-                source="HTTP/OT"
+            eid = _event_manager.create_event(
+                name=name,
+                description=description,
+                admin_password=admin_password,
+                tracker_password=tracker_password
             )
 
-            # If we auto-set a name, refresh positions file to include it
-            if auto_set_name and _position_tracker.positions_file:
-                write_current_positions(
-                    _position_tracker.current_positions,
-                    _position_tracker.positions_file,
-                    _user_overrides
-                )
+            self._send_json({"success": True, "eid": eid})
 
-            # OwnTracks expects empty array on success
-            self._send_json([])
-
-        except json.JSONDecodeError as e:
-            print(f"[OwnTracks] JSON PARSE ERROR from {client_ip}: {e}")
+        except json.JSONDecodeError:
             self._send_json({"error": "Invalid JSON"}, 400)
         except Exception as e:
-            print(f"[OwnTracks] ERROR from {client_ip}: {e}")
             self._send_json({"error": str(e)}, 500)
-    
+
+    def do_PATCH(self):
+        """Handle PATCH requests (for updating events)."""
+        path = urlparse(self.path).path
+
+        # Manager endpoint - update event
+        match = re.match(r'^/api/manage/event/(\d+)$', path)
+        if match:
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+
+            eid = int(match.group(1))
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                updates = json.loads(body)
+
+                if not _event_manager:
+                    self._send_json({"error": "Multi-event mode not enabled"}, 400)
+                    return
+
+                if _event_manager.update_event(eid, updates):
+                    self._send_json({"success": True, "eid": eid})
+                else:
+                    self._send_json({"error": f"Event {eid} not found"}, 404)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        self._send_json({"error": "Not found"}, 404)
+
     def do_DELETE(self):
         """Handle DELETE requests."""
         path = urlparse(self.path).path
-        
+
+        # Per-event DELETE endpoints
+        if path.startswith('/api/event/'):
+            self._handle_event_delete(path)
+            return
+
+        # Legacy endpoints require admin auth
         if not self._check_auth():
             self._send_json({"error": "Unauthorized"}, 401)
             return
-        
+
         if path == '/api/admin/course':
             # Delete course by rotating to .1, .2, etc.
             if _course_file and _course_file.exists():
@@ -1220,11 +1776,21 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
 
 def run_server(port: int, log_file: Path | None, positions_file: Path | None, log_dir: Path | None,
                http_port: int | None = None, admin_password: str = "admin", course_file: Path | None = None,
-               static_dir: Path | None = None, owntracks_password: str | None = None,
-               users_file: Path | None = None, tracker_password: str | None = None):
-    """Main server loop."""
-    global _daily_logger, _position_tracker, _admin_password, _owntracks_password, _tracker_password
+               static_dir: Path | None = None,
+               users_file: Path | None = None, tracker_password: str | None = None,
+               manager_password: str | None = None, events_file: Path | None = None):
+    """Main server loop.
+
+    If manager_password is provided, runs in multi-event mode where:
+    - Events are managed via events.json (or --events-file)
+    - Each event has its own data directory under static_dir/{eid}/
+    - Per-event admin and tracker passwords are used
+
+    Otherwise, runs in legacy single-event mode with global passwords.
+    """
+    global _daily_logger, _position_tracker, _admin_password, _tracker_password
     global _course_file, _static_dir, _positions_file, _users_file, _user_overrides
+    global _event_manager
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1233,60 +1799,93 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     print(f"Tracker server listening on UDP port {port}")
     print("Waiting for packets...\n")
 
-    if positions_file:
-        print(f"Writing current positions to: {positions_file}\n")
+    # Multi-event mode initialization
+    if manager_password:
+        if not static_dir:
+            print("[ERROR] Multi-event mode requires --static-dir to be set")
+            return
+        if not events_file:
+            events_file = Path("events.json")
 
-    # Daily logger for track history
-    daily_logger = None
-    if log_dir:
-        daily_logger = DailyLogger(log_dir)
-        print(f"Track logs directory: {log_dir}\n")
+        print(f"[EVENTS] Multi-event mode enabled")
+        print(f"[EVENTS] Events file: {events_file}")
+        print(f"[EVENTS] HTML directory: {static_dir}")
 
-    # Load user overrides
-    user_overrides = {}
-    if users_file:
-        user_overrides = load_user_overrides(users_file)
-        print(f"Users file: {users_file} ({len(user_overrides)} overrides)\n")
+        _event_manager = EventManager(events_file, static_dir)
+        _event_manager.manager_password = manager_password
 
-    # Create position tracker
-    position_tracker = PositionTracker(positions_file, daily_logger)
+        # In multi-event mode, legacy globals are not used for data
+        # but we still need static_dir for serving files
+        _static_dir = static_dir
+        _admin_password = ""  # Not used in multi-event mode
+        _tracker_password = None
+        _course_file = None
+        _positions_file = None
+        _users_file = None
+        _user_overrides = {}
+        daily_logger = None
+        position_tracker = None
 
-    # Ensure current_positions.json exists (so web client doesn't get 404 on startup)
-    if positions_file and not positions_file.exists():
-        write_current_positions({}, positions_file, user_overrides)
-        print(f"[STARTUP] Created empty positions file: {positions_file}")
+        print(f"[EVENTS] Loaded {len(_event_manager.events)} events\n")
 
-    # Set up globals for HTTP handler
-    _daily_logger = daily_logger
-    _position_tracker = position_tracker
-    _admin_password = admin_password
-    _owntracks_password = owntracks_password
-    _tracker_password = tracker_password
-    _course_file = course_file
-    _static_dir = static_dir
-    _positions_file = positions_file
-    _users_file = users_file
-    _user_overrides = user_overrides
+    else:
+        # Legacy single-event mode
+        _event_manager = None
 
-    if course_file:
-        print(f"Course file: {course_file}\n")
+        if positions_file:
+            print(f"Writing current positions to: {positions_file}\n")
 
-    if static_dir:
-        print(f"Serving static files from: {static_dir}\n")
+        # Daily logger for track history
+        daily_logger = None
+        if log_dir:
+            daily_logger = DailyLogger(log_dir)
+            print(f"Track logs directory: {log_dir}\n")
 
-    if tracker_password:
-        print(f"Tracker password: enabled (clients must send 'pwd' field)\n")
+        # Load user overrides
+        user_overrides = {}
+        if users_file:
+            user_overrides = load_user_overrides(users_file)
+            print(f"Users file: {users_file} ({len(user_overrides)} overrides)\n")
+
+        # Create position tracker
+        position_tracker = PositionTracker(positions_file, daily_logger)
+
+        # Ensure current_positions.json exists (so web client doesn't get 404 on startup)
+        if positions_file and not positions_file.exists():
+            write_current_positions({}, positions_file, user_overrides)
+            print(f"[STARTUP] Created empty positions file: {positions_file}")
+
+        # Set up globals for HTTP handler
+        _daily_logger = daily_logger
+        _position_tracker = position_tracker
+        _admin_password = admin_password
+        _tracker_password = tracker_password
+        _course_file = course_file
+        _static_dir = static_dir
+        _positions_file = positions_file
+        _users_file = users_file
+        _user_overrides = user_overrides
+
+        if course_file:
+            print(f"Course file: {course_file}\n")
+
+        if static_dir:
+            print(f"Serving static files from: {static_dir}\n")
+
+        if tracker_password:
+            print(f"Tracker password: enabled (clients must send 'pwd' field)\n")
 
     if http_port:
-        print(f"OwnTracks endpoint: http://SERVER:{http_port}/api/owntracks\n")
+        if _event_manager:
+            print(f"Multi-event API: http://SERVER:{http_port}/api/events\n")
 
     # Start HTTP server if enabled
     if http_port:
         http_thread = threading.Thread(target=run_http_server, args=(http_port,), daemon=True)
         http_thread.start()
 
-    # Start background summary generator if track logging is enabled
-    if log_dir:
+    # Start background summary generator if track logging is enabled (legacy mode)
+    if log_dir and not _event_manager:
         summary_thread = threading.Thread(target=run_summary_generator, args=(log_dir,), daemon=True)
         summary_thread.start()
 
@@ -1304,6 +1903,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
         while True:
             data, addr = sock.recvfrom(1024)
             recv_time = time.time()
+            client_ip = addr[0]
 
             try:
                 packet = json.loads(data.decode("utf-8"))
@@ -1327,6 +1927,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
             os_version = packet.get("os")  # OS version string (optional)
 
+            # Extract event ID (default to 1 for backwards compatibility)
+            eid = packet.get("eid", 1)
+
             # Check for 1Hz array format vs old single position format
             pos_array = packet.get("pos")  # [[ts, lat, lon], ...]
             if pos_array and isinstance(pos_array, list) and len(pos_array) > 0:
@@ -1341,76 +1944,139 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 lat = packet.get("lat", 0.0)
                 lon = packet.get("lon", 0.0)
 
-            # Check rate limiting and password if required
-            if tracker_password:
-                client_ip = addr[0]
-                # Check rate limiting first
-                if is_rate_limited(client_ip):
-                    print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
-                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+            # Multi-event mode: look up event and check per-event password
+            if _event_manager:
+                event = _event_manager.get_event(eid)
+                if not event:
+                    print(f"[UDP] Event {eid} not found for {sailor_id}")
+                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}).encode("utf-8")
+                    sock.sendto(error_ack, addr)
+                    continue
+                if event.get('archived'):
+                    print(f"[UDP] Event {eid} is archived, rejecting {sailor_id}")
+                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
                     continue
 
-                packet_pwd = packet.get("pwd", "")
-                if packet_pwd != tracker_password:
-                    record_failed_auth(client_ip)
-                    print(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
-                    # Send error ACK so client knows authentication failed
-                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                # Check per-event tracker password
+                event_tracker_pwd = event.get('tracker_password', '')
+                if event_tracker_pwd:
+                    if is_rate_limited(client_ip):
+                        print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                        sock.sendto(error_ack, addr)
+                        continue
+                    packet_pwd = packet.get("pwd", "")
+                    if packet_pwd != event_tracker_pwd:
+                        record_failed_auth(client_ip)
+                        print(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                        sock.sendto(error_ack, addr)
+                        continue
+
+                # Get or create the event tracker
+                event_tracker = get_event_tracker(eid)
+                if not event_tracker:
+                    print(f"[UDP] ERROR: Could not get tracker for event {eid}")
+                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "server", "msg": "Could not initialize event tracker"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
                     continue
 
-            # Send ACK
-            ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
-            sock.sendto(ack, addr)
+                # Send ACK
+                ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
+                sock.sendto(ack, addr)
 
-            # If 1Hz array format, log as single entry with pos array (more compact)
-            has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
-            if has_batch and daily_logger:
-                track_entry = {
-                    "id": sailor_id,
-                    "ts": ts,  # timestamp of last position (for sorting)
-                    "recv_ts": recv_time,
-                    "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
-                    "spd": speed,
-                    "hdg": heading,
-                    "ast": assist,
-                    "bat": battery,
-                    "sig": signal,
-                    "role": role,
-                    "ver": version,
-                    "flg": flags
-                }
-                if battery_drain_rate is not None:
-                    track_entry["bdr"] = battery_drain_rate
-                if heart_rate is not None and heart_rate > 0:
-                    track_entry["hr"] = heart_rate
-                if os_version:
-                    track_entry["os"] = os_version
-                daily_logger.write(track_entry)
+                # Process through event tracker
+                event_tracker.process_position(
+                    sailor_id=sailor_id,
+                    lat=lat,
+                    lon=lon,
+                    speed=speed,
+                    heading=heading,
+                    ts=ts,
+                    assist=assist,
+                    battery=battery,
+                    signal=signal,
+                    role=role,
+                    version=version,
+                    flags=flags,
+                    src_ip=client_ip,
+                    source="UDP",
+                    battery_drain_rate=battery_drain_rate,
+                    heart_rate=heart_rate,
+                    os_version=os_version,
+                    pos_array=pos_array
+                )
 
-            # Process position through shared tracker (updates live display)
-            # skip_log if we already logged the batch above
-            position_tracker.process_position(
-                sailor_id=sailor_id,
-                lat=lat,
-                lon=lon,
-                speed=speed,
-                heading=heading,
-                ts=ts,
-                assist=assist,
-                battery=battery,
-                signal=signal,
-                role=role,
-                version=version,
-                flags=flags,
-                src_ip=addr[0],
-                source="UDP",
-                battery_drain_rate=battery_drain_rate,
-                heart_rate=heart_rate,
-                os_version=os_version,
-                skip_log=has_batch
-            )
+            else:
+                # Legacy single-event mode
+                # Check rate limiting and password if required
+                if tracker_password:
+                    if is_rate_limited(client_ip):
+                        print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                        sock.sendto(error_ack, addr)
+                        continue
+
+                    packet_pwd = packet.get("pwd", "")
+                    if packet_pwd != tracker_password:
+                        record_failed_auth(client_ip)
+                        print(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                        sock.sendto(error_ack, addr)
+                        continue
+
+                # Send ACK
+                ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
+                sock.sendto(ack, addr)
+
+                # If 1Hz array format, log as single entry with pos array (more compact)
+                has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+                if has_batch and daily_logger:
+                    track_entry = {
+                        "id": sailor_id,
+                        "ts": ts,  # timestamp of last position (for sorting)
+                        "recv_ts": recv_time,
+                        "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
+                        "spd": speed,
+                        "hdg": heading,
+                        "ast": assist,
+                        "bat": battery,
+                        "sig": signal,
+                        "role": role,
+                        "ver": version,
+                        "flg": flags
+                    }
+                    if battery_drain_rate is not None:
+                        track_entry["bdr"] = battery_drain_rate
+                    if heart_rate is not None and heart_rate > 0:
+                        track_entry["hr"] = heart_rate
+                    if os_version:
+                        track_entry["os"] = os_version
+                    daily_logger.write(track_entry)
+
+                # Process position through shared tracker (updates live display)
+                # skip_log if we already logged the batch above
+                position_tracker.process_position(
+                    sailor_id=sailor_id,
+                    lat=lat,
+                    lon=lon,
+                    speed=speed,
+                    heading=heading,
+                    ts=ts,
+                    assist=assist,
+                    battery=battery,
+                    signal=signal,
+                    role=role,
+                    version=version,
+                    flags=flags,
+                    src_ip=client_ip,
+                    source="UDP",
+                    battery_drain_rate=battery_drain_rate,
+                    heart_rate=heart_rate,
+                    os_version=os_version,
+                    skip_log=has_batch
+                )
 
             # Write to legacy log file (JSON lines format for easy parsing later)
             if log_fh:
@@ -1487,12 +2153,6 @@ def main():
         help="Admin password for HTTP API (required)"
     )
     parser.add_argument(
-        "--owntracks-password",
-        type=str,
-        default=None,
-        help="Password for OwnTracks HTTP Basic Auth (default: use admin password)"
-    )
-    parser.add_argument(
         "--tracker-password",
         type=str,
         default=None,
@@ -1522,6 +2182,18 @@ def main():
         default=None,
         help="Root directory for data files (logs, course.json, users.json, current_positions.json)"
     )
+    parser.add_argument(
+        "--manager-password",
+        type=str,
+        default=None,
+        help="Manager password for multi-event mode (enables event management)"
+    )
+    parser.add_argument(
+        "--events-file",
+        type=Path,
+        default=Path("events.json"),
+        help="Events configuration file (default: events.json)"
+    )
 
     args = parser.parse_args()
 
@@ -1537,20 +2209,29 @@ def main():
             args.course_file = data_dir / "course.json"
         if args.users_file == Path("users.json"):
             args.users_file = data_dir / "users.json"
+        if args.events_file == Path("events.json"):
+            args.events_file = data_dir / "events.json"
     positions_file = None if args.no_current else args.current
     log_dir = None if args.no_track_logs else args.log_dir
     http_port = None if args.no_http else (args.http_port or args.port)
 
-    # Require admin password if HTTP is enabled
-    if http_port and not args.admin_password:
-        parser.error("--admin-password is required when HTTP is enabled (use --no-http to disable)")
+    # Multi-event mode vs legacy mode password requirements
+    if args.manager_password:
+        # Multi-event mode - manager password provided
+        if http_port is None:
+            parser.error("--manager-password requires HTTP to be enabled")
+    else:
+        # Legacy single-event mode - require admin password if HTTP is enabled
+        if http_port and not args.admin_password:
+            parser.error("--admin-password is required when HTTP is enabled (use --no-http to disable, or use --manager-password for multi-event mode)")
 
     run_server(args.port, args.log, positions_file, log_dir,
                http_port=http_port, admin_password=args.admin_password or "",
                course_file=args.course_file, static_dir=args.static_dir,
-               owntracks_password=args.owntracks_password,
                users_file=args.users_file,
-               tracker_password=args.tracker_password)
+               tracker_password=args.tracker_password,
+               manager_password=args.manager_password,
+               events_file=args.events_file)
 
 
 if __name__ == "__main__":

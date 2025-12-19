@@ -24,6 +24,7 @@ class IOSTrackerService {
   String _sailorId = 'Sailor';
   String _role = 'sailor';
   String _password = '';
+  int _eventId = 1;  // Event ID for multi-event support
   String _version = 'flutter';
   bool _highFrequencyMode = false;
 
@@ -85,6 +86,7 @@ class IOSTrackerService {
     required String sailorId,
     required String role,
     required String password,
+    int eventId = 1,
     bool highFrequencyMode = false,
   }) async {
     _serverHost = serverHost;
@@ -92,6 +94,7 @@ class IOSTrackerService {
     _sailorId = sailorId;
     _role = role;
     _password = password;
+    _eventId = eventId;
     _highFrequencyMode = highFrequencyMode;
 
     // Clear cached DNS when config changes
@@ -420,6 +423,7 @@ class IOSTrackerService {
 
     final packet = {
       'id': _sailorId,
+      'eid': _eventId,
       'sq': _sequenceNumber,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'lat': position.latitude,
@@ -608,6 +612,7 @@ class IOSTrackerService {
 
     final packet = {
       'id': _sailorId,
+      'eid': _eventId,
       'sq': _sequenceNumber,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'pos': List<List<dynamic>>.from(_positionBuffer),  // [[ts, lat, lon], ...]

@@ -49,6 +49,7 @@ class TrackerService {
   String sailorId;
   String role;
   String password;
+  int eventId;  // Event ID for multi-event support
   String version;
 
   /// Get version string in format "1.0.0+1(flutter)"
@@ -97,6 +98,7 @@ class TrackerService {
     this.sailorId = 'Sailor',
     this.role = 'sailor',
     this.password = '',
+    this.eventId = 1,
     this.version = 'flutter',
   });
 
@@ -350,6 +352,7 @@ class TrackerService {
     // Build packet matching Android format
     final packet = {
       'id': sailorId,
+      'eid': eventId,
       'sq': seq,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'lat': position.latitude,

@@ -263,6 +263,7 @@ class MainActivity : ComponentActivity() {
             putExtra("sailor_id", currentSettings.sailorId)
             putExtra("role", currentSettings.role)
             putExtra("password", currentSettings.password)
+            putExtra("event_id", currentSettings.eventId)
             putExtra("high_frequency_mode", currentSettings.highFrequencyMode)
         }
 
