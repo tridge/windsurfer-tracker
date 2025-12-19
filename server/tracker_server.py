@@ -1251,6 +1251,11 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     # Create position tracker
     position_tracker = PositionTracker(positions_file, daily_logger)
 
+    # Ensure current_positions.json exists (so web client doesn't get 404 on startup)
+    if positions_file and not positions_file.exists():
+        write_current_positions({}, positions_file, user_overrides)
+        print(f"[STARTUP] Created empty positions file: {positions_file}")
+
     # Set up globals for HTTP handler
     _daily_logger = daily_logger
     _position_tracker = position_tracker
