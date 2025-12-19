@@ -349,14 +349,14 @@
                     <textarea id="eventDescription" placeholder="Optional description"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="adminPassword">Admin Password *</label>
-                    <input type="text" id="adminPassword" required placeholder="Password for event administration">
-                    <small>Used by race officials to manage course and clear tracks</small>
+                    <label for="adminPassword">Admin Password * (required)</label>
+                    <input type="text" id="adminPassword" required placeholder="Required password for event administration">
+                    <small>Required - used by race officials to manage course and clear tracks</small>
                 </div>
                 <div class="form-group">
-                    <label for="trackerPassword">Tracker Password</label>
-                    <input type="text" id="trackerPassword" placeholder="Optional password for tracker clients">
-                    <small>If set, tracker apps must send this password to connect</small>
+                    <label for="trackerPassword">Tracker Password * (required)</label>
+                    <input type="text" id="trackerPassword" required placeholder="Required password for tracker clients">
+                    <small>Required - tracker apps must send this password to connect</small>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
@@ -495,10 +495,25 @@
             e.preventDefault();
 
             const eid = document.getElementById('eventId').value;
+            const adminPassword = document.getElementById('adminPassword').value.trim();
+            const trackerPassword = document.getElementById('trackerPassword').value.trim();
+
+            // Validate required fields
+            if (!adminPassword) {
+                document.getElementById('modalError').textContent = 'Admin password is required';
+                document.getElementById('modalError').style.display = 'block';
+                return false;
+            }
+            if (!trackerPassword) {
+                document.getElementById('modalError').textContent = 'Tracker password is required';
+                document.getElementById('modalError').style.display = 'block';
+                return false;
+            }
+
             const data = {
                 name: document.getElementById('eventName').value,
                 description: document.getElementById('eventDescription').value,
-                admin_password: document.getElementById('adminPassword').value,
+                admin_password: adminPassword,
                 tracker_password: document.getElementById('trackerPassword').value
             };
 
