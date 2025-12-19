@@ -63,6 +63,13 @@
             background: rgba(255,255,255,0.3);
         }
 
+        .header .logo {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 10px;
+            filter: brightness(0) invert(1);
+        }
+
         .events-container {
             display: flex;
             flex-wrap: wrap;
@@ -164,6 +171,7 @@
 </head>
 <body>
     <div class="header">
+        <img src="logo.svg" alt="Windsurfer Tracker" class="logo">
         <h1>Windsurfer Tracker</h1>
         <p>Select an event to view live tracking</p>
         <p class="tagline">Real-time GPS tracking for windsurfers. Track sailors, support boats, and spectators on a live map.</p>
