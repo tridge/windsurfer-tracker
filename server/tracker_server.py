@@ -37,6 +37,12 @@ def format_position(lat: float, lon: float) -> str:
     return f"{abs(lat):.5f}°{lat_dir} {abs(lon):.5f}°{lon_dir}"
 
 
+def log(msg: str) -> None:
+    """Print a message with local timestamp prefix."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"{ts} {msg}")
+
+
 def rotate_file(filepath: Path) -> Path | None:
     """Rotate a file to FILENAME.1, FILENAME.2, etc. Returns new path or None if file doesn't exist."""
     if not filepath.exists():
@@ -51,7 +57,7 @@ def rotate_file(filepath: Path) -> Path | None:
         n += 1
 
     filepath.rename(new_path)
-    print(f"Rotated {filepath} -> {new_path}")
+    log(f"Rotated {filepath} -> {new_path}")
     return new_path
 
 
@@ -149,7 +155,7 @@ def generate_log_summaries(log_dir: Path) -> int:
                         except json.JSONDecodeError:
                             continue
             except Exception as e:
-                print(f"[SUMMARY] Error reading {log_file}: {e}")
+                log(f"[SUMMARY] Error reading {log_file}: {e}")
                 continue
 
             if point_count > 0:
@@ -183,9 +189,9 @@ def generate_log_summaries(log_dir: Path) -> int:
             tmp_file.rename(summary_file)
             updated_count += 1
             total_points = sum(log['point_count'] for log in logs_data)
-            print(f"[SUMMARY] Generated {summary_file.name}: {len(logs_data)} logs, {total_points} points")
+            log(f"[SUMMARY] Generated {summary_file.name}: {len(logs_data)} logs, {total_points} points")
         except Exception as e:
-            print(f"[SUMMARY] Error writing {summary_file}: {e}")
+            log(f"[SUMMARY] Error writing {summary_file}: {e}")
 
     return updated_count
 
@@ -205,7 +211,7 @@ class EventManager:
     def _load_events(self):
         """Load events from JSON file."""
         if not self.events_file.exists():
-            print(f"[EVENTS] No events file found at {self.events_file}")
+            log(f"[EVENTS] No events file found at {self.events_file}")
             return
 
         try:
@@ -220,10 +226,10 @@ class EventManager:
                     eid = int(eid_str)
                     self.events[eid] = event
                 except ValueError:
-                    print(f"[EVENTS] Skipping invalid event ID: {eid_str}")
-            print(f"[EVENTS] Loaded {len(self.events)} events from {self.events_file}")
+                    log(f"[EVENTS] Skipping invalid event ID: {eid_str}")
+            log(f"[EVENTS] Loaded {len(self.events)} events from {self.events_file}")
         except Exception as e:
-            print(f"[EVENTS] Error loading events file: {e}")
+            log(f"[EVENTS] Error loading events file: {e}")
 
     def _save_events(self):
         """Save events to JSON file (atomic write)."""
@@ -237,9 +243,9 @@ class EventManager:
             with open(tmp_file, 'w') as f:
                 json.dump(output, f, indent=2)
             tmp_file.rename(self.events_file)
-            print(f"[EVENTS] Saved {len(self.events)} events to {self.events_file}")
+            log(f"[EVENTS] Saved {len(self.events)} events to {self.events_file}")
         except Exception as e:
-            print(f"[EVENTS] Error saving events file: {e}")
+            log(f"[EVENTS] Error saving events file: {e}")
 
     def get_event(self, eid: int) -> dict | None:
         """Get event by ID."""
@@ -308,7 +314,7 @@ class EventManager:
             self._save_events()
             # Create event data directory
             self._ensure_event_dir(eid)
-            print(f"[EVENTS] Created event {eid}: {name} (timezone: {timezone}, location: {home_location})")
+            log(f"[EVENTS] Created event {eid}: {name} (timezone: {timezone}, location: {home_location})")
             return eid
 
     def update_event(self, eid: int, updates: dict) -> bool:
@@ -327,7 +333,7 @@ class EventManager:
             event['updated'] = time.time()
             event['updated_iso'] = datetime.now().isoformat()
             self._save_events()
-            print(f"[EVENTS] Updated event {eid}: {updates}")
+            log(f"[EVENTS] Updated event {eid}: {updates}")
             return True
 
     def _ensure_event_dir(self, eid: int):
@@ -335,7 +341,7 @@ class EventManager:
         event_dir = self.html_dir / str(eid)
         logs_dir = event_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[EVENTS] Ensured directory exists: {event_dir}")
+        log(f"[EVENTS] Ensured directory exists: {event_dir}")
 
     def get_event_data_dir(self, eid: int) -> Path:
         """Get data directory for event, creating if needed."""
@@ -375,7 +381,7 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
             json.dump(output, f, indent=2)
         tmp_file.rename(positions_file)
     except OSError as e:
-        print(f"[WARNING] Failed to write positions file: {e}")
+        log(f"[WARNING] Failed to write positions file: {e}")
 
 
 class DailyLogger:
@@ -390,7 +396,7 @@ class DailyLogger:
         try:
             self.tz = ZoneInfo(tz_name)
         except Exception as e:
-            print(f"[WARNING] Invalid timezone '{tz_name}', using Australia/Sydney: {e}")
+            log(f"[WARNING] Invalid timezone '{tz_name}', using Australia/Sydney: {e}")
             self.tz = ZoneInfo("Australia/Sydney")
         self._open_log_for_today()
 
@@ -409,7 +415,7 @@ class DailyLogger:
             self.current_date = today
             log_path = self._get_log_filename(today)
             self.log_fh = open(log_path, 'a')
-            print(f"Logging to: {log_path}")
+            log(f"Logging to: {log_path}")
 
     def write(self, entry: dict):
         """Write a log entry, rolling over at midnight if needed."""
@@ -433,7 +439,7 @@ class DailyLogger:
         rotate_file(log_path)
         # Open a fresh log file
         self.log_fh = open(log_path, 'a')
-        print(f"Cleared track log: {log_path}")
+        log(f"Cleared track log: {log_path}")
 
 
 class PositionTracker:
@@ -484,16 +490,16 @@ class PositionTracker:
                     # Restore timestamp tracking for duplicate detection
                     if pos.get("ts"):
                         self.last_timestamp[sailor_id] = pos["ts"]
-            print(f"[STARTUP] Loaded {len(sailors)} positions from {positions_path}")
+            log(f"[STARTUP] Loaded {len(sailors)} positions from {positions_path}")
         except Exception as e:
-            print(f"[STARTUP] Could not load positions file: {e}")
+            log(f"[STARTUP] Could not load positions file: {e}")
 
     def clear(self):
         """Clear all position state."""
         with self._lock:
             self.current_positions.clear()
             self.last_timestamp.clear()
-        print("[ADMIN] Cleared internal position state")
+        log("[ADMIN] Cleared internal position state")
 
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
@@ -537,10 +543,10 @@ class PositionTracker:
         print(log_line)
 
         if assist:
-            print("!" * 60)
-            print(f"!!! SAILOR {sailor_id} REQUESTING ASSISTANCE !!!")
-            print(f"!!! Position: {format_position(lat, lon)}")
-            print("!" * 60)
+            log("!" * 60)
+            log(f"!!! SAILOR {sailor_id} REQUESTING ASSISTANCE !!!")
+            log(f"!!! Position: {format_position(lat, lon)}")
+            log("!" * 60)
 
         # Update current positions (only if not a duplicate)
         if not is_dup:
@@ -631,7 +637,7 @@ class EventTracker:
         if not self.positions_file.exists():
             write_current_positions({}, self.positions_file, self.user_overrides)
 
-        print(f"[EVENT {eid}] Initialized tracker for '{event_config.get('name', 'Unnamed')}'")
+        log(f"[EVENT {eid}] Initialized tracker for '{event_config.get('name', 'Unnamed')}'")
 
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
@@ -709,7 +715,7 @@ class EventTracker:
         self.position_tracker.clear()
         # Recreate empty positions file
         write_current_positions({}, self.positions_file, self.user_overrides)
-        print(f"[EVENT {self.eid}] Tracks cleared")
+        log(f"[EVENT {self.eid}] Tracks cleared")
 
     def close(self):
         """Clean up resources."""
@@ -778,7 +784,7 @@ def load_user_overrides(users_file: Path) -> dict[str, dict]:
                 data = json.load(f)
                 return data.get('users', {})
         except Exception as e:
-            print(f"Warning: Could not load users file: {e}")
+            log(f"Warning: Could not load users file: {e}")
     return {}
 
 
@@ -795,7 +801,7 @@ def save_user_overrides(users_file: Path, overrides: dict[str, dict]):
     with open(tmp_file, 'w') as f:
         json.dump(output, f, indent=2)
     tmp_file.rename(users_file)
-    print(f"[ADMIN] Saved user overrides: {len(overrides)} users")
+    log(f"[ADMIN] Saved user overrides: {len(overrides)} users")
 
 
 _static_dir: Path | None = None
@@ -807,7 +813,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Override to prefix with [HTTP]"""
-        print(f"[HTTP] {args[0]}")
+        log(f"[HTTP] {args[0]}")
     
     def _send_json(self, data: dict | list, status: int = 200):
         """Send JSON response."""
@@ -860,13 +866,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         # Check rate limiting first
         if is_rate_limited(client_ip):
-            print(f"[HTTP] Admin auth rate-limited for {client_ip}")
+            log(f"[HTTP] Admin auth rate-limited for {client_ip}")
             return False
 
         password = self.headers.get('X-Admin-Password', '')
         if password != _admin_password:
             record_failed_auth(client_ip)
-            print(f"[HTTP] Admin auth failed from {client_ip}")
+            log(f"[HTTP] Admin auth failed from {client_ip}")
             return False
         return True
 
@@ -875,17 +881,17 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         client_ip = self._get_client_ip()
 
         if is_rate_limited(client_ip):
-            print(f"[HTTP] Manager auth rate-limited for {client_ip}")
+            log(f"[HTTP] Manager auth rate-limited for {client_ip}")
             return False
 
         if not _event_manager:
-            print(f"[HTTP] Manager auth failed - multi-event mode not enabled")
+            log(f"[HTTP] Manager auth failed - multi-event mode not enabled")
             return False
 
         password = self.headers.get('X-Manager-Password', '')
         if password != _event_manager.manager_password:
             record_failed_auth(client_ip)
-            print(f"[HTTP] Manager auth failed from {client_ip}")
+            log(f"[HTTP] Manager auth failed from {client_ip}")
             return False
         return True
 
@@ -894,7 +900,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         client_ip = self._get_client_ip()
 
         if is_rate_limited(client_ip):
-            print(f"[HTTP] Event {eid} admin auth rate-limited for {client_ip}")
+            log(f"[HTTP] Event {eid} admin auth rate-limited for {client_ip}")
             return False
 
         if not _event_manager:
@@ -903,13 +909,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         event = _event_manager.get_event(eid)
         if not event:
-            print(f"[HTTP] Event {eid} not found")
+            log(f"[HTTP] Event {eid} not found")
             return False
 
         password = self.headers.get('X-Admin-Password', '')
         if password != event.get('admin_password', ''):
             record_failed_auth(client_ip)
-            print(f"[HTTP] Event {eid} admin auth failed from {client_ip}")
+            log(f"[HTTP] Event {eid} admin auth failed from {client_ip}")
             return False
         return True
 
@@ -1128,7 +1134,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     with open(tmp_file, 'w') as f:
                         json.dump(course, f, indent=2)
                     tmp_file.rename(tracker.course_file)
-                    print(f"[EVENT {eid}] Course saved: {len(course.get('marks', []))} marks")
+                    log(f"[EVENT {eid}] Course saved: {len(course.get('marks', []))} marks")
                     self._send_json({"success": True})
                 else:
                     self._send_json({"error": "Could not get event tracker"}, 500)
@@ -1172,7 +1178,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         tracker.positions_file,
                         tracker.user_overrides
                     )
-                    print(f"[EVENT {eid}] User override set for {user_id}: {override}")
+                    log(f"[EVENT {eid}] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
                     self._send_json({"error": "No valid fields (name, role)"}, 400)
@@ -1200,7 +1206,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             tracker = get_event_tracker(eid)
             if tracker and tracker.course_file.exists():
                 rotate_file(tracker.course_file)
-                print(f"[EVENT {eid}] Course deleted (rotated)")
+                log(f"[EVENT {eid}] Course deleted (rotated)")
             self._send_json({"success": True})
 
         elif subpath.startswith('/admin/user/'):
@@ -1218,7 +1224,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     tracker.positions_file,
                     tracker.user_overrides
                 )
-                print(f"[EVENT {eid}] User override removed for {user_id}")
+                log(f"[EVENT {eid}] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
 
         else:
@@ -1263,7 +1269,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 # Also remove current_positions.json to clear map
                 if _positions_file and _positions_file.exists():
                     _positions_file.unlink()
-                    print(f"[ADMIN] Removed {_positions_file}")
+                    log(f"[ADMIN] Removed {_positions_file}")
                 # Clear internal state via position tracker
                 if _position_tracker:
                     _position_tracker.clear()
@@ -1288,7 +1294,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     with open(tmp_file, 'w') as f:
                         json.dump(course, f, indent=2)
                     tmp_file.rename(_course_file)
-                    print(f"[ADMIN] Course saved: {len(course.get('marks', []))} marks")
+                    log(f"[ADMIN] Course saved: {len(course.get('marks', []))} marks")
                     self._send_json({"success": True})
                 else:
                     self._send_json({"error": "Course file not configured"}, 500)
@@ -1330,7 +1336,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             _position_tracker.positions_file,
                             _user_overrides
                         )
-                    print(f"[ADMIN] User override set for {user_id}: {override}")
+                    log(f"[ADMIN] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
                     self._send_json({"error": "No valid fields (name, role)"}, 400)
@@ -1381,11 +1387,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if _event_manager:
                 event = _event_manager.get_event(eid)
                 if not event:
-                    print(f"[POST] Event {eid} not found for {sailor_id}")
+                    log(f"[POST] Event {eid} not found for {sailor_id}")
                     self._send_json({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}, 404)
                     return
                 if event.get('archived'):
-                    print(f"[POST] Event {eid} is archived, rejecting {sailor_id}")
+                    log(f"[POST] Event {eid} is archived, rejecting {sailor_id}")
                     self._send_json({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}, 400)
                     return
 
@@ -1393,20 +1399,20 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 event_tracker_pwd = event.get('tracker_password', '')
                 if event_tracker_pwd:
                     if is_rate_limited(client_ip):
-                        print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
+                        log(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != event_tracker_pwd:
                         record_failed_auth(client_ip)
-                        print(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        log(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
 
                 # Get or create the event tracker
                 tracker = get_event_tracker(eid)
                 if not tracker:
-                    print(f"[POST] ERROR: Could not get tracker for event {eid}")
+                    log(f"[POST] ERROR: Could not get tracker for event {eid}")
                     self._send_json({"error": "Could not initialize event tracker"}, 500)
                     return
                 event_name = event.get('name', f'Event {eid}')
@@ -1417,18 +1423,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 # Check rate limiting and password if required
                 if _tracker_password:
                     if is_rate_limited(client_ip):
-                        print(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
+                        log(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != _tracker_password:
                         record_failed_auth(client_ip)
-                        print(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        log(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
 
                 if not _position_tracker:
-                    print(f"[POST] ERROR: Position tracking not enabled")
+                    log(f"[POST] ERROR: Position tracking not enabled")
                     self._send_json({"error": "Position tracking not enabled"}, 500)
                     return
                 tracker = None  # Will use legacy globals
@@ -1520,10 +1526,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json(ack_response)
 
         except json.JSONDecodeError as e:
-            print(f"[POST] JSON PARSE ERROR from {client_ip}: {e}")
+            log(f"[POST] JSON PARSE ERROR from {client_ip}: {e}")
             self._send_json({"error": "Invalid JSON"}, 400)
         except Exception as e:
-            print(f"[POST] ERROR from {client_ip}: {e}")
+            log(f"[POST] ERROR from {client_ip}: {e}")
             self._send_json({"error": str(e)}, 500)
 
     def _handle_udid_collection(self):
@@ -1542,15 +1548,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length)
             content_type = self.headers.get('Content-Type', 'unknown')
 
-            print(f"[UDID] Received {content_length} bytes, Content-Type: {content_type}")
-            print(f"[UDID] First 100 bytes: {body[:100]}")
+            log(f"[UDID] Received {content_length} bytes, Content-Type: {content_type}")
+            log(f"[UDID] First 100 bytes: {body[:100]}")
 
             data = None
 
             # Try parsing as raw plist first
             try:
                 data = plistlib.loads(body)
-                print(f"[UDID] Parsed as raw plist")
+                log(f"[UDID] Parsed as raw plist")
             except Exception:
                 pass
 
@@ -1571,14 +1577,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
                     if result.returncode == 0:
                         data = plistlib.loads(result.stdout)
-                        print(f"[UDID] Parsed from CMS envelope")
+                        log(f"[UDID] Parsed from CMS envelope")
                     else:
-                        print(f"[UDID] openssl failed: {result.stderr.decode()}")
+                        log(f"[UDID] openssl failed: {result.stderr.decode()}")
                 except Exception as e:
-                    print(f"[UDID] CMS extraction failed: {e}")
+                    log(f"[UDID] CMS extraction failed: {e}")
 
             if data is None:
-                print(f"[UDID] Could not parse plist from body")
+                log(f"[UDID] Could not parse plist from body")
                 self.send_response(302)
                 self.send_header('Location', '/install/flutter-ios.html?error=parse')
                 self.end_headers()
@@ -1590,7 +1596,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             version = data.get('VERSION', '')
             serial = data.get('SERIAL', '')
 
-            print(f"[UDID] Received: UDID={udid}, Product={product}, Version={version}")
+            log(f"[UDID] Received: UDID={udid}, Product={product}, Version={version}")
 
             # Redirect back to install page with UDID in URL
             redirect_url = f'/install/flutter-ios.html?udid={udid}&device={product}'
@@ -1600,7 +1606,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
         except Exception as e:
-            print(f"[UDID] Error handling request: {e}")
+            log(f"[UDID] Error handling request: {e}")
             import traceback
             traceback.print_exc()
             self.send_response(302)
@@ -1705,7 +1711,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             # Delete course by rotating to .1, .2, etc.
             if _course_file and _course_file.exists():
                 rotate_file(_course_file)
-                print("[ADMIN] Course deleted (rotated)")
+                log("[ADMIN] Course deleted (rotated)")
             self._send_json({"success": True})
 
         elif path.startswith('/api/admin/user/'):
@@ -1726,7 +1732,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         _position_tracker.positions_file,
                         _user_overrides
                     )
-                print(f"[ADMIN] User override removed for {user_id}")
+                log(f"[ADMIN] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
 
         else:
@@ -1736,20 +1742,20 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 def run_http_server(port: int):
     """Run HTTP server in a thread."""
     server = ThreadingHTTPServer(('0.0.0.0', port), AdminHTTPHandler)
-    print(f"Admin HTTP server listening on port {port}")
+    log(f"Admin HTTP server listening on port {port}")
     server.serve_forever()
 
 
 def run_summary_generator(log_dir: Path, interval: int = 60):
     """Background thread to periodically generate log summaries."""
-    print(f"[SUMMARY] Background generator started (interval: {interval}s)")
+    log(f"[SUMMARY] Background generator started (interval: {interval}s)")
     while True:
         try:
             updated = generate_log_summaries(log_dir)
             if updated > 0:
-                print(f"[SUMMARY] Updated {updated} summary file(s)")
+                log(f"[SUMMARY] Updated {updated} summary file(s)")
         except Exception as e:
-            print(f"[SUMMARY] Error in background generator: {e}")
+            log(f"[SUMMARY] Error in background generator: {e}")
         time.sleep(interval)
 
 
@@ -1764,7 +1770,7 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
     """
     import gzip
 
-    print(f"[COMPRESS] Background compressor started (interval: {interval}s, live window: {live_window_minutes}min)")
+    log(f"[COMPRESS] Background compressor started (interval: {interval}s, live window: {live_window_minutes}min)")
     last_mtime: dict[str, float] = {}
 
     while True:
@@ -1813,11 +1819,11 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
                     orig_size = log_file.stat().st_size
                     live_size = live_gz_file.stat().st_size
                     full_size = full_gz_file.stat().st_size
-                    print(f"[COMPRESS] Updated: live={live_size:,}B ({live_lines}/{total_lines} entries), "
+                    log(f"[COMPRESS] Updated: live={live_size:,}B ({live_lines}/{total_lines} entries), "
                           f"full={full_size:,}B (from {orig_size:,}B)")
 
         except Exception as e:
-            print(f"[COMPRESS] Error: {e}")
+            log(f"[COMPRESS] Error: {e}")
         time.sleep(interval)
 
 
@@ -1843,20 +1849,20 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", port))
 
-    print(f"Tracker server listening on UDP port {port}")
-    print("Waiting for packets...\n")
+    log(f"Tracker server listening on UDP port {port}")
+    log("Waiting for packets...")
 
     # Multi-event mode initialization
     if manager_password:
         if not static_dir:
-            print("[ERROR] Multi-event mode requires --static-dir to be set")
+            log("[ERROR] Multi-event mode requires --static-dir to be set")
             return
         if not events_file:
             events_file = Path("events.json")
 
-        print(f"[EVENTS] Multi-event mode enabled")
-        print(f"[EVENTS] Events file: {events_file}")
-        print(f"[EVENTS] HTML directory: {static_dir}")
+        log(f"[EVENTS] Multi-event mode enabled")
+        log(f"[EVENTS] Events file: {events_file}")
+        log(f"[EVENTS] HTML directory: {static_dir}")
 
         _event_manager = EventManager(events_file, static_dir)
         _event_manager.manager_password = manager_password
@@ -1873,26 +1879,26 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
         daily_logger = None
         position_tracker = None
 
-        print(f"[EVENTS] Loaded {len(_event_manager.events)} events\n")
+        log(f"[EVENTS] Loaded {len(_event_manager.events)} events\n")
 
     else:
         # Legacy single-event mode
         _event_manager = None
 
         if positions_file:
-            print(f"Writing current positions to: {positions_file}\n")
+            log(f"Writing current positions to: {positions_file}")
 
         # Daily logger for track history
         daily_logger = None
         if log_dir:
             daily_logger = DailyLogger(log_dir)
-            print(f"Track logs directory: {log_dir}\n")
+            log(f"Track logs directory: {log_dir}")
 
         # Load user overrides
         user_overrides = {}
         if users_file:
             user_overrides = load_user_overrides(users_file)
-            print(f"Users file: {users_file} ({len(user_overrides)} overrides)\n")
+            log(f"Users file: {users_file} ({len(user_overrides)} overrides)")
 
         # Create position tracker
         position_tracker = PositionTracker(positions_file, daily_logger)
@@ -1900,7 +1906,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
         # Ensure current_positions.json exists (so web client doesn't get 404 on startup)
         if positions_file and not positions_file.exists():
             write_current_positions({}, positions_file, user_overrides)
-            print(f"[STARTUP] Created empty positions file: {positions_file}")
+            log(f"[STARTUP] Created empty positions file: {positions_file}")
 
         # Set up globals for HTTP handler
         _daily_logger = daily_logger
@@ -1914,17 +1920,17 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
         _user_overrides = user_overrides
 
         if course_file:
-            print(f"Course file: {course_file}\n")
+            log(f"Course file: {course_file}")
 
         if static_dir:
-            print(f"Serving static files from: {static_dir}\n")
+            log(f"Serving static files from: {static_dir}")
 
         if tracker_password:
-            print(f"Tracker password: enabled (clients must send 'pwd' field)\n")
+            log(f"Tracker password: enabled (clients must send 'pwd' field)")
 
     if http_port:
         if _event_manager:
-            print(f"Multi-event API: http://SERVER:{http_port}/api/events\n")
+            log(f"Multi-event API: http://SERVER:{http_port}/api/events")
 
     # Start HTTP server if enabled
     if http_port:
@@ -1965,7 +1971,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     log_fh = None
     if log_file:
         log_fh = open(log_file, "a")
-        print(f"Legacy log: {log_file}\n")
+        log(f"Legacy log: {log_file}")
 
     try:
         while True:
@@ -1976,7 +1982,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             try:
                 packet = json.loads(data.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                print(f"[{addr[0]}:{addr[1]}] Invalid packet: {e}")
+                log(f"[{addr[0]}:{addr[1]}] Invalid packet: {e}")
                 continue
 
             # Extract fields with defaults
@@ -2016,12 +2022,12 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             if _event_manager:
                 event = _event_manager.get_event(eid)
                 if not event:
-                    print(f"[UDP] Event {eid} not found for {sailor_id}")
+                    log(f"[UDP] Event {eid} not found for {sailor_id}")
                     error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
                     continue
                 if event.get('archived'):
-                    print(f"[UDP] Event {eid} is archived, rejecting {sailor_id}")
+                    log(f"[UDP] Event {eid} is archived, rejecting {sailor_id}")
                     error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
                     continue
@@ -2030,14 +2036,14 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 event_tracker_pwd = event.get('tracker_password', '')
                 if event_tracker_pwd:
                     if is_rate_limited(client_ip):
-                        print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                        log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != event_tracker_pwd:
                         record_failed_auth(client_ip)
-                        print(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
@@ -2045,7 +2051,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 # Get or create the event tracker
                 event_tracker = get_event_tracker(eid)
                 if not event_tracker:
-                    print(f"[UDP] ERROR: Could not get tracker for event {eid}")
+                    log(f"[UDP] ERROR: Could not get tracker for event {eid}")
                     error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "server", "msg": "Could not initialize event tracker"}).encode("utf-8")
                     sock.sendto(error_ack, addr)
                     continue
@@ -2082,7 +2088,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 # Check rate limiting and password if required
                 if tracker_password:
                     if is_rate_limited(client_ip):
-                        print(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                        log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
@@ -2090,7 +2096,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != tracker_password:
                         record_failed_auth(client_ip)
-                        print(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        log(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
@@ -2159,7 +2165,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 log_fh.flush()
 
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        log("Shutting down...")
     finally:
         sock.close()
         if log_fh:
@@ -2190,9 +2196,9 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
             with open(settings_file) as f:
                 file_settings = json.load(f)
             defaults.update(file_settings)
-            print(f"Loaded settings from {settings_file}")
+            log(f"Loaded settings from {settings_file}")
         except Exception as e:
-            print(f"Warning: Could not load {settings_file}: {e}")
+            log(f"Warning: Could not load {settings_file}: {e}")
 
     return defaults
 
