@@ -24,9 +24,6 @@
     <!-- Boot completed for auto-restart tracking after device reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- App updates -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

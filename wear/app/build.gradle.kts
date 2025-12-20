@@ -29,14 +29,14 @@ fun getGitHash(): String {
 
 android {
     namespace = "nz.co.tracker.windsurfer"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "nz.co.tracker.windsurfer.wear"
         minSdk = 30  // Wear OS 3.0 minimum
-        targetSdk = 34
-        versionCode = 31
-        versionName = "1.9.1"
+        targetSdk = 35
+        versionCode = 36
+        versionName = "1.9.6"
 
         // Add version info as build config fields
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")

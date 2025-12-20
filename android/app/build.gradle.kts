@@ -27,18 +27,32 @@ fun getGitHash(): String {
 
 android {
     namespace = "nz.co.tracker.windsurfer"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 31
-        versionName = "1.9.1"
+        targetSdk = 35
+        versionCode = 33
+        versionName = "1.9.3"
 
         // Add version info as build config fields
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
         buildConfigField("String", "VERSION_STRING", "\"${versionName}(${getGitHash()})\"")
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("playstore") {
+            dimension = "distribution"
+            // No self-update for Play Store
+            buildConfigField("Boolean", "ENABLE_SELF_UPDATE", "false")
+        }
+        create("sideload") {
+            dimension = "distribution"
+            // Enable self-update for direct distribution
+            buildConfigField("Boolean", "ENABLE_SELF_UPDATE", "true")
+        }
     }
 
     signingConfigs {

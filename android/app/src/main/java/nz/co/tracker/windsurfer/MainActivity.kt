@@ -119,8 +119,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         setupUI()
         loadPreferences()
 
-        // Check for updates on startup
-        checkForUpdatesOnStartup()
+        // Check for updates on startup (sideload builds only)
+        if (BuildConfig.ENABLE_SELF_UPDATE) {
+            checkForUpdatesOnStartup()
+        }
 
         // Check if we should auto-resume tracking
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -852,14 +854,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(48, 0, 0, 16)
         }
 
-        // Check for Updates button
-        val updateButton = android.widget.Button(this).apply {
-            text = "Check for Updates"
-            setTextColor(0xFF000000.toInt())
-            setBackgroundColor(0xFFDDDDDD.toInt())
-            textSize = 16f
-            setPadding(16, 24, 16, 24)
-        }
+        // Check for Updates button (sideload builds only)
+        val updateButton = if (BuildConfig.ENABLE_SELF_UPDATE) {
+            android.widget.Button(this).apply {
+                text = "Check for Updates"
+                setTextColor(0xFF000000.toInt())
+                setBackgroundColor(0xFFDDDDDD.toInt())
+                textSize = 16f
+                setPadding(16, 24, 16, 24)
+            }
+        } else null
 
         // Version info label
         val versionLabel = android.widget.TextView(this).apply {
@@ -885,12 +889,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(showPasswordCheckbox)
         layout.addView(highFrequencyCheckbox)
         layout.addView(highFrequencyHint)
-        layout.addView(updateButton)
+        updateButton?.let { layout.addView(it) }
         layout.addView(versionLabel)
 
         var dialogRef: AlertDialog? = null
 
-        updateButton.setOnClickListener {
+        updateButton?.setOnClickListener {
             dialogRef?.dismiss()
             checkForUpdatesManual()
         }

@@ -19,7 +19,8 @@ data class TrackerSettings(
     val role: String = "sailor",
     val password: String = "",
     val eventId: Int = 1,  // Event ID for multi-event support
-    val highFrequencyMode: Boolean = false  // 1Hz mode for racing
+    val highFrequencyMode: Boolean = false,  // 1Hz mode for racing
+    val heartRateEnabled: Boolean = true  // Opt-out for health data privacy
 )
 
 class SettingsRepository(private val context: Context) {
@@ -31,6 +32,7 @@ class SettingsRepository(private val context: Context) {
         val PASSWORD = stringPreferencesKey("password")
         val EVENT_ID = intPreferencesKey("event_id")
         val HIGH_FREQUENCY_MODE = booleanPreferencesKey("high_frequency_mode")
+        val HEART_RATE_ENABLED = booleanPreferencesKey("heart_rate_enabled")
     }
 
     val settingsFlow: Flow<TrackerSettings> = context.dataStore.data.map { prefs ->
@@ -40,7 +42,8 @@ class SettingsRepository(private val context: Context) {
             role = prefs[PreferencesKeys.ROLE] ?: "sailor",
             password = prefs[PreferencesKeys.PASSWORD] ?: "",
             eventId = prefs[PreferencesKeys.EVENT_ID] ?: 1,
-            highFrequencyMode = prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] ?: false
+            highFrequencyMode = prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] ?: false,
+            heartRateEnabled = prefs[PreferencesKeys.HEART_RATE_ENABLED] ?: true
         )
     }
 
@@ -52,6 +55,7 @@ class SettingsRepository(private val context: Context) {
             prefs[PreferencesKeys.PASSWORD] = settings.password
             prefs[PreferencesKeys.EVENT_ID] = settings.eventId
             prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] = settings.highFrequencyMode
+            prefs[PreferencesKeys.HEART_RATE_ENABLED] = settings.heartRateEnabled
         }
     }
 

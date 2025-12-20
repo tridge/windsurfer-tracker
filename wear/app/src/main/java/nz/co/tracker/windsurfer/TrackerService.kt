@@ -70,6 +70,7 @@ class TrackerService : LifecycleService() {
     private var password: String = ""
     private var eventId: Int = 1  // Event ID for multi-event support
     private var highFrequencyMode: Boolean = false
+    private var heartRateEnabled: Boolean = true
 
     // 1Hz mode position buffer
     private val positionBuffer = mutableListOf<Triple<Long, Double, Double>>()
@@ -175,6 +176,7 @@ class TrackerService : LifecycleService() {
             password = it.getStringExtra("password") ?: ""
             eventId = it.getIntExtra("event_id", 1)
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
+            heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", true)
             positionBuffer.clear()
         }
 
@@ -371,14 +373,18 @@ class TrackerService : LifecycleService() {
         }
         Log.d(TAG, "Wake lock acquired")
 
-        // Start heart rate sensor if available
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        heartRateSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
-        if (heartRateSensor != null) {
-            sensorManager?.registerListener(heartRateListener, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL)
-            Log.d(TAG, "Heart rate sensor registered")
+        // Start heart rate sensor if available and enabled
+        if (heartRateEnabled) {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            heartRateSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+            if (heartRateSensor != null) {
+                sensorManager?.registerListener(heartRateListener, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL)
+                Log.d(TAG, "Heart rate sensor registered")
+            } else {
+                Log.d(TAG, "Heart rate sensor not available")
+            }
         } else {
-            Log.d(TAG, "Heart rate sensor not available")
+            Log.d(TAG, "Heart rate disabled by user preference")
         }
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")

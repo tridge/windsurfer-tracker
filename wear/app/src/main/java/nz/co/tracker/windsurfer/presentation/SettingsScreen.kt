@@ -39,6 +39,7 @@ fun SettingsScreen(
     var sailorId by remember { mutableStateOf(settings.sailorId) }
     var password by remember { mutableStateOf(settings.password) }
     var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
+    var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
     var selectedRoleIndex by remember {
         mutableStateOf(
             when (settings.role) {
@@ -288,6 +289,22 @@ fun SettingsScreen(
                 )
             }
 
+            // Heart Rate Toggle
+            item {
+                ToggleChip(
+                    checked = heartRateEnabled,
+                    onCheckedChange = { heartRateEnabled = it },
+                    label = { Text("Heart Rate") },
+                    secondaryLabel = { Text(if (heartRateEnabled) "On" else "Off", fontSize = 10.sp) },
+                    toggleControl = {
+                        Switch(checked = heartRateEnabled)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(top = 4.dp)
+                )
+            }
+
             // Role
             item {
                 Text(
@@ -345,7 +362,8 @@ fun SettingsScreen(
                                 role = roles[selectedRoleIndex],
                                 password = password,
                                 eventId = selectedEventId,
-                                highFrequencyMode = highFrequencyMode
+                                highFrequencyMode = highFrequencyMode,
+                                heartRateEnabled = heartRateEnabled
                             )
                         )
                         onBack()
