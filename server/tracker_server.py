@@ -521,9 +521,10 @@ class PositionTracker:
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
+        local_time = datetime.fromtimestamp(recv_time).strftime("%H:%M:%S")
 
         log_line = (
-            f"[{sailor_id}] "
+            f"{local_time} [{sailor_id}] "
             f"pos={format_position(lat, lon)} "
             f"spd={speed:.1f}kn hdg={heading:03d}° "
             f"bat={bat_str} sig={sig_str} "
