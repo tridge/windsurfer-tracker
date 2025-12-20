@@ -1,0 +1,16 @@
+[Unit]
+Description=Windsurfer Tracker Beta Server
+After=network.target
+
+[Service]
+Type=simple
+User=tracker
+WorkingDirectory=/home/tracker/tracker.beta
+ExecStart=/usr/bin/python3 /home/tracker/tracker.beta/tracker_server.py
+StandardOutput=append:/home/tracker/tracker.beta/tracker.log
+StandardError=append:/home/tracker/tracker.beta/tracker.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

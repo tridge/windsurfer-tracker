@@ -1,0 +1,87 @@
+name: WindsurferTracker
+options:
+  bundleIdPrefix: nz.co.tracker
+  deploymentTarget:
+    iOS: "15.0"
+    watchOS: "8.0"
+  xcodeVersion: "15.4"
+
+attributes:
+  LastUpgradeCheck: "1540"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.9.3"
+    CURRENT_PROJECT_VERSION: "33"
+
+targets:
+  WindsurferTracker:
+    type: application
+    platform: iOS
+    sources:
+      - Shared
+      - WindsurferTracker
+    info:
+      path: WindsurferTracker/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: "Windsurfer Tracker"
+        CFBundleName: "Windsurfer Tracker"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        GIT_HASH: "$(GIT_HASH)"
+        NSLocationWhenInUseUsageDescription: "Windsurfer Tracker needs your location to report your position during races."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races, even when the app is in the background."
+        NSLocationAlwaysUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races."
+        UIBackgroundModes:
+          - location
+          - fetch
+    entitlements:
+      path: WindsurferTracker/WindsurferTracker.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.swift
+        PRODUCT_NAME: "Windsurfer Tracker"
+        INFOPLIST_FILE: WindsurferTracker/Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  WindsurferTrackerWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - Shared
+      - WindsurferTrackerWatch
+    info:
+      path: WindsurferTrackerWatch/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: "Windsurfer Tracker"
+        CFBundleName: "Windsurfer Tracker"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.swift.watchkitapp
+        PRODUCT_NAME: "Windsurfer Tracker"
+        INFOPLIST_FILE: WindsurferTrackerWatch/Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "4"
+
+schemes:
+  WindsurferTracker:
+    build:
+      targets:
+        WindsurferTracker: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  WindsurferTrackerWatch:
+    build:
+      targets:
+        WindsurferTrackerWatch: all
+    run:
+      config: Debug
+    archive:
+      config: Release

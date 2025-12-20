@@ -1,0 +1,28 @@
+# Generated Xcode project (use xcodegen to regenerate)
+*.xcodeproj
+*.xcworkspace
+
+# Xcode build outputs
+build/
+DerivedData/
+*.xcuserdata
+
+# SwiftPM
+.swiftpm/
+.build/
+Package.resolved
+
+# CocoaPods (if used)
+Pods/
+Podfile.lock
+
+# Carthage (if used)
+Carthage/Build/
+
+# Export options (generated in CI)
+ExportOptions.plist
+
+# macOS
+.DS_Store
+*.swp
+*~

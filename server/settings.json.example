@@ -1,0 +1,8 @@
+{
+    "port": 41234,
+    "static_dir": "html",
+    "events_file": "events.json",
+    "manager_password": "CHANGEME",
+    "tracker_password": null,
+    "log_dir": "logs"
+}
