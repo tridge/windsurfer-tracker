@@ -195,7 +195,14 @@ class UpdateChecker(private val context: Context) {
     fun getCurrentVersionString(): String {
         return try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "unknown"
+            val versionName = pInfo.versionName ?: "unknown"
+            val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+            "$versionName ($versionCode) ${BuildConfig.GIT_HASH}"
         } catch (e: Exception) {
             "unknown"
         }

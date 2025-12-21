@@ -236,9 +236,11 @@ Full settings configuration, presented as a modal sheet.
 - When enabled, show helper text: "Sends 10 positions per packet for higher precision"
 
 #### Version Section
-- Display: "Version X.Y.Z (build) githash"
+- Display: "X.Y.Z (build) githash"
 - Example: "1.9.3 (33) abc1234"
 - Gray text, right-aligned
+- **iOS/Swift**: Uses `CFBundleShortVersionString`, `CFBundleVersion`, and `GIT_HASH` from Info.plist
+- **Android/Kotlin**: Uses `versionName`, `versionCode`, and `BuildConfig.GIT_HASH`
 
 ### Navigation
 - Title: "Settings"
