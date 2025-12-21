@@ -141,6 +141,13 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Download iOS Simulator (required for asset compilation)
+        run: |
+          for i in 1 2 3; do
+            echo "Attempt $i to download iOS simulator..."
+            xcodebuild -downloadPlatform iOS && break || sleep 10
+          done
+
       - name: Install Apple Certificate
         if: env.BUILD_CERTIFICATE_BASE64 != ''
         env:
