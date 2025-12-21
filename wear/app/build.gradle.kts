@@ -32,10 +32,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "nz.co.tracker.windsurfer.wear"
+        applicationId = "nz.co.tracker.windsurfer"
         minSdk = 30  // Wear OS 3.0 minimum
         targetSdk = 35
-        versionCode = 37
+        versionCode = 38
         versionName = "1.9.7"
 
         // Add version info as build config fields
