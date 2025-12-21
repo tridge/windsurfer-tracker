@@ -12,8 +12,8 @@ attributes:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.9.3"
-    CURRENT_PROJECT_VERSION: "33"
+    MARKETING_VERSION: "1.9.7"
+    CURRENT_PROJECT_VERSION: "37"
 
 targets:
   WindsurferTracker:
