@@ -268,7 +268,7 @@ public actor TrackerService {
             ts: position.unixTimestamp,
             lat: positionArray == nil ? position.latitude : nil,
             lon: positionArray == nil ? position.longitude : nil,
-            spd: position.speedKnots,
+            spd: (position.speedKnots * 100).rounded() / 100,
             hdg: position.heading,
             ast: assistRequested,
             bat: battery.level,

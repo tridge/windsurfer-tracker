@@ -638,7 +638,8 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
         "ts": int(time.time()),
         "lat": round(entity.lat, 6),
         "lon": round(entity.lon, 6),
-        "spd": round(entity.spd, 1),
+        "hac": 0.5,
+        "spd": round(entity.spd, 2),
         "hdg": int(entity.hdg) % 360,
         "ast": entity.assist,
         "bat": entity.battery,
@@ -681,7 +682,8 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
         "sq": entity.seq,
         "ts": int(time.time()),  # Current timestamp (for sorting)
         "pos": pos_array,        # Array of [ts, lat, lon] positions
-        "spd": round(entity.spd, 1),
+        "hac": 0.5,
+        "spd": round(entity.spd, 2),
         "hdg": int(entity.hdg) % 360,
         "ast": entity.assist,
         "bat": entity.battery,

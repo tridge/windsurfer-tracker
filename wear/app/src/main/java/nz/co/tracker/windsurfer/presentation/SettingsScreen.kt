@@ -21,6 +21,7 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import kotlinx.coroutines.launch
+import nz.co.tracker.windsurfer.BuildConfig
 import nz.co.tracker.windsurfer.EventFetcher
 import nz.co.tracker.windsurfer.EventInfo
 import nz.co.tracker.windsurfer.TrackerService
@@ -128,37 +129,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Server Host
-            item {
-                Text(
-                    text = "Server",
-                    style = MaterialTheme.typography.caption1,
-                    color = MaterialTheme.colors.onSurfaceVariant
-                )
-            }
-
-            item {
-                Chip(
-                    onClick = {
-                        val intent = Intent(context, TextInputActivity::class.java).apply {
-                            putExtra(TextInputActivity.EXTRA_LABEL, "Server address")
-                            putExtra(TextInputActivity.EXTRA_CURRENT_VALUE, serverHost)
-                            putExtra(TextInputActivity.EXTRA_INPUT_TYPE, TextInputActivity.INPUT_TYPE_TEXT)
-                        }
-                        serverInputLauncher.launch(intent)
-                    },
-                    label = {
-                        Text(
-                            text = serverHost,
-                            maxLines = 1,
-                            fontSize = 12.sp
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(0.9f),
-                    colors = ChipDefaults.secondaryChipColors()
-                )
-            }
-
             // Your Name
             item {
                 Text(
@@ -212,7 +182,7 @@ fun SettingsScreen(
                     },
                     label = {
                         Text(
-                            text = if (password.isEmpty()) "(tap to set)" else "••••••••",
+                            text = if (password.isEmpty()) "(tap to set)" else password,
                             maxLines = 1,
                             fontSize = 12.sp
                         )
@@ -351,6 +321,38 @@ fun SettingsScreen(
                 )
             }
 
+            // Server Host
+            item {
+                Text(
+                    text = "Server",
+                    style = MaterialTheme.typography.caption1,
+                    color = MaterialTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            item {
+                Chip(
+                    onClick = {
+                        val intent = Intent(context, TextInputActivity::class.java).apply {
+                            putExtra(TextInputActivity.EXTRA_LABEL, "Server address")
+                            putExtra(TextInputActivity.EXTRA_CURRENT_VALUE, serverHost)
+                            putExtra(TextInputActivity.EXTRA_INPUT_TYPE, TextInputActivity.INPUT_TYPE_TEXT)
+                        }
+                        serverInputLauncher.launch(intent)
+                    },
+                    label = {
+                        Text(
+                            text = serverHost,
+                            maxLines = 1,
+                            fontSize = 12.sp
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(0.9f),
+                    colors = ChipDefaults.secondaryChipColors()
+                )
+            }
+
             // Save button
             item {
                 Button(
@@ -375,6 +377,17 @@ fun SettingsScreen(
                 ) {
                     Text("Save")
                 }
+            }
+
+            // Version info
+            item {
+                Text(
+                    text = BuildConfig.VERSION_STRING,
+                    style = MaterialTheme.typography.caption3,
+                    color = MaterialTheme.colors.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                )
             }
         }
 

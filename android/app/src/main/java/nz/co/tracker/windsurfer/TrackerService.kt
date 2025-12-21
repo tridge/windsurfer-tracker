@@ -459,7 +459,7 @@ class TrackerService : LifecycleService() {
             if (location.hasAccuracy()) {
                 put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
             }
-            put("spd", speedMs * 1.94384)  // Convert m/s to knots
+            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
@@ -613,7 +613,7 @@ class TrackerService : LifecycleService() {
             if (location.hasAccuracy()) {
                 put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
             }
-            put("spd", speedMs * 1.94384)  // Convert m/s to knots
+            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
             put("bat", batteryPercent)

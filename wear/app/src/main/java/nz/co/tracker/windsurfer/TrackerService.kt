@@ -538,7 +538,10 @@ class TrackerService : LifecycleService() {
             put("ts", System.currentTimeMillis() / 1000)
             put("lat", location.latitude)
             put("lon", location.longitude)
-            put("spd", speedMs * 1.94384)  // m/s to knots
+            if (location.hasAccuracy()) {
+                put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
+            }
+            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
@@ -667,7 +670,10 @@ class TrackerService : LifecycleService() {
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
             put("pos", posArray)  // Position array instead of lat/lon
-            put("spd", speedMs * 1.94384)  // m/s to knots
+            if (location.hasAccuracy()) {
+                put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
+            }
+            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // m/s to knots
             put("hdg", bearing.toInt())
             put("ast", false)
             put("bat", batteryPercent)
