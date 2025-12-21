@@ -59,6 +59,9 @@ public struct TrackerPacket: Codable {
     /// Position array for 1Hz mode: [[ts, lat, lon], ...]
     public let pos: [[Double]]?
 
+    /// Horizontal accuracy in meters (optional)
+    public let hac: Double?
+
     public init(
         id: String,
         eid: Int,
@@ -78,7 +81,8 @@ public struct TrackerPacket: Codable {
         bdr: Double? = nil,
         chg: Bool,
         ps: Bool,
-        pos: [[Double]]? = nil
+        pos: [[Double]]? = nil,
+        hac: Double? = nil
     ) {
         self.id = id
         self.eid = eid
@@ -99,6 +103,7 @@ public struct TrackerPacket: Codable {
         self.chg = chg
         self.ps = ps
         self.pos = pos
+        self.hac = hac
     }
 
     /// Encode to JSON data

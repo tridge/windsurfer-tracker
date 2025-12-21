@@ -280,7 +280,8 @@ public actor TrackerService {
             bdr: battery.drainRate,
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
-            pos: positionArray
+            pos: positionArray,
+            hac: position.accuracy > 0 ? position.accuracy : nil
         )
     }
 

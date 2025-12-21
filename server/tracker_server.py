@@ -505,7 +505,8 @@ class PositionTracker:
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
-                         os_version: str | None = None, skip_log: bool = False) -> bool:
+                         os_version: str | None = None, horizontal_accuracy: float | None = None,
+                         skip_log: bool = False) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -527,11 +528,12 @@ class PositionTracker:
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
+        hac_str = f" hac={horizontal_accuracy:.0f}m" if horizontal_accuracy is not None else ""
         local_time = datetime.fromtimestamp(recv_time).strftime("%H:%M:%S")
 
         log_line = (
             f"{local_time} [{sailor_id}] "
-            f"pos={format_position(lat, lon)} "
+            f"pos={format_position(lat, lon)}{hac_str} "
             f"spd={speed:.1f}kn hdg={heading:03d}° "
             f"bat={bat_str} sig={sig_str} "
             f"ver={version} "
@@ -574,6 +576,8 @@ class PositionTracker:
                     pos_data["hr"] = heart_rate
                 if os_version:
                     pos_data["os"] = os_version
+                if horizontal_accuracy is not None:
+                    pos_data["hac"] = horizontal_accuracy
                 self.current_positions[sailor_id] = pos_data
 
             # Write current positions file
@@ -603,6 +607,8 @@ class PositionTracker:
                     track_entry["hr"] = heart_rate
                 if os_version:
                     track_entry["os"] = os_version
+                if horizontal_accuracy is not None:
+                    track_entry["hac"] = horizontal_accuracy
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -643,8 +649,8 @@ class EventTracker:
                          heading: int, ts: int, assist: bool, battery: int, signal: int,
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
-                         os_version: str | None = None, skip_log: bool = False,
-                         pos_array: list | None = None) -> bool:
+                         os_version: str | None = None, horizontal_accuracy: float | None = None,
+                         skip_log: bool = False, pos_array: list | None = None) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -671,6 +677,8 @@ class EventTracker:
                 track_entry["hr"] = heart_rate
             if os_version:
                 track_entry["os"] = os_version
+            if horizontal_accuracy is not None:
+                track_entry["hac"] = horizontal_accuracy
             self.daily_logger.write(track_entry)
 
         # Process through position tracker
@@ -693,6 +701,7 @@ class EventTracker:
             battery_drain_rate=battery_drain_rate,
             heart_rate=heart_rate,
             os_version=os_version,
+            horizontal_accuracy=horizontal_accuracy,
             skip_log=has_batch or skip_log
         )
 
@@ -1379,6 +1388,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             flags = packet.get("flg", {})
             battery_drain_rate = packet.get("bdr")
             os_version = packet.get("os")  # OS version string (optional)
+            horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
 
             # Extract event ID (default to 1 for backwards compatibility)
             eid = packet.get("eid", 1)
@@ -1470,6 +1480,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     battery_drain_rate=battery_drain_rate,
                     heart_rate=heart_rate,
                     os_version=os_version,
+                    horizontal_accuracy=horizontal_accuracy,
                     pos_array=pos_array
                 )
             else:
@@ -1496,6 +1507,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         track_entry["hr"] = heart_rate
                     if os_version:
                         track_entry["os"] = os_version
+                    if horizontal_accuracy is not None:
+                        track_entry["hac"] = horizontal_accuracy
                     _daily_logger.write(track_entry)
 
                 _position_tracker.process_position(
@@ -1516,6 +1529,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     battery_drain_rate=battery_drain_rate,
                     heart_rate=heart_rate,
                     os_version=os_version,
+                    horizontal_accuracy=horizontal_accuracy,
                     skip_log=has_batch
                 )
 
@@ -2000,6 +2014,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             flags = packet.get("flg", {})
             battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
             os_version = packet.get("os")  # OS version string (optional)
+            horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
 
             # Extract event ID (default to 1 for backwards compatibility)
             eid = packet.get("eid", 1)
@@ -2080,6 +2095,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     battery_drain_rate=battery_drain_rate,
                     heart_rate=heart_rate,
                     os_version=os_version,
+                    horizontal_accuracy=horizontal_accuracy,
                     pos_array=pos_array
                 )
 
@@ -2128,6 +2144,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         track_entry["hr"] = heart_rate
                     if os_version:
                         track_entry["os"] = os_version
+                    if horizontal_accuracy is not None:
+                        track_entry["hac"] = horizontal_accuracy
                     daily_logger.write(track_entry)
 
                 # Process position through shared tracker (updates live display)
@@ -2150,6 +2168,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     battery_drain_rate=battery_drain_rate,
                     heart_rate=heart_rate,
                     os_version=os_version,
+                    horizontal_accuracy=horizontal_accuracy,
                     skip_log=has_batch
                 )
 
