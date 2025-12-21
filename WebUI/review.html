@@ -869,6 +869,100 @@
             font-size: 10px;
         }
 
+        /* Accuracy graph panel */
+        #accuracy-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #accuracy-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #accuracy-graph-resize:hover,
+        #accuracy-graph-resize.dragging {
+            background: linear-gradient(to bottom, #9b59b6, transparent);
+        }
+
+        #accuracy-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #accuracy-graph-resize:hover::after,
+        #accuracy-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #accuracy-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #accuracy-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .accuracy-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #9b59b6;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .accuracy-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        .accuracy-x-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -1061,7 +1155,8 @@
             #battery-graph-panel,
             #signal-graph-panel,
             #latency-graph-panel,
-            #heartrate-graph-panel {
+            #heartrate-graph-panel,
+            #accuracy-graph-panel {
                 right: 0;
             }
 
@@ -1069,14 +1164,16 @@
             .battery-graph-title,
             .signal-graph-title,
             .latency-graph-title,
-            .heartrate-graph-title {
+            .heartrate-graph-title,
+            .accuracy-graph-title {
                 font-size: 10px;
             }
 
             .speed-y-axis,
             .battery-y-axis,
             .signal-y-axis,
-            .latency-y-axis {
+            .latency-y-axis,
+            .accuracy-y-axis {
                 font-size: 8px;
                 width: 25px;
                 left: 5px;
@@ -1086,7 +1183,8 @@
             #battery-graph-container,
             #signal-graph-container,
             #latency-graph-container,
-            #heartrate-graph-container {
+            #heartrate-graph-container,
+            #accuracy-graph-container {
                 padding: 8px 35px 20px 35px;
             }
         }
@@ -1288,6 +1386,7 @@
                 <label><input type="checkbox" id="show-signal-graph"> Signal</label>
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
                 <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
+                <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
             </div>
         </div>
         <select id="map-type-select" onchange="setMapType(this.value)" style="display:none">
@@ -1414,6 +1513,26 @@
             <div class="heartrate-x-axis">
                 <span id="heartrate-time-start">--:--</span>
                 <span id="heartrate-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Accuracy graph panel -->
+    <div id="accuracy-graph-panel">
+        <div id="accuracy-graph-resize"></div>
+        <div id="accuracy-graph-container">
+            <div class="accuracy-graph-title">GPS Accuracy (meters)</div>
+            <div class="accuracy-y-axis" id="accuracy-y-labels">
+                <span>100</span>
+                <span>75</span>
+                <span>50</span>
+                <span>25</span>
+                <span>0</span>
+            </div>
+            <canvas id="accuracy-graph"></canvas>
+            <div class="accuracy-x-axis">
+                <span id="accuracy-time-start">--:--</span>
+                <span id="accuracy-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -1752,6 +1871,7 @@
                     bat: entry.bat,
                     sig: entry.sig,
                     hr: entry.hr,
+                    hac: entry.hac,
                     role: entry.role,
                     ver: entry.ver,
                     flg: entry.flg,
@@ -2254,6 +2374,7 @@
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
+            drawAccuracyGraph();
         }
 
         function updateSliderRange() {
@@ -2452,13 +2573,18 @@
                         hrText = `<br>Heart Rate: <span style="color:#e91e63">${point.hr} bpm</span>`;
                     }
 
+                    let hacText = '';
+                    if (point.hac !== undefined) {
+                        hacText = `<br>Accuracy: ${point.hac.toFixed(1)}m`;
+                    }
+
                     pointMarker.bindTooltip(`
                         <b>${getDisplayName(userId)}</b><br>
                         Time: ${time}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${point.hdg || 0}°<br>
                         Signal: ${point.sig || '?'}<br>
-                        Battery: ${point.bat || '?'}%${hrText}${warnings}
+                        Battery: ${point.bat || '?'}%${hacText}${hrText}${warnings}
                     `, { sticky: true });
 
                     pointGroup.addLayer(pointMarker);
@@ -2487,6 +2613,11 @@
                         markerHrText = `<br>Heart Rate: <span style="color:#e91e63">${last.hr} bpm</span>`;
                     }
 
+                    let markerHacText = '';
+                    if (last.hac !== undefined) {
+                        markerHacText = `<br>Accuracy: ${last.hac.toFixed(1)}m`;
+                    }
+
                     const marker = L.circleMarker([last.lat, last.lon], {
                         radius: 8,
                         fillColor: userColor,
@@ -2497,7 +2628,7 @@
                         <b>${getDisplayName(userId)}</b><br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${last.hdg || 0}°<br>
-                        Battery: ${last.bat || '?'}%${markerHrText}${markerWarnings}
+                        Battery: ${last.bat || '?'}%${markerHacText}${markerHrText}${markerWarnings}
                     `).addTo(map);
                     markerLayers[userId] = marker;
                 }
@@ -3208,6 +3339,134 @@
             }
         }
 
+        function drawAccuracyGraph() {
+            // Only draw if accuracy graph is visible
+            if (!document.getElementById('show-accuracy-graph').checked) return;
+
+            const canvas = document.getElementById('accuracy-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            document.getElementById('accuracy-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('accuracy-time-end').textContent = formatTimeShortInTz(rangeEndTime);
+
+            // Calculate accuracy range for Y axis scaling (only from visible time range)
+            let maxAcc = 0;
+            let hasAccData = false;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                    if (entry.hac !== undefined && entry.hac > 0) {
+                        maxAcc = Math.max(maxAcc, entry.hac);
+                        hasAccData = true;
+                    }
+                }
+            }
+
+            // Set sensible defaults and add padding
+            if (!hasAccData || maxAcc === 0) {
+                maxAcc = 100;
+            } else {
+                // Add 10% padding above max, round to nice number
+                maxAcc = Math.ceil((maxAcc * 1.1) / 10) * 10;
+                maxAcc = Math.max(maxAcc, 10); // At least 10m range
+            }
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('accuracy-y-labels');
+            yLabels.innerHTML = `
+                <span>${maxAcc}</span>
+                <span>${Math.round(maxAcc * 0.75)}</span>
+                <span>${Math.round(maxAcc * 0.5)}</span>
+                <span>${Math.round(maxAcc * 0.25)}</span>
+                <span>0</span>
+            `;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see accuracy graph', width / 2, height / 2);
+                return;
+            }
+
+            if (!hasAccData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No accuracy data available', width / 2, height / 2);
+                return;
+            }
+
+            // Draw accuracy line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range and having accuracy data
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime && e.hac !== undefined && e.hac > 0);
+                if (filtered.length < 2) continue;
+
+                // Draw the accuracy line
+                ctx.strokeStyle = '#9b59b6'; // Purple color for accuracy
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const entry of filtered) {
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (entry.hac / maxAcc) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (last.hac / maxAcc) * height;
+                    ctx.fillStyle = '#9b59b6';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`${getDisplayName(userId)}: ${last.hac.toFixed(1)}m`, Math.min(x, width - 5), y - 5);
+                }
+            }
+        }
+
         // Graph hover highlighting (shared between battery, signal, and latency graphs)
         let graphHighlightMarkers = [];
 
@@ -3235,6 +3494,9 @@
             }
             if (document.getElementById('show-heartrate-graph').checked) {
                 drawHeartRateGraph();
+            }
+            if (document.getElementById('show-accuracy-graph').checked) {
+                drawAccuracyGraph();
             }
         }
 
@@ -3295,6 +3557,12 @@
                     Time: ${time}<br>
                     Battery: ${closest.bat !== undefined ? closest.bat + '%' : 'N/A'}<br>
                     Speed: ${(closest.spd || 0).toFixed(1)} kts`;
+
+                // Add accuracy if available
+                if (closest.hac !== undefined) {
+                    const hacColor = closest.hac > 50 ? '#e74c3c' : closest.hac > 20 ? '#f39c12' : '#2ecc71';
+                    tooltipHtml += `<br>Accuracy: <span style="color:${hacColor}">${closest.hac.toFixed(1)}m</span>`;
+                }
 
                 // Add signal strength if available
                 if (closest.sig !== undefined && closest.sig !== null) {
@@ -3483,6 +3751,31 @@
                 }
                 drawHighlightOnGraph('heartrate-graph', highlightX, ratio, timestamp, 'hr', maxHR, minHR);
             }
+
+            // Draw accuracy graph with highlight if visible
+            if (document.getElementById('show-accuracy-graph').checked) {
+                drawAccuracyGraph();
+                // Calculate accuracy range for proper scaling (only from visible time range)
+                let maxAcc = 0;
+                let hasAccData = false;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                        if (entry.hac !== undefined && entry.hac > 0) {
+                            maxAcc = Math.max(maxAcc, entry.hac);
+                            hasAccData = true;
+                        }
+                    }
+                }
+                if (!hasAccData || maxAcc === 0) {
+                    maxAcc = 100;
+                } else {
+                    maxAcc = Math.ceil((maxAcc * 1.1) / 10) * 10;
+                    maxAcc = Math.max(maxAcc, 10);
+                }
+                drawHighlightOnGraph('accuracy-graph', highlightX, ratio, timestamp, 'hac', maxAcc, 0);
+            }
         }
 
         function drawLatencyHighlightOnGraph(canvasId, highlightX, ratio, timestamp, maxLatency) {
@@ -3648,22 +3941,35 @@
             clearGraphHighlight();
         });
 
+        document.getElementById('accuracy-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'accuracy-graph');
+        });
+
+        document.getElementById('accuracy-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
         // Graph resize functionality
         let speedGraphHeight = parseInt(localStorage.getItem('speedGraphHeight')) || 150;
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
         let signalGraphHeight = parseInt(localStorage.getItem('signalGraphHeight')) || 150;
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
         let heartrateGraphHeight = parseInt(localStorage.getItem('heartrateGraphHeight')) || 150;
+        let accuracyGraphHeight = parseInt(localStorage.getItem('accuracyGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
         const signalPanel = document.getElementById('signal-graph-panel');
         const latencyPanel = document.getElementById('latency-graph-panel');
         const heartratePanel = document.getElementById('heartrate-graph-panel');
+        const accuracyPanel = document.getElementById('accuracy-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
         const signalResizeHandle = document.getElementById('signal-graph-resize');
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
         const heartrateResizeHandle = document.getElementById('heartrate-graph-resize');
+        const accuracyResizeHandle = document.getElementById('accuracy-graph-resize');
         let isResizing = false;
         let resizingPanel = null;
         let startY = 0;
@@ -3675,6 +3981,7 @@
         signalPanel.style.height = signalGraphHeight + 'px';
         latencyPanel.style.height = latencyGraphHeight + 'px';
         heartratePanel.style.height = heartrateGraphHeight + 'px';
+        accuracyPanel.style.height = accuracyGraphHeight + 'px';
 
         function updateGraphPositions() {
             const mapEl = document.getElementById('map');
@@ -3683,11 +3990,21 @@
             const signalVisible = document.getElementById('show-signal-graph').checked;
             const latencyVisible = document.getElementById('show-latency-graph').checked;
             const heartrateVisible = document.getElementById('show-heartrate-graph').checked;
+            const accuracyVisible = document.getElementById('show-accuracy-graph').checked;
 
             let totalHeight = 80; // timeline height
             let currentBottom = 80;
 
-            // Stack from bottom: heartrate, latency, signal, battery, speed
+            // Stack from bottom: accuracy, heartrate, latency, signal, battery, speed
+            if (accuracyVisible) {
+                accuracyPanel.style.display = 'block';
+                accuracyPanel.style.bottom = currentBottom + 'px';
+                currentBottom += accuracyGraphHeight;
+                totalHeight += accuracyGraphHeight;
+            } else {
+                accuracyPanel.style.display = 'none';
+            }
+
             if (heartrateVisible) {
                 heartratePanel.style.display = 'block';
                 heartratePanel.style.bottom = currentBottom + 'px';
@@ -3791,6 +4108,17 @@
             e.preventDefault();
         });
 
+        accuracyResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'accuracy';
+            startY = e.clientY;
+            startHeight = accuracyPanel.offsetHeight;
+            accuracyResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
 
@@ -3812,6 +4140,9 @@
             } else if (resizingPanel === 'heartrate') {
                 heartratePanel.style.height = newHeight + 'px';
                 heartrateGraphHeight = newHeight;
+            } else if (resizingPanel === 'accuracy') {
+                accuracyPanel.style.height = newHeight + 'px';
+                accuracyGraphHeight = newHeight;
             }
 
             updateGraphPositions();
@@ -3823,6 +4154,7 @@
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
+            drawAccuracyGraph();
         });
 
         document.addEventListener('mouseup', () => {
@@ -3833,6 +4165,7 @@
                 signalResizeHandle.classList.remove('dragging');
                 latencyResizeHandle.classList.remove('dragging');
                 heartrateResizeHandle.classList.remove('dragging');
+                accuracyResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('speedGraphHeight', speedGraphHeight);
@@ -3840,6 +4173,7 @@
                 localStorage.setItem('signalGraphHeight', signalGraphHeight);
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
                 localStorage.setItem('heartrateGraphHeight', heartrateGraphHeight);
+                localStorage.setItem('accuracyGraphHeight', accuracyGraphHeight);
                 resizingPanel = null;
             }
         });
@@ -3960,6 +4294,7 @@
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
+            drawAccuracyGraph();
         });
 
         document.getElementById('end-slider').addEventListener('input', (e) => {
@@ -3977,6 +4312,7 @@
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
+            drawAccuracyGraph();
         });
 
         document.getElementById('speed-color').addEventListener('change', () => {
@@ -4030,6 +4366,13 @@
             }
         });
 
+        document.getElementById('show-accuracy-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawAccuracyGraph();
+            }
+        });
+
         document.getElementById('reset-range-btn').addEventListener('click', () => {
             document.getElementById('start-slider').value = 0;
             document.getElementById('end-slider').value = 100;
@@ -4041,6 +4384,7 @@
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
+            drawAccuracyGraph();
         });
 
         // Playback controls - animate through the selected range
