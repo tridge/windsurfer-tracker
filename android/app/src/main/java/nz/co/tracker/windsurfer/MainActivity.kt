@@ -464,9 +464,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun startTrackerService() {
-        // Clear event name - will be repopulated from first ACK
-        binding.tvEventName.text = ""
-        binding.tvEventName.visibility = View.GONE
+        // Show placeholder event name - will be repopulated from first ACK
+        binding.tvEventName.text = "---"
 
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
@@ -540,10 +539,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.configGroup.visibility = View.GONE
             updateAssistButton(service.isAssistActive())
 
-            // Show 1Hz indicator if high frequency mode is enabled
+            // Show frequency mode indicator
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             val highFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
-            binding.tv1HzIndicator.visibility = if (highFrequencyMode) View.VISIBLE else View.GONE
+            binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz MODE" else "0.1Hz MODE"
+            binding.tv1HzIndicator.visibility = View.VISIBLE
 
             service.getLastLocation()?.let { loc ->
                 updateLocationDisplay(loc)
@@ -1029,8 +1029,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     override fun onEventName(name: String) {
         runOnUiThread {
-            binding.tvEventName.text = name
-            binding.tvEventName.visibility = View.VISIBLE
+            binding.tvEventName.text = if (name.isNotEmpty()) name else "---"
         }
     }
 }

@@ -98,23 +98,21 @@
             android:id="@+id/tvEventName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text=""
+            android:text="---"
             android:textSize="18sp"
             android:textColor="#0066AA"
             android:textStyle="bold"
-            android:visibility="gone"
             android:layout_marginBottom="8dp" />
 
-        <!-- 1Hz Mode Indicator -->
+        <!-- Frequency Mode Indicator -->
         <TextView
             android:id="@+id/tv1HzIndicator"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="1Hz MODE"
+            android:text="0.1Hz MODE"
             android:textSize="14sp"
             android:textColor="#00AAAA"
             android:textStyle="bold"
-            android:visibility="gone"
             android:layout_marginBottom="8dp" />
 
         <TextView
