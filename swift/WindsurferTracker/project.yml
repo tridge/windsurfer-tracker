@@ -40,7 +40,7 @@ targets:
       path: WindsurferTracker/WindsurferTracker.entitlements
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.swift
+        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer
         PRODUCT_NAME: "Windsurfer Tracker"
         INFOPLIST_FILE: WindsurferTracker/Resources/Info.plist
         CODE_SIGN_STYLE: Automatic
@@ -60,7 +60,7 @@ targets:
         CFBundleName: "Windsurfer Tracker"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.swift.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.watchkitapp
         PRODUCT_NAME: "Windsurfer Tracker"
         INFOPLIST_FILE: WindsurferTrackerWatch/Resources/Info.plist
         CODE_SIGN_STYLE: Automatic

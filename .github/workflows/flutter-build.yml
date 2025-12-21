@@ -106,6 +106,7 @@ jobs:
   # Build signed iOS for App Store (requires secrets)
   build-ios-signed:
     name: Build iOS (Signed)
+    if: false  # Disabled - using native Swift app instead (see swift-build.yml)
     runs-on: macos-latest
     # Build signed IPA on every push and manual trigger (TestFlight upload only on manual)
     
@@ -240,8 +241,9 @@ jobs:
   # Build Ad Hoc IPA for direct distribution via OTA
   build-ios-adhoc:
     name: Build iOS (Ad Hoc)
+    if: false  # Disabled - using native Swift app instead (see swift-build.yml)
     runs-on: macos-latest
-    if: github.event_name == 'workflow_dispatch'  # Only on manual trigger
+    # Previously: if: github.event_name == 'workflow_dispatch'  # Only on manual trigger
 
     steps:
       - name: Checkout code

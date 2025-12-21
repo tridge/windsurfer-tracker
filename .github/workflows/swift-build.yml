@@ -161,12 +161,12 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
 
       - name: Install Provisioning Profile
-        if: env.SWIFT_PROVISIONING_PROFILE_BASE64 != ''
+        if: env.PROVISIONING_PROFILE_BASE64 != ''
         env:
-          SWIFT_PROVISIONING_PROFILE_BASE64: ${{ secrets.SWIFT_PROVISIONING_PROFILE_BASE64 }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
         run: |
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          echo -n "$SWIFT_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+          echo -n "$PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(/usr/bin/security cms -D -i $PP_PATH))
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
@@ -186,7 +186,7 @@ jobs:
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' WindsurferTracker.xcodeproj/project.pbxproj
 
           # Set development team and provisioning profile
-          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.swift;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.swift; DEVELOPMENT_TEAM = 76AR6DVKBC; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE = \"${PP_UUID}\";/g" WindsurferTracker.xcodeproj/project.pbxproj
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer; DEVELOPMENT_TEAM = 76AR6DVKBC; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE = \"${PP_UUID}\";/g" WindsurferTracker.xcodeproj/project.pbxproj
 
       - name: Create ExportOptions.plist
         if: env.BUILD_CERTIFICATE_BASE64 != ''
@@ -206,7 +206,7 @@ jobs:
               <string>manual</string>
               <key>provisioningProfiles</key>
               <dict>
-                  <key>nz.co.tracker.windsurfer.swift</key>
+                  <key>nz.co.tracker.windsurfer</key>
                   <string>${PP_UUID}</string>
               </dict>
           </dict>
