@@ -47,6 +47,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: WindsurferTracker/WindsurferTracker.entitlements
     settings:
