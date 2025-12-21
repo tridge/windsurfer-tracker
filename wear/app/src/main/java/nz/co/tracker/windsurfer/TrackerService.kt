@@ -68,9 +68,9 @@ class TrackerService : LifecycleService() {
     private var sailorId: String = ""
     private var role: String = "sailor"
     private var password: String = ""
-    private var eventId: Int = 1  // Event ID for multi-event support
+    private var eventId: Int = 2  // Event ID for multi-event support
     private var highFrequencyMode: Boolean = false
-    private var heartRateEnabled: Boolean = true
+    private var heartRateEnabled: Boolean = false
 
     // 1Hz mode position buffer
     private val positionBuffer = mutableListOf<Triple<Long, Double, Double>>()
@@ -174,9 +174,9 @@ class TrackerService : LifecycleService() {
             sailorId = it.getStringExtra("sailor_id") ?: ""
             role = it.getStringExtra("role") ?: "sailor"
             password = it.getStringExtra("password") ?: ""
-            eventId = it.getIntExtra("event_id", 1)
+            eventId = it.getIntExtra("event_id", 2)
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
-            heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", true)
+            heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
             positionBuffer.clear()
         }
 

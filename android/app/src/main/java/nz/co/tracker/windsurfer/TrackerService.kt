@@ -157,7 +157,7 @@ class TrackerService : LifecycleService() {
      */
     private fun getCurrentEventId(): Int {
         val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
-        return prefs.getInt("event_id", 1)
+        return prefs.getInt("event_id", 2)
     }
 
     override fun onCreate() {

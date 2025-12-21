@@ -18,9 +18,9 @@ data class TrackerSettings(
     val sailorId: String = "W01",  // W for Watch
     val role: String = "sailor",
     val password: String = "",
-    val eventId: Int = 1,  // Event ID for multi-event support
+    val eventId: Int = 2,  // Event ID for multi-event support
     val highFrequencyMode: Boolean = false,  // 1Hz mode for racing
-    val heartRateEnabled: Boolean = true  // Opt-out for health data privacy
+    val heartRateEnabled: Boolean = false  // Opt-in for health data privacy
 )
 
 class SettingsRepository(private val context: Context) {
@@ -41,9 +41,9 @@ class SettingsRepository(private val context: Context) {
             sailorId = prefs[PreferencesKeys.SAILOR_ID] ?: "W01",
             role = prefs[PreferencesKeys.ROLE] ?: "sailor",
             password = prefs[PreferencesKeys.PASSWORD] ?: "",
-            eventId = prefs[PreferencesKeys.EVENT_ID] ?: 1,
+            eventId = prefs[PreferencesKeys.EVENT_ID] ?: 2,
             highFrequencyMode = prefs[PreferencesKeys.HIGH_FREQUENCY_MODE] ?: false,
-            heartRateEnabled = prefs[PreferencesKeys.HEART_RATE_ENABLED] ?: true
+            heartRateEnabled = prefs[PreferencesKeys.HEART_RATE_ENABLED] ?: false
         )
     }
 

@@ -725,7 +725,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
 
         var events: List<EventInfo> = emptyList()
-        var selectedEventId = prefs.getInt("event_id", 1)
+        var selectedEventId = prefs.getInt("event_id", 2)
 
         val eventSpinner = android.widget.Spinner(this).apply {
             setBackgroundColor(0xFFEEEEEE.toInt())
@@ -905,7 +905,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val oldRole = prefs.getString("role", "sailor") ?: "sailor"
         val oldServerHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
         val oldServerPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
-        val oldEventId = prefs.getInt("event_id", 1)
+        val oldEventId = prefs.getInt("event_id", 2)
         val oldPassword = prefs.getString("password", "") ?: ""
         val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
 
