@@ -10,7 +10,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                // Identity Section
+                // Identity Section - Your Name first (everyone needs this)
                 Section("Identity") {
                     HStack {
                         Text("Your Name")
@@ -22,37 +22,29 @@ struct SettingsView: View {
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                     }
-
-                    Picker("Role", selection: $viewModel.role) {
-                        ForEach(TrackerRole.allCases, id: \.self) { role in
-                            Text(role.displayName).tag(role)
-                        }
-                    }
                 }
 
-                // Server Section
-                Section("Server") {
+                // Authentication Section - Password needed by most users
+                Section("Authentication") {
                     HStack {
-                        Text("Host")
+                        Text("Password")
                         Spacer()
-                        TextField("wstracker.org", text: $viewModel.serverHost)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 180)
-                            .multilineTextAlignment(.trailing)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
+                        if showPassword {
+                            TextField("Optional", text: $viewModel.password)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 150)
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        } else {
+                            SecureField("Optional", text: $viewModel.password)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 150)
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
 
-                    HStack {
-                        Text("Port")
-                        Spacer()
-                        TextField("41234", value: $viewModel.serverPort, format: .number.grouping(.never))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 100)
-                            .multilineTextAlignment(.trailing)
-                            .keyboardType(.numberPad)
-                    }
+                    Toggle("Show Password", isOn: $showPassword)
                 }
 
                 // Event Section
@@ -88,30 +80,7 @@ struct SettingsView: View {
                     }
                 }
 
-                // Authentication Section
-                Section("Authentication") {
-                    HStack {
-                        Text("Password")
-                        Spacer()
-                        if showPassword {
-                            TextField("Optional", text: $viewModel.password)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 150)
-                                .multilineTextAlignment(.trailing)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                        } else {
-                            SecureField("Optional", text: $viewModel.password)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 150)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-
-                    Toggle("Show Password", isOn: $showPassword)
-                }
-
-                // Advanced Section
+                // Advanced Section - 1Hz mode option
                 Section("Advanced") {
                     Toggle("1Hz Mode", isOn: $viewModel.highFrequencyMode)
 
@@ -119,6 +88,40 @@ struct SettingsView: View {
                         Text("Sends 10 positions per packet for higher precision")
                             .font(.caption)
                             .foregroundColor(.gray)
+                    }
+                }
+
+                // Role Section - less commonly changed
+                Section("Role") {
+                    Picker("Role", selection: $viewModel.role) {
+                        ForEach(TrackerRole.allCases, id: \.self) { role in
+                            Text(role.displayName).tag(role)
+                        }
+                    }
+                }
+
+                // Server Section - rarely changed, at bottom
+                Section("Server") {
+                    HStack {
+                        Text("Host")
+                        Spacer()
+                        TextField("wstracker.org", text: $viewModel.serverHost)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 180)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                    }
+
+                    HStack {
+                        Text("Port")
+                        Spacer()
+                        TextField("41234", value: $viewModel.serverPort, format: .number.grouping(.never))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.numberPad)
                     }
                 }
 
