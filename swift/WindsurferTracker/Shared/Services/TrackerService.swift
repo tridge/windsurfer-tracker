@@ -281,7 +281,7 @@ public actor TrackerService {
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
             pos: positionArray,
-            hac: position.accuracy > 0 ? position.accuracy : nil
+            hac: position.accuracy > 0 ? (position.accuracy * 100).rounded() / 100 : nil
         )
     }
 
