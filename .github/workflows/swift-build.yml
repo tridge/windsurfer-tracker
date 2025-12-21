@@ -70,8 +70,8 @@ jobs:
       - name: Find and package app
         working-directory: swift/WindsurferTracker
         run: |
-          # Find the built .app in DerivedData
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "WindsurferTracker.app" -type d 2>/dev/null | grep -v "watchOS" | head -1)
+          # Find the built .app in DerivedData (app is named "Windsurfer Tracker.app" due to PRODUCT_NAME)
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Windsurfer Tracker.app" -type d 2>/dev/null | grep -v "watchOS" | head -1)
 
           if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
             echo "Found app at: $APP_PATH"
@@ -103,9 +103,10 @@ jobs:
             echo "Archive contents:"
             find build/WindsurferTracker.xcarchive -name "*.app" 2>/dev/null || true
 
-            if [ -d "build/WindsurferTracker.xcarchive/Products/Applications/WindsurferTracker.app" ]; then
+            # App is named "Windsurfer Tracker.app" due to PRODUCT_NAME
+            if [ -d "build/WindsurferTracker.xcarchive/Products/Applications/Windsurfer Tracker.app" ]; then
               mkdir -p build/ipa/Payload
-              cp -r build/WindsurferTracker.xcarchive/Products/Applications/WindsurferTracker.app build/ipa/Payload/
+              cp -r "build/WindsurferTracker.xcarchive/Products/Applications/Windsurfer Tracker.app" build/ipa/Payload/
               cd build/ipa
               zip -r WindsurferTracker-swift-unsigned.ipa Payload
             fi
