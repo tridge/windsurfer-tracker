@@ -7,6 +7,12 @@ struct SettingsView: View {
 
     @State private var showPassword = true
 
+    // Local state to avoid updating settings while typing
+    @State private var tempSailorId: String = ""
+    @State private var tempPassword: String = ""
+    @State private var tempServerHost: String = ""
+    @State private var tempServerPort: Int = 41234
+
     var body: some View {
         NavigationView {
             Form {
@@ -15,7 +21,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Your Name")
                         Spacer()
-                        TextField("e.g., S07", text: $viewModel.sailorId)
+                        TextField("e.g., S07", text: $tempSailorId)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 120)
                             .multilineTextAlignment(.trailing)
@@ -30,14 +36,14 @@ struct SettingsView: View {
                         Text("Password")
                         Spacer()
                         if showPassword {
-                            TextField("", text: $viewModel.password)
+                            TextField("", text: $tempPassword)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 150)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                         } else {
-                            SecureField("", text: $viewModel.password)
+                            SecureField("", text: $tempPassword)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 150)
                                 .multilineTextAlignment(.trailing)
@@ -105,7 +111,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Host")
                         Spacer()
-                        TextField("wstracker.org", text: $viewModel.serverHost)
+                        TextField("wstracker.org", text: $tempServerHost)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 180)
                             .multilineTextAlignment(.trailing)
@@ -117,7 +123,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Port")
                         Spacer()
-                        TextField("41234", value: $viewModel.serverPort, format: .number.grouping(.never))
+                        TextField("41234", value: $tempServerPort, format: .number.grouping(.never))
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 100)
                             .multilineTextAlignment(.trailing)
@@ -140,11 +146,21 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
+                        // Save settings only when Done is pressed
+                        viewModel.sailorId = tempSailorId
+                        viewModel.password = tempPassword
+                        viewModel.serverHost = tempServerHost
+                        viewModel.serverPort = tempServerPort
                         dismiss()
                     }
                 }
             }
             .onAppear {
+                // Load current values into temp state
+                tempSailorId = viewModel.sailorId
+                tempPassword = viewModel.password
+                tempServerHost = viewModel.serverHost
+                tempServerPort = viewModel.serverPort
                 Task {
                     await viewModel.fetchEvents()
                 }
