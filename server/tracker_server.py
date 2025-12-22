@@ -1841,6 +1841,54 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
         time.sleep(interval)
 
 
+def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
+    """Background thread to clear tracks at midnight in each event's timezone.
+
+    Checks every `check_interval` seconds if any event has crossed midnight
+    in its configured timezone. If so, clears tracks for that event (rotating
+    log files so they can still be viewed in track review).
+    """
+    log(f"[MIDNIGHT] Auto-clear service started (check interval: {check_interval}s)")
+
+    # Track which date we last cleared for each event (to avoid multiple clears)
+    last_cleared_date: dict[int, date] = {}
+
+    while True:
+        try:
+            for event_info in event_manager.list_events():
+                eid = event_info['eid']
+                tz_name = event_info.get('timezone', 'Australia/Sydney')
+
+                try:
+                    tz = ZoneInfo(tz_name)
+                except Exception:
+                    tz = ZoneInfo('Australia/Sydney')
+
+                # Get current date in event's timezone
+                now_in_tz = datetime.now(tz)
+                today_in_tz = now_in_tz.date()
+
+                # Check if we've already cleared for today
+                if eid in last_cleared_date and last_cleared_date[eid] >= today_in_tz:
+                    continue
+
+                # Check if it's just after midnight (within first check_interval*2 seconds of the day)
+                seconds_since_midnight = now_in_tz.hour * 3600 + now_in_tz.minute * 60 + now_in_tz.second
+                if seconds_since_midnight < check_interval * 2:
+                    # It's just after midnight - clear tracks
+                    tracker = get_event_tracker(eid)
+                    if tracker:
+                        tracker.clear_tracks()
+                        last_cleared_date[eid] = today_in_tz
+                        log(f"[MIDNIGHT] Auto-cleared tracks for event {eid} ({event_info.get('name', 'Unknown')}) "
+                            f"at midnight {tz_name}")
+
+        except Exception as e:
+            log(f"[MIDNIGHT] Error in midnight clearer: {e}")
+
+        time.sleep(check_interval)
+
+
 def run_server(port: int, log_file: Path | None, positions_file: Path | None, log_dir: Path | None,
                http_port: int | None = None, admin_password: str = "admin", course_file: Path | None = None,
                static_dir: Path | None = None,
@@ -1980,6 +2028,15 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     name=f"compressor-{eid}"
                 )
                 compressor_thread.start()
+
+        # Start midnight track clearer for multi-event mode
+        midnight_thread = threading.Thread(
+            target=run_midnight_clearer,
+            args=(_event_manager,),
+            daemon=True,
+            name="midnight-clearer"
+        )
+        midnight_thread.start()
 
     # Open legacy log file if specified
     log_fh = None
