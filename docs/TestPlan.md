@@ -8,7 +8,6 @@ This document outlines testing procedures for the Windsurfer Tracker apps across
 - **WearOS** (Pixel Watch, etc.) - Kotlin/Compose
 - **iOS** (iPhone/iPad) - Swift/SwiftUI
 - **Android** (Phone) - Kotlin
-- **Flutter** (Cross-platform) - Dart
 
 ---
 
