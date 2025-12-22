@@ -34,6 +34,13 @@ jobs:
             xcodebuild -downloadPlatform iOS && break || sleep 10
           done
 
+      - name: Download watchOS Simulator (required for embedded watch app)
+        run: |
+          for i in 1 2 3; do
+            echo "Attempt $i to download watchOS simulator..."
+            xcodebuild -downloadPlatform watchOS && break || sleep 10
+          done
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
