@@ -50,6 +50,10 @@ targets:
         ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: WindsurferTracker/WindsurferTracker.entitlements
+    dependencies:
+      - target: WindsurferTrackerWatch
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer
