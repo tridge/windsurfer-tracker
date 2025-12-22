@@ -72,9 +72,12 @@ targets:
       properties:
         CFBundleDisplayName: "Windsurfer Tracker"
         CFBundleName: "Windsurfer Tracker"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         WKApplication: true
         WKRunsIndependentlyOfCompanionApp: true
         WKCompanionAppBundleIdentifier: nz.co.tracker.windsurfer
+        GIT_HASH: "$(GIT_HASH)"
         NSLocationWhenInUseUsageDescription: "Windsurfer Tracker needs your location to report your position during races."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races."
         NSHealthShareUsageDescription: "Windsurfer Tracker uses workout sessions to enable background GPS tracking during races."

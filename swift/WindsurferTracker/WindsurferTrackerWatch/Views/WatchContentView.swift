@@ -125,18 +125,35 @@ struct WatchSettingsView: View {
                         .cornerRadius(8)
                 }
 
-                // Role
+                // Role (tap to cycle)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Role")
                         .font(.caption)
                         .foregroundColor(.gray)
-                    Picker("Role", selection: $viewModel.role) {
-                        Text("Sailor").tag(TrackerRole.sailor)
-                        Text("Support").tag(TrackerRole.support)
-                        Text("Spectator").tag(TrackerRole.spectator)
+                    Button {
+                        // Cycle through roles
+                        switch viewModel.role {
+                        case .sailor:
+                            viewModel.role = .support
+                        case .support:
+                            viewModel.role = .spectator
+                        case .spectator:
+                            viewModel.role = .sailor
+                        }
+                    } label: {
+                        HStack {
+                            Text(viewModel.role.rawValue.capitalized)
+                                .font(.caption)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
                     }
-                    .pickerStyle(.wheel)
-                    .frame(height: 60)
+                    .buttonStyle(.plain)
                 }
 
                 // 1Hz mode
@@ -221,6 +238,12 @@ struct WatchSettingsView: View {
                         .cornerRadius(20)
                 }
                 .buttonStyle(.plain)
+
+                // Version string
+                Text(versionString)
+                    .font(.system(size: 10))
+                    .foregroundColor(.gray)
+                    .padding(.top, 8)
             }
             .padding(.horizontal, 8)
         }
@@ -229,6 +252,18 @@ struct WatchSettingsView: View {
             tempHost = viewModel.serverHost
             tempPassword = viewModel.password
             viewModel.fetchEvents()
+        }
+    }
+
+    private var versionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        let gitHash = Bundle.main.infoDictionary?["GIT_HASH"] as? String
+
+        if let hash = gitHash, !hash.isEmpty {
+            return "\(version) (\(build)) \(hash)"
+        } else {
+            return "\(version) (\(build))"
         }
     }
 }
