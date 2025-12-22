@@ -48,3 +48,5 @@ keys/
 keystore.properties
 local.properties
 /app/
+take_app_screenshots.sh
+restart_sim_tracks.sh
