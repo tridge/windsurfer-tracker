@@ -2,10 +2,13 @@
 
 A GPS tracking system for windsurfing races using UDP for maximum reliability on poor mobile connections, with a web-based map UI for race organizers.
 
+**Live demo:** [wstracker.org](https://wstracker.org)
+
 ## Features
 
 - **Multi-event support** - Host multiple races/regattas with separate data, passwords, and courses
 - **Real-time GPS tracking** - Position updates every 10 seconds from Android, iOS, and smartwatch devices
+- **1Hz high-frequency mode** - Optional 1-second position updates for detailed track analysis
 - **Multiple roles** - Track sailors (windsurfers), support boats, and spectators with distinct icons
 - **Emergency assist** - One-touch "Request Assist" button with audio alerts in the web UI
 - **Track history** - View historical tracks for each participant with incremental loading
