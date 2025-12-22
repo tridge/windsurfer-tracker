@@ -40,22 +40,11 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
-      - name: Build Release APK (unsigned)
-        working-directory: android
-        run: ./gradlew assembleRelease
-
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: warn
 
   build-wearos:
@@ -83,20 +72,9 @@ jobs:
         working-directory: wear
         run: ./gradlew assembleDebug
 
-      - name: Build Release APK (unsigned)
-        working-directory: wear
-        run: ./gradlew assembleRelease
-
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: wearos-debug-apk
           path: wear/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: wearos-release-apk
-          path: wear/app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
