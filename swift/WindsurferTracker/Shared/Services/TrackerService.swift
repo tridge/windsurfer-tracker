@@ -61,15 +61,8 @@ public actor TrackerService {
             }
             .store(in: &cancellables)
 
-        // Subscribe to network ACKs
-        networkManager.ackPublisher
-            .sink { [weak self] response in
-                guard let self = self else { return }
-                Task {
-                    await self.handleACK(response)
-                }
-            }
-            .store(in: &cancellables)
+        // Note: ACKs are handled directly from send() return value, not via subscription.
+        // The ackPublisher is for external observers only.
 
         // Subscribe to location errors
         locationManager.errorPublisher
