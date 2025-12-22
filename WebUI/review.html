@@ -3469,11 +3469,22 @@
 
         // Graph hover highlighting (shared between battery, signal, and latency graphs)
         let graphHighlightMarkers = [];
+        let pendingHighlightUpdate = null;
 
         function clearGraphHighlight() {
-            // Remove highlight markers from map (close tooltips first to ensure cleanup)
+            // Cancel any pending highlight update
+            if (pendingHighlightUpdate) {
+                cancelAnimationFrame(pendingHighlightUpdate);
+                pendingHighlightUpdate = null;
+            }
+
+            // Remove highlight markers from map (explicitly remove tooltips to prevent orphans)
             for (const marker of graphHighlightMarkers) {
+                const tooltip = marker.getTooltip();
                 marker.closeTooltip();
+                if (tooltip && map.hasLayer(tooltip)) {
+                    map.removeLayer(tooltip);
+                }
                 marker.unbindTooltip();
                 map.removeLayer(marker);
             }
@@ -3501,6 +3512,19 @@
         }
 
         function showGraphHighlight(mouseX, sourceGraph) {
+            // Cancel any pending update to prevent race conditions
+            if (pendingHighlightUpdate) {
+                cancelAnimationFrame(pendingHighlightUpdate);
+            }
+
+            // Debounce with requestAnimationFrame for smooth updates
+            pendingHighlightUpdate = requestAnimationFrame(() => {
+                pendingHighlightUpdate = null;
+                showGraphHighlightImmediate(mouseX, sourceGraph);
+            });
+        }
+
+        function showGraphHighlightImmediate(mouseX, sourceGraph) {
             const canvas = document.getElementById(sourceGraph);
             const rect = canvas.getBoundingClientRect();
             const width = rect.width;
@@ -3509,9 +3533,13 @@
             const ratio = Math.max(0, Math.min(1, mouseX / width));
             const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
 
-            // Clear previous highlight markers (close tooltips first to ensure cleanup)
+            // Clear previous highlight markers (explicitly remove tooltips to prevent orphans)
             for (const marker of graphHighlightMarkers) {
+                const tooltip = marker.getTooltip();
                 marker.closeTooltip();
+                if (tooltip && map.hasLayer(tooltip)) {
+                    map.removeLayer(tooltip);
+                }
                 marker.unbindTooltip();
                 map.removeLayer(marker);
             }
