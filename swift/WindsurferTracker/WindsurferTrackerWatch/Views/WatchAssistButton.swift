@@ -19,13 +19,13 @@ struct WatchAssistButton: View {
                 if isActive {
                     Text("ASSIST")
                         .font(.caption)
-                        .fontWeight(.bold)
+                        .bold()
                     Text("Tap to cancel")
                         .font(.system(size: 10))
                 } else {
                     Text("ASSIST")
                         .font(.caption)
-                        .fontWeight(.bold)
+                        .bold()
                     Text("Tap to request")
                         .font(.system(size: 10))
                 }

@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val signalLevel = mutableIntStateOf(-1)
     private val ackRate = mutableFloatStateOf(0f)
     private val eventName = mutableStateOf("")
+    private val errorMessage = mutableStateOf<String?>(null)
     private val settings = mutableStateOf(TrackerSettings())
 
     private val serviceConnection = object : ServiceConnection {
@@ -64,7 +65,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onAckReceived(seq: Int) {
-                    // Ack received
+                    // Clear error on successful ACK
+                    errorMessage.value = null
                 }
 
                 override fun onPacketSent(seq: Int) {
@@ -77,6 +79,10 @@ class MainActivity : ComponentActivity() {
 
                 override fun onEventName(name: String) {
                     eventName.value = name
+                }
+
+                override fun onError(message: String) {
+                    errorMessage.value = message
                 }
             }
 
@@ -160,6 +166,7 @@ class MainActivity : ComponentActivity() {
                 signalLevel = signalLevel.intValue,
                 ackRate = ackRate.floatValue,
                 eventName = eventName.value,
+                errorMessage = errorMessage.value,
                 settings = settings.value,
                 onToggleTracking = { toggleTracking() },
                 onAssistToggle = { toggleAssist() },
@@ -201,6 +208,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleTracking() {
+        errorMessage.value = null  // Clear any previous error
         if (isTracking.value) {
             stopTracking()
         } else {

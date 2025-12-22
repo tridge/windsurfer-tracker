@@ -818,7 +818,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
         val passwordInput = android.widget.EditText(this).apply {
             setText(prefs.getString("password", ""))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             setTextColor(0xFF000000.toInt())
             setBackgroundColor(0xFFEEEEEE.toInt())
             textSize = 18f
@@ -826,6 +826,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
         val showPasswordCheckbox = android.widget.CheckBox(this).apply {
             text = "Show password"
+            isChecked = true
             setTextColor(0xFF000000.toInt())
             textSize = 14f
             setOnCheckedChangeListener { _, isChecked ->

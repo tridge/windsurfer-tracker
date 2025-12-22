@@ -22,107 +22,213 @@ struct WatchConfigView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                // ID display
-                VStack(spacing: 4) {
-                    Text("ID")
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-                    Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
-                        .font(.title3)
-                        .fontWeight(.bold)
-                }
-                .padding(.top, 8)
-
-                // Server status
-                Text(viewModel.serverHost)
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-
+        VStack(spacing: 8) {
+            // Header with settings gear
+            HStack {
                 Spacer()
-                    .frame(height: 16)
-
-                // Start button
-                Button {
-                    viewModel.startTracking()
-                } label: {
-                    HStack {
-                        Image(systemName: "play.fill")
-                        Text("Start")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-
-                // Settings link
                 NavigationLink {
                     WatchSettingsView()
                         .environmentObject(viewModel)
                 } label: {
-                    HStack {
-                        Image(systemName: "gear")
-                        Text("Settings")
-                    }
-                    .font(.caption)
+                    Image(systemName: "gearshape")
+                        .font(.title3)
+                        .foregroundColor(.gray)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 8)
+            .padding(.top, 4)
+
+            Spacer()
+
+            // ID display
+            VStack(spacing: 4) {
+                Text("ID")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                HStack(spacing: 4) {
+                    Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
+                        .font(.title2)
+                        .bold()
+                    if viewModel.highFrequencyMode {
+                        Text("1Hz")
+                            .font(.caption2)
+                            .bold()
+                            .foregroundColor(.cyan)
+                    }
+                }
+            }
+
+            // Server
+            Text(viewModel.serverHost)
+                .font(.caption2)
+                .foregroundColor(.gray)
+
+            // Error message
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            }
+
+            Spacer()
+
+            // Start button - styled like WearOS
+            Button {
+                viewModel.startTracking()
+            } label: {
+                HStack {
+                    Image(systemName: "play.fill")
+                    Text("Start")
+                        .bold()
+                }
+                .font(.body)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.green)
+                .foregroundColor(.black)
+                .cornerRadius(24)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
-        .navigationTitle("Tracker")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 /// Watch settings view
 struct WatchSettingsView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
+    @Environment(\.dismiss) private var dismiss
     @State private var tempId: String = ""
     @State private var tempHost: String = ""
+    @State private var tempPassword: String = ""
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Sailor ID
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your ID")
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-                    TextField("W01", text: $tempId)
-                }
+                Text("Settings")
+                    .font(.headline)
+                    .bold()
 
-                // Server
+                // Your Name / ID
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Server")
-                        .font(.caption2)
+                    Text("Your Name")
+                        .font(.caption)
                         .foregroundColor(.gray)
-                    TextField("wstracker.org", text: $tempHost)
-                        .textInputAutocapitalization(.never)
+                    TextField("", text: $tempId)
+                        .textFieldStyle(.plain)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
                 }
 
                 // Role
-                Picker("Role", selection: $viewModel.role) {
-                    Text("Sailor").tag(TrackerRole.sailor)
-                    Text("Support").tag(TrackerRole.support)
-                    Text("Spectator").tag(TrackerRole.spectator)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Role")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Picker("Role", selection: $viewModel.role) {
+                        Text("Sailor").tag(TrackerRole.sailor)
+                        Text("Support").tag(TrackerRole.support)
+                        Text("Spectator").tag(TrackerRole.spectator)
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 60)
                 }
 
                 // 1Hz mode
-                Toggle("1Hz Mode", isOn: $viewModel.highFrequencyMode)
+                Toggle(isOn: $viewModel.highFrequencyMode) {
+                    VStack(alignment: .leading) {
+                        Text("1Hz Mode")
+                            .font(.caption)
+                        Text("High frequency updates")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
+                // Event selection
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Event")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Button {
+                        viewModel.cycleEvent()
+                    } label: {
+                        HStack {
+                            if viewModel.eventsLoading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Text(viewModel.currentEventName)
+                                    .font(.caption)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Password
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Password")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    TextField("", text: $tempPassword)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
+                }
+
+                // Server (at bottom like WearOS)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Server")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    TextField("wstracker.org", text: $tempHost)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
+                }
+
+                // Save button
+                Button {
+                    viewModel.sailorId = tempId
+                    viewModel.serverHost = tempHost
+                    viewModel.password = tempPassword
+                    dismiss()
+                } label: {
+                    Text("Save")
+                        .font(.body)
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(20)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 8)
         }
-        .navigationTitle("Settings")
         .onAppear {
             tempId = viewModel.sailorId
             tempHost = viewModel.serverHost
-        }
-        .onDisappear {
-            viewModel.sailorId = tempId
-            viewModel.serverHost = tempHost
+            tempPassword = viewModel.password
+            viewModel.fetchEvents()
         }
     }
 }

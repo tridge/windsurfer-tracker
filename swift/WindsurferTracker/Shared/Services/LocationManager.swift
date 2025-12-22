@@ -32,6 +32,9 @@ public final class LocationManager: NSObject, ObservableObject {
     private var isUpdating = false
     private var lastSentTimestamp: Date?
     private var backgroundModeConfigured = false
+    #if os(watchOS)
+    private var locationTimer: Timer?
+    #endif
 
     // MARK: - Initialization
 
@@ -141,12 +144,30 @@ public final class LocationManager: NSObject, ObservableObject {
         }
 
         locationManager.startUpdatingLocation()
+
+        #if os(watchOS)
+        // On watchOS, use a timer to restart location updates periodically
+        // since startUpdatingLocation doesn't always deliver continuous updates in simulator
+        DispatchQueue.main.async { [weak self] in
+            self?.locationTimer?.invalidate()
+            let interval = highFrequency ? 1.0 : 10.0
+            self?.locationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+                // Stop and restart to force new location delivery
+                self?.locationManager.stopUpdatingLocation()
+                self?.locationManager.startUpdatingLocation()
+            }
+        }
+        #endif
     }
 
     /// Stop location updates
     public func stopUpdating() {
         isUpdating = false
         locationManager.stopUpdatingLocation()
+        #if os(watchOS)
+        locationTimer?.invalidate()
+        locationTimer = nil
+        #endif
     }
 
     /// Get current location immediately
@@ -183,6 +204,20 @@ extension LocationManager: CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Filter out non-critical errors (common in simulator)
+        if let clError = error as? CLError {
+            switch clError.code {
+            case .locationUnknown:
+                // Temporary failure - location services will keep trying
+                return
+            case .denied:
+                // Permission denied - this is critical
+                errorPublisher.send(TrackerError.locationPermissionDenied)
+                return
+            default:
+                break
+            }
+        }
         errorPublisher.send(error)
     }
 

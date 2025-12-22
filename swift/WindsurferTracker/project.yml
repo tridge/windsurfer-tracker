@@ -70,6 +70,14 @@ targets:
       properties:
         CFBundleDisplayName: "Windsurfer Tracker"
         CFBundleName: "Windsurfer Tracker"
+        WKApplication: true
+        WKRunsIndependentlyOfCompanionApp: true
+        WKCompanionAppBundleIdentifier: nz.co.tracker.windsurfer
+        NSLocationWhenInUseUsageDescription: "Windsurfer Tracker needs your location to report your position during races."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races."
+        UIBackgroundModes:
+          - location
+          - workout-processing
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.watchkitapp

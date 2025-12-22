@@ -30,6 +30,7 @@ fun TrackingScreen(
     ackRate: Float,
     sailorId: String,
     eventName: String,
+    errorMessage: String?,
     highFrequencyMode: Boolean,
     onToggleTracking: () -> Unit,
     onAssistLongPress: () -> Unit,
@@ -70,19 +71,19 @@ fun TrackingScreen(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleTracking() }
+                )
+            }
     ) {
-        // Main content - tappable area for start/stop
+        // Main content
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onToggleTracking() }
-                    )
-                }
         ) {
             Spacer(modifier = Modifier.height(28.dp))
 
@@ -203,6 +204,17 @@ fun TrackingScreen(
                 fontSize = 10.sp,
                 textAlign = TextAlign.Center
             )
+
+            // Error message
+            if (!errorMessage.isNullOrEmpty()) {
+                Text(
+                    text = errorMessage,
+                    color = StoppedRed,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2
+                )
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 

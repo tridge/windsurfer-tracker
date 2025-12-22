@@ -32,6 +32,19 @@ public class WatchTrackerViewModel: ObservableObject {
         didSet { preferences.highFrequencyMode = highFrequencyMode }
     }
 
+    @Published public var password: String {
+        didSet { preferences.password = password }
+    }
+
+    @Published public var eventId: Int {
+        didSet { preferences.eventId = eventId }
+    }
+
+    // MARK: - Event List
+
+    @Published public var events: [EventInfo] = []
+    @Published public var eventsLoading = false
+
     // MARK: - Private
 
     private let preferences = PreferencesManager.shared
@@ -45,11 +58,8 @@ public class WatchTrackerViewModel: ObservableObject {
         self.serverHost = preferences.serverHost
         self.role = preferences.role
         self.highFrequencyMode = preferences.highFrequencyMode
-
-        // Generate default ID with watch prefix if empty
-        if sailorId.isEmpty {
-            sailorId = "\(TrackerConfig.defaultWatchIdPrefix)\(String(format: "%02d", Int.random(in: 1...99)))"
-        }
+        self.password = preferences.password
+        self.eventId = preferences.eventId
 
         setupBindings()
     }
@@ -99,10 +109,39 @@ public class WatchTrackerViewModel: ObservableObject {
     // MARK: - Actions
 
     public func startTracking() {
+        // Validate required fields
+        if sailorId.isEmpty {
+            errorMessage = "Name is required"
+            WKInterfaceDevice.current().play(.failure)
+            return
+        }
+        if password.isEmpty {
+            errorMessage = "Password is required"
+            WKInterfaceDevice.current().play(.failure)
+            return
+        }
+
+        // Check authorization first
+        let locationManager = LocationManager.shared
+        if !locationManager.hasTrackingAuthorization {
+            // Request authorization if not determined
+            let status = locationManager.authorizationStatus
+            if status == .denied || status == .restricted {
+                errorMessage = "Location permission denied. Enable in Settings."
+                WKInterfaceDevice.current().play(.failure)
+            } else {
+                locationManager.requestAuthorization()
+                // Show message to user
+                errorMessage = "Requesting location permission..."
+            }
+            return
+        }
+
         Task {
             do {
                 try await TrackerService.shared.start()
-                // Haptic for success
+                // Clear error and haptic for success
+                errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
             } catch {
                 errorMessage = error.localizedDescription
@@ -115,6 +154,7 @@ public class WatchTrackerViewModel: ObservableObject {
         Task {
             await TrackerService.shared.stop()
             assistRequested = false
+            errorMessage = nil  // Clear any error
             WKInterfaceDevice.current().play(.stop)
         }
     }
@@ -124,5 +164,39 @@ public class WatchTrackerViewModel: ObservableObject {
             await TrackerService.shared.toggleAssist()
             assistRequested = await TrackerService.shared.isAssistRequested
         }
+    }
+
+    public func fetchEvents() {
+        eventsLoading = true
+        Task {
+            let networkManager = NetworkManager()
+            await networkManager.configure(
+                host: serverHost,
+                port: UInt16(TrackerConfig.defaultServerPort)
+            )
+            let fetchedEvents = await networkManager.fetchEvents()
+            await MainActor.run {
+                self.events = fetchedEvents
+                self.eventsLoading = false
+                // Ensure selected event exists in list
+                if !fetchedEvents.isEmpty && !fetchedEvents.contains(where: { $0.eid == self.eventId }) {
+                    self.eventId = fetchedEvents.first?.eid ?? 2
+                }
+            }
+        }
+    }
+
+    public func cycleEvent() {
+        guard !events.isEmpty else { return }
+        if let currentIndex = events.firstIndex(where: { $0.eid == eventId }) {
+            let nextIndex = (currentIndex + 1) % events.count
+            eventId = events[nextIndex].eid
+        } else {
+            eventId = events.first?.eid ?? 2
+        }
+    }
+
+    public var currentEventName: String {
+        events.first(where: { $0.eid == eventId })?.name ?? "Event \(eventId)"
     }
 }

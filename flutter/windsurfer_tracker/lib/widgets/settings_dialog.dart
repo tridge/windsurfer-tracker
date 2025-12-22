@@ -28,7 +28,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late TextEditingController _serverPortController;
   late TextEditingController _passwordController;
   late String _selectedRole;
-  bool _showPassword = false;
+  bool _showPassword = true;
   bool _highFrequencyMode = false;
   String _versionString = '';
 

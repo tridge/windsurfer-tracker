@@ -5,7 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var viewModel: TrackerViewModel
     @Environment(\.dismiss) var dismiss
 
-    @State private var showPassword = false
+    @State private var showPassword = true
 
     var body: some View {
         NavigationView {
@@ -30,14 +30,14 @@ struct SettingsView: View {
                         Text("Password")
                         Spacer()
                         if showPassword {
-                            TextField("Optional", text: $viewModel.password)
+                            TextField("", text: $viewModel.password)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 150)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                         } else {
-                            SecureField("Optional", text: $viewModel.password)
+                            SecureField("", text: $viewModel.password)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 150)
                                 .multilineTextAlignment(.trailing)

@@ -129,6 +129,7 @@ class TrackerService : LifecycleService() {
         fun onPacketSent(seq: Int)
         fun onConnectionStatus(ackRate: Float)
         fun onEventName(name: String)
+        fun onError(message: String)
     }
 
     private fun getServerAddress(): InetAddress? {
@@ -739,6 +740,16 @@ class TrackerService : LifecycleService() {
                     val ackSeq = ack.optInt("ack", -1)
 
                     if (ackSeq > 0) {
+                        // Check for error in response
+                        val errorType = ack.optString("error", "")
+                        val errorMsg = ack.optString("msg", "")
+                        if (errorType.isNotEmpty()) {
+                            Log.e(TAG, "Server error: $errorType - $errorMsg")
+                            statusListener?.onError(errorMsg.ifEmpty { "Server error: $errorType" })
+                            // Don't count as successful ACK
+                            continue
+                        }
+
                         // Mark this sequence as acknowledged to stop retransmissions
                         acknowledgedSeqs.add(ackSeq)
 
