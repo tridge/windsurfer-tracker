@@ -32,9 +32,7 @@ public final class LocationManager: NSObject, ObservableObject {
     private var isUpdating = false
     private var lastSentTimestamp: Date?
     private var backgroundModeConfigured = false
-    #if os(watchOS)
     private var locationTimer: Timer?
-    #endif
 
     // MARK: - Initialization
 
@@ -145,9 +143,10 @@ public final class LocationManager: NSObject, ObservableObject {
 
         locationManager.startUpdatingLocation()
 
-        #if os(watchOS)
-        // On watchOS, use a timer to restart location updates periodically
-        // since startUpdatingLocation doesn't always deliver continuous updates in simulator
+        #if targetEnvironment(simulator)
+        // Use a timer to restart location updates periodically in simulator
+        // This is needed because simulators don't deliver continuous updates
+        // and simctl location set only provides a one-time location
         DispatchQueue.main.async { [weak self] in
             self?.locationTimer?.invalidate()
             let interval = highFrequency ? 1.0 : 10.0
@@ -164,10 +163,8 @@ public final class LocationManager: NSObject, ObservableObject {
     public func stopUpdating() {
         isUpdating = false
         locationManager.stopUpdatingLocation()
-        #if os(watchOS)
         locationTimer?.invalidate()
         locationTimer = nil
-        #endif
     }
 
     /// Get current location immediately
