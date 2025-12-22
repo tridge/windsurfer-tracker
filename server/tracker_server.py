@@ -1532,7 +1532,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != event_tracker_pwd:
                         record_failed_auth(client_ip)
-                        log(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        log(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
 
@@ -1556,7 +1556,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != _tracker_password:
                         record_failed_auth(client_ip)
-                        log(f"[POST] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        log(f"[POST] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
 
@@ -2235,7 +2235,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != event_tracker_pwd:
                         record_failed_auth(client_ip)
-                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip}")
+                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
@@ -2289,7 +2289,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != tracker_password:
                         record_failed_auth(client_ip)
-                        log(f"[UDP] Auth failed for {sailor_id} from {client_ip} (bad password)")
+                        log(f"[UDP] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
