@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <title>Apple Watch Installation - Windsurfer Tracker</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #555;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #555;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .step {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .step-number {
+            display: inline-block;
+            background: #555;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .step h3 {
+            display: inline;
+            vertical-align: middle;
+        }
+        .step p {
+            margin: 15px 0 0 40px;
+        }
+        .step ul {
+            margin: 15px 0 0 40px;
+        }
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .config-table th, .config-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .config-table th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+        .config-table code {
+            background: #e8e8e8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .info {
+            background: #e8f4fd;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .btn {
+            display: inline-block;
+            background: #555;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .btn:hover {
+            background: #333;
+        }
+        .btn-blue {
+            background: #0066cc;
+        }
+        .btn-blue:hover {
+            background: #0055aa;
+        }
+        img.screenshot {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; Back to Installation Options</a>
+
+    <h1>Apple Watch Installation</h1>
+    <p>Follow these steps to install the Windsurfer Tracker app on your Apple Watch. The watch app is installed via TestFlight through your paired iPhone.</p>
+
+    <div class="info">
+        <strong>Requirements:</strong>
+        <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+            <li>Apple Watch Series 3 or newer (watchOS 8.0+)</li>
+            <li>iPhone paired with your Apple Watch</li>
+            <li>TestFlight app installed on your iPhone</li>
+            <li>Invitation to the Windsurfer Tracker TestFlight beta</li>
+        </ul>
+    </div>
+
+    <div class="warning">
+        <strong>Event &amp; Password Required:</strong> You will need to know which <strong>event</strong> you're tracking and the <strong>password</strong> for that event. Ask the race organisers for these details.
+    </div>
+
+    <h2>Step 1: Install TestFlight on iPhone</h2>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Get TestFlight</h3>
+        <p>If you don't already have TestFlight, download it from the App Store on your iPhone:</p>
+        <p style="margin-left: 40px;">
+            <a href="https://apps.apple.com/app/testflight/id899247664" class="btn btn-blue">Download TestFlight</a>
+        </p>
+    </div>
+
+    <h2>Step 2: Join the Beta</h2>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Accept the TestFlight Invitation</h3>
+        <p>You need an invitation link from the race organisers. When you receive it:</p>
+        <ul>
+            <li>Open the invitation link on your iPhone</li>
+            <li>Tap <strong>"Accept"</strong> to join the beta</li>
+            <li>TestFlight will open automatically</li>
+        </ul>
+        <p>If you don't have an invitation, contact the race organisers.</p>
+    </div>
+
+    <h2>Step 3: Install the iPhone App</h2>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Install from TestFlight</h3>
+        <p>In TestFlight, find <strong>"Windsurfer Tracker"</strong> and tap <strong>"Install"</strong>.</p>
+        <p>Wait for the app to download and install on your iPhone.</p>
+    </div>
+
+    <h2>Step 4: Install the Watch App</h2>
+
+    <div class="step">
+        <span class="step-number">4</span>
+        <h3>Open the Watch App on iPhone</h3>
+        <p>Open the <strong>Watch</strong> app on your iPhone (the app you use to manage your Apple Watch).</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">5</span>
+        <h3>Find Windsurfer Tracker</h3>
+        <p>In the Watch app:</p>
+        <ul>
+            <li>Go to the <strong>"My Watch"</strong> tab</li>
+            <li>Scroll down to <strong>"Available Apps"</strong></li>
+            <li>Find <strong>"Windsurfer Tracker"</strong> in the list</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <span class="step-number">6</span>
+        <h3>Install on Watch</h3>
+        <p>Tap <strong>"Install"</strong> next to Windsurfer Tracker.</p>
+        <p>The app will be transferred to your Apple Watch. This may take a minute or two.</p>
+    </div>
+
+    <h2>Step 5: Configure the Watch App</h2>
+
+    <div class="step">
+        <span class="step-number">7</span>
+        <h3>Open on Apple Watch</h3>
+        <p>On your Apple Watch, press the Digital Crown to go to the app grid, then tap the <strong>Windsurfer Tracker</strong> icon.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">8</span>
+        <h3>Configure Settings</h3>
+        <p>Tap the gear icon to open Settings. Configure:</p>
+
+        <table class="config-table">
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Your Name</td>
+                <td>Your name or sail number (e.g., <code>John</code> or <code>S42</code>)</td>
+            </tr>
+            <tr>
+                <td>Role</td>
+                <td>Select <code>Sailor</code> (or Support/Spectator if applicable)</td>
+            </tr>
+            <tr>
+                <td>Event</td>
+                <td>Select your event from the list</td>
+            </tr>
+            <tr>
+                <td>Password</td>
+                <td>Enter the event password from the race organisers</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="step">
+        <span class="step-number">9</span>
+        <h3>Grant Permissions</h3>
+        <p>When prompted, allow:</p>
+        <ul>
+            <li><strong>Location Access</strong> - required for tracking</li>
+            <li><strong>Health Access</strong> - used for background tracking via workout sessions</li>
+        </ul>
+    </div>
+
+    <h2>Step 6: Start Tracking</h2>
+
+    <div class="step">
+        <span class="step-number">10</span>
+        <h3>Start Tracking</h3>
+        <p>Tap the <strong>"Start"</strong> button to begin tracking. The watch will:</p>
+        <ul>
+            <li>Start a workout session (for reliable background tracking)</li>
+            <li>Send your position every 10 seconds</li>
+            <li>Show your current speed and connection status</li>
+        </ul>
+    </div>
+
+    <h2>Testing Your Setup</h2>
+
+    <div class="success">
+        <strong>Verify It's Working:</strong>
+        <ol>
+            <li>Start tracking on your watch</li>
+            <li>Open <a href="https://wstracker.org" target="_blank">https://wstracker.org</a> on any device</li>
+            <li>Select your event from the list</li>
+            <li>You should see your position appear on the map within a few seconds</li>
+        </ol>
+    </div>
+
+    <h2>During the Race</h2>
+
+    <div class="info">
+        <ul style="margin: 0; padding-left: 20px;">
+            <li><strong>Keep the app running</strong> - the workout session keeps tracking active</li>
+            <li><strong>Raise to wake</strong> - raise your wrist to see speed and status</li>
+            <li><strong>Request Assistance</strong> - if you need help on the water, use the assist button in the app</li>
+            <li><strong>Battery</strong> - GPS tracking uses battery; ensure your watch is charged before racing</li>
+            <li><strong>Water resistance</strong> - Apple Watch is water resistant, but avoid pressing buttons underwater</li>
+        </ul>
+    </div>
+
+    <h2>Troubleshooting</h2>
+
+    <div class="step">
+        <h3>Watch app not appearing in Watch app</h3>
+        <p style="margin-left: 0;">Make sure:</p>
+        <ul>
+            <li>The iPhone app is fully installed from TestFlight</li>
+            <li>Your Apple Watch is paired and connected to your iPhone</li>
+            <li>Try restarting both your iPhone and Apple Watch</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3>Position not showing on map</h3>
+        <p style="margin-left: 0;">Check:</p>
+        <ul>
+            <li>Location permission is enabled for the app</li>
+            <li>The event and password are correct</li>
+            <li>Your watch has GPS signal (may take a moment outdoors)</li>
+            <li>Your watch has a network connection (WiFi or cellular, or via iPhone)</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3>Tracking stops when screen turns off</h3>
+        <p style="margin-left: 0;">This shouldn't happen if:</p>
+        <ul>
+            <li>The workout session is active (shown by the green workout indicator)</li>
+            <li>Health permissions were granted</li>
+        </ul>
+        <p style="margin-left: 0;">If tracking stops, try ending and restarting the tracking session.</p>
+    </div>
+
+    <p style="margin-top: 40px; text-align: center;">
+        <a href="index.html" class="back-link">&larr; Back to Installation Options</a>
+    </p>
+</body>
+</html>
