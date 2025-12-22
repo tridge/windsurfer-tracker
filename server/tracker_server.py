@@ -61,6 +61,120 @@ def rotate_file(filepath: Path) -> Path | None:
     return new_path
 
 
+def sanitize_tracker_packet(packet: dict) -> dict:
+    """Sanitize tracker packet inputs to prevent HTML injection and ensure type safety.
+
+    - String fields: Strip HTML tags, limit length
+    - Numeric fields: Ensure they are numbers, use defaults if invalid
+    - Boolean fields: Ensure they are booleans
+    """
+    # HTML tag pattern for stripping
+    html_tag_pattern = re.compile(r'<[^>]+>')
+
+    def sanitize_string(value, max_length: int = 64, default: str = "?") -> str:
+        """Sanitize a string value: strip HTML, limit length."""
+        if not isinstance(value, str):
+            value = str(value) if value is not None else default
+        # Strip HTML tags
+        value = html_tag_pattern.sub('', value)
+        # Strip dangerous characters
+        value = value.replace('<', '').replace('>', '').replace('&', '').replace('"', '').replace("'", '')
+        # Limit length
+        return value[:max_length].strip() or default
+
+    def sanitize_int(value, default: int = 0, min_val: int = None, max_val: int = None) -> int:
+        """Sanitize an integer value."""
+        try:
+            result = int(value) if value is not None else default
+            if min_val is not None:
+                result = max(min_val, result)
+            if max_val is not None:
+                result = min(max_val, result)
+            return result
+        except (ValueError, TypeError):
+            return default
+
+    def sanitize_float(value, default: float = 0.0, min_val: float = None, max_val: float = None) -> float:
+        """Sanitize a float value."""
+        try:
+            result = float(value) if value is not None else default
+            if min_val is not None:
+                result = max(min_val, result)
+            if max_val is not None:
+                result = min(max_val, result)
+            return result
+        except (ValueError, TypeError):
+            return default
+
+    def sanitize_bool(value, default: bool = False) -> bool:
+        """Sanitize a boolean value."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes')
+        try:
+            return bool(value)
+        except (ValueError, TypeError):
+            return default
+
+    # Sanitize the packet in place
+    sanitized = {}
+
+    # String fields
+    sanitized['id'] = sanitize_string(packet.get('id'), max_length=32, default='???')
+    sanitized['role'] = sanitize_string(packet.get('role'), max_length=16, default='sailor')
+    sanitized['ver'] = sanitize_string(packet.get('ver'), max_length=64, default='?')
+    if 'os' in packet:
+        sanitized['os'] = sanitize_string(packet.get('os'), max_length=64, default='')
+    if 'pwd' in packet:
+        sanitized['pwd'] = sanitize_string(packet.get('pwd'), max_length=64, default='')
+
+    # Integer fields
+    sanitized['sq'] = sanitize_int(packet.get('sq'), default=0, min_val=0)
+    sanitized['ts'] = sanitize_int(packet.get('ts'), default=0, min_val=0)
+    sanitized['hdg'] = sanitize_int(packet.get('hdg'), default=0, min_val=0, max_val=360)
+    sanitized['bat'] = sanitize_int(packet.get('bat'), default=-1, min_val=-1, max_val=100)
+    sanitized['sig'] = sanitize_int(packet.get('sig'), default=-1, min_val=-1, max_val=4)
+    sanitized['eid'] = sanitize_int(packet.get('eid'), default=1, min_val=1)
+    if 'hr' in packet and packet.get('hr') is not None:
+        sanitized['hr'] = sanitize_int(packet.get('hr'), default=0, min_val=0, max_val=300)
+
+    # Float fields
+    sanitized['lat'] = sanitize_float(packet.get('lat'), default=0.0, min_val=-90.0, max_val=90.0)
+    sanitized['lon'] = sanitize_float(packet.get('lon'), default=0.0, min_val=-180.0, max_val=180.0)
+    sanitized['spd'] = sanitize_float(packet.get('spd'), default=0.0, min_val=0.0, max_val=100.0)
+    if 'bdr' in packet and packet.get('bdr') is not None:
+        sanitized['bdr'] = sanitize_float(packet.get('bdr'), default=0.0, min_val=0.0, max_val=100.0)
+    if 'hac' in packet and packet.get('hac') is not None:
+        sanitized['hac'] = sanitize_float(packet.get('hac'), default=0.0, min_val=0.0, max_val=10000.0)
+
+    # Boolean fields
+    sanitized['ast'] = sanitize_bool(packet.get('ast'), default=False)
+    if 'chg' in packet:
+        sanitized['chg'] = sanitize_bool(packet.get('chg'), default=False)
+    if 'ps' in packet:
+        sanitized['ps'] = sanitize_bool(packet.get('ps'), default=False)
+
+    # Pass through pos array (1Hz mode) with sanitized values
+    if 'pos' in packet and isinstance(packet.get('pos'), list):
+        sanitized_pos = []
+        for pos in packet['pos'][:100]:  # Limit to 100 positions
+            if isinstance(pos, list) and len(pos) >= 3:
+                sanitized_pos.append([
+                    sanitize_int(pos[0], default=0, min_val=0),  # timestamp
+                    sanitize_float(pos[1], default=0.0, min_val=-90.0, max_val=90.0),  # lat
+                    sanitize_float(pos[2], default=0.0, min_val=-180.0, max_val=180.0)  # lon
+                ])
+        if sanitized_pos:
+            sanitized['pos'] = sanitized_pos
+
+    # Pass through flags dict if present
+    if 'flg' in packet and isinstance(packet.get('flg'), dict):
+        sanitized['flg'] = packet['flg']
+
+    return sanitized
+
+
 def generate_log_summaries(log_dir: Path) -> int:
     """
     Generate summary JSON files for each day's logs.
@@ -1373,6 +1487,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length).decode('utf-8')
             packet = json.loads(body)
 
+            # Sanitize packet inputs
+            packet = sanitize_tracker_packet(packet)
+
             # Extract fields with defaults (same as UDP handler)
             sailor_id = packet.get("id", "???")
             seq = packet.get("sq", 0)
@@ -2055,6 +2172,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 log(f"[{addr[0]}:{addr[1]}] Invalid packet: {e}")
                 continue
+
+            # Sanitize packet inputs
+            packet = sanitize_tracker_packet(packet)
 
             # Extract fields with defaults
             sailor_id = packet.get("id", "???")
