@@ -167,6 +167,17 @@ struct WatchSettingsView: View {
                     }
                 }
 
+                // Heart rate
+                Toggle(isOn: $viewModel.heartRateEnabled) {
+                    VStack(alignment: .leading) {
+                        Text("Heart Rate")
+                            .font(.caption)
+                        Text("Send heart rate data")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
                 // Event selection
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Event")

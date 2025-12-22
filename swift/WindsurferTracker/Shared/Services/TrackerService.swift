@@ -125,6 +125,7 @@ public actor TrackerService {
         guard isRunning else { return }
 
         isRunning = false
+        assistRequested = false
 
         // Stop location updates
         locationManager.stopUpdating()
@@ -261,6 +262,9 @@ public actor TrackerService {
         let battery = batteryMonitor.status
         preferences.ensureSailorId()
 
+        // Get heart rate if enabled
+        let heartRate: Int? = preferences.heartRateEnabled ? HeartRateMonitor.shared.currentHeartRate : nil
+
         return TrackerPacket(
             id: preferences.sailorId,
             eid: preferences.eventId,
@@ -281,7 +285,8 @@ public actor TrackerService {
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
             pos: positionArray,
-            hac: position.accuracy > 0 ? (position.accuracy * 100).rounded() / 100 : nil
+            hac: position.accuracy > 0 ? (position.accuracy * 100).rounded() / 100 : nil,
+            hr: heartRate
         )
     }
 

@@ -62,6 +62,9 @@ public struct TrackerPacket: Codable {
     /// Horizontal accuracy in meters (optional)
     public let hac: Double?
 
+    /// Heart rate in BPM (optional, only if enabled and available)
+    public let hr: Int?
+
     public init(
         id: String,
         eid: Int,
@@ -82,7 +85,8 @@ public struct TrackerPacket: Codable {
         chg: Bool,
         ps: Bool,
         pos: [[Double]]? = nil,
-        hac: Double? = nil
+        hac: Double? = nil,
+        hr: Int? = nil
     ) {
         self.id = id
         self.eid = eid
@@ -104,6 +108,7 @@ public struct TrackerPacket: Codable {
         self.ps = ps
         self.pos = pos
         self.hac = hac
+        self.hr = hr
     }
 
     /// Encode to JSON data

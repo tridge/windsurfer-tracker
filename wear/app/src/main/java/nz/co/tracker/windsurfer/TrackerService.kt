@@ -676,7 +676,7 @@ class TrackerService : LifecycleService() {
             }
             put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // m/s to knots
             put("hdg", bearing.toInt())
-            put("ast", false)
+            put("ast", assistRequested.get())
             put("bat", batteryPercent)
             put("sig", signalLevel)
             put("role", role)

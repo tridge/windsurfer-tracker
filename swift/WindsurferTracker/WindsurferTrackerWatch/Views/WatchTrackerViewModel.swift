@@ -45,6 +45,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.highFrequencyMode = highFrequencyMode }
     }
 
+    @Published public var heartRateEnabled: Bool {
+        didSet { preferences.heartRateEnabled = heartRateEnabled }
+    }
+
     @Published public var password: String {
         didSet { preferences.password = password }
     }
@@ -72,6 +76,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.serverHost = prefs.serverHost
         self.role = prefs.role
         self.highFrequencyMode = prefs.highFrequencyMode
+        self.heartRateEnabled = prefs.heartRateEnabled
         self.password = prefs.password
         self.eventId = prefs.eventId
 
@@ -165,6 +170,14 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
 
+                // Start heart rate monitoring if enabled
+                if heartRateEnabled {
+                    let authorized = await HeartRateMonitor.shared.requestAuthorization()
+                    if authorized {
+                        HeartRateMonitor.shared.startMonitoring()
+                    }
+                }
+
                 // Try to start workout session in background for background mode support
                 // Don't await - let it run independently
                 Task.detached { [weak self] in
@@ -233,6 +246,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         Task {
             // Stop workout session
             await stopWorkoutSession()
+
+            // Stop heart rate monitoring
+            HeartRateMonitor.shared.stopMonitoring()
 
             await TrackerService.shared.stop()
             assistRequested = false

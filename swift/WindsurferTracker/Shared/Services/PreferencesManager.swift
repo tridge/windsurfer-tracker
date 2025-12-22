@@ -17,6 +17,7 @@ public final class PreferencesManager: ObservableObject {
         static let password = "password"
         static let eventId = "event_id"
         static let highFrequencyMode = "high_frequency_mode"
+        static let heartRateEnabled = "heart_rate_enabled"
         static let trackingActive = "tracking_active"
         static let batteryOptAsked = "battery_opt_asked"
     }
@@ -55,6 +56,10 @@ public final class PreferencesManager: ObservableObject {
         didSet { defaults.set(highFrequencyMode, forKey: Keys.highFrequencyMode) }
     }
 
+    @Published public var heartRateEnabled: Bool {
+        didSet { defaults.set(heartRateEnabled, forKey: Keys.heartRateEnabled) }
+    }
+
     @Published public var trackingActive: Bool {
         didSet { defaults.set(trackingActive, forKey: Keys.trackingActive) }
     }
@@ -91,6 +96,7 @@ public final class PreferencesManager: ObservableObject {
         self.eventId = eid > 0 ? eid : 2
 
         self.highFrequencyMode = defaults.bool(forKey: Keys.highFrequencyMode)
+        self.heartRateEnabled = defaults.bool(forKey: Keys.heartRateEnabled)  // Default false
         self.trackingActive = defaults.bool(forKey: Keys.trackingActive)
         self.batteryOptAsked = defaults.bool(forKey: Keys.batteryOptAsked)
     }
@@ -120,6 +126,7 @@ public final class PreferencesManager: ObservableObject {
         password = ""
         eventId = 2
         highFrequencyMode = false
+        heartRateEnabled = false
         trackingActive = false
         batteryOptAsked = false
     }
