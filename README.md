@@ -5,7 +5,7 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 ## Features
 
 - **Multi-event support** - Host multiple races/regattas with separate data, passwords, and courses
-- **Real-time GPS tracking** - Position updates every 10 seconds from Android and iOS devices
+- **Real-time GPS tracking** - Position updates every 10 seconds from Android, iOS, and smartwatch devices
 - **Multiple roles** - Track sailors (windsurfers), support boats, and spectators with distinct icons
 - **Emergency assist** - One-touch "Request Assist" button with audio alerts in the web UI
 - **Track history** - View historical tracks for each participant with incremental loading
@@ -14,9 +14,82 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 - **Course distance** - Automatic calculation and display of course length in km
 - **Reliable protocol** - UDP with acknowledgements, designed for unreliable mobile connections
 - **Battery & signal monitoring** - Track device battery level and signal strength
-- **Daily log rotation** - Automatic daily log files in JSONL format
+- **Daily log rotation** - Automatic daily log files in JSONL format with midnight auto-clear per timezone
 - **Admin controls** - Password-protected admin panel for course and track management
 - **Event management** - Web UI for creating and managing events
+
+## Apps
+
+### Android Phone
+
+<img src="store/screenshots/android/screenshot1.png" width="250" alt="Android App Screenshot">
+
+Native Kotlin app for Android phones:
+- Tracks GPS position every 10 seconds
+- Sends UDP packets with position, speed, heading, battery, signal strength
+- Supports multiple roles: sailor, support, spectator
+- Event selection from available events on server
+- Displays connection status (ACK rate)
+- Large "Request Assist" button for emergencies
+
+**Build:**
+```bash
+cd android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/sideload/debug/
+```
+
+### Wear OS (Samsung Galaxy Watch, Pixel Watch)
+
+<img src="store/screenshots/wearos/screenshot1.png" width="200" alt="Wear OS App Screenshot">
+
+Native Kotlin app for Wear OS smartwatches:
+- Standalone tracking (no phone required with LTE watches)
+- Heart rate monitoring during tracking
+- Compact UI optimized for small screens
+- Works with Galaxy Watch 4+, Pixel Watch, and other Wear OS 3+ watches
+
+**Build:**
+```bash
+cd wear
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/
+```
+
+### iPhone
+
+<img src="store/screenshots/iphone/screenshot1.png" width="250" alt="iPhone App Screenshot">
+
+Native Swift app for iPhone:
+- Same functionality as the Android app
+- Event selection from available events on server
+- Available via TestFlight (App Store release planned)
+- Background location tracking with iOS location indicator
+
+**Build:**
+```bash
+cd swift/WindsurferTracker
+xcodegen generate
+xcodebuild build -scheme WindsurferTracker -destination 'generic/platform=iOS'
+```
+
+### iPad
+
+<img src="store/screenshots/ipad/screenshot1.png" width="400" alt="iPad App Screenshot">
+
+The iPhone app runs on iPad with full support for larger screens.
+
+### Apple Watch
+
+<img src="store/screenshots/watch/screenshot1.png" width="150" alt="Apple Watch App Screenshot">
+
+Native Swift app for Apple Watch:
+- Standalone tracking (no iPhone required with cellular watches)
+- Workout session integration for reliable background tracking
+- Compact UI with large speed display
+- Works with Apple Watch Series 3+ (watchOS 8.0+)
+
+The Apple Watch app is bundled with the iPhone app and installed via the Watch app on your paired iPhone after installing from TestFlight.
 
 ## Components
 
@@ -28,25 +101,8 @@ Python UDP/HTTP server that:
 - Sends acknowledgements back to clients
 - Writes per-event `current_positions.json` for the web UI (atomic writes)
 - Maintains daily track logs per event in `{eid}/logs/YYYY_MM_DD.jsonl` format
+- Automatically clears tracks at midnight in each event's configured timezone
 - Serves static files (Web UI) and provides admin/management API endpoints
-
-### Android App (`android/`)
-
-Native Kotlin app that:
-- Tracks GPS position every 10 seconds
-- Sends UDP packets with position, speed, heading, battery, signal strength
-- Supports multiple roles: sailor, support, spectator
-- Event selection from available events on server
-- Displays connection status (ACK rate)
-- Large "Request Assist" button for emergencies
-
-### iOS App (`flutter/windsurfer_tracker/`)
-
-Flutter app for iPhone that:
-- Same functionality as the Android app
-- Event selection from available events on server
-- Available via TestFlight (App Store release planned)
-- Uses Flutter for cross-platform development
 
 ### Web UI (`WebUI/`)
 
@@ -80,8 +136,8 @@ Post-race analysis page that:
 ### Prerequisites
 
 - Python 3.8+ (for server)
-- Android Studio or Gradle (for building the Android app)
-- Flutter SDK and Xcode (for building the iOS app)
+- Android Studio or Gradle (for building Android/Wear OS apps)
+- Xcode 15+ and XcodeGen (for building iOS/watchOS apps)
 
 ### Server Setup
 
@@ -137,40 +193,48 @@ The server reads configuration from `settings.json` (recommended) or command lin
 ```bash
 cd android
 ./gradlew assembleDebug
-# APK will be in app/build/outputs/apk/debug/
+# APK will be in app/build/outputs/apk/sideload/debug/
 ```
 
 Or using Android Studio:
 1. Open the `android/` folder as a project
 2. Build → Build Bundle(s)/APK(s) → Build APK(s)
 
-### Android App Configuration
+### Wear OS App Build
 
-Before building, update the default server address in:
-`app/src/main/java/nz/co/tracker/windsurfer/TrackerService.kt`
-
-```kotlin
-const val DEFAULT_SERVER_HOST = "your.server.ip"
-const val DEFAULT_SERVER_PORT = 41234
+```bash
+cd wear
+./gradlew assembleDebug
+# APK will be in app/build/outputs/apk/debug/
 ```
 
-Or configure at runtime in the app settings.
+### iOS/watchOS App Build
+
+```bash
+# Install XcodeGen if needed
+brew install xcodegen
+
+cd swift/WindsurferTracker
+xcodegen generate
+open WindsurferTracker.xcodeproj
+# Build and run from Xcode
+```
+
+The watchOS app is automatically built as part of the iOS app and embedded in the iPhone app bundle.
 
 ### Install APK to Device
 
 ```bash
-adb install android/app/build/outputs/apk/debug/app-debug.apk
+# Android phone
+adb install android/app/build/outputs/apk/sideload/debug/app-sideload-debug.apk
+
+# Wear OS watch
+adb install wear/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### iOS App
+### iOS/watchOS Distribution
 
-The iOS app is distributed via TestFlight. For end users, see the installation instructions at `WebUI/install/flutter-ios.html`.
-
-To build from source:
-```bash
-cd flutter/windsurfer_tracker
-flutter build ios
-```
+The iOS and watchOS apps are distributed via TestFlight. For end users, see the installation instructions at `WebUI/install/`.
 
 ## Testing
 
@@ -276,7 +340,8 @@ Overrides are stored per-event in `html/{eid}/users.json`.
   "ast": false,
   "bat": 85,
   "sig": 3,
-  "role": "sailor"
+  "role": "sailor",
+  "hr": 120
 }
 ```
 
@@ -294,6 +359,7 @@ Overrides are stored per-event in `html/{eid}/users.json`.
 | `bat` | int | Battery percentage (0-100, -1 if unknown) |
 | `sig` | int | Signal strength (0-4, -1 if unknown) |
 | `role` | string | Role: "sailor", "support", or "spectator" |
+| `hr` | int | Heart rate in BPM (optional, from smartwatches) |
 
 ### Acknowledgement (Server → Phone)
 
@@ -352,15 +418,18 @@ windsurfer-tracker/
 │   ├── test_client.py       # Test client simulator
 │   ├── settings.json        # Server configuration
 │   └── events.json          # Event definitions (passwords)
-├── android/                  # Android app source
-├── wear/                     # Wear OS app source
+├── android/                  # Android phone app (Kotlin)
+├── wear/                     # Wear OS smartwatch app (Kotlin)
+├── swift/                    # iOS/watchOS apps (Swift)
+│   └── WindsurferTracker/
 ├── WebUI/
 │   ├── index.html           # Event picker
 │   ├── event.html           # Live tracking map UI
 │   ├── manage.html          # Event management UI
 │   ├── review.html          # Post-race track review
 │   └── install/             # Installation guides
-├── flutter/                  # Flutter app source (MPL 2.0)
+├── store/                    # App store assets
+│   └── screenshots/         # App screenshots
 └── html/                     # Per-event data (created at runtime)
     ├── 1/                    # Event ID 1
     │   ├── logs/             # Daily track logs
@@ -373,12 +442,7 @@ windsurfer-tracker/
 
 ## License
 
-This project uses a dual-license structure:
-
-- **Server, WebUI, and native Android app**: [GNU General Public License v3.0](LICENSE) (GPLv3+)
-- **Flutter app** (`flutter/windsurfer_tracker/`): [Mozilla Public License 2.0](flutter/windsurfer_tracker/LICENSE) (MPL 2.0)
-
-The Flutter app uses MPL 2.0 for app store compatibility while maintaining open source requirements.
+This project is licensed under the [GNU General Public License v3.0](LICENSE) (GPLv3+).
 
 ## Acknowledgments
 
@@ -388,7 +452,3 @@ This project uses the following third-party resources:
 - **[OpenStreetMap](https://www.openstreetmap.org/)** - Map data © OpenStreetMap contributors (ODbL license)
 - **Windsurfer logo** - The app icon is based on the Windsurfer class logo, thanks to Windsurfing International
 - **[OwnTracks](https://owntracks.org/)** - Thanks to the OwnTracks project for inspiration and ideas
-
-The Flutter app includes additional open-source packages; see the
-in-app licenses page for details.
-
