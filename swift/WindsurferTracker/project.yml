@@ -65,6 +65,8 @@ targets:
     sources:
       - Shared
       - WindsurferTrackerWatch
+    dependencies:
+      - sdk: HealthKit.framework
     info:
       path: WindsurferTrackerWatch/Resources/Info.plist
       properties:
@@ -75,9 +77,13 @@ targets:
         WKCompanionAppBundleIdentifier: nz.co.tracker.windsurfer
         NSLocationWhenInUseUsageDescription: "Windsurfer Tracker needs your location to report your position during races."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races."
+        NSHealthShareUsageDescription: "Windsurfer Tracker uses workout sessions to enable background GPS tracking during races."
+        NSHealthUpdateUsageDescription: "Windsurfer Tracker records workouts to enable background GPS tracking during races."
         UIBackgroundModes:
           - location
           - workout-processing
+    entitlements:
+      path: WindsurferTrackerWatch/WindsurferTrackerWatch.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.watchkitapp

@@ -1,10 +1,11 @@
 import Foundation
 import Combine
 import WatchKit
+import HealthKit
 
 /// View model for watchOS app
 @MainActor
-public class WatchTrackerViewModel: ObservableObject {
+public class WatchTrackerViewModel: NSObject, ObservableObject {
     // MARK: - Tracking State
 
     @Published public var isTracking = false
@@ -13,6 +14,18 @@ public class WatchTrackerViewModel: ObservableObject {
     @Published public var connectionStatus = ConnectionStatus()
     @Published public var eventName = ""
     @Published public var errorMessage: String?
+
+    // MARK: - Display State (for UI updates)
+
+    @Published public var ackRatePercent: Int = 0
+    @Published public var packetsSent: Int = 0
+    @Published public var packetsAcked: Int = 0
+
+    // MARK: - Workout Session (for background tracking)
+
+    private let healthStore = HKHealthStore()
+    private var workoutSession: HKWorkoutSession?
+    private var workoutBuilder: HKLiveWorkoutBuilder?
 
     // MARK: - Settings
 
@@ -52,15 +65,17 @@ public class WatchTrackerViewModel: ObservableObject {
 
     // MARK: - Initialization
 
-    public init() {
-        // Load from preferences
-        self.sailorId = preferences.sailorId
-        self.serverHost = preferences.serverHost
-        self.role = preferences.role
-        self.highFrequencyMode = preferences.highFrequencyMode
-        self.password = preferences.password
-        self.eventId = preferences.eventId
+    public override init() {
+        // Load from preferences (before super.init)
+        let prefs = PreferencesManager.shared
+        self.sailorId = prefs.sailorId
+        self.serverHost = prefs.serverHost
+        self.role = prefs.role
+        self.highFrequencyMode = prefs.highFrequencyMode
+        self.password = prefs.password
+        self.eventId = prefs.eventId
 
+        super.init()
         setupBindings()
     }
 
@@ -86,6 +101,9 @@ public class WatchTrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.connectionStatus = status
+                self?.ackRatePercent = Int(status.ackRate)
+                self?.packetsSent = status.packetsSent
+                self?.packetsAcked = status.packetsAcked
             }
             .store(in: &cancellables)
 
@@ -137,12 +155,25 @@ public class WatchTrackerViewModel: ObservableObject {
             return
         }
 
+        // Start tracking
+        errorMessage = "Starting..."
+
         Task {
             do {
                 try await TrackerService.shared.start()
                 // Clear error and haptic for success
                 errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
+
+                // Try to start workout session in background for background mode support
+                // Don't await - let it run independently
+                Task.detached { [weak self] in
+                    do {
+                        try await self?.startWorkoutSession()
+                    } catch {
+                        print("Workout session failed: \(error.localizedDescription)")
+                    }
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 WKInterfaceDevice.current().play(.failure)
@@ -150,11 +181,65 @@ public class WatchTrackerViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Workout Session (for background GPS)
+
+    private func startWorkoutSession() async throws {
+        // End any existing session
+        await stopWorkoutSession()
+
+        // Create workout configuration for water sports
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .sailing  // Closest to windsurfing
+        configuration.locationType = .outdoor
+
+        // Create session
+        let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
+        let builder = session.associatedWorkoutBuilder()
+
+        // Set data source
+        builder.dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
+
+        // Set delegates
+        session.delegate = self
+        builder.delegate = self
+
+        // Store references
+        workoutSession = session
+        workoutBuilder = builder
+
+        // Start session and builder
+        session.startActivity(with: Date())
+        try await builder.beginCollection(at: Date())
+    }
+
+    private func stopWorkoutSession() async {
+        guard let session = workoutSession, let builder = workoutBuilder else { return }
+
+        // End workout
+        session.end()
+
+        do {
+            try await builder.endCollection(at: Date())
+            try await builder.finishWorkout()
+        } catch {
+            // Ignore errors when ending workout
+        }
+
+        workoutSession = nil
+        workoutBuilder = nil
+    }
+
     public func stopTracking() {
         Task {
+            // Stop workout session
+            await stopWorkoutSession()
+
             await TrackerService.shared.stop()
             assistRequested = false
             errorMessage = nil  // Clear any error
+            ackRatePercent = 0
+            packetsSent = 0
+            packetsAcked = 0
             WKInterfaceDevice.current().play(.stop)
         }
     }
@@ -198,5 +283,56 @@ public class WatchTrackerViewModel: ObservableObject {
 
     public var currentEventName: String {
         events.first(where: { $0.eid == eventId })?.name ?? "Event \(eventId)"
+    }
+}
+
+// MARK: - HKWorkoutSessionDelegate
+
+extension WatchTrackerViewModel: HKWorkoutSessionDelegate {
+    nonisolated public func workoutSession(
+        _ workoutSession: HKWorkoutSession,
+        didChangeTo toState: HKWorkoutSessionState,
+        from fromState: HKWorkoutSessionState,
+        date: Date
+    ) {
+        Task { @MainActor in
+            switch toState {
+            case .ended:
+                // Workout ended - stop tracking if still active
+                if isTracking {
+                    await TrackerService.shared.stop()
+                    isTracking = false
+                    errorMessage = "Workout session ended"
+                }
+            case .running:
+                // Workout is running - good for background
+                break
+            default:
+                break
+            }
+        }
+    }
+
+    nonisolated public func workoutSession(
+        _ workoutSession: HKWorkoutSession,
+        didFailWithError error: Error
+    ) {
+        // Don't show error to user - workout session is optional for background support
+        print("Workout session error: \(error.localizedDescription)")
+    }
+}
+
+// MARK: - HKLiveWorkoutBuilderDelegate
+
+extension WatchTrackerViewModel: HKLiveWorkoutBuilderDelegate {
+    nonisolated public func workoutBuilder(
+        _ workoutBuilder: HKLiveWorkoutBuilder,
+        didCollectDataOf collectedTypes: Set<HKSampleType>
+    ) {
+        // We don't need to process workout data - just use for background mode
+    }
+
+    nonisolated public func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
+        // Workout event collected
     }
 }

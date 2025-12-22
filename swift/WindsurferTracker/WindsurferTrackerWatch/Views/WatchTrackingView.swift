@@ -80,19 +80,18 @@ struct WatchTrackingView: View {
                         .foregroundColor(.gray)
                 }
 
-                // Status row: battery, signal indicator
+                // Status row: ACK rate, sent/acked counts, connection indicator
                 HStack(spacing: 8) {
-                    // Battery percentage
-                    Text(batteryText)
+                    // ACK rate percentage
+                    Text("\(viewModel.ackRatePercent)%")
                         .font(.caption2)
                         .bold()
-                        .foregroundColor(batteryColor)
+                        .foregroundColor(ackRateColor)
 
-                    // Signal bar indicator (like WearOS yellow bar)
-                    Rectangle()
-                        .fill(signalBarColor)
-                        .frame(width: 16, height: 4)
-                        .cornerRadius(2)
+                    // Sent/Acked counts
+                    Text("\(viewModel.packetsAcked)/\(viewModel.packetsSent)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
 
                     // Connection dot
                     Circle()
@@ -150,42 +149,27 @@ struct WatchTrackingView: View {
         return String(format: "%.1f", pos.speedKnots)
     }
 
-    private var batteryText: String {
-        let level = BatteryMonitor.shared.level
-        return level >= 0 ? "\(level)%" : "--%"
-    }
-
-    private var batteryColor: Color {
-        let level = BatteryMonitor.shared.level
-        if level > 50 {
+    private var ackRateColor: Color {
+        let rate = viewModel.ackRatePercent
+        if rate >= 80 {
             return .green
-        } else if level > 20 {
+        } else if rate >= 50 {
             return .yellow
         } else {
             return .red
         }
     }
 
-    private var signalBarColor: Color {
-        // Yellow bar like WearOS
-        switch viewModel.connectionStatus.qualityLevel {
-        case .good:
-            return .yellow
-        case .fair:
-            return .yellow.opacity(0.6)
-        case .poor:
-            return .gray
-        }
-    }
-
     private var connectionColor: Color {
-        switch viewModel.connectionStatus.qualityLevel {
-        case .good:
+        let rate = viewModel.ackRatePercent
+        if rate >= 80 {
             return .green
-        case .fair:
+        } else if rate >= 50 {
             return .yellow
-        case .poor:
+        } else if viewModel.packetsSent > 0 {
             return .red
+        } else {
+            return .gray
         }
     }
 }

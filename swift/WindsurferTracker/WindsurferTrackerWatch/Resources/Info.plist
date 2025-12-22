@@ -33,5 +33,9 @@
 		<string>location</string>
 		<string>workout-processing</string>
 	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Windsurfer Tracker uses workout sessions to enable background GPS tracking during races.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Windsurfer Tracker records workouts to enable background GPS tracking during races.</string>
 </dict>
 </plist>
