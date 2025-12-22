@@ -19,7 +19,6 @@ This document outlines testing procedures for the Windsurfer Tracker apps across
 3. Have WebUI open to monitor incoming packets
 
 ### Device Connectivity
-- **watchOS Simulator**: `ssh mac2 "xcrun simctl location 'Apple Watch Ultra 3 (49mm)' set <lat>,<lon>"`
 - **WearOS**: Connect via `adb connect <ip>:<port>`
 - **iOS/Android**: Enable developer mode, connect via USB or WiFi
 
