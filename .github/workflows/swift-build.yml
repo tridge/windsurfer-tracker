@@ -142,11 +142,15 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Download iOS Simulator (required for asset compilation)
+      - name: Download iOS and watchOS Simulators
         run: |
           for i in 1 2 3; do
             echo "Attempt $i to download iOS simulator..."
             xcodebuild -downloadPlatform iOS && break || sleep 10
+          done
+          for i in 1 2 3; do
+            echo "Attempt $i to download watchOS simulator..."
+            xcodebuild -downloadPlatform watchOS && break || sleep 10
           done
 
       - name: Install Apple Certificate
@@ -168,17 +172,31 @@ jobs:
           security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Install Provisioning Profile
+      - name: Install Provisioning Profiles
         if: env.PROVISIONING_PROFILE_BASE64 != ''
         env:
           PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+          WATCHOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.WATCHOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+
+          # Install iOS provisioning profile
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           echo -n "$PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(/usr/bin/security cms -D -i $PP_PATH))
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
           echo "PP_UUID=$PP_UUID" >> $GITHUB_ENV
+          echo "Installed iOS profile: $PP_UUID"
+
+          # Install watchOS provisioning profile (if available)
+          if [ -n "$WATCHOS_PROVISIONING_PROFILE_BASE64" ]; then
+            WATCH_PP_PATH=$RUNNER_TEMP/watch_pp.mobileprovision
+            echo -n "$WATCHOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $WATCH_PP_PATH
+            WATCH_PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(/usr/bin/security cms -D -i $WATCH_PP_PATH))
+            cp $WATCH_PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$WATCH_PP_UUID.mobileprovision
+            echo "WATCH_PP_UUID=$WATCH_PP_UUID" >> $GITHUB_ENV
+            echo "Installed watchOS profile: $WATCH_PP_UUID"
+          fi
 
       - name: Generate Xcode project
         working-directory: swift/WindsurferTracker
@@ -190,17 +208,29 @@ jobs:
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
         run: |
-          # Update project to use manual signing
+          # Update project to use manual signing for all targets
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' WindsurferTracker.xcodeproj/project.pbxproj
 
-          # Set development team and provisioning profile
+          # Set development team and provisioning profile for iOS app
           sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer; DEVELOPMENT_TEAM = 76AR6DVKBC; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE = \"${PP_UUID}\";/g" WindsurferTracker.xcodeproj/project.pbxproj
+
+          # Set development team and provisioning profile for watchOS app
+          if [ -n "$WATCH_PP_UUID" ]; then
+            sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp; DEVELOPMENT_TEAM = 76AR6DVKBC; CODE_SIGN_IDENTITY = \"Apple Distribution\"; PROVISIONING_PROFILE = \"${WATCH_PP_UUID}\";/g" WindsurferTracker.xcodeproj/project.pbxproj
+          fi
 
       - name: Create ExportOptions.plist
         if: env.BUILD_CERTIFICATE_BASE64 != ''
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
         run: |
+          # Build provisioning profiles dict based on available profiles
+          WATCH_PROFILE_ENTRY=""
+          if [ -n "$WATCH_PP_UUID" ]; then
+            WATCH_PROFILE_ENTRY="<key>nz.co.tracker.windsurfer.watchkitapp</key>
+                  <string>${WATCH_PP_UUID}</string>"
+          fi
+
           cat > swift/WindsurferTracker/ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -216,6 +246,7 @@ jobs:
               <dict>
                   <key>nz.co.tracker.windsurfer</key>
                   <string>${PP_UUID}</string>
+                  ${WATCH_PROFILE_ENTRY}
               </dict>
           </dict>
           </plist>
