@@ -335,6 +335,7 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
+            white-space: nowrap;
         }
 
         .date-display:hover {
@@ -1496,7 +1497,6 @@
         <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
         <a href="index.html" style="color:#aaa;text-decoration:none;padding:8px 12px;margin-right:10px;font-size:12px;">📋 All Events</a>
         <label>Date: <span id="date-display" class="date-display" onclick="document.getElementById('date-picker').showPicker()"></span><input type="date" id="date-picker" style="position:absolute;opacity:0;width:0;height:0;"></label>
-        <button id="load-btn">Load Tracks</button>
         <div class="graphs-dropdown">
             <button id="options-btn">Options ▼</button>
             <div id="options-dropdown-content" class="graphs-dropdown-content">
@@ -2476,7 +2476,10 @@
             const dateStr = document.getElementById('date-picker').value;
             document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
         }
-        document.getElementById('date-picker').addEventListener('change', updateDateDisplay);
+        document.getElementById('date-picker').addEventListener('change', () => {
+            updateDateDisplay();
+            loadSummary();  // Auto-load when date changes
+        });
 
         // Set date: use URL param if provided, otherwise today in event timezone
         const initDateParams = new URLSearchParams(window.location.search);
@@ -5047,9 +5050,6 @@
             // Convert slider value (0-100) to timestamp based on global range
             return minTime + (maxTime - minTime) * (value / 100);
         }
-
-        // Event listeners
-        document.getElementById('load-btn').addEventListener('click', loadSummary);
 
         // Options dropdown toggle
         document.getElementById('options-btn').addEventListener('click', (e) => {
