@@ -327,6 +327,20 @@
             cursor: pointer;
         }
 
+        .date-display {
+            padding: 4px 8px;
+            background: white;
+            color: #333;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .date-display:hover {
+            background: #f0f0f0;
+        }
+
         .speed-legend {
             position: fixed;
             bottom: 100px;
@@ -1481,7 +1495,7 @@
         <a id="live-link" href="event.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
         <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
         <a href="index.html" style="color:#aaa;text-decoration:none;padding:8px 12px;margin-right:10px;font-size:12px;">📋 All Events</a>
-        <label>Date: <input type="date" id="date-picker"></label>
+        <label>Date: <span id="date-display" class="date-display" onclick="document.getElementById('date-picker').showPicker()"></span><input type="date" id="date-picker" style="position:absolute;opacity:0;width:0;height:0;"></label>
         <button id="load-btn">Load Tracks</button>
         <div class="graphs-dropdown">
             <button id="options-btn">Options ▼</button>
@@ -1799,6 +1813,19 @@
             return parts; // Format: YYYY-MM-DD (en-CA gives ISO format)
         }
 
+        // Format date as "DD Mon YYYY" for consistent display across platforms
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        function formatDateDisplay(dateStr) {
+            // Input: YYYY-MM-DD or YYYY_MM_DD
+            const normalized = dateStr.replace(/_/g, '-');
+            const parts = normalized.split('-');
+            if (parts.length !== 3) return dateStr;
+            const year = parts[0];
+            const month = parseInt(parts[1], 10) - 1;
+            const day = parseInt(parts[2], 10);
+            return `${day} ${monthNames[month]} ${year}`;
+        }
+
         // Format time in event timezone
         function formatTimeInTz(ts) {
             return new Date(ts * 1000).toLocaleTimeString([], {
@@ -1838,6 +1865,9 @@
                             document.getElementById('timezone-display').style.display = 'block';
                             // Update date picker to use event timezone
                             document.getElementById('date-picker').value = getTodayInEventTz();
+                            // Update display
+                            const dateStr = document.getElementById('date-picker').value;
+                            document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
                         }
 
                         // Center map on event home location if available
@@ -2322,6 +2352,14 @@
 
         // Set default date to today in event timezone
         document.getElementById('date-picker').value = getTodayInEventTz();
+
+        // Update date display when picker changes
+        function updateDateDisplay() {
+            const dateStr = document.getElementById('date-picker').value;
+            document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
+        }
+        document.getElementById('date-picker').addEventListener('change', updateDateDisplay);
+        updateDateDisplay();  // Initialize display
 
         // Load summary for a date (phase 1)
         async function loadSummary() {
