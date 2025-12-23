@@ -970,6 +970,15 @@
             <span>⚙️</span>
             <span>Admin</span>
         </div>
+        <div class="menu-item" id="menuExportCourse" onclick="exportCourse()" style="display:none">
+            <span>📤</span>
+            <span>Export Course</span>
+        </div>
+        <div class="menu-item" id="menuImportCourse" onclick="document.getElementById('importCourseInput').click()" style="display:none">
+            <span>📥</span>
+            <span>Import Course</span>
+        </div>
+        <input type="file" id="importCourseInput" accept=".json" style="display:none" onchange="importCourse(event)">
         <div class="menu-item" onclick="showAbout()">
             <span>ℹ️</span>
             <span>About</span>
@@ -1031,9 +1040,6 @@
             <div class="admin-btn-group">
                 <button class="admin-action-btn primary" id="btnDrawCourse" onclick="startDrawingCourse()">
                     ✏️ Draw Course
-                </button>
-                <button class="admin-action-btn success" id="btnSaveCourse" onclick="saveCourse()" disabled>
-                    💾 Save Course
                 </button>
                 <button class="admin-action-btn danger" id="btnDeleteCourse" onclick="deleteCourse()">
                     🗑 Delete Course
@@ -1479,6 +1485,8 @@
                 document.getElementById('adminBtn').classList.remove('active');
                 document.getElementById('adminPanel').classList.remove('visible');
                 document.getElementById('menuAdmin').classList.remove('active');
+                document.getElementById('menuExportCourse').style.display = 'none';
+                document.getElementById('menuImportCourse').style.display = 'none';
                 cancelDrawing();
                 // Refresh course display to remove edit buttons from marks
                 if (courseData) {
@@ -1498,6 +1506,8 @@
                     document.getElementById('adminBtn').classList.add('active');
                     document.getElementById('adminPanel').classList.add('visible');
                     document.getElementById('menuAdmin').classList.add('active');
+                    document.getElementById('menuExportCourse').style.display = '';
+                    document.getElementById('menuImportCourse').style.display = '';
                     updateCourseInfo();
                     await loadUserOverrides();
                     // Refresh markers to show edit buttons
@@ -1553,7 +1563,6 @@
             drawingPoints = [];
             drawingMarkers = [];
             document.getElementById('btnDrawCourse').textContent = '❌ Cancel Drawing';
-            document.getElementById('btnSaveCourse').disabled = true;
             document.getElementById('drawingIndicator').classList.add('visible');
             
             map.on('click', onDrawingClick);
@@ -1604,9 +1613,6 @@
             drawingMarkers.push(marker);
             
             updateDrawingLine();
-            
-            // Enable save after at least 2 points
-            document.getElementById('btnSaveCourse').disabled = drawingPoints.length < 2;
         }
         
         function onDrawingComplete(e) {
@@ -1686,8 +1692,7 @@
                         drawingLine = null;
                     }
                     drawingPoints = [];
-                    document.getElementById('btnSaveCourse').disabled = true;
-                    
+
                     // Reload course
                     await loadCourse();
                     alert('Course saved');
@@ -1719,7 +1724,66 @@
                 alert('Error deleting course: ' + e.message);
             }
         }
-        
+
+        function exportCourse() {
+            if (!courseData || !courseData.start) {
+                alert('No course to export');
+                return;
+            }
+            // Create a clean copy without server timestamps
+            const exportData = {
+                start: courseData.start,
+                marks: courseData.marks || [],
+                finish: courseData.finish
+            };
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `course-${EVENT_ID}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function importCourse(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const imported = JSON.parse(text);
+
+                // Validate structure
+                if (!imported.start || !imported.finish) {
+                    alert('Invalid course file: must have start and finish');
+                    return;
+                }
+
+                // Save to server
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(imported)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadCourse();
+                    alert('Course imported');
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error importing course: ' + e.message);
+            }
+            // Reset file input so same file can be selected again
+            event.target.value = '';
+        }
+
         function updateCourseInfo() {
             const info = document.getElementById('courseInfo');
             if (drawingPoints.length > 0) {
