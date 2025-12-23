@@ -1739,7 +1739,8 @@
             <button id="speed-1x" class="speed-btn">1x</button>
             <button id="speed-5x" class="speed-btn">5x</button>
             <button id="speed-20x" class="speed-btn">20x</button>
-            <button id="reset-range-btn" style="background:#95a5a6">Reset Range</button>
+            <button id="reset-range-btn" style="background:#95a5a6" title="Reset time range">⟲</button>
+            <button id="copy-link-btn" style="background:#9b59b6" title="Copy shareable link">📋</button>
         </div>
     </div>
 
@@ -1844,6 +1845,125 @@
             });
         }
 
+        // Build shareable URL with current view state
+        function buildShareableUrl() {
+            const params = new URLSearchParams();
+
+            // Map state
+            const center = map.getCenter();
+            params.set('lat', center.lat.toFixed(6));
+            params.set('lon', center.lng.toFixed(6));
+            params.set('z', map.getZoom());
+
+            // Date
+            const dateStr = document.getElementById('date-picker').value;
+            if (dateStr) params.set('date', dateStr);
+
+            // Selected log file
+            if (currentLogFile) params.set('log', currentLogFile);
+
+            // Selected users
+            if (selectedUsers.size > 0) {
+                params.set('users', Array.from(selectedUsers).join(','));
+            }
+
+            // Time range (as percentages)
+            const startSlider = document.getElementById('start-slider').value;
+            const endSlider = document.getElementById('end-slider').value;
+            if (startSlider !== '0' || endSlider !== '100') {
+                params.set('start', startSlider);
+                params.set('end', endSlider);
+            }
+
+            // Options
+            if (!document.getElementById('speed-color').checked) params.set('nospeedcolor', '1');
+            if (!document.getElementById('show-markers').checked) params.set('nomarkers', '1');
+            if (!document.getElementById('filter-outliers').checked) params.set('nofilter', '1');
+            if (document.getElementById('show-outliers').checked) params.set('showoutliers', '1');
+            if (!document.getElementById('show-course').checked) params.set('nocourse', '1');
+
+            // Graphs
+            const graphs = [];
+            if (document.getElementById('show-speed-graph').checked) graphs.push('speed');
+            if (document.getElementById('show-distance-graph').checked) graphs.push('distance');
+            if (document.getElementById('show-battery-graph').checked) graphs.push('battery');
+            if (document.getElementById('show-signal-graph').checked) graphs.push('signal');
+            if (document.getElementById('show-latency-graph').checked) graphs.push('latency');
+            if (document.getElementById('show-heartrate-graph').checked) graphs.push('heartrate');
+            if (document.getElementById('show-accuracy-graph').checked) graphs.push('accuracy');
+            if (graphs.length > 0) params.set('graphs', graphs.join(','));
+
+            // Build URL
+            const url = new URL(window.location.href);
+            url.search = params.toString();
+            return url.toString();
+        }
+
+        // Parse URL params and restore state (called after data loads)
+        function restoreStateFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+
+            // Map position
+            const lat = parseFloat(params.get('lat'));
+            const lon = parseFloat(params.get('lon'));
+            const zoom = parseInt(params.get('z'));
+            if (!isNaN(lat) && !isNaN(lon) && !isNaN(zoom)) {
+                map.setView([lat, lon], zoom);
+            }
+
+            // Options (apply before loading data)
+            if (params.has('nospeedcolor')) document.getElementById('speed-color').checked = false;
+            if (params.has('nomarkers')) document.getElementById('show-markers').checked = false;
+            if (params.has('nofilter')) document.getElementById('filter-outliers').checked = false;
+            if (params.has('showoutliers')) document.getElementById('show-outliers').checked = true;
+            if (params.has('nocourse')) document.getElementById('show-course').checked = false;
+
+            // Graphs
+            if (params.has('graphs')) {
+                const graphs = params.get('graphs').split(',');
+                if (graphs.includes('speed')) document.getElementById('show-speed-graph').checked = true;
+                if (graphs.includes('distance')) document.getElementById('show-distance-graph').checked = true;
+                if (graphs.includes('battery')) document.getElementById('show-battery-graph').checked = true;
+                if (graphs.includes('signal')) document.getElementById('show-signal-graph').checked = true;
+                if (graphs.includes('latency')) document.getElementById('show-latency-graph').checked = true;
+                if (graphs.includes('heartrate')) document.getElementById('show-heartrate-graph').checked = true;
+                if (graphs.includes('accuracy')) document.getElementById('show-accuracy-graph').checked = true;
+                updateGraphPositions();
+            }
+
+            return params;
+        }
+
+        // Restore state that depends on loaded data
+        function restoreDataDependentState(params) {
+            // Time range
+            if (params.has('start')) {
+                document.getElementById('start-slider').value = params.get('start');
+            }
+            if (params.has('end')) {
+                document.getElementById('end-slider').value = params.get('end');
+            }
+            if (params.has('start') || params.has('end')) {
+                updateSliderRange();
+                updateTimeDisplay();
+            }
+
+            // Selected users
+            if (params.has('users')) {
+                const users = params.get('users').split(',');
+                for (const userId of users) {
+                    if (userData[userId]) {
+                        selectedUsers.add(userId);
+                        // Update UI to show selection
+                        const userDiv = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+                        if (userDiv) {
+                            userDiv.classList.add('selected');
+                        }
+                    }
+                }
+            }
+        }
+
         // Fetch event name and update page title + header
         (async function() {
             try {
@@ -1863,11 +1983,12 @@
                             eventTimezone = event.timezone;
                             document.getElementById('event-timezone').textContent = event.timezone;
                             document.getElementById('timezone-display').style.display = 'block';
-                            // Update date picker to use event timezone
-                            document.getElementById('date-picker').value = getTodayInEventTz();
-                            // Update display
-                            const dateStr = document.getElementById('date-picker').value;
-                            document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
+                            // Update date picker to use event timezone (only if no URL date param)
+                            const urlDateParams = new URLSearchParams(window.location.search);
+                            if (!urlDateParams.has('date')) {
+                                document.getElementById('date-picker').value = getTodayInEventTz();
+                                updateDateDisplay();
+                            }
                         }
 
                         // Center map on event home location if available
@@ -2350,15 +2471,20 @@
             return `rgb(${r},${g},${b})`;
         }
 
-        // Set default date to today in event timezone
-        document.getElementById('date-picker').value = getTodayInEventTz();
-
         // Update date display when picker changes
         function updateDateDisplay() {
             const dateStr = document.getElementById('date-picker').value;
             document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
         }
         document.getElementById('date-picker').addEventListener('change', updateDateDisplay);
+
+        // Set date: use URL param if provided, otherwise today in event timezone
+        const initDateParams = new URLSearchParams(window.location.search);
+        if (initDateParams.has('date')) {
+            document.getElementById('date-picker').value = initDateParams.get('date');
+        } else {
+            document.getElementById('date-picker').value = getTodayInEventTz();
+        }
         updateDateDisplay();  // Initialize display
 
         // Load summary for a date (phase 1)
@@ -2441,6 +2567,24 @@
 
                 container.appendChild(div);
             });
+
+            // Auto-select log from URL params if present
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('log')) {
+                const targetLog = urlParams.get('log');
+                const matchingLog = currentSummary.logs.find(log => log.file === targetLog);
+                if (matchingLog) {
+                    const index = currentSummary.logs.indexOf(matchingLog);
+                    const logDiv = container.querySelector(`[data-index="${index}"]`);
+                    if (logDiv) {
+                        logDiv.classList.add('selected');
+                        loadRace(matchingLog).then(() => {
+                            restoreDataDependentState(urlParams);
+                            drawTracks();
+                        });
+                    }
+                }
+            }
         }
 
         // Helper to fetch and decompress a file (tries .gz first, falls back to uncompressed)
@@ -5084,6 +5228,25 @@
             drawDistanceGraph();
         });
 
+        // Copy shareable link to clipboard
+        document.getElementById('copy-link-btn').addEventListener('click', async () => {
+            const url = buildShareableUrl();
+            try {
+                await navigator.clipboard.writeText(url);
+                const btn = document.getElementById('copy-link-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                btn.style.background = '#27ae60';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = '#9b59b6';
+                }, 2000);
+            } catch (err) {
+                // Fallback for browsers without clipboard API
+                prompt('Copy this link:', url);
+            }
+        });
+
         // Playback controls - animate through the selected range
         let playbackCurrentTime = 0;
 
@@ -5237,7 +5400,10 @@
             liveLink.href = `event.html?eid=${EVENT_ID}`;
         }
 
-        // Load today's summary on start
+        // Restore state from URL (map position, options, graphs)
+        restoreStateFromUrl();
+
+        // Load summary (will auto-select log if URL has log param)
         loadSummary();
     </script>
 </body>
