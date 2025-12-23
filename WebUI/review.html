@@ -390,21 +390,6 @@
             font-size: 12px;
         }
 
-        #map-type-select {
-            padding: 6px 10px;
-            border: none;
-            border-radius: 4px;
-            font-size: 13px;
-            background: #3498db;
-            color: white;
-            cursor: pointer;
-        }
-
-        #map-type-select option {
-            background: white;
-            color: #333;
-        }
-
         /* Battery graph panel */
         #speed-graph-panel {
             position: absolute;
@@ -1495,8 +1480,7 @@
     <div id="controls">
         <a id="live-link" href="event.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
         <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
-        <a href="index.html" style="color:#aaa;text-decoration:none;padding:8px 12px;margin-right:10px;font-size:12px;">📋 All Events</a>
-        <label>Date: <span id="date-display" class="date-display" onclick="document.getElementById('date-picker').showPicker()"></span><input type="date" id="date-picker" style="position:absolute;opacity:0;width:0;height:0;"></label>
+        <span id="date-display" class="date-display" onclick="document.getElementById('date-picker').showPicker()"></span><input type="date" id="date-picker" style="position:absolute;opacity:0;width:0;height:0;">
         <div class="graphs-dropdown">
             <button id="options-btn">Options ▼</button>
             <div id="options-dropdown-content" class="graphs-dropdown-content">
@@ -1505,6 +1489,13 @@
                 <label><input type="checkbox" id="filter-outliers" checked> Filter outliers</label>
                 <label><input type="checkbox" id="show-outliers"> Show outliers (red)</label>
                 <label><input type="checkbox" id="show-course" checked> Show course</label>
+                <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
+                    <label style="font-size:11px;color:#aaa;margin-bottom:3px;display:block;">Map Type</label>
+                    <label><input type="radio" name="map-type" value="osm" checked onchange="setMapType(this.value)"> OpenStreetMap</label>
+                    <label style="display:none"><input type="radio" name="map-type" value="roads" onchange="setMapType(this.value)"> Google Roads</label>
+                    <label style="display:none"><input type="radio" name="map-type" value="satellite" onchange="setMapType(this.value)"> Google Satellite</label>
+                    <label style="display:none"><input type="radio" name="map-type" value="hybrid" onchange="setMapType(this.value)"> Google Hybrid</label>
+                </div>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -1519,13 +1510,6 @@
                 <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
             </div>
         </div>
-        <select id="map-type-select" onchange="setMapType(this.value)" style="display:none">
-            <option value="osm">OpenStreetMap</option>
-            <option value="roads">Google Roads</option>
-            <option value="satellite">Google Satellite</option>
-            <option value="hybrid">Google Hybrid</option>
-        </select>
-        <button id="about-btn">About</button>
         <button id="reload-tiles-btn" title="Reload map tiles">⟳</button>
         <span id="status"></span>
     </div>
@@ -1741,6 +1725,7 @@
             <button id="speed-20x" class="speed-btn">20x</button>
             <button id="reset-range-btn" style="background:#95a5a6" title="Reset time range">⟲</button>
             <button id="copy-link-btn" style="background:#9b59b6" title="Copy shareable link">📋</button>
+            <button id="about-btn" style="background:#7f8c8d" title="About">ℹ</button>
         </div>
     </div>
 
@@ -2017,8 +2002,10 @@
         // Initialize map layers after Google Maps API loads
         function initMapLayers() {
             if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE' && typeof google !== 'undefined') {
-                // Show map type selector
-                document.getElementById('map-type-select').style.display = '';
+                // Enable Google Maps radio options
+                document.querySelectorAll('input[name="map-type"][value="roads"], input[name="map-type"][value="satellite"], input[name="map-type"][value="hybrid"]').forEach(el => {
+                    el.parentElement.style.display = '';
+                });
 
                 // Create Google layers for each type
                 googleLayers.roads = L.gridLayer.googleMutant({ type: 'roadmap', maxZoom: 21 });
@@ -2055,8 +2042,9 @@
             currentMapType = mapType;
             localStorage.setItem('mapType', mapType);
 
-            // Update select dropdown
-            document.getElementById('map-type-select').value = mapType;
+            // Update radio button selection
+            const radio = document.querySelector(`input[name="map-type"][value="${mapType}"]`);
+            if (radio) radio.checked = true;
         }
 
         // Initialize layers - wait for Google Maps to load if configured
@@ -5092,13 +5080,12 @@
         // Reload tiles button - forces refresh of map tiles
         document.getElementById('reload-tiles-btn').addEventListener('click', () => {
             // Remove and re-add the current tile layer to force reload
-            const currentType = document.getElementById('map-type-select').value;
-            if (currentType === 'osm') {
+            if (currentMapType === 'osm') {
                 map.removeLayer(osmLayer);
                 map.addLayer(osmLayer);
-            } else if (googleLayers[currentType]) {
-                map.removeLayer(googleLayers[currentType]);
-                map.addLayer(googleLayers[currentType]);
+            } else if (googleLayers[currentMapType]) {
+                map.removeLayer(googleLayers[currentMapType]);
+                map.addLayer(googleLayers[currentMapType]);
             }
         });
 
