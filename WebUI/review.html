@@ -1984,6 +1984,7 @@
         let pointLayers = {};
         let outlierLayers = {};  // Outlier markers per user
         let cachedDistanceData = {};  // Cached distance calculations for hover display
+        let trackHoverPopup = null;  // Popup shown when hovering over track
         let selectedUsers = new Set();
         let playbackInterval = null;
         let playbackSpeed = 1;
@@ -2828,6 +2829,9 @@
                     outlierLayers[userId] = outlierGroup;
                 }
 
+                // Create coords array for both cases
+                const coords = filtered.map(e => [e.lat, e.lon]);
+
                 if (useSpeedColor) {
                     // Draw segments colored by speed
                     const layerGroup = L.layerGroup();
@@ -2844,85 +2848,97 @@
                         layerGroup.addLayer(line);
                     }
 
+                    // Add invisible wider polyline for hover detection
+                    const hitArea = L.polyline(coords, {
+                        color: 'transparent',
+                        weight: 15,
+                        opacity: 0
+                    });
+                    layerGroup.addLayer(hitArea);
+
                     layerGroup.addTo(map);
                     trackLayers[userId] = layerGroup;
+                    trackLayers[userId].hitArea = hitArea;
                 } else {
-                    // Draw single color track
-                    const coords = filtered.map(e => [e.lat, e.lon]);
+                    // Draw single color track with invisible hit area for hover
+                    const layerGroup = L.layerGroup();
                     const polyline = L.polyline(coords, {
                         color: userColor,
                         weight: 3,
                         opacity: 0.8
-                    }).addTo(map);
-                    trackLayers[userId] = polyline;
+                    });
+                    layerGroup.addLayer(polyline);
+
+                    // Add invisible wider polyline for hover detection
+                    const hitArea = L.polyline(coords, {
+                        color: 'transparent',
+                        weight: 15,
+                        opacity: 0
+                    });
+                    layerGroup.addLayer(hitArea);
+
+                    layerGroup.addTo(map);
+                    trackLayers[userId] = layerGroup;
+                    trackLayers[userId].hitArea = hitArea;
                 }
 
-                // Add interactive point markers for each track point
-                const pointGroup = L.layerGroup();
-                for (const point of filtered) {
-                    const speedKnots = (point.spd || 0).toFixed(1);
-                    const time = formatTimeInTz(point.ts);
-                    const color = useSpeedColor ? speedToColor(point.spd || 0) : userColor;
+                // Store filtered data for hover lookup (no individual markers for performance)
+                trackLayers[userId].trackData = filtered;
+                trackLayers[userId].trackUserId = userId;
 
-                    const pointMarker = L.circleMarker([point.lat, point.lon], {
-                        radius: 4,
-                        fillColor: color,
-                        color: color,
-                        weight: 1,
-                        fillOpacity: 0.6,
-                        opacity: 0.6
-                    });
+                // Add hover handler to show closest point info
+                const hoverTarget = trackLayers[userId].hitArea || trackLayers[userId];
+                hoverTarget.on('mousemove', (e) => {
+                    const latlng = e.latlng;
+                    const data = trackLayers[userId].trackData;
+                    if (!data || data.length === 0) return;
 
-                    // Add red circle around points where assist was requested
-                    if (point.ast) {
-                        const assistMarker = L.circleMarker([point.lat, point.lon], {
-                            radius: 10,
-                            fillColor: 'transparent',
-                            color: '#ff0000',
-                            weight: 2,
-                            fillOpacity: 0,
-                            opacity: 0.9
-                        });
-                        pointGroup.addLayer(assistMarker);
-                    }
-
-                    // Build warnings for battery issues and assist
-                    let warnings = '';
-                    if (point.ast) {
-                        warnings += '<br><span style="color:#ff0000">🆘 ASSIST REQUESTED</span>';
-                    }
-                    if (point.flg) {
-                        if (point.flg.ps) {
-                            warnings += '<br><span style="color:#e74c3c">⚠️ Battery Saver ON</span>';
-                        }
-                        if (point.flg.bo === false) {
-                            warnings += '<br><span style="color:#f39c12">⚠️ Battery Optimization ON</span>';
+                    // Find closest point
+                    let closest = data[0];
+                    let closestDist = Infinity;
+                    for (const point of data) {
+                        const dist = Math.pow(point.lat - latlng.lat, 2) + Math.pow(point.lon - latlng.lng, 2);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closest = point;
                         }
                     }
 
-                    let hrText = '';
-                    if (point.hr !== undefined && point.hr > 0) {
-                        hrText = `<br>Heart Rate: <span style="color:#e91e63">${point.hr} bpm</span>`;
-                    }
-
-                    let hacText = '';
-                    if (point.hac !== undefined) {
-                        hacText = `<br>Accuracy: ${point.hac.toFixed(1)}m`;
-                    }
-
-                    pointMarker.bindTooltip(`
-                        <b>${getDisplayName(userId)}</b><br>
+                    // Build popup content
+                    const speedKnots = (closest.spd || 0).toFixed(1);
+                    const time = formatTimeInTz(closest.ts);
+                    let content = `<b>${getDisplayName(userId)}</b><br>
                         Time: ${time}<br>
                         Speed: ${speedKnots} kts<br>
-                        Heading: ${point.hdg || 0}°<br>
-                        Signal: ${point.sig || '?'}<br>
-                        Battery: ${point.bat || '?'}%${hacText}${hrText}${warnings}
-                    `, { sticky: true });
+                        Heading: ${closest.hdg || 0}°<br>
+                        Battery: ${closest.bat || '?'}%`;
+                    if (closest.hac !== undefined) {
+                        content += `<br>Accuracy: ${closest.hac.toFixed(1)}m`;
+                    }
+                    if (closest.hr !== undefined && closest.hr > 0) {
+                        content += `<br>Heart Rate: <span style="color:#e91e63">${closest.hr} bpm</span>`;
+                    }
+                    if (closest.ast) {
+                        content += '<br><span style="color:#ff0000">🆘 ASSIST REQUESTED</span>';
+                    }
 
-                    pointGroup.addLayer(pointMarker);
-                }
-                pointGroup.addTo(map);
-                pointLayers[userId] = pointGroup;
+                    // Show or update popup
+                    if (trackHoverPopup) {
+                        trackHoverPopup.setLatLng([closest.lat, closest.lon]).setContent(content);
+                    } else {
+                        trackHoverPopup = L.popup({ closeButton: false, offset: [0, -5] })
+                            .setLatLng([closest.lat, closest.lon])
+                            .setContent(content)
+                            .openOn(map);
+                    }
+                });
+
+                hoverTarget.on('mouseout', () => {
+                    if (trackHoverPopup) {
+                        map.closePopup(trackHoverPopup);
+                        trackHoverPopup = null;
+                    }
+                });
 
                 // Add current position marker
                 if (showMarkers && filtered.length > 0) {
