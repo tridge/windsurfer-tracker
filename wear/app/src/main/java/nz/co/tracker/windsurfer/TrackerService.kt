@@ -86,8 +86,11 @@ class TrackerService : LifecycleService() {
     private val assistRequested = AtomicBoolean(false)
     private val sequenceNumber = AtomicInteger(0)
     private val lastAckTime = AtomicLong(0)
-    private val packetsAcked = AtomicInteger(0)
-    private val packetsSent = AtomicInteger(0)
+    // Sliding window for ACK rate calculation (last 20 messages)
+    private val ackWindow = java.util.concurrent.ConcurrentLinkedDeque<Boolean>()
+    private val ACK_WINDOW_SIZE = 20
+    // Track sequences that have been recorded in the window (to avoid double-counting)
+    private val recordedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
     // Track acknowledged sequence numbers to stop retransmissions
     private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
@@ -579,8 +582,9 @@ class TrackerService : LifecycleService() {
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
                     socket?.send(dgram)
 
-                    packetsSent.incrementAndGet()
-                    statusListener?.onPacketSent(seq)
+                    if (attempt == 0) {
+                        statusListener?.onPacketSent(seq)
+                    }
 
                     Log.d(TAG, "Sent packet seq=$seq attempt=${attempt + 1}")
 
@@ -590,6 +594,12 @@ class TrackerService : LifecycleService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to send packet", e)
                 }
+            }
+
+            // If we exhausted all retries without ACK, record as failure
+            if (!acknowledgedSeqs.contains(seq)) {
+                recordSendResult(seq, false)
+                statusListener?.onConnectionStatus(getAckRate())
             }
         }
     }
@@ -711,8 +721,9 @@ class TrackerService : LifecycleService() {
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
                     socket?.send(dgram)
 
-                    packetsSent.incrementAndGet()
-                    statusListener?.onPacketSent(seq)
+                    if (attempt == 0) {
+                        statusListener?.onPacketSent(seq)
+                    }
 
                     Log.d(TAG, "Sent array packet seq=$seq with $numPositions positions, attempt=${attempt + 1}")
 
@@ -722,6 +733,12 @@ class TrackerService : LifecycleService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to send packet", e)
                 }
+            }
+
+            // If we exhausted all retries without ACK, record as failure
+            if (!acknowledgedSeqs.contains(seq)) {
+                recordSendResult(seq, false)
+                statusListener?.onConnectionStatus(getAckRate())
             }
         }
     }
@@ -758,9 +775,11 @@ class TrackerService : LifecycleService() {
                         acknowledgedSeqs.removeIf { it < currentSeq - 100 }
 
                         lastAckTime.set(System.currentTimeMillis())
-                        packetsAcked.incrementAndGet()
 
-                        val ackRate = packetsAcked.get().toFloat() / maxOf(packetsSent.get(), 1)
+                        // Record success in sliding window
+                        recordSendResult(ackSeq, true)
+
+                        val ackRate = getAckRate()
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
 
@@ -787,8 +806,31 @@ class TrackerService : LifecycleService() {
     fun getLastLocation(): Location? = lastLocation
 
     fun getAckRate(): Float {
-        val sent = packetsSent.get()
-        return if (sent > 0) packetsAcked.get().toFloat() / sent else 0f
+        val window = ackWindow.toList()
+        if (window.isEmpty()) return 0f
+        return window.count { it }.toFloat() / window.size
+    }
+
+    /**
+     * Record a send result in the sliding window.
+     * @param seq The sequence number
+     * @param success True if ACK was received, false if timed out
+     */
+    private fun recordSendResult(seq: Int, success: Boolean) {
+        // Only record each sequence once
+        if (!recordedSeqs.add(seq)) return
+
+        // Add to window
+        ackWindow.addLast(success)
+
+        // Trim window to size
+        while (ackWindow.size > ACK_WINDOW_SIZE) {
+            ackWindow.removeFirst()
+        }
+
+        // Clean up old recorded sequences
+        val currentSeq = sequenceNumber.get()
+        recordedSeqs.removeIf { it < currentSeq - 100 }
     }
 
     fun getLastAckTime(): Long = lastAckTime.get()

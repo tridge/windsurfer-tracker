@@ -31,7 +31,7 @@
             android:layout_height="wrap_content"
             android:hint="e.g. John or S07"
             android:inputType="text"
-            android:maxLength="10"
+            android:maxLength="20"
             android:text="S01"
             android:textSize="20sp"
             android:textColor="#000000"

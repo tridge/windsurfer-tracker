@@ -24,10 +24,13 @@ public actor TrackerService {
     private var isRunning = false
     private var assistRequested = false
     private var sequenceNumber = 0
-    private var packetsSent = 0
-    private var packetsAcked = 0
     private var lastAckSeq = 0
     private var acknowledgedSeqs: Set<Int> = []
+
+    // Sliding window for ACK rate (last 20 messages)
+    private var ackWindow: [Bool] = []
+    private let ackWindowSize = 20
+    private var recordedSeqs: Set<Int> = []
 
     // 1Hz mode buffer
     private var positionBuffer: [TrackerPosition] = []
@@ -93,10 +96,10 @@ public actor TrackerService {
         // Reset state
         isRunning = true
         sequenceNumber = 0
-        packetsSent = 0
-        packetsAcked = 0
         lastAckSeq = 0
         acknowledgedSeqs.removeAll()
+        ackWindow.removeAll()
+        recordedSeqs.removeAll()
         positionBuffer.removeAll()
         lastSendTime = nil
 
@@ -207,15 +210,16 @@ public actor TrackerService {
             positionArray: nil
         )
 
-        packetsSent += 1
-        updateConnectionStatus()
-
         // Send packet
         let response = await networkManager.send(packet)
 
         if let response = response {
             await handleACK(response)
+        } else {
+            // No ACK received - record failure
+            recordSendResult(seq: seq, success: false)
         }
+        updateConnectionStatus()
     }
 
     private func sendPositionBatch() async {
@@ -240,15 +244,16 @@ public actor TrackerService {
         // Clear buffer
         positionBuffer.removeAll()
 
-        packetsSent += 1
-        updateConnectionStatus()
-
         // Send packet
         let response = await networkManager.send(packet)
 
         if let response = response {
             await handleACK(response)
+        } else {
+            // No ACK received - record failure
+            recordSendResult(seq: seq, success: false)
         }
+        updateConnectionStatus()
     }
 
     private func buildPacket(sequence: Int, position: TrackerPosition, positionArray: [[Double]]?) -> TrackerPacket {
@@ -285,12 +290,35 @@ public actor TrackerService {
 
     // MARK: - ACK Handling
 
+    /// Record send result in sliding window (only once per sequence number)
+    private func recordSendResult(seq: Int, success: Bool) {
+        // Only record once per sequence number
+        guard !recordedSeqs.contains(seq) else { return }
+        recordedSeqs.insert(seq)
+
+        // Add to sliding window
+        ackWindow.append(success)
+
+        // Maintain window size
+        while ackWindow.count > ackWindowSize {
+            ackWindow.removeFirst()
+        }
+
+        // Clean up old sequence numbers to prevent memory growth
+        if recordedSeqs.count > 100 {
+            let threshold = sequenceNumber - 100
+            recordedSeqs = recordedSeqs.filter { $0 > threshold }
+        }
+    }
+
     private func handleACK(_ response: AckResponse) async {
         // Track acknowledged sequence
         if !acknowledgedSeqs.contains(response.ack) {
             acknowledgedSeqs.insert(response.ack)
-            packetsAcked += 1
             lastAckSeq = response.ack
+
+            // Record success in sliding window
+            recordSendResult(seq: response.ack, success: true)
 
             // Limit set size
             if acknowledgedSeqs.count > 100 {
@@ -312,13 +340,20 @@ public actor TrackerService {
     }
 
     private func updateConnectionStatus() {
-        let ackRate = packetsSent > 0 ? Double(packetsAcked) / Double(packetsSent) * 100 : 0
+        // Calculate ACK rate from sliding window
+        let ackRate: Double
+        if ackWindow.isEmpty {
+            ackRate = 0
+        } else {
+            let successCount = ackWindow.filter { $0 }.count
+            ackRate = Double(successCount) / Double(ackWindow.count) * 100
+        }
 
         let status = ConnectionStatus(
             ackRate: ackRate,
             lastAckSeq: lastAckSeq,
-            packetsSent: packetsSent,
-            packetsAcked: packetsAcked,
+            packetsSent: ackWindow.count,
+            packetsAcked: ackWindow.filter { $0 }.count,
             usingHttpFallback: false  // Will update from network manager
         )
 
