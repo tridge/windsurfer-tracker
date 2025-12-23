@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import threading
+import traceback
 import email.utils
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
@@ -1954,7 +1955,10 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
                           f"full={full_size:,}B (from {orig_size:,}B)")
 
         except Exception as e:
+            tb_lines = traceback.format_exc().strip().split('\n')[-3:]
             log(f"[COMPRESS] Error: {e}")
+            for tb_line in tb_lines:
+                log(f"[COMPRESS]   {tb_line}")
         time.sleep(interval)
 
 
@@ -2003,7 +2007,10 @@ def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
                             f"at midnight {tz_name}")
 
         except Exception as e:
-            log(f"[MIDNIGHT] Error in midnight clearer: {e}")
+            tb_lines = traceback.format_exc().strip().split('\n')[-3:]
+            log(f"[MIDNIGHT] Error: {e}")
+            for tb_line in tb_lines:
+                log(f"[MIDNIGHT]   {tb_line}")
 
         time.sleep(check_interval)
 
@@ -2175,192 +2182,201 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 log(f"[{addr[0]}:{addr[1]}] Invalid packet: {e}")
                 continue
 
-            # Sanitize packet inputs
-            packet = sanitize_tracker_packet(packet)
+            # Wrap processing in try/except to prevent crash on bad data
+            try:
+                # Sanitize packet inputs
+                packet = sanitize_tracker_packet(packet)
 
-            # Extract fields with defaults
-            sailor_id = packet.get("id", "???")
-            seq = packet.get("sq", 0)
-            ts = packet.get("ts", 0)
-            speed = packet.get("spd", 0.0)
-            heading = packet.get("hdg", 0)
-            assist = packet.get("ast", False)
-            battery = packet.get("bat", -1)
-            signal = packet.get("sig", -1)
-            heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
-            role = packet.get("role", "sailor")
-            version = packet.get("ver", "?")
-            flags = packet.get("flg", {})
-            battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
-            os_version = packet.get("os")  # OS version string (optional)
-            horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
+                # Extract fields with defaults
+                sailor_id = packet.get("id", "???")
+                seq = packet.get("sq", 0)
+                ts = packet.get("ts", 0)
+                speed = packet.get("spd", 0.0)
+                heading = packet.get("hdg", 0)
+                assist = packet.get("ast", False)
+                battery = packet.get("bat", -1)
+                signal = packet.get("sig", -1)
+                heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
+                role = packet.get("role", "sailor")
+                version = packet.get("ver", "?")
+                flags = packet.get("flg", {})
+                battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
+                os_version = packet.get("os")  # OS version string (optional)
+                horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
 
-            # Extract event ID (default to 1 for backwards compatibility)
-            eid = packet.get("eid", 1)
+                # Extract event ID (default to 1 for backwards compatibility)
+                eid = packet.get("eid", 1)
 
-            # Check for 1Hz array format vs old single position format
-            pos_array = packet.get("pos")  # [[ts, lat, lon], ...]
-            if pos_array and isinstance(pos_array, list) and len(pos_array) > 0:
-                # New 1Hz array format - use last position for live display
-                last_pos = pos_array[-1]
-                lat = last_pos[1] if len(last_pos) > 1 else 0.0
-                lon = last_pos[2] if len(last_pos) > 2 else 0.0
-                # Use timestamp from last position
-                ts = last_pos[0] if len(last_pos) > 0 else ts
-            else:
-                # Old single position format (backwards compatible)
-                lat = packet.get("lat", 0.0)
-                lon = packet.get("lon", 0.0)
+                # Check for 1Hz array format vs old single position format
+                pos_array = packet.get("pos")  # [[ts, lat, lon], ...]
+                if pos_array and isinstance(pos_array, list) and len(pos_array) > 0:
+                    # New 1Hz array format - use last position for live display
+                    last_pos = pos_array[-1]
+                    lat = last_pos[1] if len(last_pos) > 1 else 0.0
+                    lon = last_pos[2] if len(last_pos) > 2 else 0.0
+                    # Use timestamp from last position
+                    ts = last_pos[0] if len(last_pos) > 0 else ts
+                else:
+                    # Old single position format (backwards compatible)
+                    lat = packet.get("lat", 0.0)
+                    lon = packet.get("lon", 0.0)
 
-            # Multi-event mode: look up event and check per-event password
-            if _event_manager:
-                event = _event_manager.get_event(eid)
-                if not event:
-                    log(f"[UDP] Event {eid} not found for {sailor_id}")
-                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}).encode("utf-8")
-                    sock.sendto(error_ack, addr)
-                    continue
-                if event.get('archived'):
-                    log(f"[UDP] Event {eid} is archived, rejecting {sailor_id}")
-                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}).encode("utf-8")
-                    sock.sendto(error_ack, addr)
-                    continue
-
-                # Check per-event tracker password
-                event_tracker_pwd = event.get('tracker_password', '')
-                if event_tracker_pwd:
-                    if is_rate_limited(client_ip):
-                        log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
-                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                # Multi-event mode: look up event and check per-event password
+                if _event_manager:
+                    event = _event_manager.get_event(eid)
+                    if not event:
+                        log(f"[UDP] Event {eid} not found for {sailor_id}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} not found"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
-                    packet_pwd = packet.get("pwd", "")
-                    if packet_pwd != event_tracker_pwd:
-                        record_failed_auth(client_ip)
-                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
-                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                    if event.get('archived'):
+                        log(f"[UDP] Event {eid} is archived, rejecting {sailor_id}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "event", "msg": f"Event {eid} is archived"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
 
-                # Get or create the event tracker
-                event_tracker = get_event_tracker(eid)
-                if not event_tracker:
-                    log(f"[UDP] ERROR: Could not get tracker for event {eid}")
-                    error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "server", "msg": "Could not initialize event tracker"}).encode("utf-8")
-                    sock.sendto(error_ack, addr)
-                    continue
+                    # Check per-event tracker password
+                    event_tracker_pwd = event.get('tracker_password', '')
+                    if event_tracker_pwd:
+                        if is_rate_limited(client_ip):
+                            log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                            error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                            sock.sendto(error_ack, addr)
+                            continue
+                        packet_pwd = packet.get("pwd", "")
+                        if packet_pwd != event_tracker_pwd:
+                            record_failed_auth(client_ip)
+                            log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
+                            error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                            sock.sendto(error_ack, addr)
+                            continue
 
-                # Send ACK with event name
-                event_name = event.get('name', f'Event {eid}')
-                ack = json.dumps({"ack": seq, "ts": int(recv_time), "event": event_name}).encode("utf-8")
-                sock.sendto(ack, addr)
-
-                # Process through event tracker
-                event_tracker.process_position(
-                    sailor_id=sailor_id,
-                    lat=lat,
-                    lon=lon,
-                    speed=speed,
-                    heading=heading,
-                    ts=ts,
-                    assist=assist,
-                    battery=battery,
-                    signal=signal,
-                    role=role,
-                    version=version,
-                    flags=flags,
-                    src_ip=client_ip,
-                    source="UDP",
-                    battery_drain_rate=battery_drain_rate,
-                    heart_rate=heart_rate,
-                    os_version=os_version,
-                    horizontal_accuracy=horizontal_accuracy,
-                    pos_array=pos_array
-                )
-
-            else:
-                # Legacy single-event mode
-                # Check rate limiting and password if required
-                if tracker_password:
-                    if is_rate_limited(client_ip):
-                        log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
-                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                    # Get or create the event tracker
+                    event_tracker = get_event_tracker(eid)
+                    if not event_tracker:
+                        log(f"[UDP] ERROR: Could not get tracker for event {eid}")
+                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "server", "msg": "Could not initialize event tracker"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
 
-                    packet_pwd = packet.get("pwd", "")
-                    if packet_pwd != tracker_password:
-                        record_failed_auth(client_ip)
-                        log(f"[UDP] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
-                        error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
-                        sock.sendto(error_ack, addr)
-                        continue
+                    # Send ACK with event name
+                    event_name = event.get('name', f'Event {eid}')
+                    ack = json.dumps({"ack": seq, "ts": int(recv_time), "event": event_name}).encode("utf-8")
+                    sock.sendto(ack, addr)
 
-                # Send ACK
-                ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
-                sock.sendto(ack, addr)
+                    # Process through event tracker
+                    event_tracker.process_position(
+                        sailor_id=sailor_id,
+                        lat=lat,
+                        lon=lon,
+                        speed=speed,
+                        heading=heading,
+                        ts=ts,
+                        assist=assist,
+                        battery=battery,
+                        signal=signal,
+                        role=role,
+                        version=version,
+                        flags=flags,
+                        src_ip=client_ip,
+                        source="UDP",
+                        battery_drain_rate=battery_drain_rate,
+                        heart_rate=heart_rate,
+                        os_version=os_version,
+                        horizontal_accuracy=horizontal_accuracy,
+                        pos_array=pos_array
+                    )
 
-                # If 1Hz array format, log as single entry with pos array (more compact)
-                has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
-                if has_batch and daily_logger:
-                    track_entry = {
-                        "id": sailor_id,
-                        "ts": ts,  # timestamp of last position (for sorting)
+                else:
+                    # Legacy single-event mode
+                    # Check rate limiting and password if required
+                    if tracker_password:
+                        if is_rate_limited(client_ip):
+                            log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
+                            error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                            sock.sendto(error_ack, addr)
+                            continue
+
+                        packet_pwd = packet.get("pwd", "")
+                        if packet_pwd != tracker_password:
+                            record_failed_auth(client_ip)
+                            log(f"[UDP] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
+                            error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
+                            sock.sendto(error_ack, addr)
+                            continue
+
+                    # Send ACK
+                    ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
+                    sock.sendto(ack, addr)
+
+                    # If 1Hz array format, log as single entry with pos array (more compact)
+                    has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
+                    if has_batch and daily_logger:
+                        track_entry = {
+                            "id": sailor_id,
+                            "ts": ts,  # timestamp of last position (for sorting)
+                            "recv_ts": recv_time,
+                            "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
+                            "spd": speed,
+                            "hdg": heading,
+                            "ast": assist,
+                            "bat": battery,
+                            "sig": signal,
+                            "role": role,
+                            "ver": version,
+                            "flg": flags
+                        }
+                        if battery_drain_rate is not None:
+                            track_entry["bdr"] = battery_drain_rate
+                        if heart_rate is not None and heart_rate > 0:
+                            track_entry["hr"] = heart_rate
+                        if os_version:
+                            track_entry["os"] = os_version
+                        if horizontal_accuracy is not None:
+                            track_entry["hac"] = horizontal_accuracy
+                        daily_logger.write(track_entry)
+
+                    # Process position through shared tracker (updates live display)
+                    # skip_log if we already logged the batch above
+                    position_tracker.process_position(
+                        sailor_id=sailor_id,
+                        lat=lat,
+                        lon=lon,
+                        speed=speed,
+                        heading=heading,
+                        ts=ts,
+                        assist=assist,
+                        battery=battery,
+                        signal=signal,
+                        role=role,
+                        version=version,
+                        flags=flags,
+                        src_ip=client_ip,
+                        source="UDP",
+                        battery_drain_rate=battery_drain_rate,
+                        heart_rate=heart_rate,
+                        os_version=os_version,
+                        horizontal_accuracy=horizontal_accuracy,
+                        skip_log=has_batch
+                    )
+
+                # Write to legacy log file (JSON lines format for easy parsing later)
+                if log_fh:
+                    log_entry = {
                         "recv_ts": recv_time,
-                        "pos": pos_array,  # [[ts, lat, lon], ...] - compact array format
-                        "spd": speed,
-                        "hdg": heading,
-                        "ast": assist,
-                        "bat": battery,
-                        "sig": signal,
-                        "role": role,
-                        "ver": version,
-                        "flg": flags
+                        "src_ip": addr[0],
+                        "src_port": addr[1],
+                        **packet
                     }
-                    if battery_drain_rate is not None:
-                        track_entry["bdr"] = battery_drain_rate
-                    if heart_rate is not None and heart_rate > 0:
-                        track_entry["hr"] = heart_rate
-                    if os_version:
-                        track_entry["os"] = os_version
-                    if horizontal_accuracy is not None:
-                        track_entry["hac"] = horizontal_accuracy
-                    daily_logger.write(track_entry)
+                    log_fh.write(json.dumps(log_entry) + "\n")
+                    log_fh.flush()
 
-                # Process position through shared tracker (updates live display)
-                # skip_log if we already logged the batch above
-                position_tracker.process_position(
-                    sailor_id=sailor_id,
-                    lat=lat,
-                    lon=lon,
-                    speed=speed,
-                    heading=heading,
-                    ts=ts,
-                    assist=assist,
-                    battery=battery,
-                    signal=signal,
-                    role=role,
-                    version=version,
-                    flags=flags,
-                    src_ip=client_ip,
-                    source="UDP",
-                    battery_drain_rate=battery_drain_rate,
-                    heart_rate=heart_rate,
-                    os_version=os_version,
-                    horizontal_accuracy=horizontal_accuracy,
-                    skip_log=has_batch
-                )
-
-            # Write to legacy log file (JSON lines format for easy parsing later)
-            if log_fh:
-                log_entry = {
-                    "recv_ts": recv_time,
-                    "src_ip": addr[0],
-                    "src_port": addr[1],
-                    **packet
-                }
-                log_fh.write(json.dumps(log_entry) + "\n")
-                log_fh.flush()
+            except Exception as e:
+                tb_lines = traceback.format_exc().strip().split('\n')[-3:]
+                log(f"[UDP] Error from {client_ip}: {e}")
+                for tb_line in tb_lines:
+                    log(f"[UDP]   {tb_line}")
+                continue
 
     except KeyboardInterrupt:
         log("Shutting down...")
