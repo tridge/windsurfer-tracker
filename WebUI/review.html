@@ -1376,6 +1376,7 @@
                 <label><input type="checkbox" id="show-markers" checked> Show markers</label>
                 <label><input type="checkbox" id="filter-outliers" checked> Filter outliers</label>
                 <label><input type="checkbox" id="show-outliers"> Show outliers (red)</label>
+                <label><input type="checkbox" id="show-course" checked> Show course</label>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -1856,6 +1857,10 @@
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
         let sliderDebounceTimer = null;  // Debounce timer for slider redraw
+        let courseMarkers = [];  // Course marker layers
+        let courseLines = [];    // Course line layers
+        let showCourse = true;   // Whether to display course
+        let currentCourseFile = null;  // Currently loaded course filename
 
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
         function expandEntry(entry) {
@@ -1884,6 +1889,140 @@
             }
             // Old format: single position with lat/lon directly
             return [entry];
+        }
+
+        // Course display functions
+        function clearCourseDisplay() {
+            courseMarkers.forEach(m => map.removeLayer(m));
+            courseMarkers = [];
+            courseLines.forEach(l => map.removeLayer(l));
+            courseLines = [];
+        }
+
+        function displayCourse(course) {
+            clearCourseDisplay();
+            if (!showCourse) return;
+
+            const points = [];
+
+            // Start marker
+            if (course.start) {
+                const marker = L.marker([course.start.lat, course.start.lon], {
+                    icon: createStartIcon()
+                }).addTo(map);
+                marker.bindPopup('<strong>Start</strong>');
+                courseMarkers.push(marker);
+                points.push([course.start.lat, course.start.lon]);
+            }
+
+            // Mark markers
+            if (course.marks) {
+                course.marks.forEach((mark, idx) => {
+                    const marker = L.marker([mark.lat, mark.lon], {
+                        icon: createMarkIcon(idx + 1)
+                    }).addTo(map);
+                    marker.bindPopup(`<strong>Mark ${idx + 1}</strong>${mark.name ? '<br>' + mark.name : ''}`);
+                    courseMarkers.push(marker);
+                    points.push([mark.lat, mark.lon]);
+                });
+            }
+
+            // Finish marker
+            if (course.finish) {
+                const marker = L.marker([course.finish.lat, course.finish.lon], {
+                    icon: createFinishIcon()
+                }).addTo(map);
+                marker.bindPopup('<strong>Finish</strong>');
+                courseMarkers.push(marker);
+                points.push([course.finish.lat, course.finish.lon]);
+            }
+
+            // Course line
+            if (points.length >= 2) {
+                const line = L.polyline(points, {
+                    color: '#ff6600',
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '10, 5'
+                }).addTo(map);
+                courseLines.push(line);
+            }
+        }
+
+        // Course marker icons
+        function createStartIcon() {
+            const svg = `
+                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="0" cy="0" r="12" fill="#22c55e" stroke="#166534" stroke-width="2"/>
+                    <text x="0" y="5" text-anchor="middle" fill="white" font-size="12" font-weight="bold">S</text>
+                </svg>
+            `;
+            return L.divIcon({
+                html: svg,
+                className: 'course-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+        }
+
+        function createMarkIcon(number) {
+            const svg = `
+                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="0" cy="0" r="12" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+                    <text x="0" y="5" text-anchor="middle" fill="white" font-size="11" font-weight="bold">${number}</text>
+                </svg>
+            `;
+            return L.divIcon({
+                html: svg,
+                className: 'course-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+        }
+
+        function createFinishIcon() {
+            const svg = `
+                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Checkered flag pattern -->
+                    <rect x="-12" y="-12" width="24" height="24" fill="white" stroke="#333" stroke-width="2" rx="3"/>
+                    <rect x="-12" y="-12" width="6" height="6" fill="#333"/>
+                    <rect x="0" y="-12" width="6" height="6" fill="#333"/>
+                    <rect x="-6" y="-6" width="6" height="6" fill="#333"/>
+                    <rect x="6" y="-6" width="6" height="6" fill="#333"/>
+                    <rect x="-12" y="0" width="6" height="6" fill="#333"/>
+                    <rect x="0" y="0" width="6" height="6" fill="#333"/>
+                    <rect x="-6" y="6" width="6" height="6" fill="#333"/>
+                    <rect x="6" y="6" width="6" height="6" fill="#333"/>
+                </svg>
+            `;
+            return L.divIcon({
+                html: svg,
+                className: 'course-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+        }
+
+        async function loadCourse(courseFilename) {
+            if (!courseFilename || courseFilename === currentCourseFile) {
+                return;
+            }
+            try {
+                const courseUrl = `${DATA_BASE}${courseFilename}`;
+                const response = await fetch(courseUrl);
+                if (response.ok) {
+                    const courseData = await response.json();
+                    currentCourseFile = courseFilename;
+                    displayCourse(courseData);
+                } else {
+                    clearCourseDisplay();
+                    currentCourseFile = null;
+                }
+            } catch (e) {
+                console.log('Error loading course:', e);
+                clearCourseDisplay();
+                currentCourseFile = null;
+            }
         }
 
         // Mobile drawer toggle
@@ -2202,6 +2341,14 @@
                 // Fit map to data
                 fitMapToData();
 
+                // Load course if available in log entry
+                if (logEntry.course) {
+                    await loadCourse(logEntry.course);
+                } else {
+                    clearCourseDisplay();
+                    currentCourseFile = null;
+                }
+
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('status').textContent = `Loaded ${allData.length} points from ${Object.keys(userData).length} users`;
 
@@ -2301,6 +2448,9 @@
 
             // Fit map to data
             fitMapToData();
+
+            // Try to load current course (legacy mode has no course info in summary)
+            await loadCourse('course.json');
 
             document.getElementById('loading').style.display = 'none';
             document.getElementById('status').textContent = `Loaded ${allData.length} points from ${Object.keys(userData).length} users`;
@@ -4372,6 +4522,18 @@
 
         document.getElementById('show-outliers').addEventListener('change', () => {
             drawTracks();
+        });
+
+        document.getElementById('show-course').addEventListener('change', (e) => {
+            showCourse = e.target.checked;
+            if (showCourse && currentCourseFile) {
+                // Re-load and display course
+                const courseFilename = currentCourseFile;
+                currentCourseFile = null;  // Reset to force reload
+                loadCourse(courseFilename);
+            } else {
+                clearCourseDisplay();
+            }
         });
 
         document.getElementById('show-speed-graph').addEventListener('change', (e) => {

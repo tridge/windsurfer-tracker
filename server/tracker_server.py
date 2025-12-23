@@ -176,6 +176,61 @@ def sanitize_tracker_packet(packet: dict) -> dict:
     return sanitized
 
 
+def get_course_timestamp(course_path: Path) -> float | None:
+    """Get the 'updated' timestamp from inside a course file.
+
+    Returns the internal 'updated' field if present, otherwise file mtime.
+    """
+    try:
+        with open(course_path, 'r') as f:
+            course = json.load(f)
+            if 'updated' in course:
+                return course['updated']
+            # Fallback to file mtime
+            return course_path.stat().st_mtime
+    except Exception:
+        return None
+
+
+def find_applicable_course(event_dir: Path, log_end_ts: float) -> tuple[str, float] | None:
+    """Find the course file that was active at log_end_ts.
+
+    Scans course.json and rotated versions (course.json.1, course.json.2, etc.)
+    and returns the one with the latest 'updated' timestamp that is <= log_end_ts.
+
+    Returns (course_filename, updated_ts) or None if no applicable course.
+    """
+    course_files = []
+
+    # Check main course.json
+    base = event_dir / "course.json"
+    if base.exists():
+        ts = get_course_timestamp(base)
+        if ts is not None:
+            course_files.append((base.name, ts))
+
+    # Check rotated versions (course.json.1, course.json.2, ...)
+    for i in range(1, 100):
+        rotated = event_dir / f"course.json.{i}"
+        if rotated.exists():
+            ts = get_course_timestamp(rotated)
+            if ts is not None:
+                course_files.append((rotated.name, ts))
+        else:
+            break
+
+    if not course_files:
+        return None
+
+    # Find latest course that was created before log ended
+    applicable = [(f, t) for f, t in course_files if t <= log_end_ts]
+    if applicable:
+        return max(applicable, key=lambda x: x[1])
+
+    # No course was active at the time of this log
+    return None
+
+
 def generate_log_summaries(log_dir: Path) -> int:
     """
     Generate summary JSON files for each day's logs.
@@ -274,14 +329,23 @@ def generate_log_summaries(log_dir: Path) -> int:
                 continue
 
             if point_count > 0:
-                logs_data.append({
+                log_entry = {
                     'file': log_file.name,
                     'index': rotation_idx,
                     'start_ts': start_ts,
                     'end_ts': end_ts,
                     'point_count': point_count,
                     'sailors': sailors
-                })
+                }
+
+                # Find applicable course for this log segment
+                event_dir = log_dir.parent
+                course_info = find_applicable_course(event_dir, end_ts)
+                if course_info:
+                    log_entry['course'] = course_info[0]
+                    log_entry['course_mtime'] = course_info[1]
+
+                logs_data.append(log_entry)
 
         if not logs_data:
             continue
@@ -1254,6 +1318,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
                 tracker = get_event_tracker(eid)
                 if tracker:
+                    # Rotate existing course before saving new one
+                    if tracker.course_file.exists():
+                        rotate_file(tracker.course_file)
                     tmp_file = tracker.course_file.with_suffix('.tmp')
                     with open(tmp_file, 'w') as f:
                         json.dump(course, f, indent=2)
@@ -1413,6 +1480,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 course['updated_iso'] = datetime.now().isoformat()
 
                 if _course_file:
+                    # Rotate existing course before saving new one
+                    if _course_file.exists():
+                        rotate_file(_course_file)
                     # Write atomically
                     tmp_file = _course_file.with_suffix('.tmp')
                     with open(tmp_file, 'w') as f:
