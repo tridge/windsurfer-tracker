@@ -1061,6 +1061,28 @@
         </div>
     </div>
 
+    <!-- Mark edit overlay -->
+    <div class="edit-user-overlay" id="editMarkOverlay" onclick="if(event.target===this)closeEditMark()">
+        <div class="edit-user-dialog">
+            <h3>Edit <span id="editMarkNumber"></span></h3>
+            <label for="editMarkColor">Color</label>
+            <select id="editMarkColor">
+                <option value="">Default (Orange)</option>
+                <option value="#f97316">Orange</option>
+                <option value="#ef4444">Red (Port)</option>
+                <option value="#22c55e">Green (Starboard)</option>
+                <option value="#3b82f6">Blue</option>
+                <option value="#8b5cf6">Purple</option>
+            </select>
+            <label for="editMarkComment">Comment</label>
+            <input type="text" id="editMarkComment" placeholder="e.g., Port rounding">
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
+                <button class="btn-save" onclick="saveEditMark()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Initialize map centered on Auckland
         const map = L.map('map').setView([-36.8485, 174.7633], 13);
@@ -1436,6 +1458,10 @@
                 document.getElementById('adminPanel').classList.remove('visible');
                 document.getElementById('menuAdmin').classList.remove('active');
                 cancelDrawing();
+                // Refresh course display to remove edit buttons from marks
+                if (courseData) {
+                    displayCourse(courseData);
+                }
             } else {
                 // Try to enter admin mode
                 if (!adminPassword) {
@@ -1455,6 +1481,10 @@
                     // Refresh markers to show edit buttons
                     if (currentPositions?.sailors) {
                         updateMarkers(currentPositions.sailors);
+                    }
+                    // Refresh course display to show edit buttons on marks
+                    if (courseData) {
+                        displayCourse(courseData);
                     }
                 } else {
                     adminPassword = '';
@@ -1816,10 +1846,23 @@
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
+                    const color = mark.color || '#f97316';
+                    const label = mark.comment || null;
                     const marker = L.marker([mark.lat, mark.lon], {
-                        icon: createMarkIcon(idx + 1)
+                        icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
-                    marker.bindPopup(`<strong>Mark ${idx + 1}</strong>${mark.name ? '<br>' + mark.name : ''}`);
+
+                    // Build popup with mark info
+                    let popupContent = `<strong>Mark ${idx + 1}</strong>`;
+                    if (mark.comment) {
+                        popupContent += `<br><em>${mark.comment}</em>`;
+                    }
+                    popupContent += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
+                    if (adminMode) {
+                        popupContent += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
+                    }
+                    marker.bindPopup(popupContent);
+
                     courseMarkers.push(marker);
                     points.push([mark.lat, mark.lon]);
                 });
@@ -1863,17 +1906,28 @@
             });
         }
         
-        function createMarkIcon(number) {
+        // Darken a hex color by reducing RGB values ~30%
+        function darkenColor(hex) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            const darken = (v) => Math.max(0, Math.floor(v * 0.7)).toString(16).padStart(2, '0');
+            return `#${darken(r)}${darken(g)}${darken(b)}`;
+        }
+
+        function createMarkIcon(number, color = '#f97316', label = null) {
+            const strokeColor = darkenColor(color);
             const svg = `
                 <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="0" cy="0" r="12" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+                    <circle cx="0" cy="0" r="12" fill="${color}" stroke="${strokeColor}" stroke-width="2"/>
                     <text x="0" y="5" text-anchor="middle" fill="white" font-size="11" font-weight="bold">${number}</text>
                 </svg>
             `;
+            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
             return L.divIcon({
-                html: svg,
+                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
                 className: 'course-marker',
-                iconSize: [32, 32],
+                iconSize: [32, 32 + (label ? 20 : 0)],
                 iconAnchor: [16, 16]
             });
         }
@@ -1904,6 +1958,7 @@
         // User edit state
         let userOverrides = {};
         let editingUserId = null;
+        let editingMarkIndex = null;
 
         // Load user overrides from server
         async function loadUserOverrides() {
@@ -2002,6 +2057,65 @@
                 }
             } catch (e) {
                 alert('Error removing override: ' + e.message);
+            }
+        }
+
+        // Mark edit functions
+        function showEditMark(markIndex) {
+            if (!courseData || !courseData.marks || markIndex >= courseData.marks.length) return;
+
+            editingMarkIndex = markIndex;
+            const mark = courseData.marks[markIndex];
+
+            document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
+            document.getElementById('editMarkColor').value = mark.color || '';
+            document.getElementById('editMarkComment').value = mark.comment || '';
+            document.getElementById('editMarkOverlay').classList.add('visible');
+        }
+
+        function closeEditMark() {
+            editingMarkIndex = null;
+            document.getElementById('editMarkOverlay').classList.remove('visible');
+        }
+
+        async function saveEditMark() {
+            if (editingMarkIndex === null || !courseData || !courseData.marks) return;
+
+            const color = document.getElementById('editMarkColor').value;
+            const comment = document.getElementById('editMarkComment').value.trim();
+
+            // Update mark in courseData
+            if (color) {
+                courseData.marks[editingMarkIndex].color = color;
+            } else {
+                delete courseData.marks[editingMarkIndex].color;
+            }
+            if (comment) {
+                courseData.marks[editingMarkIndex].comment = comment;
+            } else {
+                delete courseData.marks[editingMarkIndex].comment;
+            }
+
+            // Save course to server
+            try {
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    closeEditMark();
+                    // Reload course to refresh display
+                    await loadCourse();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error saving mark: ' + e.message);
             }
         }
 
