@@ -1855,6 +1855,7 @@
         let rangeEndTime = 0;    // User-selected end time
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
+        let sliderDebounceTimer = null;  // Debounce timer for slider redraw
 
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
         function expandEntry(entry) {
@@ -2408,6 +2409,28 @@
                 `<span style="color:#2ecc71">Start: ${formatTimeInTz(rangeStartTime)}</span> &nbsp;|&nbsp;` +
                 `<span style="color:#e74c3c">End: ${formatTimeInTz(rangeEndTime)}</span> &nbsp;|&nbsp;` +
                 `Duration: ${durationStr}`;
+        }
+
+        // Redraw all tracks and graphs (expensive operation)
+        function redrawAll() {
+            drawTracks();
+            drawSpeedGraph();
+            drawBatteryGraph();
+            drawSignalGraph();
+            drawLatencyGraph();
+            drawHeartRateGraph();
+            drawAccuracyGraph();
+        }
+
+        // Debounced version - waits for slider to stop moving before redrawing
+        function debouncedRedrawAll(delay = 500) {
+            if (sliderDebounceTimer) {
+                clearTimeout(sliderDebounceTimer);
+            }
+            sliderDebounceTimer = setTimeout(() => {
+                redrawAll();
+                sliderDebounceTimer = null;
+            }, delay);
         }
 
         function drawTracks() {
@@ -4314,15 +4337,11 @@
             if (startVal > endVal) {
                 e.target.value = endVal;
             }
+            // Update visual indicators immediately (cheap)
             updateSliderRange();
             updateTimeDisplay();
-            drawTracks();
-            drawSpeedGraph();
-            drawBatteryGraph();
-            drawSignalGraph();
-            drawLatencyGraph();
-            drawHeartRateGraph();
-            drawAccuracyGraph();
+            // Debounce expensive redraws until slider stops moving
+            debouncedRedrawAll();
         });
 
         document.getElementById('end-slider').addEventListener('input', (e) => {
@@ -4332,15 +4351,11 @@
             if (endVal < startVal) {
                 e.target.value = startVal;
             }
+            // Update visual indicators immediately (cheap)
             updateSliderRange();
             updateTimeDisplay();
-            drawTracks();
-            drawSpeedGraph();
-            drawBatteryGraph();
-            drawSignalGraph();
-            drawLatencyGraph();
-            drawHeartRateGraph();
-            drawAccuracyGraph();
+            // Debounce expensive redraws until slider stops moving
+            debouncedRedrawAll();
         });
 
         document.getElementById('speed-color').addEventListener('change', () => {
