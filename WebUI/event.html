@@ -837,6 +837,22 @@
         .popup-edit-btn:hover {
             background: #0055aa;
         }
+
+        .popup-move-btn {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #059669;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .popup-move-btn:hover {
+            background: #047857;
+        }
     </style>
 </head>
 <body>
@@ -1431,7 +1447,10 @@
         let drawingPoints = [];       // Points being drawn
         let drawingMarkers = [];      // Temporary markers while drawing
         let drawingLine = null;       // Temporary line while drawing
-        
+        let movingMarkIndex = null;   // Index of mark being moved (null=none, -1=start, marks.length=finish)
+        let movingPreviewMarker = null;  // Preview marker showing new position
+        let movingPreviewLines = [];  // Preview lines to adjacent points
+
         // Admin functions
         async function checkAdminAuth() {
             try {
@@ -1589,6 +1608,15 @@
         
         function onDrawingComplete(e) {
             e.originalEvent.preventDefault();
+
+            // Double-click fires click first, so remove the duplicate point added by click
+            if (drawingPoints.length > 0) {
+                drawingPoints.pop();
+                const extraMarker = drawingMarkers.pop();
+                if (extraMarker) map.removeLayer(extraMarker);
+                updateDrawingLine();
+            }
+
             if (drawingPoints.length < 2) {
                 alert('Need at least a start and finish point');
                 return;
@@ -1838,7 +1866,11 @@
                 const marker = L.marker([course.start.lat, course.start.lon], {
                     icon: createStartIcon()
                 }).addTo(map);
-                marker.bindPopup('<strong>Start</strong>');
+                let startPopup = '<strong>Start</strong>';
+                if (adminMode) {
+                    startPopup += `<br><button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
+                }
+                marker.bindPopup(startPopup);
                 courseMarkers.push(marker);
                 points.push([course.start.lat, course.start.lon]);
             }
@@ -1860,6 +1892,7 @@
                     popupContent += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
                     if (adminMode) {
                         popupContent += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
+                        popupContent += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
                     }
                     marker.bindPopup(popupContent);
 
@@ -1873,7 +1906,11 @@
                 const marker = L.marker([course.finish.lat, course.finish.lon], {
                     icon: createFinishIcon()
                 }).addTo(map);
-                marker.bindPopup('<strong>Finish</strong>');
+                let finishPopup = '<strong>Finish</strong>';
+                if (adminMode) {
+                    finishPopup += `<br><button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
+                }
+                marker.bindPopup(finishPopup);
                 courseMarkers.push(marker);
                 points.push([course.finish.lat, course.finish.lon]);
             }
@@ -2116,6 +2153,192 @@
                 }
             } catch (e) {
                 alert('Error saving mark: ' + e.message);
+            }
+        }
+
+        // Move course point functions
+        function startMoveMark(index) {
+            if (!courseData) return;
+
+            // Close any open popup
+            map.closePopup();
+
+            movingMarkIndex = index;
+
+            // Change cursor
+            document.getElementById('map').style.cursor = 'crosshair';
+
+            // Show status message
+            document.getElementById('connectionStatus').textContent = 'Click to place marker, Esc to cancel';
+            document.getElementById('connectionStatus').className = 'connection-status connection-warning';
+
+            // Add event listeners
+            map.on('mousemove', updateMovePreview);
+            map.on('click', finishMoveMark);
+            document.addEventListener('keydown', handleMoveKeydown);
+        }
+
+        function getAdjacentCoursePoints(index) {
+            // Returns {prev: [lat,lon] or null, next: [lat,lon] or null}
+            // index: -1=start, 0..n-1=marks, 'finish'=finish
+            const result = { prev: null, next: null };
+            if (!courseData) return result;
+
+            const marksCount = courseData.marks ? courseData.marks.length : 0;
+
+            if (index === -1) {
+                // Moving start - next is first mark or finish
+                if (marksCount > 0) {
+                    result.next = [courseData.marks[0].lat, courseData.marks[0].lon];
+                } else if (courseData.finish) {
+                    result.next = [courseData.finish.lat, courseData.finish.lon];
+                }
+            } else if (index === 'finish') {
+                // Moving finish - prev is last mark or start
+                if (marksCount > 0) {
+                    result.prev = [courseData.marks[marksCount - 1].lat, courseData.marks[marksCount - 1].lon];
+                } else if (courseData.start) {
+                    result.prev = [courseData.start.lat, courseData.start.lon];
+                }
+            } else {
+                // Moving a mark
+                if (index === 0) {
+                    // First mark - prev is start
+                    if (courseData.start) {
+                        result.prev = [courseData.start.lat, courseData.start.lon];
+                    }
+                } else {
+                    // Prev is previous mark
+                    result.prev = [courseData.marks[index - 1].lat, courseData.marks[index - 1].lon];
+                }
+
+                if (index === marksCount - 1) {
+                    // Last mark - next is finish
+                    if (courseData.finish) {
+                        result.next = [courseData.finish.lat, courseData.finish.lon];
+                    }
+                } else {
+                    // Next is next mark
+                    result.next = [courseData.marks[index + 1].lat, courseData.marks[index + 1].lon];
+                }
+            }
+
+            return result;
+        }
+
+        function updateMovePreview(e) {
+            const latlng = e.latlng;
+
+            // Create or update preview marker
+            if (!movingPreviewMarker) {
+                // Create a simple circle marker for preview
+                movingPreviewMarker = L.circleMarker(latlng, {
+                    radius: 10,
+                    color: '#0066cc',
+                    fillColor: '#0066cc',
+                    fillOpacity: 0.5,
+                    weight: 2
+                }).addTo(map);
+            } else {
+                movingPreviewMarker.setLatLng(latlng);
+            }
+
+            // Get adjacent points and draw preview lines
+            const adjacent = getAdjacentCoursePoints(movingMarkIndex);
+
+            // Clear old preview lines
+            movingPreviewLines.forEach(line => map.removeLayer(line));
+            movingPreviewLines = [];
+
+            // Draw new preview lines
+            if (adjacent.prev) {
+                const line = L.polyline([adjacent.prev, [latlng.lat, latlng.lng]], {
+                    color: '#0066cc',
+                    weight: 2,
+                    opacity: 0.7,
+                    dashArray: '5, 5'
+                }).addTo(map);
+                movingPreviewLines.push(line);
+            }
+            if (adjacent.next) {
+                const line = L.polyline([[latlng.lat, latlng.lng], adjacent.next], {
+                    color: '#0066cc',
+                    weight: 2,
+                    opacity: 0.7,
+                    dashArray: '5, 5'
+                }).addTo(map);
+                movingPreviewLines.push(line);
+            }
+        }
+
+        async function finishMoveMark(e) {
+            const latlng = e.latlng;
+
+            // Update courseData with new position
+            if (movingMarkIndex === -1) {
+                courseData.start.lat = latlng.lat;
+                courseData.start.lon = latlng.lng;
+            } else if (movingMarkIndex === 'finish') {
+                courseData.finish.lat = latlng.lat;
+                courseData.finish.lon = latlng.lng;
+            } else {
+                courseData.marks[movingMarkIndex].lat = latlng.lat;
+                courseData.marks[movingMarkIndex].lon = latlng.lng;
+            }
+
+            // Save to server
+            try {
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    // Refresh display
+                    await loadCourse();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Error moving marker: ' + err.message);
+            }
+
+            // Clean up
+            cancelMoveMark();
+        }
+
+        function cancelMoveMark() {
+            // Remove event listeners
+            map.off('mousemove', updateMovePreview);
+            map.off('click', finishMoveMark);
+            document.removeEventListener('keydown', handleMoveKeydown);
+
+            // Clean up preview elements
+            if (movingPreviewMarker) {
+                map.removeLayer(movingPreviewMarker);
+                movingPreviewMarker = null;
+            }
+            movingPreviewLines.forEach(line => map.removeLayer(line));
+            movingPreviewLines = [];
+
+            // Reset state
+            movingMarkIndex = null;
+
+            // Restore cursor
+            document.getElementById('map').style.cursor = '';
+
+            // Restore status
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            document.getElementById('connectionStatus').className = 'connection-status connection-ok';
+        }
+
+        function handleMoveKeydown(e) {
+            if (e.key === 'Escape' && movingMarkIndex !== null) {
+                cancelMoveMark();
             }
         }
 
