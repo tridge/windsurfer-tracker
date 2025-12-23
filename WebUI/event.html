@@ -853,6 +853,38 @@
         .popup-move-btn:hover {
             background: #047857;
         }
+
+        .popup-delete-btn {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #dc2626;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .popup-delete-btn:hover {
+            background: #b91c1c;
+        }
+
+        .popup-split-btn {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #7c3aed;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .popup-split-btn:hover {
+            background: #6d28d9;
+        }
     </style>
 </head>
 <body>
@@ -1941,12 +1973,13 @@
                 if (adminMode) {
                     startPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
                     startPopup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
+                    startPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start')">Del</button>`;
                 }
                 marker.bindPopup(startPopup);
                 courseMarkers.push(marker);
                 points.push([course.start.lat, course.start.lon]);
             }
-            
+
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
@@ -1965,6 +1998,8 @@
                     if (adminMode) {
                         popupContent += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
                         popupContent += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
+                        popupContent += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
+                        popupContent += `<button class="popup-delete-btn" onclick="deleteCourseMark(${idx})">Del</button>`;
                     }
                     marker.bindPopup(popupContent);
 
@@ -1986,6 +2021,8 @@
                 if (adminMode) {
                     finishPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
                     finishPopup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
+                    finishPopup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
+                    finishPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish')">Del</button>`;
                 }
                 marker.bindPopup(finishPopup);
                 courseMarkers.push(marker);
@@ -2265,6 +2302,144 @@
                 }
             } catch (e) {
                 alert('Error saving mark: ' + e.message);
+            }
+        }
+
+        async function deleteCourseMark(markIndex) {
+            if (!courseData) return;
+
+            // Close any open popup
+            map.closePopup();
+
+            // Count total points (start + marks + finish)
+            const markCount = courseData.marks ? courseData.marks.length : 0;
+            const totalPoints = (courseData.start ? 1 : 0) + markCount + (courseData.finish ? 1 : 0);
+
+            // Need at least 2 points to have a valid course
+            if (totalPoints <= 2) {
+                if (confirm('Deleting this mark will remove the entire course. Continue?')) {
+                    await deleteCourse();
+                }
+                return;
+            }
+
+            if (markIndex === 'start') {
+                // Delete start - first mark becomes new start
+                if (markCount > 0) {
+                    courseData.start = courseData.marks.shift();
+                } else {
+                    // No marks, finish becomes start (but this shouldn't happen with totalPoints > 2)
+                    courseData.start = courseData.finish;
+                    courseData.finish = null;
+                }
+            } else if (markIndex === 'finish') {
+                // Delete finish - last mark becomes new finish
+                if (markCount > 0) {
+                    courseData.finish = courseData.marks.pop();
+                } else {
+                    // No marks, start stays, no finish (but this shouldn't happen with totalPoints > 2)
+                    courseData.finish = null;
+                }
+            } else {
+                // Delete a regular mark
+                if (!courseData.marks) return;
+                courseData.marks.splice(markIndex, 1);
+            }
+
+            // Save to server
+            try {
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadCourse();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error deleting mark: ' + e.message);
+            }
+        }
+
+        async function splitCourseMark(markIndex) {
+            if (!courseData) return;
+
+            // Close any open popup
+            map.closePopup();
+
+            // Can't split start (no previous point)
+            if (markIndex === 'start') {
+                alert('Cannot split before the start marker');
+                return;
+            }
+
+            // Find current point and previous point
+            let currentLat, currentLon, prevLat, prevLon;
+            let insertIndex;
+
+            if (markIndex === 'finish') {
+                currentLat = courseData.finish.lat;
+                currentLon = courseData.finish.lon;
+                if (courseData.marks && courseData.marks.length > 0) {
+                    const lastMark = courseData.marks[courseData.marks.length - 1];
+                    prevLat = lastMark.lat;
+                    prevLon = lastMark.lon;
+                } else {
+                    prevLat = courseData.start.lat;
+                    prevLon = courseData.start.lon;
+                }
+                insertIndex = courseData.marks ? courseData.marks.length : 0;
+            } else {
+                // Regular mark
+                if (!courseData.marks) return;
+                const mark = courseData.marks[markIndex];
+                currentLat = mark.lat;
+                currentLon = mark.lon;
+                if (markIndex === 0) {
+                    prevLat = courseData.start.lat;
+                    prevLon = courseData.start.lon;
+                } else {
+                    const prevMark = courseData.marks[markIndex - 1];
+                    prevLat = prevMark.lat;
+                    prevLon = prevMark.lon;
+                }
+                insertIndex = markIndex;
+            }
+
+            // Create new mark at midpoint
+            const newMark = {
+                lat: (currentLat + prevLat) / 2,
+                lon: (currentLon + prevLon) / 2
+            };
+
+            // Insert new mark
+            if (!courseData.marks) courseData.marks = [];
+            courseData.marks.splice(insertIndex, 0, newMark);
+
+            // Save to server
+            try {
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadCourse();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error splitting mark: ' + e.message);
             }
         }
 
