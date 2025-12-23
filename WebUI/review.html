@@ -2886,10 +2886,11 @@
                 trackLayers[userId].trackData = filtered;
                 trackLayers[userId].trackUserId = userId;
 
-                // Add hover handler to show closest point info
+                // Add hover/click handler to show closest point info
                 const hoverTarget = trackLayers[userId].hitArea || trackLayers[userId];
-                hoverTarget.on('mousemove', (e) => {
-                    const latlng = e.latlng;
+
+                // Function to show popup at closest point to given latlng
+                const showTrackPopup = (latlng, withCloseButton = false) => {
                     const data = trackLayers[userId].trackData;
                     if (!data || data.length === 0) return;
 
@@ -2923,14 +2924,26 @@
                     }
 
                     // Show or update popup
-                    if (trackHoverPopup) {
+                    if (trackHoverPopup && !withCloseButton) {
                         trackHoverPopup.setLatLng([closest.lat, closest.lon]).setContent(content);
                     } else {
-                        trackHoverPopup = L.popup({ closeButton: false, offset: [0, -5] })
+                        if (trackHoverPopup) {
+                            map.closePopup(trackHoverPopup);
+                        }
+                        trackHoverPopup = L.popup({ closeButton: withCloseButton, offset: [0, -5] })
                             .setLatLng([closest.lat, closest.lon])
                             .setContent(content)
                             .openOn(map);
                     }
+                };
+
+                // Desktop: mousemove for live tracking
+                hoverTarget.on('mousemove', (e) => showTrackPopup(e.latlng, false));
+
+                // Mobile: click/tap to show popup with close button
+                hoverTarget.on('click', (e) => {
+                    showTrackPopup(e.latlng, true);
+                    L.DomEvent.stopPropagation(e);
                 });
 
                 hoverTarget.on('mouseout', () => {
