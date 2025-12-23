@@ -1972,8 +1972,10 @@ def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
 
     while True:
         try:
-            for event_info in event_manager.list_events():
-                eid = event_info['eid']
+            for eid in event_manager.list_events():
+                event_info = event_manager.get_event(eid)
+                if not event_info:
+                    continue
                 tz_name = event_info.get('timezone', 'Australia/Sydney')
 
                 try:
