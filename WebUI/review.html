@@ -328,7 +328,7 @@
         }
 
         .speed-legend {
-            position: absolute;
+            position: fixed;
             bottom: 100px;
             left: 20px;
             background: white;
@@ -1512,6 +1512,7 @@
             <option value="hybrid">Google Hybrid</option>
         </select>
         <button id="about-btn">About</button>
+        <button id="reload-tiles-btn" title="Reload map tiles">⟳</button>
         <span id="status"></span>
     </div>
 
@@ -4634,6 +4635,10 @@
 
             mapEl.style.bottom = totalHeight + 'px';
             map.invalidateSize();
+
+            // Update speed legend and scale positions to stay above graphs
+            document.querySelector('.speed-legend').style.bottom = (totalHeight + 20) + 'px';
+            document.getElementById('customScale').style.bottom = (totalHeight + 95) + 'px';
         }
 
         speedResizeHandle.addEventListener('mousedown', (e) => {
@@ -4871,6 +4876,19 @@
 
         document.getElementById('about-close-btn').addEventListener('click', () => {
             document.getElementById('about-modal').classList.remove('show');
+        });
+
+        // Reload tiles button - forces refresh of map tiles
+        document.getElementById('reload-tiles-btn').addEventListener('click', () => {
+            // Remove and re-add the current tile layer to force reload
+            const currentType = document.getElementById('map-type-select').value;
+            if (currentType === 'osm') {
+                map.removeLayer(osmLayer);
+                map.addLayer(osmLayer);
+            } else if (googleLayers[currentType]) {
+                map.removeLayer(googleLayers[currentType]);
+                map.addLayer(googleLayers[currentType]);
+            }
         });
 
         document.getElementById('about-modal').addEventListener('click', (e) => {
