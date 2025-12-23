@@ -1081,15 +1081,17 @@
     <div class="edit-user-overlay" id="editMarkOverlay" onclick="if(event.target===this)closeEditMark()">
         <div class="edit-user-dialog">
             <h3>Edit <span id="editMarkNumber"></span></h3>
-            <label for="editMarkColor">Color</label>
-            <select id="editMarkColor">
-                <option value="">Default (Orange)</option>
-                <option value="#f97316">Orange</option>
-                <option value="#ef4444">Red (Port)</option>
-                <option value="#22c55e">Green (Starboard)</option>
-                <option value="#3b82f6">Blue</option>
-                <option value="#8b5cf6">Purple</option>
-            </select>
+            <div id="colorRow">
+                <label for="editMarkColor">Color</label>
+                <select id="editMarkColor">
+                    <option value="">Default (Orange)</option>
+                    <option value="#f97316">Orange</option>
+                    <option value="#ef4444">Red (Port)</option>
+                    <option value="#22c55e">Green (Starboard)</option>
+                    <option value="#3b82f6">Blue</option>
+                    <option value="#8b5cf6">Purple</option>
+                </select>
+            </div>
             <label for="editMarkComment">Comment</label>
             <input type="text" id="editMarkComment" placeholder="e.g., Port rounding">
             <div class="btn-row">
@@ -1858,17 +1860,22 @@
         
         function displayCourse(course) {
             clearCourseDisplay();
-            
+
             const points = [];
             
             // Start marker
             if (course.start) {
+                const startLabel = course.start.comment || null;
                 const marker = L.marker([course.start.lat, course.start.lon], {
-                    icon: createStartIcon()
+                    icon: createStartIcon(startLabel)
                 }).addTo(map);
                 let startPopup = '<strong>Start</strong>';
+                if (course.start.comment) {
+                    startPopup += `<br><em>${course.start.comment}</em>`;
+                }
                 if (adminMode) {
-                    startPopup += `<br><button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
+                    startPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
+                    startPopup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
                 }
                 marker.bindPopup(startPopup);
                 courseMarkers.push(marker);
@@ -1903,12 +1910,17 @@
             
             // Finish marker
             if (course.finish) {
+                const finishLabel = course.finish.comment || null;
                 const marker = L.marker([course.finish.lat, course.finish.lon], {
-                    icon: createFinishIcon()
+                    icon: createFinishIcon(finishLabel)
                 }).addTo(map);
                 let finishPopup = '<strong>Finish</strong>';
+                if (course.finish.comment) {
+                    finishPopup += `<br><em>${course.finish.comment}</em>`;
+                }
                 if (adminMode) {
-                    finishPopup += `<br><button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
+                    finishPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
+                    finishPopup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
                 }
                 marker.bindPopup(finishPopup);
                 courseMarkers.push(marker);
@@ -1928,17 +1940,18 @@
         }
         
         // Course marker icons
-        function createStartIcon() {
+        function createStartIcon(label = null) {
             const svg = `
                 <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="0" cy="0" r="12" fill="#22c55e" stroke="#166534" stroke-width="2"/>
                     <text x="0" y="5" text-anchor="middle" fill="white" font-size="12" font-weight="bold">S</text>
                 </svg>
             `;
+            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
             return L.divIcon({
-                html: svg,
+                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
                 className: 'course-marker',
-                iconSize: [32, 32],
+                iconSize: [32, 32 + (label ? 20 : 0)],
                 iconAnchor: [16, 16]
             });
         }
@@ -1969,7 +1982,7 @@
             });
         }
         
-        function createFinishIcon() {
+        function createFinishIcon(label = null) {
             const svg = `
                 <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
                     <!-- Checkered flag pattern -->
@@ -1984,10 +1997,11 @@
                     <rect x="6" y="6" width="6" height="6" fill="#333"/>
                 </svg>
             `;
+            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
             return L.divIcon({
-                html: svg,
+                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
                 className: 'course-marker',
-                iconSize: [32, 32],
+                iconSize: [32, 32 + (label ? 20 : 0)],
                 iconAnchor: [16, 16]
             });
         }
@@ -2099,14 +2113,31 @@
 
         // Mark edit functions
         function showEditMark(markIndex) {
-            if (!courseData || !courseData.marks || markIndex >= courseData.marks.length) return;
+            if (!courseData) return;
 
-            editingMarkIndex = markIndex;
-            const mark = courseData.marks[markIndex];
+            const colorRow = document.getElementById('colorRow');
 
-            document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
-            document.getElementById('editMarkColor').value = mark.color || '';
-            document.getElementById('editMarkComment').value = mark.comment || '';
+            if (markIndex === 'start') {
+                if (!courseData.start) return;
+                editingMarkIndex = 'start';
+                document.getElementById('editMarkNumber').textContent = 'Start';
+                document.getElementById('editMarkComment').value = courseData.start.comment || '';
+                colorRow.style.display = 'none';  // Hide color for start
+            } else if (markIndex === 'finish') {
+                if (!courseData.finish) return;
+                editingMarkIndex = 'finish';
+                document.getElementById('editMarkNumber').textContent = 'Finish';
+                document.getElementById('editMarkComment').value = courseData.finish.comment || '';
+                colorRow.style.display = 'none';  // Hide color for finish
+            } else {
+                if (!courseData.marks || markIndex >= courseData.marks.length) return;
+                editingMarkIndex = markIndex;
+                const mark = courseData.marks[markIndex];
+                document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
+                document.getElementById('editMarkColor').value = mark.color || '';
+                document.getElementById('editMarkComment').value = mark.comment || '';
+                colorRow.style.display = '';  // Show color for marks
+            }
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
@@ -2116,21 +2147,37 @@
         }
 
         async function saveEditMark() {
-            if (editingMarkIndex === null || !courseData || !courseData.marks) return;
+            if (editingMarkIndex === null || !courseData) return;
 
-            const color = document.getElementById('editMarkColor').value;
             const comment = document.getElementById('editMarkComment').value.trim();
 
-            // Update mark in courseData
-            if (color) {
-                courseData.marks[editingMarkIndex].color = color;
+            // Update the appropriate item in courseData
+            if (editingMarkIndex === 'start') {
+                if (comment) {
+                    courseData.start.comment = comment;
+                } else {
+                    delete courseData.start.comment;
+                }
+            } else if (editingMarkIndex === 'finish') {
+                if (comment) {
+                    courseData.finish.comment = comment;
+                } else {
+                    delete courseData.finish.comment;
+                }
             } else {
-                delete courseData.marks[editingMarkIndex].color;
-            }
-            if (comment) {
-                courseData.marks[editingMarkIndex].comment = comment;
-            } else {
-                delete courseData.marks[editingMarkIndex].comment;
+                // Regular mark - also handle color
+                if (!courseData.marks) return;
+                const color = document.getElementById('editMarkColor').value;
+                if (color) {
+                    courseData.marks[editingMarkIndex].color = color;
+                } else {
+                    delete courseData.marks[editingMarkIndex].color;
+                }
+                if (comment) {
+                    courseData.marks[editingMarkIndex].comment = comment;
+                } else {
+                    delete courseData.marks[editingMarkIndex].comment;
+                }
             }
 
             // Save course to server
