@@ -1242,7 +1242,37 @@
             }
 
             .speed-legend {
-                display: none;
+                bottom: 150px;
+                left: 10px;
+                padding: 6px;
+            }
+
+            .speed-legend h4 {
+                font-size: 10px;
+                margin-bottom: 4px;
+            }
+
+            .speed-gradient {
+                width: 100px;
+                height: 10px;
+            }
+
+            .speed-labels {
+                font-size: 9px;
+            }
+
+            .custom-scale {
+                bottom: 150px;
+                left: unset !important;
+                right: 10px;
+                padding: 4px 6px;
+                font-size: 11px;
+                width: fit-content;
+            }
+
+            .scale-bar {
+                height: 6px;
+                max-width: 60px !important;
             }
 
             #speed-graph-panel,
@@ -1253,6 +1283,7 @@
             #heartrate-graph-panel,
             #accuracy-graph-panel {
                 right: 0;
+                bottom: 130px;
             }
 
             .speed-graph-title,
@@ -4769,8 +4800,10 @@
             const accuracyVisible = document.getElementById('show-accuracy-graph').checked;
             const distanceVisible = document.getElementById('show-distance-graph').checked;
 
-            let totalHeight = 80; // timeline height
-            let currentBottom = 80;
+            // Get actual timeline height (different on mobile vs desktop)
+            const timelineHeight = document.getElementById('timeline').offsetHeight;
+            let totalHeight = timelineHeight;
+            let currentBottom = timelineHeight;
 
             // Stack from bottom: distance, accuracy, heartrate, latency, signal, battery, speed
             if (distanceVisible) {
