@@ -17,7 +17,7 @@
         // Load Google Maps API if key is available
         if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
             var script = document.createElement('script');
-            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY;
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY + '&loading=async';
             script.async = true;
             document.head.appendChild(script);
         }

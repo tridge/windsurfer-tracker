@@ -1784,7 +1784,7 @@
         // Load Google Maps API dynamically if API key is configured
         if (GMAPS_API_KEY && GMAPS_API_KEY !== 'YOUR_API_KEY_HERE') {
             var script = document.createElement('script');
-            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY;
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_API_KEY + '&loading=async';
             script.async = true;
             document.head.appendChild(script);
         }
@@ -2728,24 +2728,15 @@
 
             // Try to load main file and rotated files
             const baseUrl = `${DATA_BASE}logs/${logDate}.jsonl`;
-            const filesToTry = [baseUrl];
 
-            // Try numbered rotations
-            for (let i = 1; i <= 10; i++) {
-                filesToTry.push(`${baseUrl}.${i}`);
-            }
-
-            for (const file of filesToTry) {
-                try {
-                    const text = await fetchLogFile(file);
-                    if (!text) continue;
-
+            // Load base file first
+            try {
+                const text = await fetchLogFile(baseUrl);
+                if (text) {
                     const lines = text.trim().split('\n');
-
                     for (const line of lines) {
                         try {
                             const entry = JSON.parse(line);
-                            // Expand pos array entries (new format) or use directly (old format)
                             const expanded = expandEntry(entry);
                             for (const e of expanded) {
                                 if (e.lat && e.lon && e.ts) {
@@ -2754,9 +2745,33 @@
                             }
                         } catch (e) {}
                     }
+                    document.getElementById('status').textContent = `Loaded ${baseUrl}...`;
+                }
+            } catch (e) {}
 
+            // Try numbered rotations - stop on first missing file
+            for (let i = 1; i <= 10; i++) {
+                const file = `${baseUrl}.${i}`;
+                try {
+                    const text = await fetchLogFile(file);
+                    if (!text) break;  // If file N doesn't exist, N+1 won't either
+
+                    const lines = text.trim().split('\n');
+                    for (const line of lines) {
+                        try {
+                            const entry = JSON.parse(line);
+                            const expanded = expandEntry(entry);
+                            for (const e of expanded) {
+                                if (e.lat && e.lon && e.ts) {
+                                    allData.push(e);
+                                }
+                            }
+                        } catch (e) {}
+                    }
                     document.getElementById('status').textContent = `Loaded ${file}...`;
-                } catch (e) {}
+                } catch (e) {
+                    break;  // Stop on error too
+                }
             }
 
             if (allData.length === 0) {
