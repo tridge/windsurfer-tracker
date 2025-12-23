@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>Support - Windsurfer Tracker</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #0066cc;
+            text-align: center;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #0066cc;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .info-box {
+            background: #e8f4fd;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        li {
+            margin: 8px 0;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .support-option {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+        .support-option h3 {
+            margin-top: 0;
+            color: #0066cc;
+        }
+        .btn {
+            display: inline-block;
+            background: #0066cc;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            background: #0052a3;
+        }
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 0.9em;
+        }
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; Back to Tracker</a>
+
+    <h1>Support</h1>
+    <p style="text-align: center; color: #666;">Get help with Windsurfer Tracker</p>
+
+    <div class="section">
+        <h2>Getting Help</h2>
+
+        <div class="support-option">
+            <h3>1. Contact Your Event Administrator</h3>
+            <p>For questions about a specific event, the best first step is to contact the person who gave you the event password or event link. They can help with:</p>
+            <ul>
+                <li>Event-specific settings and passwords</li>
+                <li>Which server URL to use</li>
+                <li>Your role assignment (sailor, support, spectator)</li>
+                <li>Local event procedures</li>
+            </ul>
+        </div>
+
+        <div class="support-option">
+            <h3>2. Join the Community</h3>
+            <p>Join our Google Group to ask questions, share feedback, and connect with other users and developers:</p>
+            <a href="https://groups.google.com/g/wstracker" class="btn" target="_blank">Join wstracker@groups.google.com</a>
+            <p style="margin-top: 15px; color: #666; font-size: 0.9em;">This is the best place for general questions, feature requests, and community discussion.</p>
+        </div>
+
+        <div class="support-option">
+            <h3>3. Email Support</h3>
+            <p>For issues that require direct assistance, you can email us:</p>
+            <p><a href="mailto:windsurfertracker@gmail.com">windsurfertracker@gmail.com</a></p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Reporting Issues</h2>
+
+        <div class="warning-box">
+            <strong>Important:</strong> When reporting a problem, please include the following information to help us diagnose the issue quickly.
+        </div>
+
+        <h3>Required Information</h3>
+        <ul>
+            <li><strong>App Version:</strong> Find this on the Settings page of the app (scroll down to see the version number, e.g., "v1.2.3 (abc1234)")</li>
+            <li><strong>Device:</strong> Your phone/watch model (e.g., "iPhone 14", "Samsung Galaxy S23", "Galaxy Watch 5")</li>
+            <li><strong>Operating System:</strong> iOS version, Android version, or Wear OS version</li>
+        </ul>
+
+        <h3>Helpful Details</h3>
+        <ul>
+            <li><strong>Screenshots:</strong> Attach screenshots showing the issue or any error messages</li>
+            <li><strong>Steps to reproduce:</strong> What were you doing when the problem occurred?</li>
+            <li><strong>Event details:</strong> Which event were you tracking? (if applicable)</li>
+            <li><strong>Frequency:</strong> Does this happen every time, or only sometimes?</li>
+        </ul>
+
+        <div class="info-box">
+            <strong>Tip:</strong> The more details you provide, the faster we can help resolve your issue!
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Common Questions</h2>
+
+        <h3>The app isn't sending my location</h3>
+        <ul>
+            <li>Check that you've pressed "Start Tracking"</li>
+            <li>Ensure location permissions are granted (including background location)</li>
+            <li>Verify you have mobile data or WiFi connectivity</li>
+            <li>Check that the server URL and event password are correct</li>
+        </ul>
+
+        <h3>My position isn't showing on the map</h3>
+        <ul>
+            <li>Wait a few seconds - there may be network delay</li>
+            <li>Check your internet connection</li>
+            <li>Try refreshing the map page</li>
+            <li>Verify you're viewing the correct event</li>
+        </ul>
+
+        <h3>Battery drain concerns</h3>
+        <ul>
+            <li>GPS tracking does use battery - this is normal</li>
+            <li>Consider using a battery pack for long events</li>
+            <li>The app only uses GPS when you're actively tracking</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>Other Resources</h2>
+        <ul>
+            <li><a href="privacy.html">Privacy Policy</a></li>
+            <li><a href="https://github.com/tridge/windsurfer-tracker" target="_blank">Source Code on GitHub</a></li>
+            <li><a href="https://wstracker.org/install" target="_blank">App Installation Guide</a></li>
+        </ul>
+    </div>
+
+    <footer>
+        <p><a href="index.html">&larr; Back to Tracker</a></p>
+        <p>Windsurfer Tracker</p>
+    </footer>
+</body>
+</html>
