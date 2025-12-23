@@ -1982,6 +1982,7 @@
         let markerLayers = {};
         let pointLayers = {};
         let outlierLayers = {};  // Outlier markers per user
+        let cachedDistanceData = {};  // Cached distance calculations for hover display
         let selectedUsers = new Set();
         let playbackInterval = null;
         let playbackSpeed = 1;
@@ -3797,18 +3798,6 @@
             }
         }
 
-        // Haversine distance calculation between two lat/lon points (returns meters)
-        function haversineDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371000; // Earth radius in meters
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c;
-        }
-
         function drawDistanceGraph() {
             // Only draw if distance graph is visible
             if (!document.getElementById('show-distance-graph').checked) return;
@@ -3836,6 +3825,7 @@
             let maxDist = 0;
             let hasDistData = false;
             const userDistances = {};
+            cachedDistanceData = {};  // Reset cache
 
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
@@ -3861,7 +3851,7 @@
                 for (let i = 1; i < filtered.length; i++) {
                     const prev = filtered[i - 1];
                     const curr = filtered[i];
-                    const d = haversineDistance(prev.lat, prev.lon, curr.lat, curr.lon);
+                    const d = haversineDistance(prev.lat, prev.lon, curr.lat, curr.lon) * 1000; // km to meters
                     cumDist += d;
                     distances.push({ts: curr.ts, dist: cumDist});
                 }
@@ -3872,6 +3862,9 @@
                     hasDistData = true;
                 }
             }
+
+            // Cache for hover display
+            cachedDistanceData = userDistances;
 
             // Set sensible defaults and add padding
             if (!hasDistData || maxDist === 0) {
@@ -4490,10 +4483,41 @@
             const rect = e.target.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             showGraphHighlight(mouseX, 'distance-graph');
+
+            // Update title with distance at cursor position
+            const ratio = Math.max(0, Math.min(1, mouseX / rect.width));
+            const timestamp = rangeStartTime + ratio * (rangeEndTime - rangeStartTime);
+
+            // Find the distance at this timestamp (use first selected user's data)
+            let distAtCursor = null;
+            for (const [userId, distances] of Object.entries(cachedDistanceData)) {
+                if (distances.length === 0) continue;
+                // Find closest point before or at timestamp
+                let closest = distances[0];
+                for (const point of distances) {
+                    if (point.ts <= timestamp) {
+                        closest = point;
+                    } else {
+                        break;
+                    }
+                }
+                distAtCursor = closest.dist;
+                break;  // Just use first user for now
+            }
+
+            const titleEl = document.querySelector('.distance-graph-title');
+            if (distAtCursor !== null) {
+                const label = distAtCursor >= 1000 ? `${(distAtCursor / 1000).toFixed(2)}km` : `${Math.round(distAtCursor)}m`;
+                titleEl.textContent = `Distance: ${label}`;
+            } else {
+                titleEl.textContent = 'Distance (meters)';
+            }
         });
 
         document.getElementById('distance-graph').addEventListener('mouseleave', () => {
             clearGraphHighlight();
+            // Reset title
+            document.querySelector('.distance-graph-title').textContent = 'Distance (meters)';
         });
 
         // Graph resize functionality
