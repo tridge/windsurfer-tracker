@@ -963,6 +963,100 @@
             font-size: 10px;
         }
 
+        /* Distance graph panel */
+        #distance-graph-panel {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 300px;
+            height: 150px;
+            background: #1a252f;
+            border-top: 1px solid #34495e;
+            display: none;
+        }
+
+        #distance-graph-resize {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            background: linear-gradient(to bottom, #34495e, transparent);
+            z-index: 10;
+        }
+
+        #distance-graph-resize:hover,
+        #distance-graph-resize.dragging {
+            background: linear-gradient(to bottom, #27ae60, transparent);
+        }
+
+        #distance-graph-resize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            background: #5a6a7a;
+            border-radius: 2px;
+        }
+
+        #distance-graph-resize:hover::after,
+        #distance-graph-resize.dragging::after {
+            background: #7a8a9a;
+        }
+
+        #distance-graph-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 10px 50px 25px 50px;
+        }
+
+        #distance-graph {
+            width: 100%;
+            height: 100%;
+            background: #2c3e50;
+            border-radius: 4px;
+        }
+
+        .distance-graph-title {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #27ae60;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .distance-y-axis {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 25px;
+            width: 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
+        .distance-x-axis {
+            position: absolute;
+            bottom: 5px;
+            left: 50px;
+            right: 50px;
+            display: flex;
+            justify-content: space-between;
+            color: #95a5a6;
+            font-size: 10px;
+        }
+
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -1152,6 +1246,7 @@
             }
 
             #speed-graph-panel,
+            #distance-graph-panel,
             #battery-graph-panel,
             #signal-graph-panel,
             #latency-graph-panel,
@@ -1161,6 +1256,7 @@
             }
 
             .speed-graph-title,
+            .distance-graph-title,
             .battery-graph-title,
             .signal-graph-title,
             .latency-graph-title,
@@ -1170,6 +1266,7 @@
             }
 
             .speed-y-axis,
+            .distance-y-axis,
             .battery-y-axis,
             .signal-y-axis,
             .latency-y-axis,
@@ -1180,6 +1277,7 @@
             }
 
             #speed-graph-container,
+            #distance-graph-container,
             #battery-graph-container,
             #signal-graph-container,
             #latency-graph-container,
@@ -1399,6 +1497,7 @@
             <button id="graphs-btn">Graphs ▼</button>
             <div id="graphs-dropdown-content" class="graphs-dropdown-content">
                 <label><input type="checkbox" id="show-speed-graph"> Speed</label>
+                <label><input type="checkbox" id="show-distance-graph"> Distance</label>
                 <label><input type="checkbox" id="show-battery-graph"> Battery</label>
                 <label><input type="checkbox" id="show-signal-graph"> Signal</label>
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
@@ -1550,6 +1649,26 @@
             <div class="accuracy-x-axis">
                 <span id="accuracy-time-start">--:--</span>
                 <span id="accuracy-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Distance graph panel -->
+    <div id="distance-graph-panel">
+        <div id="distance-graph-resize"></div>
+        <div id="distance-graph-container">
+            <div class="distance-graph-title">Distance (meters)</div>
+            <div class="distance-y-axis" id="distance-y-labels">
+                <span>10000</span>
+                <span>7500</span>
+                <span>5000</span>
+                <span>2500</span>
+                <span>0</span>
+            </div>
+            <canvas id="distance-graph"></canvas>
+            <div class="distance-x-axis">
+                <span id="distance-time-start">--:--</span>
+                <span id="distance-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -2562,6 +2681,7 @@
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawDistanceGraph();
         }
 
         function updateSliderRange() {
@@ -2606,6 +2726,7 @@
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawDistanceGraph();
         }
 
         // Debounced version - waits for slider to stop moving before redrawing
@@ -3676,6 +3797,180 @@
             }
         }
 
+        // Haversine distance calculation between two lat/lon points (returns meters)
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Earth radius in meters
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function drawDistanceGraph() {
+            // Only draw if distance graph is visible
+            if (!document.getElementById('show-distance-graph').checked) return;
+
+            const canvas = document.getElementById('distance-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            document.getElementById('distance-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('distance-time-end').textContent = formatTimeShortInTz(rangeEndTime);
+
+            // Calculate cumulative distance for each user (only 10s points for CPU efficiency)
+            let maxDist = 0;
+            let hasDistData = false;
+            const userDistances = {};
+
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter to only 10s points (skip 1s high-frequency points)
+                // 10s points have gaps >= 5 seconds from the previous point
+                const filtered = [];
+                let lastTs = -Infinity;
+                for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                    // Only include points that are at least 5 seconds apart (to catch 10s points)
+                    if (entry.ts - lastTs >= 5) {
+                        filtered.push(entry);
+                        lastTs = entry.ts;
+                    }
+                }
+
+                if (filtered.length < 2) continue;
+
+                // Calculate cumulative distance
+                const distances = [{ts: filtered[0].ts, dist: 0}];
+                let cumDist = 0;
+                for (let i = 1; i < filtered.length; i++) {
+                    const prev = filtered[i - 1];
+                    const curr = filtered[i];
+                    const d = haversineDistance(prev.lat, prev.lon, curr.lat, curr.lon);
+                    cumDist += d;
+                    distances.push({ts: curr.ts, dist: cumDist});
+                }
+
+                if (distances.length > 1) {
+                    userDistances[userId] = distances;
+                    maxDist = Math.max(maxDist, cumDist);
+                    hasDistData = true;
+                }
+            }
+
+            // Set sensible defaults and add padding
+            if (!hasDistData || maxDist === 0) {
+                maxDist = 10000;
+            } else {
+                // Add 10% padding above max, round to nice number
+                maxDist = Math.ceil((maxDist * 1.1) / 1000) * 1000;
+                maxDist = Math.max(maxDist, 1000); // At least 1km range
+            }
+
+            // Update Y axis labels (show in km if over 10km, otherwise meters)
+            const yLabels = document.getElementById('distance-y-labels');
+            if (maxDist >= 10000) {
+                yLabels.innerHTML = `
+                    <span>${(maxDist / 1000).toFixed(1)}km</span>
+                    <span>${(maxDist * 0.75 / 1000).toFixed(1)}km</span>
+                    <span>${(maxDist * 0.5 / 1000).toFixed(1)}km</span>
+                    <span>${(maxDist * 0.25 / 1000).toFixed(1)}km</span>
+                    <span>0</span>
+                `;
+            } else {
+                yLabels.innerHTML = `
+                    <span>${Math.round(maxDist)}m</span>
+                    <span>${Math.round(maxDist * 0.75)}m</span>
+                    <span>${Math.round(maxDist * 0.5)}m</span>
+                    <span>${Math.round(maxDist * 0.25)}m</span>
+                    <span>0</span>
+                `;
+            }
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see distance graph', width / 2, height / 2);
+                return;
+            }
+
+            if (!hasDistData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Not enough data for distance calculation', width / 2, height / 2);
+                return;
+            }
+
+            // Draw distance line for each selected user
+            let colorIdx = 0;
+            for (const [userId, distances] of Object.entries(userDistances)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (distances.length < 2) continue;
+
+                // Draw the distance line
+                ctx.strokeStyle = '#27ae60'; // Green color for distance
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const point of distances) {
+                    const x = ((point.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (point.dist / maxDist) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (distances.length > 0) {
+                    const last = distances[distances.length - 1];
+                    const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (last.dist / maxDist) * height;
+                    ctx.fillStyle = '#27ae60';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'right';
+                    const distLabel = last.dist >= 1000 ? `${(last.dist / 1000).toFixed(2)}km` : `${Math.round(last.dist)}m`;
+                    ctx.fillText(`${getDisplayName(userId)}: ${distLabel}`, Math.min(x, width - 5), y - 5);
+                }
+            }
+        }
+
         // Graph hover highlighting (shared between battery, signal, and latency graphs)
         let graphHighlightMarkers = [];
         let pendingHighlightUpdate = null;
@@ -3717,6 +4012,9 @@
             }
             if (document.getElementById('show-accuracy-graph').checked) {
                 drawAccuracyGraph();
+            }
+            if (document.getElementById('show-distance-graph').checked) {
+                drawDistanceGraph();
             }
         }
 
@@ -4188,6 +4486,16 @@
             clearGraphHighlight();
         });
 
+        document.getElementById('distance-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'distance-graph');
+        });
+
+        document.getElementById('distance-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
         // Graph resize functionality
         let speedGraphHeight = parseInt(localStorage.getItem('speedGraphHeight')) || 150;
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
@@ -4195,18 +4503,21 @@
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
         let heartrateGraphHeight = parseInt(localStorage.getItem('heartrateGraphHeight')) || 150;
         let accuracyGraphHeight = parseInt(localStorage.getItem('accuracyGraphHeight')) || 150;
+        let distanceGraphHeight = parseInt(localStorage.getItem('distanceGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
         const signalPanel = document.getElementById('signal-graph-panel');
         const latencyPanel = document.getElementById('latency-graph-panel');
         const heartratePanel = document.getElementById('heartrate-graph-panel');
         const accuracyPanel = document.getElementById('accuracy-graph-panel');
+        const distancePanel = document.getElementById('distance-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
         const signalResizeHandle = document.getElementById('signal-graph-resize');
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
         const heartrateResizeHandle = document.getElementById('heartrate-graph-resize');
         const accuracyResizeHandle = document.getElementById('accuracy-graph-resize');
+        const distanceResizeHandle = document.getElementById('distance-graph-resize');
         let isResizing = false;
         let resizingPanel = null;
         let startY = 0;
@@ -4219,6 +4530,7 @@
         latencyPanel.style.height = latencyGraphHeight + 'px';
         heartratePanel.style.height = heartrateGraphHeight + 'px';
         accuracyPanel.style.height = accuracyGraphHeight + 'px';
+        distancePanel.style.height = distanceGraphHeight + 'px';
 
         function updateGraphPositions() {
             const mapEl = document.getElementById('map');
@@ -4228,11 +4540,21 @@
             const latencyVisible = document.getElementById('show-latency-graph').checked;
             const heartrateVisible = document.getElementById('show-heartrate-graph').checked;
             const accuracyVisible = document.getElementById('show-accuracy-graph').checked;
+            const distanceVisible = document.getElementById('show-distance-graph').checked;
 
             let totalHeight = 80; // timeline height
             let currentBottom = 80;
 
-            // Stack from bottom: accuracy, heartrate, latency, signal, battery, speed
+            // Stack from bottom: distance, accuracy, heartrate, latency, signal, battery, speed
+            if (distanceVisible) {
+                distancePanel.style.display = 'block';
+                distancePanel.style.bottom = currentBottom + 'px';
+                currentBottom += distanceGraphHeight;
+                totalHeight += distanceGraphHeight;
+            } else {
+                distancePanel.style.display = 'none';
+            }
+
             if (accuracyVisible) {
                 accuracyPanel.style.display = 'block';
                 accuracyPanel.style.bottom = currentBottom + 'px';
@@ -4356,6 +4678,17 @@
             e.preventDefault();
         });
 
+        distanceResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'distance';
+            startY = e.clientY;
+            startHeight = distancePanel.offsetHeight;
+            distanceResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
 
@@ -4380,6 +4713,9 @@
             } else if (resizingPanel === 'accuracy') {
                 accuracyPanel.style.height = newHeight + 'px';
                 accuracyGraphHeight = newHeight;
+            } else if (resizingPanel === 'distance') {
+                distancePanel.style.height = newHeight + 'px';
+                distanceGraphHeight = newHeight;
             }
 
             updateGraphPositions();
@@ -4392,6 +4728,7 @@
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawDistanceGraph();
         });
 
         document.addEventListener('mouseup', () => {
@@ -4403,6 +4740,7 @@
                 latencyResizeHandle.classList.remove('dragging');
                 heartrateResizeHandle.classList.remove('dragging');
                 accuracyResizeHandle.classList.remove('dragging');
+                distanceResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('speedGraphHeight', speedGraphHeight);
@@ -4411,6 +4749,7 @@
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
                 localStorage.setItem('heartrateGraphHeight', heartrateGraphHeight);
                 localStorage.setItem('accuracyGraphHeight', accuracyGraphHeight);
+                localStorage.setItem('distanceGraphHeight', distanceGraphHeight);
                 resizingPanel = null;
             }
         });
@@ -4614,6 +4953,13 @@
             }
         });
 
+        document.getElementById('show-distance-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawDistanceGraph();
+            }
+        });
+
         document.getElementById('reset-range-btn').addEventListener('click', () => {
             document.getElementById('start-slider').value = 0;
             document.getElementById('end-slider').value = 100;
@@ -4626,6 +4972,7 @@
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawDistanceGraph();
         });
 
         // Playback controls - animate through the selected range
