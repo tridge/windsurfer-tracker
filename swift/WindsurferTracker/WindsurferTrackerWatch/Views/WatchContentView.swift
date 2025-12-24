@@ -23,21 +23,21 @@ struct WatchConfigView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Header with settings gear
+            // Header with settings gear - left side to avoid clock
             HStack {
-                Spacer()
                 NavigationLink {
                     WatchSettingsView()
                         .environmentObject(viewModel)
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.title3)
+                        .font(.body)
                         .foregroundColor(.gray)
                 }
                 .buttonStyle(.plain)
+                Spacer()
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 4)
+            .padding(.leading, 16)
+            .padding(.top, 20)
 
             Spacer()
 

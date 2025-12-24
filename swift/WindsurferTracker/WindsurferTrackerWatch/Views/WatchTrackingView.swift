@@ -69,12 +69,11 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Speed - large and prominent
-                VStack(spacing: 0) {
+                // Speed - large and prominent, kts inline to save space
+                HStack(alignment: .lastTextBaseline, spacing: 2) {
                     Text(speedText)
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-
                     Text("kts")
                         .font(.caption)
                         .foregroundColor(.gray)

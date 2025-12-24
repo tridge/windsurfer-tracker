@@ -27,6 +27,13 @@ public actor NetworkManager {
     // ACK tracking
     private var pendingAcks: [Int: CheckedContinuation<AckResponse?, Never>] = [:]
 
+    // MARK: - Path Monitoring
+
+    /// Network path monitor to detect constrained paths (e.g., Bluetooth relay)
+    private let pathMonitor = NWPathMonitor()
+    private var isPathConstrained = false
+    private var currentInterfaceType: NWInterface.InterfaceType = .other
+
     // MARK: - Configuration
 
     private var serverHost: String = TrackerConfig.defaultServerHost
@@ -34,7 +41,41 @@ public actor NetworkManager {
 
     // MARK: - Initialization
 
-    public init() {}
+    public init() {
+        // Start path monitoring on a dedicated queue
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+            Task {
+                await self.handlePathUpdate(path)
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "network.path.monitor"))
+    }
+
+    private func handlePathUpdate(_ path: NWPath) {
+        let wasConstrained = isPathConstrained
+        isPathConstrained = path.isConstrained
+
+        // Determine interface type
+        if path.usesInterfaceType(.wifi) {
+            currentInterfaceType = .wifi
+        } else if path.usesInterfaceType(.cellular) {
+            currentInterfaceType = .cellular
+        } else if path.usesInterfaceType(.wiredEthernet) {
+            currentInterfaceType = .wiredEthernet
+        } else {
+            currentInterfaceType = .other
+        }
+
+        print("[NET] Path update: status=\(path.status), constrained=\(isPathConstrained), interface=\(currentInterfaceType), expensive=\(path.isExpensive)")
+
+        // If path changed from constrained to unconstrained, try UDP again
+        if wasConstrained && !isPathConstrained {
+            print("[NET] Path no longer constrained, will retry UDP")
+            useHttpFallback = false
+            consecutiveUdpFailures = 0
+        }
+    }
 
     // MARK: - Configuration
 
@@ -57,9 +98,11 @@ public actor NetworkManager {
         if useHttpFallback {
             if let lastRetry = lastHttpRetryTime,
                Date().timeIntervalSince(lastRetry) >= TrackerConfig.httpRetryIntervalSeconds {
-                // Try UDP again
-                useHttpFallback = false
-                consecutiveUdpFailures = 0
+                // Try UDP again (but only if path is not constrained)
+                if !isPathConstrained {
+                    useHttpFallback = false
+                    consecutiveUdpFailures = 0
+                }
             }
         }
 
@@ -68,11 +111,23 @@ public actor NetworkManager {
             return nil
         }
 
+        // On watchOS, UDP only works in foreground due to aggressive power management
+        // (see TN3135: Low-level networking on watchOS). Always use HTTP.
+        #if os(watchOS)
+        return await sendHTTP(data, sequence: packet.sq)
+        #else
+        // On constrained paths (e.g., Bluetooth relay), UDP may be blocked
+        if isPathConstrained {
+            print("[NET] Path is constrained, using HTTP directly")
+            return await sendHTTP(data, sequence: packet.sq)
+        }
+
         if useHttpFallback {
             return await sendHTTP(data, sequence: packet.sq)
         } else {
             return await sendUDP(data, sequence: packet.sq)
         }
+        #endif
     }
 
     // MARK: - UDP Communication
@@ -145,6 +200,13 @@ public actor NetworkManager {
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
 
+        // Try to help UDP traverse watch→iPhone Bluetooth relay
+        parameters.prohibitExpensivePaths = false
+        parameters.prohibitConstrainedPaths = false
+
+        // Prefer WiFi over Bluetooth relay if available
+        parameters.serviceClass = .responsiveData
+
         let connection = NWConnection(to: endpoint, using: parameters)
 
         // Use a class to track if continuation was already resumed
@@ -163,6 +225,13 @@ public actor NetworkManager {
                         tracker.resumed = true
                         continuation.resume()
                     }
+                case .waiting(let error):
+                    // Network is down or blocked - treat as failure
+                    print("[NET] UDP connection waiting with error: \(error)")
+                    if !tracker.resumed {
+                        tracker.resumed = true
+                        continuation.resume()
+                    }
                 default:
                     break
                 }
@@ -170,11 +239,17 @@ public actor NetworkManager {
             connection.start(queue: .global(qos: .userInitiated))
         }
 
-        udpConnection = connection
-        print("[NET] UDP connection created, state: \(connection.state)")
-
-        // Start receiving
-        startReceiving(on: connection)
+        // Only keep connection if it's ready
+        if connection.state == .ready {
+            udpConnection = connection
+            print("[NET] UDP connection created, state: \(connection.state)")
+            // Start receiving
+            startReceiving(on: connection)
+        } else {
+            print("[NET] UDP connection failed to reach ready state: \(connection.state)")
+            connection.cancel()
+            udpConnection = nil
+        }
     }
 
     private func startReceiving(on connection: NWConnection) {
@@ -355,5 +430,30 @@ public actor NetworkManager {
     /// Get consecutive UDP failure count
     public var udpFailureCount: Int {
         consecutiveUdpFailures
+    }
+
+    /// Check if path is constrained (e.g., Bluetooth relay blocks UDP)
+    public var isOnConstrainedPath: Bool {
+        isPathConstrained
+    }
+
+    /// Get current interface type
+    public var networkInterfaceType: NWInterface.InterfaceType {
+        currentInterfaceType
+    }
+
+    /// Get transport being used (for UI display)
+    public var currentTransport: String {
+        #if os(watchOS)
+        return "HTTP"  // watchOS always uses HTTP (TN3135)
+        #else
+        if isPathConstrained {
+            return "HTTP (constrained)"
+        } else if useHttpFallback {
+            return "HTTP (fallback)"
+        } else {
+            return "UDP"
+        }
+        #endif
     }
 }

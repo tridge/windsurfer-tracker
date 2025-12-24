@@ -173,11 +173,27 @@ public final class BatteryMonitor: ObservableObject {
     }
 
     private func updateWatchOSBatteryState() {
-        // WatchKit doesn't expose battery level directly
-        // Battery info requires HealthKit or is unavailable
-        // For now, report as unavailable
-        level = -1
-        isCharging = false
+        let device = WKInterfaceDevice.current()
+
+        // Enable battery monitoring
+        device.isBatteryMonitoringEnabled = true
+
+        let batteryLevel = device.batteryLevel
+        if batteryLevel >= 0 {
+            level = Int(batteryLevel * 100)
+        } else {
+            level = -1
+        }
+
+        switch device.batteryState {
+        case .charging, .full:
+            isCharging = true
+        case .unplugged, .unknown:
+            isCharging = false
+        @unknown default:
+            isCharging = false
+        }
+
         updateDrainRate()
     }
     #endif
