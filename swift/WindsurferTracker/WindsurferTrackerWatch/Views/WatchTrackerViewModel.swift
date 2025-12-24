@@ -20,6 +20,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     @Published public var ackRatePercent: Int = 0
     @Published public var packetsSent: Int = 0
     @Published public var packetsAcked: Int = 0
+    @Published public var workoutState: String = ""
 
     // MARK: - Workout Session (for background tracking)
 
@@ -179,12 +180,15 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 }
 
                 // Try to start workout session in background for background mode support
-                // Don't await - let it run independently
+                workoutState = "starting..."
                 Task.detached { [weak self] in
                     do {
                         try await self?.startWorkoutSession()
                     } catch {
-                        print("Workout session failed: \(error.localizedDescription)")
+                        print("[WORKOUT] Session failed: \(error.localizedDescription)")
+                        await MainActor.run {
+                            self?.workoutState = "failed"
+                        }
                     }
                 }
             } catch {
@@ -245,8 +249,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         workoutBuilder = builder
 
         // Start session and builder
+        print("[WORKOUT] Starting workout session...")
         session.startActivity(with: Date())
         try await builder.beginCollection(at: Date())
+        print("[WORKOUT] Workout session started successfully")
     }
 
     private func stopWorkoutSession() async {
@@ -280,6 +286,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             ackRatePercent = 0
             packetsSent = 0
             packetsAcked = 0
+            workoutState = ""
             WKInterfaceDevice.current().play(.stop)
         }
     }
@@ -336,6 +343,18 @@ extension WatchTrackerViewModel: HKWorkoutSessionDelegate {
         date: Date
     ) {
         Task { @MainActor in
+            // Update state display
+            switch toState {
+            case .notStarted: workoutState = "not started"
+            case .running: workoutState = "running"
+            case .ended: workoutState = "ended"
+            case .paused: workoutState = "paused"
+            case .prepared: workoutState = "prepared"
+            case .stopped: workoutState = "stopped"
+            @unknown default: workoutState = "unknown"
+            }
+            print("[WORKOUT] State changed: \(fromState.rawValue) -> \(toState.rawValue) (\(workoutState))")
+
             switch toState {
             case .ended:
                 // Workout ended - stop tracking if still active
@@ -344,6 +363,10 @@ extension WatchTrackerViewModel: HKWorkoutSessionDelegate {
                     isTracking = false
                     errorMessage = "Workout session ended"
                 }
+            case .paused:
+                // Resume the workout if it gets paused
+                print("[WORKOUT] Resuming paused workout...")
+                workoutSession.resume()
             case .running:
                 // Workout is running - good for background
                 break
@@ -357,8 +380,10 @@ extension WatchTrackerViewModel: HKWorkoutSessionDelegate {
         _ workoutSession: HKWorkoutSession,
         didFailWithError error: Error
     ) {
-        // Don't show error to user - workout session is optional for background support
-        print("Workout session error: \(error.localizedDescription)")
+        Task { @MainActor in
+            workoutState = "error"
+            print("[WORKOUT] Session error: \(error.localizedDescription)")
+        }
     }
 }
 

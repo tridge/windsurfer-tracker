@@ -98,10 +98,17 @@ struct WatchTrackingView: View {
                         .frame(width: 8, height: 8)
                 }
 
-                // Tap to stop hint
-                Text("Tap to stop")
-                    .font(.system(size: 10))
-                    .foregroundColor(.gray)
+                // Tap to stop hint + workout state
+                HStack(spacing: 4) {
+                    Text("Tap to stop")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                    if !viewModel.workoutState.isEmpty {
+                        Text("• \(viewModel.workoutState)")
+                            .font(.system(size: 10))
+                            .foregroundColor(viewModel.workoutState == "running" ? .green : .orange)
+                    }
+                }
 
                 // Error message
                 if let error = viewModel.errorMessage {
