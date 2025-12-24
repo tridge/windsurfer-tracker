@@ -6,12 +6,14 @@ All apps are synced to the same version (using max of current versions).
 Watch apps (Wear OS and watchOS) get build/code +1 to avoid conflicts.
 
 Usage:
-  ./increment_version.py          # Increment minor: 1.8.5 -> 1.9.0
-  ./increment_version.py --patch  # Increment patch: 1.8.5 -> 1.8.6
-  ./increment_version.py --major  # Increment major: 1.8.5 -> 2.0.0
-  ./increment_version.py --dry-run  # Show what would change without modifying files
+  ./increment_version.py              # Increment minor: 1.8.5 -> 1.9.0
+  ./increment_version.py --patch      # Increment patch: 1.8.5 -> 1.8.6
+  ./increment_version.py --major      # Increment major: 1.8.5 -> 2.0.0
+  ./increment_version.py --set 2.0.0  # Set explicit version
+  ./increment_version.py --dry-run    # Show what would change
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -141,7 +143,6 @@ def update_swift(new_version: str, ios_build: int, watch_build: int, dry_run: bo
     )
 
     # Add/update watchOS-specific build number in its settings section
-    # Look for the watchOS target settings and add CURRENT_PROJECT_VERSION there
     watch_settings_pattern = r'(WindsurferTrackerWatch:.*?settings:\s*\n\s*base:\s*\n)(.*?)((?=\n\w)|\Z)'
 
     def add_watch_build(match):
@@ -164,29 +165,34 @@ def update_swift(new_version: str, ios_build: int, watch_build: int, dry_run: bo
 
 
 def main():
-    dry_run = '--dry-run' in sys.argv
-    major_mode = '--major' in sys.argv
-    patch_mode = '--patch' in sys.argv
+    parser = argparse.ArgumentParser(
+        description='Increment version numbers for Android, Wear OS, and Swift apps.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s              Increment minor version (1.8.5 -> 1.9.0)
+  %(prog)s --patch      Increment patch version (1.8.5 -> 1.8.6)
+  %(prog)s --major      Increment major version (1.8.5 -> 2.0.0)
+  %(prog)s --set 2.0.0  Set explicit version number
+  %(prog)s --dry-run    Preview changes without modifying files
+'''
+    )
 
-    if major_mode and patch_mode:
-        print("Error: Cannot use both --major and --patch")
-        sys.exit(1)
+    increment_group = parser.add_mutually_exclusive_group()
+    increment_group.add_argument('--major', action='store_true',
+                                  help='Increment major version (X.0.0)')
+    increment_group.add_argument('--patch', action='store_true',
+                                  help='Increment patch version (x.y.Z)')
+    increment_group.add_argument('--set', metavar='VERSION',
+                                  help='Set explicit version (e.g., 2.0.0)')
 
-    if dry_run:
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Show what would change without modifying files')
+
+    args = parser.parse_args()
+
+    if args.dry_run:
         print("DRY RUN - no files will be modified\n")
-
-    # Determine increment type
-    if major_mode:
-        increment_type = "major"
-        increment_func = increment_major_version
-    elif patch_mode:
-        increment_type = "patch"
-        increment_func = increment_patch_version
-    else:
-        increment_type = "minor"
-        increment_func = increment_minor_version
-
-    print(f"Incrementing {increment_type} version\n")
 
     # Read current versions from all apps
     android_content = ANDROID_GRADLE.read_text()
@@ -201,7 +207,7 @@ def main():
     print(f"Current Wear OS version: {wear_version} (code {wear_code})")
     print(f"Current Swift version: {swift_version} (build {swift_build})")
 
-    # Find max version and increment from there
+    # Find max version for base
     android_tuple = parse_version_tuple(android_version)
     wear_tuple = parse_version_tuple(wear_version)
     swift_tuple = parse_version_tuple(swift_version)
@@ -217,8 +223,21 @@ def main():
         base_version = swift_version
         print(f"\nUsing Swift version as base: {base_version}")
 
-    # Increment version
-    new_version = increment_func(base_version)
+    # Determine new version
+    if args.set:
+        new_version = args.set
+        increment_type = "set"
+    elif args.major:
+        new_version = increment_major_version(base_version)
+        increment_type = "major"
+    elif args.patch:
+        new_version = increment_patch_version(base_version)
+        increment_type = "patch"
+    else:
+        new_version = increment_minor_version(base_version)
+        increment_type = "minor"
+
+    print(f"\nIncrementing {increment_type} version")
 
     # Use max build/code number + 1 for phone apps, +2 for watch apps
     new_code = max(android_code, wear_code, swift_build) + 1
@@ -230,21 +249,20 @@ def main():
 
     # Update all apps
     print("\nAndroid (build.gradle.kts):")
-    old_android = update_android(new_version, new_code, dry_run)
+    old_android = update_android(new_version, new_code, args.dry_run)
     print(f"  Version: {old_android} -> {new_version} (code {new_code})")
 
     print("\nWear OS (build.gradle.kts):")
-    old_wear = update_wear(new_version, watch_code, dry_run)
+    old_wear = update_wear(new_version, watch_code, args.dry_run)
     print(f"  Version: {old_wear} -> {new_version} (code {watch_code})")
 
     print("\nSwift (project.yml):")
-    old_swift = update_swift(new_version, new_code, watch_code, dry_run)
+    old_swift = update_swift(new_version, new_code, watch_code, args.dry_run)
     print(f"  iOS: {old_swift} -> {new_version} (build {new_code})")
     print(f"  watchOS: {old_swift} -> {new_version} (build {watch_code})")
 
-    if not dry_run:
-        print(f"\n{increment_type.capitalize()} version incremented and synced successfully!")
-        print(f"All apps now at version: {new_version}")
+    if not args.dry_run:
+        print(f"\nVersion updated successfully to {new_version}")
     else:
         print("\nRun without --dry-run to apply changes")
 
