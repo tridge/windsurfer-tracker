@@ -16,7 +16,7 @@ public enum TrackerConfig {
 
     // MARK: - Thresholds
     public static let maxAccuracyMeters: Double = 100.0
-    public static let httpFallbackThreshold = 3  // Switch to HTTP after this many UDP failures
+    public static let httpFallbackThreshold = 1  // Switch to HTTP after this many UDP failures (was 3, lowered for watch debugging)
     public static let highFrequencyBatchSize = 10  // Positions per packet in 1Hz mode
     public static let batteryDrainMinMinutes: TimeInterval = 5  // Min time before reporting drain rate
 

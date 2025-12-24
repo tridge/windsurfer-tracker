@@ -35,7 +35,7 @@ android {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 30  // Wear OS 3.0 minimum
         targetSdk = 35
-        versionCode = 41
+        versionCode = 42
         versionName = "1.9.10"
 
         // Add version info as build config fields

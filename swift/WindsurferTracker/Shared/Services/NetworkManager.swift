@@ -81,39 +81,53 @@ public actor NetworkManager {
         // Resolve DNS
         let (host, _) = await dnsResolver.resolve(serverHost)
         let endpoint = NWEndpoint.hostPort(host: host, port: NWEndpoint.Port(rawValue: serverPort)!)
+        print("[NET] UDP send seq=\(sequence) to \(serverHost):\(serverPort) -> \(host)")
 
         // Create or reuse connection
         if udpConnection == nil || udpConnection?.state == .cancelled {
+            print("[NET] Creating new UDP connection...")
             await createUDPConnection(to: endpoint)
         }
 
         guard let connection = udpConnection else {
+            print("[NET] UDP connection failed to create")
             await handleUDPFailure()
             return nil
         }
+
+        print("[NET] UDP connection state: \(connection.state)")
 
         // Send with retries
         for attempt in 0..<TrackerConfig.udpRetryCount {
             // Send packet
             let sendSuccess = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
                 connection.send(content: data, completion: .contentProcessed { error in
+                    if let error = error {
+                        print("[NET] UDP send error: \(error)")
+                    }
                     continuation.resume(returning: error == nil)
                 })
             }
 
             guard sendSuccess else {
+                print("[NET] UDP send failed attempt \(attempt + 1)")
                 continue
             }
+
+            print("[NET] UDP sent seq=\(sequence) attempt \(attempt + 1), waiting for ACK...")
 
             // Wait for ACK with timeout
             let ackResponse = await waitForACK(sequence: sequence, timeout: TrackerConfig.ackTimeoutSeconds)
 
             if let response = ackResponse {
+                print("[NET] UDP ACK received for seq=\(response.ack)")
                 consecutiveUdpFailures = 0
                 nonisolated(unsafe) let pub = connectionStatePublisher
                 pub.send(true)
                 return response
             }
+
+            print("[NET] UDP ACK timeout attempt \(attempt + 1)")
 
             // Delay before retry (except on last attempt)
             if attempt < TrackerConfig.udpRetryCount - 1 {
@@ -122,6 +136,7 @@ public actor NetworkManager {
         }
 
         // All retries failed
+        print("[NET] UDP all \(TrackerConfig.udpRetryCount) attempts failed, failures=\(consecutiveUdpFailures + 1)")
         await handleUDPFailure()
         return nil
     }
@@ -141,6 +156,7 @@ public actor NetworkManager {
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             connection.stateUpdateHandler = { state in
+                print("[NET] UDP connection state changed: \(state)")
                 switch state {
                 case .ready, .failed, .cancelled:
                     if !tracker.resumed {
@@ -155,6 +171,7 @@ public actor NetworkManager {
         }
 
         udpConnection = connection
+        print("[NET] UDP connection created, state: \(connection.state)")
 
         // Start receiving
         startReceiving(on: connection)
@@ -164,7 +181,12 @@ public actor NetworkManager {
         connection.receiveMessage { [weak self] content, _, _, error in
             guard let self = self else { return }
 
+            if let error = error {
+                print("[NET] UDP receive error: \(error)")
+            }
+
             if let data = content {
+                print("[NET] UDP received \(data.count) bytes")
                 Task {
                     await self.handleReceivedData(data)
                 }
@@ -238,6 +260,7 @@ public actor NetworkManager {
         consecutiveUdpFailures += 1
 
         if consecutiveUdpFailures >= TrackerConfig.httpFallbackThreshold {
+            print("[NET] Switching to HTTP fallback after \(consecutiveUdpFailures) UDP failures")
             useHttpFallback = true
             lastHttpRetryTime = Date()
             nonisolated(unsafe) let pub = connectionStatePublisher
@@ -258,9 +281,12 @@ public actor NetworkManager {
         let port = serverHost == "wstracker.org" ? 443 : serverPort
 
         guard let url = URL(string: "\(proto)://\(serverHost):\(port)/api/tracker") else {
+            print("[NET] HTTP invalid URL")
             errorPublisher.send(.serverUnreachable)
             return nil
         }
+
+        print("[NET] HTTP POST seq=\(sequence) to \(url)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -273,15 +299,19 @@ public actor NetworkManager {
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                print("[NET] HTTP error status=\(status)")
                 errorPublisher.send(.serverUnreachable)
                 return nil
             }
 
             let ackResponse = try JSONDecoder().decode(AckResponse.self, from: responseData)
+            print("[NET] HTTP ACK received for seq=\(ackResponse.ack)")
             ackPublisher.send(ackResponse)
             return ackResponse
 
         } catch {
+            print("[NET] HTTP error: \(error)")
             errorPublisher.send(.serverUnreachable)
             return nil
         }
