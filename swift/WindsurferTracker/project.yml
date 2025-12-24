@@ -71,9 +71,8 @@ targets:
       - WindsurferTrackerWatch
     dependencies:
       - sdk: HealthKit.framework
-    capabilities:
-      HealthKit:
-        background: true
+    entitlements:
+      path: WindsurferTrackerWatch/WindsurferTrackerWatch.entitlements
     info:
       path: WindsurferTrackerWatch/Resources/Info.plist
       properties:
