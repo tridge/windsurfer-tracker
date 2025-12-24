@@ -35,6 +35,9 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+	</array>
+	<key>WKBackgroundModes</key>
+	<array>
 		<string>workout-processing</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>

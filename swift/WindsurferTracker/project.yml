@@ -90,6 +90,7 @@ targets:
         NSHealthUpdateUsageDescription: "Windsurfer Tracker records workouts to enable background GPS tracking during races."
         UIBackgroundModes:
           - location
+        WKBackgroundModes:
           - workout-processing
     settings:
       base:
