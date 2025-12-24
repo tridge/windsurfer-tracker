@@ -196,7 +196,31 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     // MARK: - Workout Session (for background GPS)
 
+    private func requestWorkoutAuthorization() async -> Bool {
+        let workoutType = HKObjectType.workoutType()
+        let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
+        let activeEnergyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
+
+        do {
+            try await healthStore.requestAuthorization(
+                toShare: [workoutType],
+                read: [heartRateType, activeEnergyType]
+            )
+            return true
+        } catch {
+            print("Workout authorization failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private func startWorkoutSession() async throws {
+        // Request workout authorization first
+        let authorized = await requestWorkoutAuthorization()
+        if !authorized {
+            print("Workout authorization not granted")
+            return
+        }
+
         // End any existing session
         await stopWorkoutSession()
 
