@@ -73,6 +73,8 @@ targets:
       - sdk: HealthKit.framework
     entitlements:
       path: WindsurferTrackerWatch/WindsurferTrackerWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     info:
       path: WindsurferTrackerWatch/Resources/Info.plist
       properties:
