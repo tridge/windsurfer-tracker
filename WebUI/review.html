@@ -1791,9 +1791,9 @@
         }
     </script>
     <script>
-        // Event ID from URL parameter (default to 1 for backwards compatibility)
+        // Event ID from URL parameter (default to 2)
         const urlParams = new URLSearchParams(window.location.search);
-        const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+        const EVENT_ID = parseInt(urlParams.get('eid')) || 2;
         const DATA_BASE = `${EVENT_ID}/`;
 
         // Store event info for modal
@@ -1865,6 +1865,9 @@
         // Build shareable URL with current view state
         function buildShareableUrl() {
             const params = new URLSearchParams();
+
+            // Event ID
+            params.set('eid', EVENT_ID);
 
             // Map state
             const center = map.getCenter();
