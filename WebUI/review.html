@@ -1879,8 +1879,8 @@
             const dateStr = document.getElementById('date-picker').value;
             if (dateStr) params.set('date', dateStr);
 
-            // Selected log file
-            if (currentLogFile) params.set('log', currentLogFile);
+            // Selected log (by start timestamp for stability across rotations)
+            if (currentLogStartTs) params.set('logts', currentLogStartTs);
 
             // Selected users
             if (selectedUsers.size > 0) {
@@ -2011,8 +2011,9 @@
                             }
                         }
 
-                        // Center map on event home location if available
-                        if (event.home_lat && event.home_lon) {
+                        // Center map on event home location if available (only if URL doesn't specify position)
+                        const urlPosParams = new URLSearchParams(window.location.search);
+                        if (event.home_lat && event.home_lon && !urlPosParams.has('lat')) {
                             map.setView([event.home_lat, event.home_lon], 13);
                         }
                     }
@@ -2168,6 +2169,7 @@
         let rangeEndTime = 0;    // User-selected end time
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
+        let currentLogStartTs = null;  // Start timestamp of current log (for stable URLs)
         let sliderDebounceTimer = null;  // Debounce timer for slider redraw
         let courseMarkers = [];  // Course marker layers
         let courseLines = [];    // Course line layers
@@ -2527,6 +2529,7 @@
             // Clear previous state
             currentSummary = null;
             currentLogFile = null;
+            currentLogStartTs = null;
             allData = [];
             userData = {};
             selectedUsers = new Set();
@@ -2596,19 +2599,27 @@
 
             // Auto-select log from URL params if present
             const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.has('log')) {
+            let matchingLog = null;
+
+            // Prefer logts (timestamp) over log (filename) for stability across rotations
+            if (urlParams.has('logts')) {
+                const targetTs = parseInt(urlParams.get('logts'));
+                matchingLog = currentSummary.logs.find(log => log.start_ts === targetTs);
+            } else if (urlParams.has('log')) {
+                // Legacy: match by filename
                 const targetLog = urlParams.get('log');
-                const matchingLog = currentSummary.logs.find(log => log.file === targetLog);
-                if (matchingLog) {
-                    const index = currentSummary.logs.indexOf(matchingLog);
-                    const logDiv = container.querySelector(`[data-index="${index}"]`);
-                    if (logDiv) {
-                        logDiv.classList.add('selected');
-                        loadRace(matchingLog).then(() => {
-                            restoreDataDependentState(urlParams);
-                            drawTracks();
-                        });
-                    }
+                matchingLog = currentSummary.logs.find(log => log.file === targetLog);
+            }
+
+            if (matchingLog) {
+                const index = currentSummary.logs.indexOf(matchingLog);
+                const logDiv = container.querySelector(`[data-index="${index}"]`);
+                if (logDiv) {
+                    logDiv.classList.add('selected');
+                    loadRace(matchingLog).then(() => {
+                        restoreDataDependentState(urlParams);
+                        drawTracks();
+                    });
                 }
             }
         }
@@ -2646,6 +2657,7 @@
             document.getElementById('status').textContent = `Loading ${logEntry.file}...`;
 
             currentLogFile = logEntry.file;
+            currentLogStartTs = logEntry.start_ts;
             allData = [];
             userData = {};
             selectedUsers = new Set();
