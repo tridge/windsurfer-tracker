@@ -47,6 +47,7 @@ key.properties
 keys/
 keystore.properties
 local.properties
+play-store-key.json
 /app/
 take_app_screenshots.sh
 restart_sim_tracks.sh
