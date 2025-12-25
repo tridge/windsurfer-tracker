@@ -157,15 +157,20 @@ def sanitize_tracker_packet(packet: dict) -> dict:
         sanitized['ps'] = sanitize_bool(packet.get('ps'), default=False)
 
     # Pass through pos array (1Hz mode) with sanitized values
+    # Format: [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
     if 'pos' in packet and isinstance(packet.get('pos'), list):
         sanitized_pos = []
         for pos in packet['pos'][:100]:  # Limit to 100 positions
             if isinstance(pos, list) and len(pos) >= 3:
-                sanitized_pos.append([
+                entry = [
                     sanitize_int(pos[0], default=0, min_val=0),  # timestamp
                     sanitize_float(pos[1], default=0.0, min_val=-90.0, max_val=90.0),  # lat
                     sanitize_float(pos[2], default=0.0, min_val=-180.0, max_val=180.0)  # lon
-                ])
+                ]
+                # Include speed if present (4th element)
+                if len(pos) >= 4:
+                    entry.append(sanitize_float(pos[3], default=0.0, min_val=0.0, max_val=100.0))  # spd in knots
+                sanitized_pos.append(entry)
         if sanitized_pos:
             sanitized['pos'] = sanitized_pos
 
