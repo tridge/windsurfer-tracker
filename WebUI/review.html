@@ -1769,9 +1769,8 @@
         <div class="speed-gradient"></div>
         <div class="speed-labels">
             <span>0</span>
-            <span>5</span>
-            <span>10</span>
-            <span>15+</span>
+            <span>7.5</span>
+            <span>15</span>
         </div>
     </div>
 
@@ -2464,10 +2463,13 @@
             '#1abc9c', '#e91e63', '#00bcd4', '#ff5722', '#795548'
         ];
 
-        // Speed to color (0-15+ knots)
+        // Speed scale max (updated dynamically based on data)
+        let speedScaleMax = 15;
+
+        // Speed to color (0 to speedScaleMax knots)
         function speedToColor(speedKnots) {
             const knots = speedKnots;  // spd is already in knots
-            const ratio = Math.min(knots / 15, 1);
+            const ratio = Math.min(knots / speedScaleMax, 1);
 
             if (ratio < 0.33) {
                 // Blue to green
@@ -2982,6 +2984,30 @@
         }
 
         function drawTracks() {
+            // Calculate max speed from visible data and update scale
+            const useSpeedColorForScale = document.getElementById('speed-color').checked;
+            if (useSpeedColorForScale) {
+                let maxSpeedInData = 0;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                        if (entry.spd !== undefined && entry.spd !== null && entry.spd > 0) {
+                            maxSpeedInData = Math.max(maxSpeedInData, entry.spd);
+                        }
+                    }
+                }
+                // Round up to nearest 5 knots, minimum 5
+                speedScaleMax = Math.max(5, Math.ceil(maxSpeedInData / 5) * 5);
+                // Update legend labels
+                const mid = speedScaleMax / 2;
+                document.querySelector('.speed-labels').innerHTML = `
+                    <span>0</span>
+                    <span>${mid}</span>
+                    <span>${speedScaleMax}</span>
+                `;
+            }
+
             // Clear existing layers
             for (const layer of Object.values(trackLayers)) {
                 map.removeLayer(layer);
