@@ -72,8 +72,9 @@ class TrackerService : LifecycleService() {
     private var highFrequencyMode: Boolean = false
     private var heartRateEnabled: Boolean = false
 
-    // 1Hz mode position buffer
-    private val positionBuffer = mutableListOf<Triple<Long, Double, Double>>()
+    // 1Hz mode position buffer: [[ts, lat, lon, spd], ...]
+    private data class BufferedPosition(val ts: Long, val lat: Double, val lon: Double, val spd: Double)
+    private val positionBuffer = mutableListOf<BufferedPosition>()
     private var lastBufferedLocation: Location? = null
 
     // DNS caching
@@ -258,7 +259,10 @@ class TrackerService : LifecycleService() {
                     if (highFrequencyMode) {
                         // Buffer position for batched sending
                         val ts = System.currentTimeMillis() / 1000
-                        positionBuffer.add(Triple(ts, location.latitude, location.longitude))
+                        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+                            (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
+                        } else 0.0
+                        positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
                         lastBufferedLocation = location
 
                         // Send every 10 positions (10 seconds at 1Hz)
@@ -657,13 +661,14 @@ class TrackerService : LifecycleService() {
 
         previousLocation = location
 
-        // Build position array: [[ts, lat, lon], ...]
+        // Build position array: [[ts, lat, lon, spd], ...]
         val posArray = org.json.JSONArray()
         for (pos in positionBuffer) {
             val posEntry = org.json.JSONArray()
-            posEntry.put(pos.first)   // ts
-            posEntry.put(pos.second)  // lat
-            posEntry.put(pos.third)   // lon
+            posEntry.put(pos.ts)
+            posEntry.put(pos.lat)
+            posEntry.put(pos.lon)
+            posEntry.put(pos.spd)
             posArray.put(posEntry)
         }
 

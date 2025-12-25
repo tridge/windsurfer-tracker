@@ -79,8 +79,8 @@ public struct TrackerPosition: Equatable, Sendable {
         String(format: "%d°", heading)
     }
 
-    /// Convert to array for 1Hz mode batch: [timestamp, lat, lon]
+    /// Convert to array for 1Hz mode batch: [timestamp, lat, lon, speed]
     public func toPositionArray() -> [Double] {
-        [Double(unixTimestamp), latitude, longitude]
+        [Double(unixTimestamp), latitude, longitude, (speedKnots * 10).rounded() / 10]
     }
 }

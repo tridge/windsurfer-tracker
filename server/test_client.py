@@ -63,14 +63,20 @@ class SimulatedEntity:
     base_speed: float = 10.0
     speed_variance: float = 3.0
 
+    # Wind gust simulation
+    gust_factor: float = 1.0  # Multiplier for wind gusts (0.6 = lull, 1.4 = gust)
+    gust_trend: float = 0.0   # Rate of change of gust factor
+
     # 1Hz mode (batched position updates)
     is_1hz: bool = False
-    pos_buffer: List[Tuple[int, float, float]] = field(default_factory=list)  # [(ts, lat, lon), ...]
+    pos_buffer: List[Tuple[int, float, float, float]] = field(default_factory=list)  # [(ts, lat, lon, spd), ...]
     heart_rate: int = 0  # Only used in 1Hz mode
 
     def __post_init__(self):
         self.target_lat = self.lat
         self.target_lon = self.lon
+        self.gust_factor = random.uniform(0.9, 1.1)  # Start with slight variation
+        self.gust_trend = random.uniform(-0.05, 0.05)
         if self.is_1hz:
             self.heart_rate = random.randint(60, 90)  # Initial heart rate
 
@@ -364,22 +370,37 @@ class SailingSimulator:
                 entity.hdg = (self.wind_direction - self.TACK_ANGLE + 360) % 360
 
             # Slower when beating
-            entity.spd = entity.base_speed * 0.7 + random.uniform(-1, 1)
+            base_spd = entity.base_speed * 0.7
 
         elif 60 < wind_angle < 120 or 240 < wind_angle < 300:
             # Reaching - fastest point of sail
             entity.hdg = target_bearing + random.uniform(-10, 10)
-            entity.spd = entity.base_speed * 1.2 + random.uniform(-1, 2)
+            base_spd = entity.base_speed * 1.2
             entity.tack_timer = 0
 
         else:
             # Running or broad reach
             entity.hdg = target_bearing + random.uniform(-15, 15)
-            entity.spd = entity.base_speed * 0.9 + random.uniform(-1, 1)
+            base_spd = entity.base_speed * 0.9
             entity.tack_timer = 0
 
         # Ensure heading is in valid range
         entity.hdg = (entity.hdg + 360) % 360
+
+        # Update gust factor - simulates wind variability
+        entity.gust_trend += random.uniform(-0.02, 0.02) * dt
+        entity.gust_trend = max(-0.15, min(0.15, entity.gust_trend))  # Limit trend rate
+        entity.gust_factor += entity.gust_trend * dt
+        entity.gust_factor = max(0.6, min(1.5, entity.gust_factor))  # Keep within 60%-150%
+
+        # Occasional sudden gusts or lulls
+        if random.random() < 0.02 * dt:  # ~2% chance per second
+            entity.gust_factor += random.choice([-0.2, 0.3])  # Sudden lull or gust
+            entity.gust_factor = max(0.5, min(1.6, entity.gust_factor))
+
+        # Apply gust factor and add high-frequency buffeting
+        buffet = random.uniform(-1.5, 1.5)  # Per-second wind buffeting
+        entity.spd = base_spd * entity.gust_factor + buffet
 
         # Ensure speed is positive
         entity.spd = max(0.5, entity.spd)
@@ -673,15 +694,15 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
     """Send 1Hz batch position packet with pos array and wait for ACK"""
     entity.seq += 1
 
-    # pos array format: [[ts, lat, lon], [ts, lat, lon], ...]
-    pos_array = [[ts, round(lat, 6), round(lon, 6)] for ts, lat, lon in entity.pos_buffer]
+    # pos array format: [[ts, lat, lon, spd], ...]
+    pos_array = [[ts, round(lat, 6), round(lon, 6), round(spd, 1)] for ts, lat, lon, spd in entity.pos_buffer]
 
     packet = {
         "id": entity.id,
         "eid": eid,
         "sq": entity.seq,
         "ts": int(time.time()),  # Current timestamp (for sorting)
-        "pos": pos_array,        # Array of [ts, lat, lon] positions
+        "pos": pos_array,        # Array of [ts, lat, lon, spd] positions
         "hac": 0.5,
         "spd": round(entity.spd, 2),
         "hdg": int(entity.hdg) % 360,
@@ -864,8 +885,8 @@ def main():
                     else:
                         simulator.update_spectator(entity, 1.0)
 
-                    # Accumulate position in buffer
-                    entity.pos_buffer.append((ts, entity.lat, entity.lon))
+                    # Accumulate position in buffer (ts, lat, lon, spd)
+                    entity.pos_buffer.append((ts, entity.lat, entity.lon, entity.spd))
 
                     # Update heart rate occasionally (varies slowly)
                     if random.random() < 0.1:

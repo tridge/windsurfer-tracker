@@ -2179,14 +2179,14 @@
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
         function expandEntry(entry) {
             if (entry.pos && Array.isArray(entry.pos)) {
-                // New compact format: pos array [[ts, lat, lon], ...]
+                // Compact format: pos array [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
                 // Expand into individual entries, each inheriting all metadata
-                return entry.pos.map(([ts, lat, lon]) => ({
+                return entry.pos.map(p => ({
                     id: entry.id,
-                    ts: ts,
-                    lat: lat,
-                    lon: lon,
-                    spd: entry.spd,
+                    ts: p[0],
+                    lat: p[1],
+                    lon: p[2],
+                    spd: p.length >= 4 ? p[3] : entry.spd,  // Use per-point speed if available
                     hdg: entry.hdg,
                     bat: entry.bat,
                     sig: entry.sig,

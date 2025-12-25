@@ -2852,9 +2852,9 @@
                         // Expand pos array if present (1Hz batch format)
                         let positions;
                         if (entry.pos && Array.isArray(entry.pos)) {
-                            positions = entry.pos.map(([ts, lat, lon]) => ({
-                                lat, lon, ts,
-                                spd: entry.spd,
+                            positions = entry.pos.map(p => ({
+                                lat: p[1], lon: p[2], ts: p[0],
+                                spd: p.length >= 4 ? p[3] : entry.spd,
                                 hdg: entry.hdg
                             }));
                         } else if (entry.lat && entry.lon && entry.ts) {
@@ -2918,7 +2918,7 @@
 
                         let positions;
                         if (entry.pos && Array.isArray(entry.pos)) {
-                            positions = entry.pos.map(([ts, lat, lon]) => ({ lat, lon, ts, spd: entry.spd, hdg: entry.hdg }));
+                            positions = entry.pos.map(p => ({ lat: p[1], lon: p[2], ts: p[0], spd: p.length >= 4 ? p[3] : entry.spd, hdg: entry.hdg }));
                         } else if (entry.lat && entry.lon && entry.ts) {
                             positions = [{ lat: entry.lat, lon: entry.lon, ts: entry.ts, spd: entry.spd, hdg: entry.hdg }];
                         } else {
