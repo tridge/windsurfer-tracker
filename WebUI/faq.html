@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>FAQ - Windsurfer Tracker</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #0066cc;
+            text-align: center;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #0066cc;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .faq-item {
+            margin: 25px 0;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .faq-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
+        .faq-question {
+            font-weight: 600;
+            color: #0066cc;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        .faq-answer {
+            color: #555;
+        }
+        .faq-answer ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        .faq-answer li {
+            margin: 8px 0;
+        }
+        .info-box {
+            background: #e8f4fd;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 0.9em;
+        }
+        a {
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; Back to Tracker</a>
+
+    <h1>Frequently Asked Questions</h1>
+    <p style="text-align: center; color: #666;">Common questions about Windsurfer Tracker</p>
+
+    <div class="section">
+        <h2>Device Compatibility</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">Why don't you support Garmin watches?</div>
+            <div class="faq-answer">
+                <p>Unfortunately there are two issues with Garmin watches that prevent us from supporting them:</p>
+                <ul>
+                    <li><strong>LTE connectivity:</strong> Only the very top-end (and very expensive) Garmin watches have LTE capability. Without LTE, the watch cannot send live position updates to the tracking server - it would need to be paired with a phone, which defeats the purpose of standalone watch tracking.</li>
+                    <li><strong>Foreground-only apps:</strong> Even on Garmin watches that do have LTE, apps can only do live tracking when running in the "foreground". This means the tracker would need to take over the entire watch screen while sailing, preventing you from using your watch for other things like race timing.</li>
+                </ul>
+                <p>In contrast, Apple Watch and Wear OS watches allow apps to track in the background while you use other watch features. For these reasons, we don't plan to port Windsurfer Tracker to the Garmin ecosystem at this stage.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">Which devices are supported?</div>
+            <div class="faq-answer">
+                <p>Windsurfer Tracker currently supports:</p>
+                <ul>
+                    <li><strong>iPhone:</strong> iOS 15 or later</li>
+                    <li><strong>Apple Watch:</strong> watchOS 9 or later (with cellular or paired to iPhone)</li>
+                    <li><strong>Android phones:</strong> Android 8.0 or later</li>
+                    <li><strong>Wear OS watches:</strong> Wear OS 3.0 or later (with LTE)</li>
+                </ul>
+                <div class="info-box">
+                    <strong>Note:</strong> For standalone watch tracking (without a phone), you need a watch with LTE/cellular capability.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>More Questions?</h2>
+        <p>If your question isn't answered here, check out our <a href="support.html">Support page</a> for ways to get help, or join our <a href="https://groups.google.com/g/wstracker" target="_blank">Google Group</a> to ask the community.</p>
+    </div>
+
+    <footer>
+        <p><a href="index.html">&larr; Back to Tracker</a></p>
+        <p>Windsurfer Tracker</p>
+    </footer>
+</body>
+</html>
