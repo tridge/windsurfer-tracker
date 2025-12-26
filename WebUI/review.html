@@ -1511,9 +1511,9 @@
     <div id="controls">
         <a id="live-link" href="event.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
         <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
-        <span class="date-display" style="position:relative;">
+        <span class="date-display" onclick="document.getElementById('date-picker').showPicker()" style="cursor:pointer;position:relative;">
             <span id="date-display"></span>
-            <input type="date" id="date-picker" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px;">
+            <input type="date" id="date-picker" style="position:absolute;left:0;top:100%;width:0;height:0;border:none;padding:0;margin:0;opacity:0;">
         </span>
         <div class="graphs-dropdown">
             <button id="options-btn">Options ▼</button>
@@ -2499,6 +2499,17 @@
             const b = Math.round(b1 + (b2 - b1) * t);
 
             return `rgb(${r},${g},${b})`;
+        }
+
+        // Open date picker (with fallback for browsers without showPicker)
+        function openDatePicker() {
+            const picker = document.getElementById('date-picker');
+            if (picker.showPicker) {
+                picker.showPicker();
+            } else {
+                picker.focus();
+                picker.click();
+            }
         }
 
         // Update date display when picker changes
