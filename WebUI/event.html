@@ -1353,7 +1353,7 @@
 
         // Menu state
         let menuOpen = false;
-        let showLabels = localStorage.getItem('showLabels') === 'true';
+        let showLabels = localStorage.getItem('showLabels') !== 'false';
 
         function showAbout() {
             document.getElementById('about-modal').classList.add('show');
