@@ -6,7 +6,7 @@ set -e
 
 MAC_HOST="mac2"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOCAL_SWIFT_DIR="$SCRIPT_DIR/swift"
+LOCAL_SWIFT_DIR="$SCRIPT_DIR/../swift"
 REMOTE_PROJECT_DIR="~/project/windsurfer-tracker/swift"
 ARCHIVE_PATH="$REMOTE_PROJECT_DIR/WindsurferTracker/build/WindsurferTracker.xcarchive"
 EXPORT_PATH="$REMOTE_PROJECT_DIR/WindsurferTracker/build/export"
