@@ -7,12 +7,18 @@ struct SettingsView: View {
 
     @State private var showPassword = true
     @State private var validationError: String? = nil
+    @State private var isCheckingPassword = false
 
     // Local state to avoid updating settings while typing
     @State private var tempSailorId: String = ""
     @State private var tempPassword: String = ""
     @State private var tempServerHost: String = ""
     @State private var tempServerPort: Int = 41234
+
+    // Track original auth values to detect changes
+    @State private var originalSailorId: String = ""
+    @State private var originalPassword: String = ""
+    @State private var originalEventId: Int = 0
 
     var body: some View {
         NavigationView {
@@ -146,7 +152,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button(isCheckingPassword ? "..." : "Done") {
                         // Validate required fields
                         if tempSailorId.isEmpty && tempPassword.isEmpty {
                             validationError = "Name and password are required"
@@ -161,13 +167,52 @@ struct SettingsView: View {
                             return
                         }
 
-                        // Save settings only when Done is pressed
-                        viewModel.sailorId = tempSailorId
-                        viewModel.password = tempPassword
-                        viewModel.serverHost = tempServerHost
-                        viewModel.serverPort = tempServerPort
-                        dismiss()
+                        // Check if auth fields changed
+                        let authFieldsChanged = tempSailorId != originalSailorId ||
+                            tempPassword != originalPassword ||
+                            viewModel.eventId != originalEventId
+
+                        if authFieldsChanged {
+                            // Check password with server
+                            isCheckingPassword = true
+                            Task { @MainActor in
+                                let networkManager = NetworkManager()
+                                await networkManager.configure(
+                                    host: tempServerHost,
+                                    port: UInt16(tempServerPort)
+                                )
+                                let osVersion = "iOS \(UIDevice.current.systemVersion)"
+                                let result = await networkManager.checkPassword(
+                                    eventId: viewModel.eventId,
+                                    password: tempPassword,
+                                    userId: tempSailorId,
+                                    userOs: osVersion,
+                                    userVer: appVersion
+                                )
+
+                                isCheckingPassword = false
+
+                                switch result {
+                                case .success:
+                                    viewModel.sailorId = tempSailorId
+                                    viewModel.password = tempPassword
+                                    viewModel.serverHost = tempServerHost
+                                    viewModel.serverPort = tempServerPort
+                                    dismiss()
+                                case .failure(let error):
+                                    validationError = error.localizedDescription
+                                }
+                            }
+                        } else {
+                            // No auth fields changed, save directly
+                            viewModel.sailorId = tempSailorId
+                            viewModel.password = tempPassword
+                            viewModel.serverHost = tempServerHost
+                            viewModel.serverPort = tempServerPort
+                            dismiss()
+                        }
                     }
+                    .disabled(isCheckingPassword)
                 }
             }
             .alert("Required Fields", isPresented: .init(
@@ -184,6 +229,10 @@ struct SettingsView: View {
                 tempPassword = viewModel.password
                 tempServerHost = viewModel.serverHost
                 tempServerPort = viewModel.serverPort
+                // Track original auth values
+                originalSailorId = viewModel.sailorId
+                originalPassword = viewModel.password
+                originalEventId = viewModel.eventId
                 Task {
                     await viewModel.fetchEvents()
                 }

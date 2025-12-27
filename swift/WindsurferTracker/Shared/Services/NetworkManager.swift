@@ -420,6 +420,66 @@ public actor NetworkManager {
         }
     }
 
+    /// Check if user password is valid for a given event
+    /// Uses the tracking endpoint with auth_check flag
+    /// Returns success or error with message
+    public func checkPassword(eventId: Int, password: String,
+                              userId: String = "unknown", userOs: String = "unknown", userVer: String = "unknown") async -> Result<Bool, Error> {
+        // Determine protocol
+        let proto = serverHost == "wstracker.org" || serverPort == 443 ? "https" : "http"
+        let port = serverHost == "wstracker.org" ? 443 : serverPort
+
+        guard let url = URL(string: "\(proto)://\(serverHost):\(port)/api/tracker") else {
+            return .failure(NSError(domain: "NetworkManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"]))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Send auth_check packet (same format as tracking, but with auth_check flag)
+        let body: [String: Any] = [
+            "id": userId,
+            "sq": 1,
+            "ts": Int(Date().timeIntervalSince1970),
+            "eid": eventId,
+            "pwd": password,
+            "auth_check": true,
+            "ver": userVer,
+            "os": userOs
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure(NSError(domain: "NetworkManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"]))
+            }
+
+            if httpResponse.statusCode == 200 {
+                // Success if we got an ack and no error
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   json["ack"] != nil && json["error"] == nil {
+                    return .success(true)
+                } else {
+                    let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String ?? "Invalid password"
+                    return .failure(NSError(domain: "NetworkManager", code: 401, userInfo: [NSLocalizedDescriptionKey: message]))
+                }
+            } else if httpResponse.statusCode == 401 {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String ?? "Incorrect password"
+                return .failure(NSError(domain: "NetworkManager", code: 401, userInfo: [NSLocalizedDescriptionKey: message]))
+            } else if httpResponse.statusCode == 429 {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String ?? "Too many attempts, please wait"
+                return .failure(NSError(domain: "NetworkManager", code: 429, userInfo: [NSLocalizedDescriptionKey: message]))
+            } else {
+                return .failure(NSError(domain: "NetworkManager", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server error: \(httpResponse.statusCode)"]))
+            }
+        } catch {
+            return .failure(NSError(domain: "NetworkManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not connect to server"]))
+        }
+    }
+
     // MARK: - Status
 
     /// Check if using HTTP fallback

@@ -42,6 +42,12 @@ fun SettingsScreen(
     var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
     var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
     var validationError by remember { mutableStateOf<String?>(null) }
+
+    // Track original auth values to detect changes
+    val originalSailorId = remember { settings.sailorId }
+    val originalPassword = remember { settings.password }
+    val originalEventId = remember { settings.eventId }
+
     var selectedRoleIndex by remember {
         mutableStateOf(
             when (settings.role) {
@@ -55,6 +61,7 @@ fun SettingsScreen(
     var selectedEventId by remember { mutableStateOf(settings.eventId) }
     var events by remember { mutableStateOf<List<EventInfo>>(emptyList()) }
     var eventsLoading by remember { mutableStateOf(true) }
+    var isCheckingPassword by remember { mutableStateOf(false) }
 
     val roles = listOf("sailor", "support", "spectator")
     val eventFetcher = remember { EventFetcher() }
@@ -386,26 +393,65 @@ fun SettingsScreen(
                                 return@Button
                             }
                         }
-                        validationError = null
-                        onSave(
-                            TrackerSettings(
-                                serverHost = serverHost,
-                                sailorId = sailorId,
-                                role = roles[selectedRoleIndex],
-                                password = password,
-                                eventId = selectedEventId,
-                                highFrequencyMode = highFrequencyMode,
-                                heartRateEnabled = heartRateEnabled
+
+                        // Check if auth fields changed
+                        val authFieldsChanged = sailorId != originalSailorId ||
+                            password != originalPassword ||
+                            selectedEventId != originalEventId
+
+                        // Function to save and exit
+                        fun doSave() {
+                            validationError = null
+                            onSave(
+                                TrackerSettings(
+                                    serverHost = serverHost,
+                                    sailorId = sailorId,
+                                    role = roles[selectedRoleIndex],
+                                    password = password,
+                                    eventId = selectedEventId,
+                                    highFrequencyMode = highFrequencyMode,
+                                    heartRateEnabled = heartRateEnabled
+                                )
                             )
-                        )
-                        onBack()
+                            onBack()
+                        }
+
+                        if (authFieldsChanged) {
+                            // Check password with server
+                            isCheckingPassword = true
+                            validationError = "Checking password..."
+                            coroutineScope.launch {
+                                val osVersion = "WearOS ${android.os.Build.VERSION.RELEASE}"
+                                val result = eventFetcher.checkPassword(
+                                    serverHost,
+                                    TrackerService.DEFAULT_SERVER_PORT,
+                                    selectedEventId,
+                                    password,
+                                    userId = sailorId,
+                                    userOs = osVersion,
+                                    userVer = BuildConfig.VERSION_STRING
+                                )
+                                isCheckingPassword = false
+
+                                if (result.isFailure) {
+                                    validationError = result.exceptionOrNull()?.message ?: "Incorrect password"
+                                    return@launch
+                                }
+
+                                doSave()
+                            }
+                        } else {
+                            // No auth fields changed, save directly
+                            doSave()
+                        }
                     },
+                    enabled = !isCheckingPassword,
                     modifier = Modifier
                         .fillMaxWidth(0.7f)
                         .padding(top = 12.dp),
                     colors = ButtonDefaults.primaryButtonColors()
                 ) {
-                    Text("Save")
+                    Text(if (isCheckingPassword) "..." else "Save")
                 }
             }
 

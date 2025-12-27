@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 /// Main watch view with compact interface
 struct WatchContentView: View {
@@ -114,6 +115,12 @@ struct WatchSettingsView: View {
     @State private var tempHost: String = ""
     @State private var tempPassword: String = ""
     @State private var validationError: String? = nil
+    @State private var isCheckingPassword = false
+
+    // Track original auth values to detect changes
+    @State private var originalSailorId: String = ""
+    @State private var originalPassword: String = ""
+    @State private var originalEventId: Int = 0
 
     /// Whether this was opened because setup is required (prevents dismissing without valid settings)
     var needsSetup: Bool = false
@@ -267,22 +274,64 @@ struct WatchSettingsView: View {
                         validationError = "Password is required"
                         return
                     }
-                    validationError = nil
-                    viewModel.sailorId = tempId
-                    viewModel.serverHost = tempHost
-                    viewModel.password = tempPassword
-                    dismiss()
+
+                    // Check if auth fields changed
+                    let authFieldsChanged = tempId != originalSailorId ||
+                        tempPassword != originalPassword ||
+                        viewModel.eventId != originalEventId
+
+                    if authFieldsChanged {
+                        // Check password with server
+                        isCheckingPassword = true
+                        validationError = "Checking..."
+                        Task { @MainActor in
+                            let networkManager = NetworkManager()
+                            await networkManager.configure(
+                                host: tempHost,
+                                port: UInt16(TrackerConfig.defaultServerPort)
+                            )
+                            let osVersion = "watchOS \(WKInterfaceDevice.current().systemVersion)"
+                            let result = await networkManager.checkPassword(
+                                eventId: viewModel.eventId,
+                                password: tempPassword,
+                                userId: tempId,
+                                userOs: osVersion,
+                                userVer: versionString
+                            )
+
+                            isCheckingPassword = false
+
+                            switch result {
+                            case .success:
+                                validationError = nil
+                                viewModel.sailorId = tempId
+                                viewModel.serverHost = tempHost
+                                viewModel.password = tempPassword
+                                dismiss()
+                            case .failure(let error):
+                                validationError = error.localizedDescription
+                            }
+                        }
+                    } else {
+                        // No auth fields changed, save directly
+                        validationError = nil
+                        viewModel.sailorId = tempId
+                        viewModel.serverHost = tempHost
+                        viewModel.password = tempPassword
+                        dismiss()
+                    }
                 } label: {
-                    Text("Save")
+                    Text(isCheckingPassword ? "..." : "Save")
                         .font(.body)
                         .bold()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color.blue)
+                        .background(isCheckingPassword ? Color.gray : Color.blue)
                         .foregroundColor(.white)
                         .cornerRadius(20)
                 }
                 .buttonStyle(.plain)
+                .disabled(isCheckingPassword)
 
                 // Version string
                 Text(versionString)
@@ -296,6 +345,10 @@ struct WatchSettingsView: View {
             tempId = viewModel.sailorId
             tempHost = viewModel.serverHost
             tempPassword = viewModel.password
+            // Track original auth values
+            originalSailorId = viewModel.sailorId
+            originalPassword = viewModel.password
+            originalEventId = viewModel.eventId
             viewModel.fetchEvents()
         }
     }

@@ -1602,15 +1602,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 event_tracker_pwd = event.get('tracker_password', '')
                 if event_tracker_pwd:
                     if is_rate_limited(client_ip):
-                        log(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
-                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        log(f"[AUTH] Rate limited for {sailor_id} from {client_ip} os={os_version} ver={version}")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Too many attempts"}, 429)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != event_tracker_pwd:
                         record_failed_auth(client_ip)
-                        log(f"[POST] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
+                        log(f"[AUTH] Failed for event {eid} user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
+
+                # Check for auth-only request (no position update)
+                if packet.get("auth_check"):
+                    log(f"[AUTH] Checkuser OK for event {eid} user={sailor_id} from {client_ip} os={os_version} ver={version}")
+                    self._send_json({"ack": seq, "ts": int(recv_time)})
+                    return
 
                 # Get or create the event tracker
                 tracker = get_event_tracker(eid)
@@ -1626,15 +1632,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 # Check rate limiting and password if required
                 if _tracker_password:
                     if is_rate_limited(client_ip):
-                        log(f"[POST] Auth rate-limited for {sailor_id} from {client_ip}")
-                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
+                        log(f"[AUTH] Rate limited for {sailor_id} from {client_ip} os={os_version} ver={version}")
+                        self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Too many attempts"}, 429)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != _tracker_password:
                         record_failed_auth(client_ip)
-                        log(f"[POST] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
+                        log(f"[AUTH] Failed (legacy) user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
+
+                # Check for auth-only request (no position update) - legacy mode
+                if packet.get("auth_check"):
+                    log(f"[AUTH] Checkuser OK (legacy) user={sailor_id} from {client_ip} os={os_version} ver={version}")
+                    self._send_json({"ack": seq, "ts": int(recv_time)})
+                    return
 
                 if not _position_tracker:
                     log(f"[POST] ERROR: Position tracking not enabled")

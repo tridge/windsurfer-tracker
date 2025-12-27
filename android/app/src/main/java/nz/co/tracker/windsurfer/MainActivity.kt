@@ -932,67 +932,101 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                 setTextColor(0xFFFFFFFF.toInt())
                 setBackgroundColor(0xFF00AA00.toInt())  // Green
                 textSize = 18f
-                setOnClickListener {
+                setOnClickListener saveButton@{
                     // Validate inputs
                     val sailorId = sailorIdInput.text.toString().trim()
                     val password = passwordInput.text.toString()
+                    val serverHost = serverInput.text.toString().trim()
+                    val serverPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
 
                     if (sailorId.isEmpty() && password.isEmpty()) {
                         Toast.makeText(this@MainActivity, "Name and password are required", Toast.LENGTH_LONG).show()
-                        return@setOnClickListener
+                        return@saveButton
                     }
                     if (sailorId.isEmpty()) {
                         Toast.makeText(this@MainActivity, "Your name is required", Toast.LENGTH_LONG).show()
-                        return@setOnClickListener
+                        return@saveButton
                     }
                     if (password.isEmpty()) {
                         Toast.makeText(this@MainActivity, "Password is required", Toast.LENGTH_LONG).show()
-                        return@setOnClickListener
+                        return@saveButton
                     }
 
-                    // Validation passed, save settings
-                    val newHighFrequencyMode = highFrequencyCheckbox.isChecked
-                    val newRole = roleValues[selectedRoleIndex]
-                    val newServerHost = serverInput.text.toString()
-                    val newServerPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
+                    // Only check password with server if auth-related fields changed
+                    val authFieldsChanged = sailorId != oldSailorId || password != oldPassword || selectedEventId != oldEventId
 
-                    prefs.edit().apply {
-                        putString("sailor_id", sailorId)
-                        putString("role", newRole)
-                        putString("server_host", newServerHost)
-                        putInt("server_port", newServerPort)
-                        putInt("event_id", selectedEventId)
-                        putString("password", password)
-                        putBoolean("high_frequency_mode", newHighFrequencyMode)
-                        commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
+                    // Function to save settings (called directly or after password check)
+                    fun saveSettings() {
+                        // Validation passed, save settings
+                        val newHighFrequencyMode = highFrequencyCheckbox.isChecked
+                        val newRole = roleValues[selectedRoleIndex]
+                        val newServerHost = serverInput.text.toString()
+                        val newServerPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
+
+                        prefs.edit().apply {
+                            putString("sailor_id", sailorId)
+                            putString("role", newRole)
+                            putString("server_host", newServerHost)
+                            putInt("server_port", newServerPort)
+                            putInt("event_id", selectedEventId)
+                            putString("password", password)
+                            putBoolean("high_frequency_mode", newHighFrequencyMode)
+                            commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
+                        }
+                        // Always update the binding fields to keep them in sync
+                        // (even when not visible, to prevent savePreferences() from overwriting)
+                        binding.etSailorId.setText(sailorId)
+                        binding.etServerHost.setText(newServerHost)
+                        binding.etServerPort.setText(newServerPort.toString())
+
+                        // Auto-restart tracking if any settings changed while tracking
+                        val isTracking = trackerService?.isTracking() == true
+                        val settingsChanged = sailorId != oldSailorId ||
+                            newRole != oldRole ||
+                            newServerHost != oldServerHost ||
+                            newServerPort != oldServerPort ||
+                            selectedEventId != oldEventId ||
+                            password != oldPassword ||
+                            newHighFrequencyMode != oldHighFrequencyMode
+
+                        if (isTracking && settingsChanged) {
+                            Toast.makeText(this@MainActivity, "Restarting tracking with new settings...", Toast.LENGTH_SHORT).show()
+                            stopTrackerService()
+                            // Brief delay to ensure clean stop before restart
+                            binding.root.postDelayed({
+                                startTrackerService()
+                            }, 500)
+                        } else {
+                            Toast.makeText(this@MainActivity, "Settings saved", Toast.LENGTH_SHORT).show()
+                        }
+                        dialog.dismiss()
                     }
-                    // Always update the binding fields to keep them in sync
-                    // (even when not visible, to prevent savePreferences() from overwriting)
-                    binding.etSailorId.setText(sailorId)
-                    binding.etServerHost.setText(newServerHost)
-                    binding.etServerPort.setText(newServerPort.toString())
 
-                    // Auto-restart tracking if any settings changed while tracking
-                    val isTracking = trackerService?.isTracking() == true
-                    val settingsChanged = sailorId != oldSailorId ||
-                        newRole != oldRole ||
-                        newServerHost != oldServerHost ||
-                        newServerPort != oldServerPort ||
-                        selectedEventId != oldEventId ||
-                        password != oldPassword ||
-                        newHighFrequencyMode != oldHighFrequencyMode
+                    // Check password only if auth fields changed, otherwise save directly
+                    if (authFieldsChanged) {
+                        Toast.makeText(this@MainActivity, "Checking password...", Toast.LENGTH_SHORT).show()
+                        lifecycleScope.launch {
+                            val fetcher = EventFetcher()
+                            val osVersion = "Android ${android.os.Build.VERSION.RELEASE}"
+                            val result = fetcher.checkPassword(
+                                serverHost, serverPort, selectedEventId, password,
+                                userId = sailorId,
+                                userOs = osVersion,
+                                userVer = BuildConfig.VERSION_STRING
+                            )
 
-                    if (isTracking && settingsChanged) {
-                        Toast.makeText(this@MainActivity, "Restarting tracking with new settings...", Toast.LENGTH_SHORT).show()
-                        stopTrackerService()
-                        // Brief delay to ensure clean stop before restart
-                        binding.root.postDelayed({
-                            startTrackerService()
-                        }, 500)
+                            if (result.isFailure) {
+                                val errorMsg = result.exceptionOrNull()?.message ?: "Incorrect password"
+                                Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_LONG).show()
+                                return@launch
+                            }
+
+                            saveSettings()
+                        }
                     } else {
-                        Toast.makeText(this@MainActivity, "Settings saved", Toast.LENGTH_SHORT).show()
+                        // No auth fields changed, save directly without server check
+                        saveSettings()
                     }
-                    dialog.dismiss()
                 }
             }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
