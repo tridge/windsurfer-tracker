@@ -55,6 +55,11 @@ public class TrackerViewModel: ObservableObject {
         self.highFrequencyMode = preferences.highFrequencyMode
 
         setupBindings()
+
+        // Auto-show settings if ID or password is missing
+        if sailorId.isEmpty || password.isEmpty {
+            showSettings = true
+        }
     }
 
     private func setupBindings() {

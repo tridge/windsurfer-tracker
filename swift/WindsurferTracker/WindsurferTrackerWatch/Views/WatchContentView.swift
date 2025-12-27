@@ -3,6 +3,7 @@ import SwiftUI
 /// Main watch view with compact interface
 struct WatchContentView: View {
     @StateObject private var viewModel = WatchTrackerViewModel()
+    @State private var navigateToSettings = false
 
     var body: some View {
         NavigationView {
@@ -10,8 +11,14 @@ struct WatchContentView: View {
                 WatchTrackingView()
                     .environmentObject(viewModel)
             } else {
-                WatchConfigView()
+                WatchConfigView(navigateToSettings: $navigateToSettings)
                     .environmentObject(viewModel)
+            }
+        }
+        .onAppear {
+            // Auto-navigate to settings if ID or password is missing
+            if viewModel.needsSetup {
+                navigateToSettings = true
             }
         }
     }
@@ -20,13 +27,14 @@ struct WatchContentView: View {
 /// Pre-tracking config for watch
 struct WatchConfigView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
+    @Binding var navigateToSettings: Bool
 
     var body: some View {
         VStack(spacing: 8) {
             // Header with settings gear - left side to avoid clock
             HStack {
-                NavigationLink {
-                    WatchSettingsView()
+                NavigationLink(isActive: $navigateToSettings) {
+                    WatchSettingsView(needsSetup: viewModel.needsSetup)
                         .environmentObject(viewModel)
                 } label: {
                     Image(systemName: "gearshape")
@@ -105,6 +113,10 @@ struct WatchSettingsView: View {
     @State private var tempId: String = ""
     @State private var tempHost: String = ""
     @State private var tempPassword: String = ""
+    @State private var validationError: String? = nil
+
+    /// Whether this was opened because setup is required (prevents dismissing without valid settings)
+    var needsSetup: Bool = false
 
     var body: some View {
         ScrollView {
@@ -232,8 +244,30 @@ struct WatchSettingsView: View {
                         .cornerRadius(8)
                 }
 
+                // Validation error
+                if let error = validationError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                }
+
                 // Save button
                 Button {
+                    // Validate required fields
+                    if tempId.isEmpty && tempPassword.isEmpty {
+                        validationError = "Name and password required"
+                        return
+                    }
+                    if tempId.isEmpty {
+                        validationError = "Name is required"
+                        return
+                    }
+                    if tempPassword.isEmpty {
+                        validationError = "Password is required"
+                        return
+                    }
+                    validationError = nil
                     viewModel.sailorId = tempId
                     viewModel.serverHost = tempHost
                     viewModel.password = tempPassword

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var showPassword = true
+    @State private var validationError: String? = nil
 
     // Local state to avoid updating settings while typing
     @State private var tempSailorId: String = ""
@@ -146,6 +147,20 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
+                        // Validate required fields
+                        if tempSailorId.isEmpty && tempPassword.isEmpty {
+                            validationError = "Name and password are required"
+                            return
+                        }
+                        if tempSailorId.isEmpty {
+                            validationError = "Your name is required"
+                            return
+                        }
+                        if tempPassword.isEmpty {
+                            validationError = "Password is required"
+                            return
+                        }
+
                         // Save settings only when Done is pressed
                         viewModel.sailorId = tempSailorId
                         viewModel.password = tempPassword
@@ -154,6 +169,14 @@ struct SettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .alert("Required Fields", isPresented: .init(
+                get: { validationError != nil },
+                set: { if !$0 { validationError = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(validationError ?? "")
             }
             .onAppear {
                 // Load current values into temp state

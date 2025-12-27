@@ -30,9 +30,13 @@ fun TrackerApp(
     WindsurferTrackerTheme {
         val navController = rememberSwipeDismissableNavController()
 
+        // Start at settings if ID or password is missing
+        val needsSetup = settings.sailorId.isEmpty() || settings.password.isEmpty()
+        val startRoute = if (needsSetup) Screen.Settings.route else Screen.Tracking.route
+
         SwipeDismissableNavHost(
             navController = navController,
-            startDestination = Screen.Tracking.route
+            startDestination = startRoute
         ) {
             composable(Screen.Tracking.route) {
                 TrackingScreen(

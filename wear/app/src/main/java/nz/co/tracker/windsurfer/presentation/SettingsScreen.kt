@@ -41,6 +41,7 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.password) }
     var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
     var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
+    var validationError by remember { mutableStateOf<String?>(null) }
     var selectedRoleIndex by remember {
         mutableStateOf(
             when (settings.role) {
@@ -353,10 +354,39 @@ fun SettingsScreen(
                 )
             }
 
+            // Validation error
+            if (validationError != null) {
+                item {
+                    Text(
+                        text = validationError!!,
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.error,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+
             // Save button
             item {
                 Button(
                     onClick = {
+                        // Validate required fields
+                        when {
+                            sailorId.isEmpty() && password.isEmpty() -> {
+                                validationError = "Name and password required"
+                                return@Button
+                            }
+                            sailorId.isEmpty() -> {
+                                validationError = "Name is required"
+                                return@Button
+                            }
+                            password.isEmpty() -> {
+                                validationError = "Password is required"
+                                return@Button
+                            }
+                        }
+                        validationError = null
                         onSave(
                             TrackerSettings(
                                 serverHost = serverHost,

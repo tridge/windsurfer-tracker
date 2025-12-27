@@ -126,7 +126,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
         // Check if we should auto-resume tracking
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        if (prefs.getBoolean("tracking_active", false)) {
+
+        // Auto-open settings if ID or password is missing
+        val sailorId = prefs.getString("sailor_id", "") ?: ""
+        val password = prefs.getString("password", "") ?: ""
+        if (sailorId.isEmpty() || password.isEmpty()) {
+            // Delay slightly to ensure UI is ready
+            binding.root.post {
+                showSettingsDialog()
+            }
+        } else if (prefs.getBoolean("tracking_active", false)) {
             // Was tracking before - restart (but verify permissions first)
             Log.d(TAG, "Auto-resuming tracking from saved state")
             // Must check location permission before starting foreground service on Android 14+

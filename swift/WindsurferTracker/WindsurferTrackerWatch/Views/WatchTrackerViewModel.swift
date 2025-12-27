@@ -58,6 +58,11 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.eventId = eventId }
     }
 
+    /// Returns true if required settings are missing
+    public var needsSetup: Bool {
+        sailorId.isEmpty || password.isEmpty
+    }
+
     // MARK: - Event List
 
     @Published public var events: [EventInfo] = []
