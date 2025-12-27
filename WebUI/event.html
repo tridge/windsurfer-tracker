@@ -1073,9 +1073,6 @@
                 <button class="admin-action-btn primary" id="btnDrawCourse" onclick="startDrawingCourse()">
                     ✏️ Draw Course
                 </button>
-                <button class="admin-action-btn" id="btnSaveCourse" onclick="onDrawingComplete(null, true)" style="display:none; background:#28a745; color:white;">
-                    ✓ Save Course
-                </button>
                 <button class="admin-action-btn danger" id="btnDeleteCourse" onclick="deleteCourse()">
                     🗑 Delete Course
                 </button>
@@ -1604,9 +1601,16 @@
             lastTapTime = 0;
             lastTapLatLng = null;
             document.getElementById('btnDrawCourse').textContent = '❌ Cancel Drawing';
-            document.getElementById('btnSaveCourse').style.display = 'inline-block';
             document.getElementById('drawingIndicator').classList.add('visible');
-            
+
+            // Collapse panels to maximize map visibility
+            document.getElementById('adminPanel').classList.remove('visible');
+            document.getElementById('menuPanel').classList.remove('visible');
+            // Collapse the tracking list panel
+            panelCollapsed = true;
+            document.getElementById('panelContent').classList.add('collapsed');
+            document.getElementById('panelToggle').textContent = '▶';
+
             map.on('click', onDrawingClick);
             map.on('dblclick', onDrawingComplete);
 
@@ -1685,7 +1689,6 @@
             drawingMode = false;
             drawingPoints = [];
             document.getElementById('btnDrawCourse').textContent = '✏️ Draw Course';
-            document.getElementById('btnSaveCourse').style.display = 'none';
             document.getElementById('drawingIndicator').classList.remove('visible');
 
             // Remove temporary markers and line
@@ -1779,7 +1782,6 @@
             // Done drawing
             drawingMode = false;
             document.getElementById('btnDrawCourse').textContent = '✏️ Draw Course';
-            document.getElementById('btnSaveCourse').style.display = 'none';
             document.getElementById('drawingIndicator').classList.remove('visible');
 
             map.off('click', onDrawingClick);
