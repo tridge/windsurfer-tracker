@@ -3439,11 +3439,9 @@
             }
             
             // Auto-fit bounds if we have sailors (only before user interaction)
+            // Don't include device position - ISP-based geolocation is often inaccurate
             if (Object.keys(sailors).length > 0 && !map._userPanned) {
                 const bounds = Object.values(sailors).map(s => [s.lat, s.lon]);
-                if (deviceMarker) {
-                    bounds.push(deviceMarker.getLatLng());
-                }
                 if (bounds.length > 0) {
                     map._fitting = true;
                     map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
