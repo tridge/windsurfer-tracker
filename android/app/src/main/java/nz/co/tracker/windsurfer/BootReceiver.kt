@@ -25,14 +25,20 @@ class BootReceiver : BroadcastReceiver() {
             val wasTracking = prefs.getBoolean("tracking_active", false)
 
             if (wasTracking) {
-                Log.i(TAG, "Restarting tracking after ${intent.action}")
-
                 // Retrieve saved configuration
                 val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST)
                 val serverPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
-                val sailorId = prefs.getString("sailor_id", "")
+                val sailorId = prefs.getString("sailor_id", "") ?: ""
                 val role = prefs.getString("role", "sailor")
-                val password = prefs.getString("password", "")
+                val password = prefs.getString("password", "") ?: ""
+
+                // Don't restart if sailorId or password is empty
+                if (sailorId.isEmpty() || password.isEmpty()) {
+                    Log.w(TAG, "Not restarting tracking: sailorId or password is empty")
+                    return
+                }
+
+                Log.i(TAG, "Restarting tracking after ${intent.action}")
 
                 // Start the tracking service
                 val serviceIntent = Intent(context, TrackerService::class.java).apply {
