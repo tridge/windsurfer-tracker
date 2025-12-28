@@ -140,12 +140,20 @@ public struct AckResponse: Codable {
     /// Error message (optional)
     public let msg: String?
 
+    /// Whether assist button should be shown (nil = true, explicit false = disabled)
+    public let assist: Bool?
+
     public var isSuccess: Bool {
         return error == nil
     }
 
     public var isAuthError: Bool {
         return error == "auth"
+    }
+
+    /// Whether assist is enabled for this event (defaults to true if not specified)
+    public var isAssistEnabled: Bool {
+        return assist ?? true
     }
 }
 

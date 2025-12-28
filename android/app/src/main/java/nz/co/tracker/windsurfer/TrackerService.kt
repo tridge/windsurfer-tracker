@@ -148,6 +148,7 @@ class TrackerService : LifecycleService() {
         fun onAuthError(message: String)
         fun onEventName(name: String)
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
+        fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
     }
 
     /**
@@ -866,6 +867,15 @@ class TrackerService : LifecycleService() {
                             // First ACK but no event name yet
                             hasFirstAck.set(true)
                             updateStatusLine()
+                        }
+
+                        // Check for assist enabled status (missing = true, explicit false = disabled)
+                        if (ack.has("assist")) {
+                            val assistEnabled = ack.optBoolean("assist", true)
+                            statusListener?.onAssistEnabled(assistEnabled)
+                        } else {
+                            // Default to enabled if not specified
+                            statusListener?.onAssistEnabled(true)
                         }
 
                         Log.d(TAG, "Received ACK for seq=$ackSeq")

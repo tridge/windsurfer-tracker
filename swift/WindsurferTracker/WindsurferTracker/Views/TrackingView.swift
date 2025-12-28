@@ -105,15 +105,17 @@ struct TrackingView: View {
 
             Spacer(minLength: 16)
 
-            // Assist button - large and prominent
-            AssistButton(
-                isActive: viewModel.assistRequested,
-                onToggle: {
-                    viewModel.toggleAssist()
-                }
-            )
-            .frame(minHeight: 80, maxHeight: 120)
-            .padding(.horizontal, 16)
+            // Assist button - large and prominent (only show if assist is enabled for this event)
+            if viewModel.assistEnabled {
+                AssistButton(
+                    isActive: viewModel.assistRequested,
+                    onToggle: {
+                        viewModel.toggleAssist()
+                    }
+                )
+                .frame(minHeight: 80, maxHeight: 120)
+                .padding(.horizontal, 16)
+            }
 
             Spacer(minLength: 16)
 

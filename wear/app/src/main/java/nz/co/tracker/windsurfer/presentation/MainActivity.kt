@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private val ackRate = mutableFloatStateOf(0f)
     private val eventName = mutableStateOf("")
     private val errorMessage = mutableStateOf<String?>(null)
+    private val assistEnabled = mutableStateOf(true)  // Whether assist button should be shown
     private val settings = mutableStateOf(TrackerSettings())
 
     private val serviceConnection = object : ServiceConnection {
@@ -87,6 +88,10 @@ class MainActivity : ComponentActivity() {
 
                 override fun onStatusLine(status: String) {
                     eventName.value = status
+                }
+
+                override fun onAssistEnabled(enabled: Boolean) {
+                    assistEnabled.value = enabled
                 }
             }
 
@@ -165,6 +170,7 @@ class MainActivity : ComponentActivity() {
             TrackerApp(
                 isTracking = isTracking.value,
                 isAssistActive = isAssistActive.value,
+                assistEnabled = assistEnabled.value,
                 speedKnots = speedKnots.floatValue,
                 batteryPercent = batteryPercent.intValue,
                 signalLevel = signalLevel.intValue,

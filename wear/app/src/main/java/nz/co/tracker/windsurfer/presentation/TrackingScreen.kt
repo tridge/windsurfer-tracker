@@ -24,6 +24,7 @@ import nz.co.tracker.windsurfer.presentation.theme.TrackingGreen
 fun TrackingScreen(
     isTracking: Boolean,
     isAssistActive: Boolean,
+    assistEnabled: Boolean,
     speedKnots: Float,
     batteryPercent: Int,
     signalLevel: Int,
@@ -218,26 +219,28 @@ fun TrackingScreen(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // ASSIST button at bottom
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(36.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(if (isAssistActive) Color.Red else Color.DarkGray)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onAssistLongPress() }
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (isAssistActive) "CANCEL ASSIST" else "ASSIST",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // ASSIST button at bottom (only show if assist is enabled for this event)
+            if (assistEnabled) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(36.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(if (isAssistActive) Color.Red else Color.DarkGray)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onAssistLongPress() }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isAssistActive) "CANCEL ASSIST" else "ASSIST",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

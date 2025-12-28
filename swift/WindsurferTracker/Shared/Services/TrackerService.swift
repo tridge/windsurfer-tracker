@@ -19,6 +19,7 @@ public actor TrackerService {
     public nonisolated let eventNamePublisher = CurrentValueSubject<String, Never>("")
     public nonisolated let statusLinePublisher = CurrentValueSubject<String, Never>("---")  // GPS wait, connecting..., auth failure, or event name
     public nonisolated let errorPublisher = PassthroughSubject<TrackerError, Never>()
+    public nonisolated let assistEnabledPublisher = CurrentValueSubject<Bool, Never>(true)  // Whether assist button should be shown
 
     // MARK: - State
 
@@ -411,6 +412,9 @@ public actor TrackerService {
             hasFirstAck = true
             updateStatusLine()
         }
+
+        // Update assist enabled state (defaults to true if not specified)
+        assistEnabledPublisher.send(response.isAssistEnabled)
 
         updateConnectionStatus()
     }

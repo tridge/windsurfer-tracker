@@ -494,6 +494,7 @@ class EventManager:
                 "home_lat": home_lat,
                 "home_lon": home_lon,
                 "archived": False,
+                "assist_enabled": True,  # Whether assist button is available to users
                 "created": time.time(),
                 "created_iso": datetime.now().isoformat()
             }
@@ -510,7 +511,7 @@ class EventManager:
                 return False
             event = self.events[eid]
             # Only allow updating certain fields
-            allowed_fields = ['name', 'description', 'archived',
+            allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
                               'admin_password', 'tracker_password', 'timezone',
                               'home_location', 'home_lat', 'home_lon']
             for field in allowed_fields:
@@ -1641,9 +1642,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": "Could not initialize event tracker"}, 500)
                     return
                 event_name = event.get('name', f'Event {eid}')
+                assist_enabled = event.get('assist_enabled', True)
 
             else:
                 event_name = None  # No event name in legacy mode
+                assist_enabled = True  # Legacy mode always has assist enabled
                 # Legacy single-event mode
                 # Check rate limiting and password if required
                 if _tracker_password:
@@ -1760,6 +1763,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             ack_response = {"ack": seq, "ts": int(recv_time)}
             if event_name:
                 ack_response["event"] = event_name
+            if not assist_enabled:
+                ack_response["assist"] = False
             self._send_json(ack_response)
 
         except json.JSONDecodeError as e:
@@ -2365,9 +2370,13 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         sock.sendto(error_ack, addr)
                         continue
 
-                    # Send ACK with event name
+                    # Send ACK with event name and assist status
                     event_name = event.get('name', f'Event {eid}')
-                    ack = json.dumps({"ack": seq, "ts": int(recv_time), "event": event_name}).encode("utf-8")
+                    assist_enabled = event.get('assist_enabled', True)
+                    ack_data = {"ack": seq, "ts": int(recv_time), "event": event_name}
+                    if not assist_enabled:
+                        ack_data["assist"] = False
+                    ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
 
                     # Process through event tracker

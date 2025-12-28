@@ -462,6 +462,13 @@
                     </div>
                     <small>Auto-filled from timezone. Override if needed for exact race location.</small>
                 </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="assistEnabled" checked style="width:auto;margin:0;">
+                        <span>Assist Button Enabled</span>
+                    </label>
+                    <small>When disabled, the assist/emergency button is hidden in tracker apps</small>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
@@ -639,6 +646,7 @@
                             <span>Tracker: ${event.tracker_password ? '***' : '(none)'}</span>
                             <span>TZ: ${escapeHtml(event.timezone || 'Australia/Sydney')}</span>
                             <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
+                            <span style="${event.assist_enabled === false ? 'color:#c00;font-weight:bold' : ''}">Assist: ${event.assist_enabled === false ? 'Disabled' : 'Enabled'}</span>
                         </div>
                         <div class="event-actions">
                             <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
@@ -662,6 +670,7 @@
             document.getElementById('eventForm').reset();
             document.getElementById('eventTimezone').value = 'Australia/Sydney';  // Reset to default
             setLocationFromTimezone('Australia/Sydney');  // Set default location
+            document.getElementById('assistEnabled').checked = true;  // Default to enabled
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
         }
@@ -691,6 +700,7 @@
                 document.getElementById('homeLocation').value = event.home_location || '';
                 document.getElementById('homeLat').value = event.home_lat || '';
                 document.getElementById('homeLon').value = event.home_lon || '';
+                document.getElementById('assistEnabled').checked = event.assist_enabled !== false;  // Default true
                 // If no location set, default from timezone
                 if (!event.home_location && !event.home_lat) {
                     setLocationFromTimezone(event.timezone || 'Australia/Sydney');
@@ -737,7 +747,8 @@
                 timezone: document.getElementById('eventTimezone').value,
                 home_location: document.getElementById('homeLocation').value,
                 home_lat: homeLat ? parseFloat(homeLat) : null,
-                home_lon: homeLon ? parseFloat(homeLon) : null
+                home_lon: homeLon ? parseFloat(homeLon) : null,
+                assist_enabled: document.getElementById('assistEnabled').checked
             };
 
             try {

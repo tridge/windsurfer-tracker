@@ -13,6 +13,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var connectionStatus = ConnectionStatus()
     @Published public var eventName = ""
     @Published public var statusLine = "---"  // GPS wait, connecting..., auth failure, or event name
+    @Published public var assistEnabled = true  // Whether assist button should be shown
     @Published public var errorMessage: String?
     @Published public var showError = false
 
@@ -153,6 +154,14 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.statusLine = status
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to assist enabled status
+        TrackerService.shared.assistEnabledPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                self?.assistEnabled = enabled
             }
             .store(in: &cancellables)
 

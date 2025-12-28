@@ -120,21 +120,23 @@ struct WatchTrackingView: View {
                 Spacer()
                     .frame(height: 4)
 
-                // Assist / Cancel Assist button
-                Button {
-                    viewModel.toggleAssist()
-                } label: {
-                    Text(viewModel.assistRequested ? "CANCEL ASSIST" : "ASSIST")
-                        .font(.caption)
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(viewModel.assistRequested ? Color.red : Color.gray.opacity(0.4))
-                        .foregroundColor(.white)
-                        .cornerRadius(20)
+                // Assist / Cancel Assist button (only show if assist is enabled for this event)
+                if viewModel.assistEnabled {
+                    Button {
+                        viewModel.toggleAssist()
+                    } label: {
+                        Text(viewModel.assistRequested ? "CANCEL ASSIST" : "ASSIST")
+                            .font(.caption)
+                            .bold()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(viewModel.assistRequested ? Color.red : Color.gray.opacity(0.4))
+                            .foregroundColor(.white)
+                            .cornerRadius(20)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
             }
             .padding(.bottom, 4)
         }

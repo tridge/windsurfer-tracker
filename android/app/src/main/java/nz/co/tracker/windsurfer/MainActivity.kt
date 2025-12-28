@@ -1087,4 +1087,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.tvEventName.text = status
         }
     }
+
+    override fun onAssistEnabled(enabled: Boolean) {
+        runOnUiThread {
+            binding.btnAssist.visibility = if (enabled) View.VISIBLE else View.GONE
+        }
+    }
 }

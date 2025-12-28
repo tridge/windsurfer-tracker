@@ -16,6 +16,7 @@ sealed class Screen(val route: String) {
 fun TrackerApp(
     isTracking: Boolean,
     isAssistActive: Boolean,
+    assistEnabled: Boolean,
     speedKnots: Float,
     batteryPercent: Int,
     signalLevel: Int,
@@ -42,6 +43,7 @@ fun TrackerApp(
                 TrackingScreen(
                     isTracking = isTracking,
                     isAssistActive = isAssistActive,
+                    assistEnabled = assistEnabled,
                     speedKnots = speedKnots,
                     batteryPercent = batteryPercent,
                     signalLevel = signalLevel,
