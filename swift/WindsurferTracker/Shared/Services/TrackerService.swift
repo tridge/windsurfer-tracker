@@ -414,7 +414,14 @@ public actor TrackerService {
         }
 
         // Update assist enabled state (defaults to true if not specified)
-        assistEnabledPublisher.send(response.isAssistEnabled)
+        let assistEnabled = response.isAssistEnabled
+        assistEnabledPublisher.send(assistEnabled)
+
+        // Clear local assist flag if server says assist is disabled
+        if !assistEnabled && assistRequested {
+            assistRequested = false
+            print("[TrackerService] Assist cleared by server (assist disabled for event)")
+        }
 
         updateConnectionStatus()
     }

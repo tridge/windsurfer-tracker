@@ -873,6 +873,10 @@ class TrackerService : LifecycleService() {
                         if (ack.has("assist")) {
                             val assistEnabled = ack.optBoolean("assist", true)
                             statusListener?.onAssistEnabled(assistEnabled)
+                            // Clear local assist flag if server says assist is disabled
+                            if (!assistEnabled && assistRequested.getAndSet(false)) {
+                                Log.d(TAG, "Assist cleared by server (assist disabled for event)")
+                            }
                         } else {
                             // Default to enabled if not specified
                             statusListener?.onAssistEnabled(true)
