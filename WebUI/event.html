@@ -982,6 +982,10 @@
             <span>🏷</span>
             <span>Show Labels</span>
         </div>
+        <div class="menu-item" id="menuTails" onclick="toggleTails()">
+            <span>〰️</span>
+            <span>Show Tails</span>
+        </div>
         <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
             <span>🗺️</span>
             <span>Map Type ▼</span>
@@ -1354,6 +1358,8 @@
         // Menu state
         let menuOpen = false;
         let showLabels = localStorage.getItem('showLabels') !== 'false';
+        let showTails = localStorage.getItem('showTails') !== 'false';
+        const sailorTails = {};  // Polylines for position tails (last 20 seconds)
 
         function showAbout() {
             document.getElementById('about-modal').classList.add('show');
@@ -1398,9 +1404,31 @@
             }
         }
 
-        // Initialize label menu item state
+        function toggleTails() {
+            showTails = !showTails;
+            localStorage.setItem('showTails', showTails);
+            document.getElementById('menuTails').classList.toggle('active', showTails);
+            // Show or hide all tail polylines
+            if (showTails) {
+                // Refresh markers to draw tails
+                if (currentPositions?.sailors) {
+                    updateMarkers(currentPositions.sailors);
+                }
+            } else {
+                // Remove all tail polylines
+                for (const id of Object.keys(sailorTails)) {
+                    if (sailorTails[id]) {
+                        map.removeLayer(sailorTails[id]);
+                        delete sailorTails[id];
+                    }
+                }
+            }
+        }
+
+        // Initialize menu item states
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('menuLabels').classList.toggle('active', showLabels);
+            document.getElementById('menuTails').classList.toggle('active', showTails);
         });
 
         // Close menu/admin when clicking outside
@@ -3354,6 +3382,14 @@
                 }
             }
 
+            // Remove tails for sailors no longer visible
+            for (const id of Object.keys(sailorTails)) {
+                if (!activeSailorIds.has(id)) {
+                    map.removeLayer(sailorTails[id]);
+                    delete sailorTails[id];
+                }
+            }
+
             // Update or create markers
             for (const [id, sailor] of Object.entries(visibleSailors)) {
                 const age = now - sailor.last_seen;
@@ -3370,7 +3406,32 @@
                 } else {
                     sailorMarkers[id] = L.marker(pos, { icon }).addTo(map);
                 }
-                
+
+                // Update tail polyline (last 20 seconds of positions)
+                if (showTails && sailor.tail && sailor.tail.length > 0) {
+                    // Convert tail data [ts, lat, lon] to LatLng array, add current position at end
+                    const tailPoints = sailor.tail.map(p => [p[1], p[2]]);
+                    tailPoints.push(pos);  // Add current position to connect the trail
+
+                    // Choose color based on role
+                    const tailColor = role === 'support' ? '#2196f3' : role === 'spectator' ? '#9c27b0' : '#e91e63';
+
+                    if (sailorTails[id]) {
+                        sailorTails[id].setLatLngs(tailPoints);
+                    } else {
+                        sailorTails[id] = L.polyline(tailPoints, {
+                            color: tailColor,
+                            weight: 3,
+                            opacity: 0.7,
+                            smoothFactor: 1
+                        }).addTo(map);
+                    }
+                } else if (sailorTails[id]) {
+                    // Hide tail if showTails is disabled or no tail data
+                    map.removeLayer(sailorTails[id]);
+                    delete sailorTails[id];
+                }
+
                 // Update popup
                 const trackChecked = showTrack[id] ? 'checked' : '';
                 const trackCount = getTrackPointCount(id);

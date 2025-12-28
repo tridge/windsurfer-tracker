@@ -538,7 +538,7 @@ class EventManager:
         return event_dir
 
 
-def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None):
+def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None, position_tails: dict | None = None):
     """Write current positions to a JSON file for web UI consumption."""
     # Apply user overrides for display (name, role, hidden)
     display_positions = {}
@@ -552,6 +552,9 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
                 display_pos['role'] = override['role']
             if override.get('hidden'):
                 display_pos['hidden'] = True
+        # Add position tail if available (last 20 seconds of positions)
+        if position_tails and sailor_id in position_tails:
+            display_pos['tail'] = position_tails[sailor_id]
         display_positions[sailor_id] = display_pos
 
     output = {
@@ -632,11 +635,16 @@ class DailyLogger:
 class PositionTracker:
     """Handles position tracking state and processing."""
 
+    # How many seconds of position history to keep for tails
+    TAIL_DURATION_SECONDS = 20
+
     def __init__(self, positions_file: Path | None, daily_logger: DailyLogger | None):
         self.positions_file = positions_file
         self.daily_logger = daily_logger
         self.current_positions: dict[str, dict] = {}
         self.last_timestamp: dict[str, int] = {}
+        # Position tails: sailor_id -> list of [ts, lat, lon] for last 20 seconds
+        self.position_tails: dict[str, list] = {}
         self._lock = threading.Lock()
         # Load existing state from positions file if it exists
         self._load_from_file()
@@ -686,6 +694,7 @@ class PositionTracker:
         with self._lock:
             self.current_positions.clear()
             self.last_timestamp.clear()
+            self.position_tails.clear()
         log("[ADMIN] Cleared internal position state")
 
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
@@ -693,11 +702,13 @@ class PositionTracker:
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
-                         skip_log: bool = False, stopped: bool = False) -> bool:
+                         skip_log: bool = False, stopped: bool = False,
+                         pos_array: list | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
         If stopped=True, the user deliberately stopped tracking (vs losing signal).
+        If pos_array is provided (1Hz mode), all positions are added to the tail.
         """
         recv_time = time.time()
 
@@ -778,9 +789,26 @@ class PositionTracker:
                     pos_data["stopped"] = True
                 self.current_positions[sailor_id] = pos_data
 
+                # Update position tail (last 20 seconds of positions)
+                if sailor_id not in self.position_tails:
+                    self.position_tails[sailor_id] = []
+                tail = self.position_tails[sailor_id]
+                # In 1Hz mode, add all positions from the array
+                if pos_array and isinstance(pos_array, list) and len(pos_array) > 0:
+                    for pos_entry in pos_array:
+                        if len(pos_entry) >= 3:
+                            tail.append([pos_entry[0], pos_entry[1], pos_entry[2]])
+                else:
+                    # Standard mode - just add current position
+                    tail.append([ts, lat, lon])
+                # Remove positions older than TAIL_DURATION_SECONDS
+                cutoff_ts = ts - self.TAIL_DURATION_SECONDS
+                while tail and tail[0][0] < cutoff_ts:
+                    tail.pop(0)
+
             # Write current positions file
             if self.positions_file:
-                write_current_positions(self.current_positions, self.positions_file, _user_overrides)
+                write_current_positions(self.current_positions, self.positions_file, _user_overrides, self.position_tails)
 
             # Write to daily track log (unless skip_log is True, e.g., for batch entries)
             if self.daily_logger and not skip_log:
@@ -902,7 +930,8 @@ class EventTracker:
             os_version=os_version,
             horizontal_accuracy=horizontal_accuracy,
             skip_log=has_batch or skip_log,
-            stopped=stopped
+            stopped=stopped,
+            pos_array=pos_array
         )
 
         # Write positions with event-specific user overrides
@@ -910,7 +939,8 @@ class EventTracker:
             write_current_positions(
                 self.position_tracker.current_positions,
                 self.positions_file,
-                self.user_overrides
+                self.user_overrides,
+                self.position_tracker.position_tails
             )
 
         return result
@@ -1388,7 +1418,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     write_current_positions(
                         tracker.position_tracker.current_positions,
                         tracker.positions_file,
-                        tracker.user_overrides
+                        tracker.user_overrides,
+                        tracker.position_tracker.position_tails
                     )
                     log(f"[EVENT {eid}] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
@@ -1434,7 +1465,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 write_current_positions(
                     tracker.position_tracker.current_positions,
                     tracker.positions_file,
-                    tracker.user_overrides
+                    tracker.user_overrides,
+                    tracker.position_tracker.position_tails
                 )
                 log(f"[EVENT {eid}] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
@@ -1549,7 +1581,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         write_current_positions(
                             _position_tracker.current_positions,
                             _position_tracker.positions_file,
-                            _user_overrides
+                            _user_overrides,
+                            _position_tracker.position_tails
                         )
                     log(f"[ADMIN] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
@@ -1760,7 +1793,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
                     skip_log=has_batch,
-                    stopped=stopped
+                    stopped=stopped,
+                    pos_array=pos_array
                 )
 
             # Send ACK response (same format as UDP)
@@ -1976,7 +2010,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     write_current_positions(
                         _position_tracker.current_positions,
                         _position_tracker.positions_file,
-                        _user_overrides
+                        _user_overrides,
+                        _position_tracker.position_tails
                     )
                 log(f"[ADMIN] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
@@ -2482,7 +2517,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
                         skip_log=has_batch,
-                        stopped=stopped
+                        stopped=stopped,
+                        pos_array=pos_array
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)
