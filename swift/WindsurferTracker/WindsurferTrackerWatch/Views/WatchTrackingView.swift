@@ -48,13 +48,11 @@ struct WatchTrackingView: View {
                         .foregroundColor(.cyan)
                 }
 
-                // Event name (if available)
-                if !viewModel.eventName.isEmpty {
-                    Text(viewModel.eventName)
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                        .lineLimit(1)
-                }
+                // Status line (GPS wait, connecting, auth failure, or event name)
+                Text(viewModel.statusLine)
+                    .font(.caption2)
+                    .foregroundColor(viewModel.statusLine == "auth failure" ? .red : .blue)
+                    .lineLimit(1)
 
                 // Sailor ID with 1Hz indicator
                 HStack(spacing: 4) {

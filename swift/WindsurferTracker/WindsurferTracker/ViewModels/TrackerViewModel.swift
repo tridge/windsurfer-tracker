@@ -12,6 +12,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var lastPosition: TrackerPosition?
     @Published public var connectionStatus = ConnectionStatus()
     @Published public var eventName = ""
+    @Published public var statusLine = "---"  // GPS wait, connecting..., auth failure, or event name
     @Published public var errorMessage: String?
     @Published public var showError = false
 
@@ -144,6 +145,14 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] name in
                 self?.eventName = name
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to status line (GPS wait, connecting, auth failure, or event name)
+        TrackerService.shared.statusLinePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.statusLine = status
             }
             .store(in: &cancellables)
 

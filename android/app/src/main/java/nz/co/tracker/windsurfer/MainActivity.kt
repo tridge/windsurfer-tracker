@@ -473,9 +473,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun startTrackerService() {
-        // Show placeholder event name - will be repopulated from first ACK
-        binding.tvEventName.text = "---"
-
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
         // Validate ID and password before starting
@@ -1075,6 +1072,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     override fun onEventName(name: String) {
         runOnUiThread {
             binding.tvEventName.text = if (name.isNotEmpty()) name else "---"
+        }
+    }
+
+    override fun onStatusLine(status: String) {
+        runOnUiThread {
+            binding.tvEventName.text = status
         }
     }
 }

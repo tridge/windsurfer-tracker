@@ -8,11 +8,11 @@ struct TrackingView: View {
         VStack(spacing: 0) {
             // Status section
             VStack(alignment: .leading, spacing: 8) {
-                // Event name (always show, with placeholder when not yet received)
-                Text(viewModel.eventName.isEmpty ? "---" : viewModel.eventName)
+                // Status line (GPS wait, connecting..., auth failure, or event name)
+                Text(viewModel.statusLine)
                     .font(.headline)
                     .fontWeight(.bold)
-                    .foregroundColor(Color(red: 0, green: 0.4, blue: 0.67))
+                    .foregroundColor(viewModel.statusLine == "auth failure" ? .red : Color(red: 0, green: 0.4, blue: 0.67))
 
                 // Frequency mode indicator (always show)
                 Text(viewModel.highFrequencyMode ? "1Hz MODE" : "0.1Hz MODE")

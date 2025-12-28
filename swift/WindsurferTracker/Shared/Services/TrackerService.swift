@@ -17,6 +17,7 @@ public actor TrackerService {
     public nonisolated let positionPublisher = PassthroughSubject<TrackerPosition, Never>()
     public nonisolated let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(ConnectionStatus())
     public nonisolated let eventNamePublisher = CurrentValueSubject<String, Never>("")
+    public nonisolated let statusLinePublisher = CurrentValueSubject<String, Never>("---")  // GPS wait, connecting..., auth failure, or event name
     public nonisolated let errorPublisher = PassthroughSubject<TrackerError, Never>()
 
     // MARK: - State
@@ -26,6 +27,12 @@ public actor TrackerService {
     private var sequenceNumber = 0
     private var lastAckSeq = 0
     private var acknowledgedSeqs: Set<Int> = []
+
+    // Status line state
+    private var hasGpsFix = false
+    private var hasFirstAck = false
+    private var hasAuthFailure = false
+    private var currentEventName = ""
 
     // Sliding window for ACK rate (last 20 messages)
     private var ackWindow: [Bool] = []
@@ -103,6 +110,13 @@ public actor TrackerService {
         positionBuffer.removeAll()
         lastSendTime = nil
 
+        // Reset status line state
+        hasGpsFix = false
+        hasFirstAck = false
+        hasAuthFailure = false
+        currentEventName = ""
+        updateStatusLine()  // Show "GPS wait"
+
         // Start battery tracking
         batteryMonitor.startDrainTracking()
 
@@ -177,6 +191,12 @@ public actor TrackerService {
 
         // Publish position for UI
         positionPublisher.send(position)
+
+        // Mark GPS as ready and update status line
+        if !hasGpsFix {
+            hasGpsFix = true
+            updateStatusLine()  // Show "connecting ..."
+        }
 
         if preferences.highFrequencyMode {
             // 1Hz mode - buffer positions
@@ -312,6 +332,17 @@ public actor TrackerService {
     }
 
     private func handleACK(_ response: AckResponse) async {
+        // Handle auth error
+        if response.isAuthError {
+            hasAuthFailure = true
+            updateStatusLine()  // Show "auth failure"
+            errorPublisher.send(.authenticationFailed(response.msg))
+            return  // Don't count auth failures as successful ACK
+        }
+
+        // Clear auth failure on successful ACK
+        hasAuthFailure = false
+
         // Track acknowledged sequence
         if !acknowledgedSeqs.contains(response.ack) {
             acknowledgedSeqs.insert(response.ack)
@@ -326,14 +357,16 @@ public actor TrackerService {
             }
         }
 
-        // Handle event name
+        // Handle event name and update status
         if let eventName = response.event {
+            currentEventName = eventName
+            hasFirstAck = true
+            updateStatusLine()  // Show event name
             eventNamePublisher.send(eventName)
-        }
-
-        // Handle auth error
-        if response.isAuthError {
-            errorPublisher.send(.authenticationFailed(response.msg))
+        } else if !hasFirstAck {
+            // First ACK but no event name yet
+            hasFirstAck = true
+            updateStatusLine()
         }
 
         updateConnectionStatus()
@@ -358,6 +391,21 @@ public actor TrackerService {
         )
 
         connectionStatusPublisher.send(status)
+    }
+
+    /// Update the status line based on current state
+    private func updateStatusLine() {
+        let status: String
+        if hasAuthFailure {
+            status = "auth failure"
+        } else if hasFirstAck && !currentEventName.isEmpty {
+            status = currentEventName
+        } else if hasGpsFix {
+            status = "connecting ..."
+        } else {
+            status = "GPS wait"
+        }
+        statusLinePublisher.send(status)
     }
 
     // MARK: - Version Info

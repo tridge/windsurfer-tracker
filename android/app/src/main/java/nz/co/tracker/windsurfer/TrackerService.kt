@@ -121,6 +121,10 @@ class TrackerService : LifecycleService() {
     private val assistRequested = AtomicBoolean(false)
     private val sequenceNumber = AtomicInteger(0)
     private val lastAckTime = AtomicLong(0)
+    private val hasGpsFix = AtomicBoolean(false)
+    private val hasFirstAck = AtomicBoolean(false)
+    private val hasAuthFailure = AtomicBoolean(false)
+    private var currentEventName: String = ""
     // Sliding window for ACK rate calculation (last 20 messages)
     private val ackWindow = java.util.concurrent.ConcurrentLinkedDeque<Boolean>()
     private val ACK_WINDOW_SIZE = 20
@@ -143,6 +147,21 @@ class TrackerService : LifecycleService() {
         fun onConnectionStatus(ackRate: Float)
         fun onAuthError(message: String)
         fun onEventName(name: String)
+        fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
+    }
+
+    /**
+     * Update the status line based on current state.
+     * Priority: auth failure > event name > connecting > GPS wait
+     */
+    private fun updateStatusLine() {
+        val status = when {
+            hasAuthFailure.get() -> "auth failure"
+            hasFirstAck.get() && currentEventName.isNotEmpty() -> currentEventName
+            hasGpsFix.get() -> "connecting ..."
+            else -> "GPS wait"
+        }
+        statusListener?.onStatusLine(status)
     }
 
     /**
@@ -255,15 +274,31 @@ class TrackerService : LifecycleService() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
+                    // Filter out invalid 0,0 locations (can happen before GPS is ready)
+                    if (location.latitude == 0.0 && location.longitude == 0.0) {
+                        Log.d(TAG, "Skipping invalid 0,0 location - GPS not ready")
+                        return
+                    }
+
+                    // Filter out locations without accuracy (likely not a real GPS fix)
+                    if (!location.hasAccuracy()) {
+                        Log.d(TAG, "Skipping location without accuracy data")
+                        return
+                    }
+
                     // Filter out inaccurate locations (technique from OwnTracks)
-                    if (MAX_ACCURACY_METERS > 0 && location.hasAccuracy() &&
-                        location.accuracy > MAX_ACCURACY_METERS) {
+                    if (MAX_ACCURACY_METERS > 0 && location.accuracy > MAX_ACCURACY_METERS) {
                         Log.d(TAG, "Skipping inaccurate location: accuracy=${location.accuracy}m > ${MAX_ACCURACY_METERS}m")
                         return
                     }
 
                     lastLocation = location
                     statusListener?.onLocationUpdate(location)
+
+                    // Mark GPS as ready and update status line
+                    if (!hasGpsFix.getAndSet(true)) {
+                        updateStatusLine()  // Show "connecting ..."
+                    }
 
                     if (highFrequencyMode) {
                         // Buffer position for batched sending
@@ -295,6 +330,13 @@ class TrackerService : LifecycleService() {
 
         // Clear acknowledged sequences from previous session
         acknowledgedSeqs.clear()
+
+        // Reset status tracking for new session
+        hasGpsFix.set(false)
+        hasFirstAck.set(false)
+        hasAuthFailure.set(false)
+        currentEventName = ""
+        updateStatusLine()  // Show "GPS wait"
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
@@ -705,10 +747,15 @@ class TrackerService : LifecycleService() {
                         if (error == "auth") {
                             val msg = ack.optString("msg", "Invalid password")
                             Log.w(TAG, "Auth error received: $msg")
+                            hasAuthFailure.set(true)
+                            updateStatusLine()  // Show "auth failure"
                             statusListener?.onAuthError(msg)
                             // Don't count as successful ACK
                             continue
                         }
+
+                        // Clear auth failure on successful ACK
+                        hasAuthFailure.set(false)
 
                         // Mark this sequence as acknowledged to stop retransmissions
                         acknowledgedSeqs.add(ackSeq)
@@ -726,10 +773,17 @@ class TrackerService : LifecycleService() {
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
 
-                        // Check for event name in ACK
+                        // Check for event name in ACK and update status
                         val eventName = ack.optString("event", "")
                         if (eventName.isNotEmpty()) {
+                            currentEventName = eventName
+                            hasFirstAck.set(true)
+                            updateStatusLine()  // Show event name
                             statusListener?.onEventName(eventName)
+                        } else if (!hasFirstAck.get()) {
+                            // First ACK but no event name yet
+                            hasFirstAck.set(true)
+                            updateStatusLine()
                         }
 
                         Log.d(TAG, "Received ACK for seq=$ackSeq")
