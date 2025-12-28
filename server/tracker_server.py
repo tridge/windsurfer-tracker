@@ -1684,6 +1684,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 lat = packet.get("lat", 0.0)
                 lon = packet.get("lon", 0.0)
 
+            # Clear assist flag if assist is disabled for this event
+            if not assist_enabled:
+                assist = False
+
             # Process through event tracker (multi-event) or legacy tracker
             if tracker:
                 tracker.process_position(
@@ -2378,6 +2382,10 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         ack_data["assist"] = False
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
+
+                    # Clear assist flag if assist is disabled for this event
+                    if not assist_enabled:
+                        assist = False
 
                     # Process through event tracker
                     event_tracker.process_position(
