@@ -294,6 +294,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopTracking() {
+        // Send stop notification to server, then clean up
+        trackerService?.requestGracefulStop {
+            finishStopTracking()
+        } ?: finishStopTracking()
+    }
+
+    private fun finishStopTracking() {
         trackerService?.stopService()
 
         if (serviceBound) {

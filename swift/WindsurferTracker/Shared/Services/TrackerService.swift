@@ -134,6 +134,9 @@ public actor TrackerService {
     public func stop() async {
         guard isRunning else { return }
 
+        // Send stop notification to server before stopping
+        await sendStopPacket()
+
         isRunning = false
         assistRequested = false
 
@@ -151,6 +154,46 @@ public actor TrackerService {
 
         // Save tracking state
         preferences.trackingActive = false
+    }
+
+    /// Send a stop notification packet to the server
+    /// This tells the server the user deliberately stopped tracking (vs losing signal)
+    private func sendStopPacket() async {
+        guard let position = locationManager.lastPosition else { return }
+
+        sequenceNumber += 1
+        let seq = sequenceNumber
+
+        let packet = TrackerPacket(
+            id: preferences.sailorId,
+            eid: preferences.eventId,
+            sq: seq,
+            ts: position.unixTimestamp,
+            lat: position.latitude,
+            lon: position.longitude,
+            spd: 0.0,
+            hdg: 0,
+            ast: false,  // Clear assist on stop
+            bat: batteryMonitor.status.level,
+            role: preferences.role.rawValue,
+            ver: appVersion,
+            os: osVersion,
+            pwd: preferences.password.isEmpty ? nil : preferences.password,
+            chg: batteryMonitor.status.isCharging,
+            ps: batteryMonitor.status.isLowPowerMode,
+            stopped: true
+        )
+
+        // Try up to 5 times with short delays
+        for attempt in 1...5 {
+            let response = await networkManager.send(packet)
+            if response != nil {
+                // Got ACK
+                return
+            }
+            // Wait 500ms before retry
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
     }
 
     /// Toggle assist request

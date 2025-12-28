@@ -382,11 +382,93 @@ class TrackerService : LifecycleService() {
     
     private fun stopTracking() {
         if (!isRunning.getAndSet(false)) return
-        
+
         Log.d(TAG, "Stopping tracking")
         fusedLocationClient.removeLocationUpdates(locationCallback)
         socket?.close()
         socket = null
+    }
+
+    /**
+     * Send a stop notification packet to the server.
+     * This tells the server the user deliberately stopped tracking (vs losing signal).
+     * Retries until ACK received or max attempts reached.
+     */
+    suspend fun sendStopPacket(): Boolean {
+        val location = lastLocation ?: return false
+        val seq = sequenceNumber.incrementAndGet()
+
+        // Get current password and event ID from prefs
+        val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("lat", location.latitude)
+            put("lon", location.longitude)
+            put("spd", 0.0)
+            put("hdg", 0)
+            put("ast", false)  // Clear assist on stop
+            put("stopped", true)  // This is a deliberate stop
+            put("role", role)
+            put("ver", BuildConfig.VERSION_STRING)
+            put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+            if (currentPassword.isNotEmpty()) {
+                put("pwd", currentPassword)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+        val address = getServerAddress() ?: return false
+
+        Log.d(TAG, "Sending stop packet seq=$seq")
+
+        // Try up to 5 times with shorter timeout for stop packet
+        repeat(5) { attempt ->
+            if (acknowledgedSeqs.contains(seq)) {
+                Log.d(TAG, "Stop packet acknowledged")
+                return true
+            }
+
+            try {
+                val dgram = DatagramPacket(data, data.size, address, serverPort)
+                socket?.send(dgram)
+                Log.d(TAG, "Sent stop packet attempt ${attempt + 1}")
+
+                // Wait for ACK with short timeout
+                delay(500)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send stop packet", e)
+            }
+        }
+
+        // Check one more time if we got an ACK
+        return acknowledgedSeqs.contains(seq).also {
+            if (it) Log.d(TAG, "Stop packet acknowledged (delayed)"
+            ) else Log.w(TAG, "Stop packet not acknowledged after all attempts")
+        }
+    }
+
+    /**
+     * Request a graceful stop - sends stop notification to server before stopping.
+     * This should be called when user deliberately stops tracking.
+     */
+    fun requestGracefulStop(callback: (() -> Unit)? = null) {
+        if (!isRunning.get()) {
+            callback?.invoke()
+            return
+        }
+
+        serviceScope.launch {
+            sendStopPacket()
+            withContext(Dispatchers.Main) {
+                stopTracking()
+                callback?.invoke()
+            }
+        }
     }
     
     /**

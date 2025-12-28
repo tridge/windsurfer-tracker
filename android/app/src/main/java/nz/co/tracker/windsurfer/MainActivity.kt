@@ -516,11 +516,18 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun stopTrackerService() {
+        // Send stop notification to server, then clean up
+        trackerService?.requestGracefulStop {
+            finishStopTrackerService()
+        } ?: finishStopTrackerService()
+    }
+
+    private fun finishStopTrackerService() {
         // Clear tracking state
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean("tracking_active", false)
             .apply()
-        
+
         trackerService?.statusListener = null
         if (serviceBound) {
             unbindService(serviceConnection)
@@ -529,7 +536,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         bindingInProgress = false
         stopService(Intent(this, TrackerService::class.java))
         trackerService = null
-        
+
         binding.btnStartStop.text = "Start Tracking"
         binding.statusGroup.visibility = View.GONE
         binding.configGroup.visibility = View.VISIBLE

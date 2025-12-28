@@ -65,6 +65,9 @@ public struct TrackerPacket: Codable {
     /// Heart rate in BPM (optional, only if enabled and available)
     public let hr: Int?
 
+    /// Stopped flag - true when user deliberately stops tracking
+    public let stopped: Bool?
+
     public init(
         id: String,
         eid: Int,
@@ -86,7 +89,8 @@ public struct TrackerPacket: Codable {
         ps: Bool,
         pos: [[Double]]? = nil,
         hac: Double? = nil,
-        hr: Int? = nil
+        hr: Int? = nil,
+        stopped: Bool? = nil
     ) {
         self.id = id
         self.eid = eid
@@ -109,6 +113,7 @@ public struct TrackerPacket: Codable {
         self.pos = pos
         self.hac = hac
         self.hr = hr
+        self.stopped = stopped
     }
 
     /// Encode to JSON data

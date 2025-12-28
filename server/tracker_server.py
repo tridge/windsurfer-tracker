@@ -155,6 +155,8 @@ def sanitize_tracker_packet(packet: dict) -> dict:
         sanitized['chg'] = sanitize_bool(packet.get('chg'), default=False)
     if 'ps' in packet:
         sanitized['ps'] = sanitize_bool(packet.get('ps'), default=False)
+    if 'stopped' in packet:
+        sanitized['stopped'] = sanitize_bool(packet.get('stopped'), default=False)
 
     # Pass through pos array (1Hz mode) with sanitized values
     # Format: [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
@@ -690,10 +692,11 @@ class PositionTracker:
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
-                         skip_log: bool = False) -> bool:
+                         skip_log: bool = False, stopped: bool = False) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
+        If stopped=True, the user deliberately stopped tracking (vs losing signal).
         """
         recv_time = time.time()
 
@@ -707,9 +710,14 @@ class PositionTracker:
             if not is_dup:
                 self.last_timestamp[sailor_id] = ts
 
+        # If stopped=True, clear any assist request
+        if stopped:
+            assist = False
+
         # Format output
         dup_marker = " [DUP]" if is_dup else ""
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
+        stopped_marker = " [STOPPED]" if stopped else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
         hac_str = f" hac={horizontal_accuracy:.0f}m" if horizontal_accuracy is not None else ""
@@ -724,9 +732,12 @@ class PositionTracker:
             f"time={format_timestamp(ts)} "
             f"[{source}] "
             f"ip={src_ip}"
-            f"{dup_marker}{assist_marker}"
+            f"{dup_marker}{assist_marker}{stopped_marker}"
         )
         print(log_line)
+
+        if stopped:
+            log(f"[{sailor_id}] Tracking stopped by user")
 
         if assist:
             log("!" * 60)
@@ -762,6 +773,8 @@ class PositionTracker:
                     pos_data["os"] = os_version
                 if horizontal_accuracy is not None:
                     pos_data["hac"] = horizontal_accuracy
+                if stopped:
+                    pos_data["stopped"] = True
                 self.current_positions[sailor_id] = pos_data
 
             # Write current positions file
@@ -834,7 +847,8 @@ class EventTracker:
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
-                         skip_log: bool = False, pos_array: list | None = None) -> bool:
+                         skip_log: bool = False, pos_array: list | None = None,
+                         stopped: bool = False) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -886,7 +900,8 @@ class EventTracker:
             heart_rate=heart_rate,
             os_version=os_version,
             horizontal_accuracy=horizontal_accuracy,
-            skip_log=has_batch or skip_log
+            skip_log=has_batch or skip_log,
+            stopped=stopped
         )
 
         # Write positions with event-specific user overrides
@@ -1582,6 +1597,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             battery_drain_rate = packet.get("bdr")
             os_version = packet.get("os")  # OS version string (optional)
             horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
+            stopped = packet.get("stopped", False)  # User deliberately stopped tracking
 
             # Extract event ID (default to 1 for backwards compatibility)
             eid = packet.get("eid", 1)
@@ -1686,7 +1702,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     heart_rate=heart_rate,
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
-                    pos_array=pos_array
+                    pos_array=pos_array,
+                    stopped=stopped
                 )
             else:
                 # Legacy single-event mode
@@ -1735,7 +1752,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     heart_rate=heart_rate,
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
-                    skip_log=has_batch
+                    skip_log=has_batch,
+                    stopped=stopped
                 )
 
             # Send ACK response (same format as UDP)
@@ -2290,6 +2308,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
                 os_version = packet.get("os")  # OS version string (optional)
                 horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
+                stopped = packet.get("stopped", False)  # User deliberately stopped tracking
 
                 # Extract event ID (default to 1 for backwards compatibility)
                 eid = packet.get("eid", 1)
@@ -2371,7 +2390,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         heart_rate=heart_rate,
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
-                        pos_array=pos_array
+                        pos_array=pos_array,
+                        stopped=stopped
                     )
 
                 else:
@@ -2444,7 +2464,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         heart_rate=heart_rate,
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
-                        skip_log=has_batch
+                        skip_log=has_batch,
+                        stopped=stopped
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)

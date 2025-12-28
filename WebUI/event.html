@@ -3302,7 +3302,7 @@
                                 <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
                                 <div class="sailor-details">
-                                    ${sailor.spd.toFixed(1)} kn · <span style="${batColor}">${batStr}</span> · ${sigStr} · ${timeAgo(sailor.last_seen)}
+                                    ${sailor.spd.toFixed(1)} kn · <span style="${batColor}">${batStr}</span> · ${sigStr} · ${timeAgo(sailor.last_seen)}${sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : ''}
                                 </div>
                             </div>
                         </div>
@@ -3427,7 +3427,7 @@
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                     Signal: ${sigStr}${heartRateLine}<br>
-                    Updated: ${timeAgo(sailor.last_seen)}<br>
+                    Updated: ${timeAgo(sailor.last_seen)}${sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : ''}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">
                         <label>
