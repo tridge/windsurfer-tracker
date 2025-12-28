@@ -88,10 +88,14 @@ Shown when tracking is active. Displays current position and status.
 
 ### Layout (top to bottom)
 
-1. **Event Name**
-   - Text: Event name from server ACK, or "---" if not received
+1. **Status Line**
+   - Shows connection state progression:
+     - "GPS wait" - waiting for first GPS fix
+     - "connecting ..." - have GPS, waiting for first ACK
+     - "auth failure" - authentication failed (red text)
+     - Event name - connected successfully (teal blue)
    - Font: headline, bold
-   - Color: Teal blue (#0066AA)
+   - Color: Red for "auth failure", Teal blue (#0066AA) otherwise
 
 2. **Frequency Mode**
    - Text: "1Hz MODE" or "0.1Hz MODE"
@@ -152,6 +156,14 @@ Shown when tracking is active. Displays current position and status.
 ## Component: Assist Button
 
 Emergency assistance request button with safety features.
+
+### Visibility
+
+The assist button can be disabled per-event by the event manager:
+- Server sends `assist: false` in ACK when disabled for event
+- Client hides the assist button when `assist: false` received
+- If client has assist active when disabled, it's automatically cleared
+- Button reappears if manager re-enables assist (dynamic)
 
 ### States
 
@@ -320,6 +332,17 @@ Simplified interface for Apple Watch / Wear OS.
 - Title: "Stop Tracking?"
 - Message: "Are you sure you want to stop tracking? Your position will no longer be reported."
 - Actions: "Stop" (destructive), "Cancel"
+
+---
+
+## Stop Tracking Behavior
+
+When user stops tracking:
+1. Client sends final position packet with `stopped: true` flag
+2. Server clears any active assist request for this tracker
+3. Server marks position as stopped (shown as "STOPPED" in WebUI)
+4. Retry up to 5 times with 500ms delays to ensure delivery
+5. Clean up local state after stop packet sent (or after retries exhausted)
 
 ---
 
