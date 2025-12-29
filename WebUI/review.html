@@ -91,6 +91,23 @@
             color: #3498db;
         }
 
+        .export-format-btn {
+            width: 100%;
+            padding: 6px 12px;
+            margin: 2px 0;
+            background: #34495e;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        .export-format-btn:hover {
+            background: #3498db;
+        }
+
         .about-modal {
             display: none;
             position: fixed;
@@ -1557,6 +1574,14 @@
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
                 <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
                 <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
+            </div>
+        </div>
+        <div class="graphs-dropdown">
+            <button id="export-btn" style="background:#27ae60">Export ▼</button>
+            <div id="export-dropdown-content" class="graphs-dropdown-content">
+                <label><button id="export-gpx" class="export-format-btn">GPX (GPS Exchange)</button></label>
+                <label><button id="export-csv" class="export-format-btn">CSV (Spreadsheet)</button></label>
+                <label><button id="export-geojson" class="export-format-btn">GeoJSON (Mapping)</button></label>
             </div>
         </div>
         <button id="reload-tiles-btn" title="Reload map tiles">⟳</button>
@@ -5264,6 +5289,7 @@
             e.stopPropagation();
             document.getElementById('options-dropdown-content').classList.toggle('show');
             document.getElementById('graphs-dropdown-content').classList.remove('show');
+            document.getElementById('export-dropdown-content').classList.remove('show');
         });
 
         // Graphs dropdown toggle
@@ -5271,6 +5297,15 @@
             e.stopPropagation();
             document.getElementById('graphs-dropdown-content').classList.toggle('show');
             document.getElementById('options-dropdown-content').classList.remove('show');
+            document.getElementById('export-dropdown-content').classList.remove('show');
+        });
+
+        // Export dropdown toggle
+        document.getElementById('export-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('export-dropdown-content').classList.toggle('show');
+            document.getElementById('options-dropdown-content').classList.remove('show');
+            document.getElementById('graphs-dropdown-content').classList.remove('show');
         });
 
         // Close dropdowns when clicking outside
@@ -5279,12 +5314,17 @@
             const graphsBtn = document.getElementById('graphs-btn');
             const optionsDropdown = document.getElementById('options-dropdown-content');
             const optionsBtn = document.getElementById('options-btn');
+            const exportDropdown = document.getElementById('export-dropdown-content');
+            const exportBtn = document.getElementById('export-btn');
 
             if (!graphsDropdown.contains(e.target) && e.target !== graphsBtn) {
                 graphsDropdown.classList.remove('show');
             }
             if (!optionsDropdown.contains(e.target) && e.target !== optionsBtn) {
                 optionsDropdown.classList.remove('show');
+            }
+            if (!exportDropdown.contains(e.target) && e.target !== exportBtn) {
+                exportDropdown.classList.remove('show');
             }
         });
 
@@ -5648,6 +5688,172 @@
             document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
             resetPlaybackToSelection();
         });
+
+        // ===== Export Functions =====
+
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function getExportFilename(extension) {
+            const date = document.getElementById('date-picker').value || 'tracks';
+            const users = Array.from(selectedUsers).slice(0, 3).join('-') || 'all';
+            const suffix = selectedUsers.size > 3 ? `-and${selectedUsers.size - 3}more` : '';
+            return `${date}_${users}${suffix}.${extension}`;
+        }
+
+        function getFilteredExportData() {
+            // Get data for selected users within current time range
+            const exportData = [];
+            for (const userId of selectedUsers) {
+                if (!userData[userId]) continue;
+                const filtered = userData[userId].filter(
+                    e => e.ts >= rangeStartTime && e.ts <= rangeEndTime
+                );
+                if (filtered.length > 0) {
+                    exportData.push({ userId, entries: filtered });
+                }
+            }
+            return exportData;
+        }
+
+        function exportToGPX() {
+            const data = getFilteredExportData();
+            if (data.length === 0) {
+                alert('No data to export. Please select at least one user.');
+                return;
+            }
+
+            const now = new Date().toISOString();
+            let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Windsurfer Tracker"
+     xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2">
+  <metadata>
+    <name>Track Export</name>
+    <time>${now}</time>
+  </metadata>
+`;
+
+            for (const { userId, entries } of data) {
+                const displayName = getDisplayName(userId);
+                gpx += `  <trk>
+    <name>${escapeXml(displayName)}</name>
+    <trkseg>
+`;
+                for (const e of entries) {
+                    const time = new Date(e.ts * 1000).toISOString();
+                    const speedMs = (e.spd || 0) * 0.514444; // knots to m/s
+                    gpx += `      <trkpt lat="${e.lat.toFixed(7)}" lon="${e.lon.toFixed(7)}">
+        <time>${time}</time>
+        <extensions>
+          <gpxtpx:TrackPointExtension>
+            <gpxtpx:speed>${speedMs.toFixed(2)}</gpxtpx:speed>
+            <gpxtpx:course>${e.hdg || 0}</gpxtpx:course>
+          </gpxtpx:TrackPointExtension>
+        </extensions>
+      </trkpt>
+`;
+                }
+                gpx += `    </trkseg>
+  </trk>
+`;
+            }
+
+            gpx += `</gpx>`;
+
+            downloadFile(gpx, getExportFilename('gpx'), 'application/gpx+xml');
+            document.getElementById('export-dropdown-content').classList.remove('show');
+        }
+
+        function exportToCSV() {
+            const data = getFilteredExportData();
+            if (data.length === 0) {
+                alert('No data to export. Please select at least one user.');
+                return;
+            }
+
+            // CSV header
+            let csv = 'timestamp,user_id,user_name,latitude,longitude,speed_kn,speed_ms,heading,battery,signal,accuracy,heart_rate\n';
+
+            for (const { userId, entries } of data) {
+                const displayName = getDisplayName(userId);
+                for (const e of entries) {
+                    const time = new Date(e.ts * 1000).toISOString();
+                    const speedMs = (e.spd || 0) * 0.514444;
+                    csv += `${time},${userId},"${displayName}",${e.lat.toFixed(7)},${e.lon.toFixed(7)},`;
+                    csv += `${(e.spd || 0).toFixed(2)},${speedMs.toFixed(2)},${e.hdg || 0},`;
+                    csv += `${e.bat !== undefined ? e.bat : ''},${e.sig !== undefined ? e.sig : ''},`;
+                    csv += `${e.hac !== undefined ? e.hac.toFixed(1) : ''},${e.hr !== undefined ? e.hr : ''}\n`;
+                }
+            }
+
+            downloadFile(csv, getExportFilename('csv'), 'text/csv');
+            document.getElementById('export-dropdown-content').classList.remove('show');
+        }
+
+        function exportToGeoJSON() {
+            const data = getFilteredExportData();
+            if (data.length === 0) {
+                alert('No data to export. Please select at least one user.');
+                return;
+            }
+
+            const features = [];
+
+            for (const { userId, entries } of data) {
+                const displayName = getDisplayName(userId);
+                const coordinates = entries.map(e => [e.lon, e.lat]); // GeoJSON uses [lon, lat]
+                const timestamps = entries.map(e => new Date(e.ts * 1000).toISOString());
+                const speeds = entries.map(e => e.spd || 0);
+
+                features.push({
+                    type: 'Feature',
+                    properties: {
+                        user_id: userId,
+                        user_name: displayName,
+                        start_time: timestamps[0],
+                        end_time: timestamps[timestamps.length - 1],
+                        point_count: entries.length,
+                        avg_speed_kn: (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(2),
+                        max_speed_kn: Math.max(...speeds).toFixed(2)
+                    },
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: coordinates
+                    }
+                });
+            }
+
+            const geojson = {
+                type: 'FeatureCollection',
+                features: features
+            };
+
+            downloadFile(JSON.stringify(geojson, null, 2), getExportFilename('geojson'), 'application/geo+json');
+            document.getElementById('export-dropdown-content').classList.remove('show');
+        }
+
+        function escapeXml(str) {
+            return str.replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;')
+                      .replace(/'/g, '&apos;');
+        }
+
+        // Export button handlers
+        document.getElementById('export-gpx').addEventListener('click', exportToGPX);
+        document.getElementById('export-csv').addEventListener('click', exportToCSV);
+        document.getElementById('export-geojson').addEventListener('click', exportToGeoJSON);
 
         // Update live tracking link to include event ID
         const liveLink = document.getElementById('live-link');
