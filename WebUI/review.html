@@ -2058,8 +2058,12 @@
             }
         })();
 
-        // Initialize map
-        const map = L.map('map').setView([-36.85, 174.88], 13);
+        // Initialize map with fractional zoom for finer scroll wheel control
+        const map = L.map('map', {
+            zoomSnap: 0.25,      // Allow fractional zoom levels (0.25 increments)
+            zoomDelta: 0.5,      // Smaller zoom steps per scroll event
+            wheelPxPerZoomLevel: 120  // Pixels of scrolling per zoom level
+        }).setView([-36.85, 174.88], 13);
 
         // Map layers
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
