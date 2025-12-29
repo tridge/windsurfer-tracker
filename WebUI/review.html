@@ -1746,8 +1746,8 @@
         <div class="time-slider-container">
             <div class="slider-track"></div>
             <div class="slider-range" id="slider-range"></div>
-            <input type="range" class="time-slider" id="start-slider" min="0" max="100" value="0">
-            <input type="range" class="time-slider" id="end-slider" min="0" max="100" value="100">
+            <input type="range" class="time-slider" id="start-slider" min="0" max="100" value="0" step="any">
+            <input type="range" class="time-slider" id="end-slider" min="0" max="100" value="100" step="any">
         </div>
         <div class="time-labels">
             <span id="label-start">--:--:--</span>
@@ -1889,12 +1889,12 @@
                 params.set('users', Array.from(selectedUsers).join(','));
             }
 
-            // Time range (as percentages)
-            const startSlider = document.getElementById('start-slider').value;
-            const endSlider = document.getElementById('end-slider').value;
-            if (startSlider !== '0' || endSlider !== '100') {
-                params.set('start', startSlider);
-                params.set('end', endSlider);
+            // Time range (as percentages of global log range for stable URLs)
+            const startPercent = timeToGlobalPercent(rangeStartTime);
+            const endPercent = timeToGlobalPercent(rangeEndTime);
+            if (startPercent > 0.01 || endPercent < 99.99) {
+                params.set('start', startPercent.toFixed(2));
+                params.set('end', endPercent.toFixed(2));
             }
 
             // Options
@@ -1958,19 +1958,7 @@
 
         // Restore state that depends on loaded data
         function restoreDataDependentState(params) {
-            // Time range
-            if (params.has('start')) {
-                document.getElementById('start-slider').value = params.get('start');
-            }
-            if (params.has('end')) {
-                document.getElementById('end-slider').value = params.get('end');
-            }
-            if (params.has('start') || params.has('end')) {
-                updateSliderRange();
-                updateTimeDisplay();
-            }
-
-            // Selected users
+            // First restore selected users (affects slider range)
             if (params.has('users')) {
                 const users = params.get('users').split(',');
                 for (const userId of users) {
@@ -1983,6 +1971,35 @@
                         }
                     }
                 }
+            }
+
+            // Update slider endpoints based on selected users
+            updateSliderEndpoints();
+
+            // Time range (URL stores percentages of global log range)
+            if (params.has('start') || params.has('end')) {
+                const startPercent = parseFloat(params.get('start') || '0');
+                const endPercent = parseFloat(params.get('end') || '100');
+
+                // Convert global percentages to timestamps
+                rangeStartTime = globalPercentToTime(startPercent);
+                rangeEndTime = globalPercentToTime(endPercent);
+
+                // Update slider positions (will use current sliderMinTime/sliderMaxTime)
+                const startSlider = document.getElementById('start-slider');
+                const endSlider = document.getElementById('end-slider');
+
+                // Clamp to slider range and convert to slider percentage
+                const clampedStart = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeStartTime));
+                const clampedEnd = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeEndTime));
+                rangeStartTime = clampedStart;
+                rangeEndTime = clampedEnd;
+
+                startSlider.value = timeToSliderValue(clampedStart);
+                endSlider.value = timeToSliderValue(clampedEnd);
+
+                updateSliderRange();
+                updateTimeDisplay();
             }
         }
 
@@ -2169,6 +2186,8 @@
         let maxTime = 0;
         let rangeStartTime = 0;  // User-selected start time
         let rangeEndTime = 0;    // User-selected end time
+        let sliderMinTime = 0;   // Current slider min (selected users' min or global)
+        let sliderMaxTime = 0;   // Current slider max (selected users' max or global)
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
         let currentLogStartTs = null;  // Start timestamp of current log (for stable URLs)
@@ -2718,6 +2737,8 @@
                 // Calculate time range
                 minTime = allData[0].ts;
                 maxTime = allData[allData.length - 1].ts;
+                sliderMinTime = minTime;  // Initialize slider range to full log
+                sliderMaxTime = maxTime;
                 rangeStartTime = minTime;
                 rangeEndTime = maxTime;
 
@@ -2828,6 +2849,8 @@
             // Calculate time range
             minTime = allData[0].ts;
             maxTime = allData[allData.length - 1].ts;
+            sliderMinTime = minTime;  // Initialize slider range to full log
+            sliderMaxTime = maxTime;
             rangeStartTime = minTime;
             rangeEndTime = maxTime;
 
@@ -2910,6 +2933,10 @@
                 selectedUsers.add(userId);
                 element.classList.add('selected');
             }
+
+            // Update slider endpoints based on newly selected users
+            updateSliderEndpoints();
+
             resetPlaybackToSelection();
 
             // Auto-fit map to show all selected tracks
@@ -2947,16 +2974,17 @@
             const endVal = parseFloat(endSlider.value);
 
             // Update the visual range indicator
-            sliderRange.style.left = startVal + '%';
-            sliderRange.style.width = (endVal - startVal) + '%';
+            // Account for 20px thumb width - thumb center is at 10px + (value/100)*(100%-20px)
+            sliderRange.style.left = `calc(10px + ${startVal}% - ${startVal * 0.2}px)`;
+            sliderRange.style.width = `calc(${endVal - startVal}% - ${(endVal - startVal) * 0.2}px)`;
 
-            // Update times from slider values
-            rangeStartTime = minTime + (maxTime - minTime) * (startVal / 100);
-            rangeEndTime = minTime + (maxTime - minTime) * (endVal / 100);
+            // Update times from slider values (using dynamic slider range)
+            rangeStartTime = sliderMinTime + (sliderMaxTime - sliderMinTime) * (startVal / 100);
+            rangeEndTime = sliderMinTime + (sliderMaxTime - sliderMinTime) * (endVal / 100);
 
-            // Update the labels
-            document.getElementById('label-start').textContent = formatTimeInTz(minTime);
-            document.getElementById('label-end').textContent = formatTimeInTz(maxTime);
+            // Update the edge labels
+            document.getElementById('label-start').textContent = formatTimeInTz(sliderMinTime);
+            document.getElementById('label-end').textContent = formatTimeInTz(sliderMaxTime);
         }
 
         function updateTimeDisplay() {
@@ -3063,6 +3091,11 @@
                     const result = filterOutliers(timeFiltered);
                     filtered = result.filtered;
                     outliers = result.outliers;
+                    // Fall back to unfiltered data if outlier filtering removed too many points
+                    if (filtered.length < 2 && timeFiltered.length >= 2) {
+                        filtered = timeFiltered;
+                        outliers = [];
+                    }
                 }
 
                 if (filtered.length < 2) continue;
@@ -5133,14 +5166,77 @@
         }
 
         function timeToSliderValue(timestamp) {
-            // Convert timestamp to slider value (0-100) based on global range
+            // Convert timestamp to slider value (0-100) based on current slider range
+            if (sliderMaxTime === sliderMinTime) return 100;
+            return ((timestamp - sliderMinTime) / (sliderMaxTime - sliderMinTime)) * 100;
+        }
+
+        function sliderValueToTime(value) {
+            // Convert slider value (0-100) to timestamp based on current slider range
+            return sliderMinTime + (sliderMaxTime - sliderMinTime) * (value / 100);
+        }
+
+        function timeToGlobalPercent(timestamp) {
+            // Convert timestamp to percentage of global log range (for URLs)
             if (maxTime === minTime) return 100;
             return ((timestamp - minTime) / (maxTime - minTime)) * 100;
         }
 
-        function sliderValueToTime(value) {
-            // Convert slider value (0-100) to timestamp based on global range
-            return minTime + (maxTime - minTime) * (value / 100);
+        function globalPercentToTime(percent) {
+            // Convert percentage of global log range to timestamp (for URLs)
+            return minTime + (maxTime - minTime) * (percent / 100);
+        }
+
+        function updateSliderEndpoints() {
+            // Update slider endpoints based on selected users' data range
+            const range = getSelectedTimeRange();
+            sliderMinTime = range.min;
+            sliderMaxTime = range.max;
+
+            // Update edge labels
+            document.getElementById('label-start').textContent = formatTimeInTz(sliderMinTime);
+            document.getElementById('label-end').textContent = formatTimeInTz(sliderMaxTime);
+
+            // Convert current time selection to new slider percentages
+            const startSlider = document.getElementById('start-slider');
+            const endSlider = document.getElementById('end-slider');
+
+            // Clamp rangeStartTime/rangeEndTime to new slider range
+            let clampedStart = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeStartTime));
+            let clampedEnd = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeEndTime));
+
+            // Check if any selected user has visible data in the clamped range
+            let hasVisibleData = false;
+            if (clampedEnd > clampedStart) {
+                for (const userId of selectedUsers) {
+                    if (userData[userId]) {
+                        const visiblePoints = userData[userId].filter(
+                            e => e.ts >= clampedStart && e.ts <= clampedEnd
+                        );
+                        if (visiblePoints.length >= 2) {
+                            hasVisibleData = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If no visible data, reset to full range of selected users
+            if (selectedUsers.size > 0 && !hasVisibleData) {
+                clampedStart = sliderMinTime;
+                clampedEnd = sliderMaxTime;
+            }
+
+            // Update rangeStartTime/rangeEndTime if they were clamped
+            rangeStartTime = clampedStart;
+            rangeEndTime = clampedEnd;
+
+            // Update slider positions
+            startSlider.value = timeToSliderValue(clampedStart);
+            endSlider.value = timeToSliderValue(clampedEnd);
+
+            // Update visual range indicator
+            updateSliderRange();
         }
 
         // Options dropdown toggle
@@ -5419,6 +5515,10 @@
                 if (doFilterOutliers) {
                     const result = filterOutliers(timeFiltered);
                     filtered = result.filtered;
+                    // Fall back to unfiltered data if outlier filtering removed too many points
+                    if (filtered.length < 2 && timeFiltered.length >= 2) {
+                        filtered = timeFiltered;
+                    }
                 }
 
                 if (filtered.length < 2) continue;
