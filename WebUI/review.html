@@ -303,6 +303,21 @@
             top: 10px;
         }
 
+        .playback-indicator {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #e67e22;
+            border-radius: 50%;
+            top: 8px;
+            transform: translateX(-50%);
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            z-index: 10;
+            display: none;
+            pointer-events: none;
+        }
+
         .time-labels {
             display: flex;
             justify-content: space-between;
@@ -1746,6 +1761,7 @@
         <div class="time-slider-container">
             <div class="slider-track"></div>
             <div class="slider-range" id="slider-range"></div>
+            <div class="playback-indicator" id="playback-indicator"></div>
             <input type="range" class="time-slider" id="start-slider" min="0" max="100" value="0" step="any">
             <input type="range" class="time-slider" id="end-slider" min="0" max="100" value="100" step="any">
         </div>
@@ -5305,6 +5321,8 @@
             // Update visual indicators immediately (cheap)
             updateSliderRange();
             updateTimeDisplay();
+            // Reset playback when slider moves
+            resetPlaybackPosition();
             // Debounce expensive redraws until slider stops moving
             debouncedRedrawAll();
         });
@@ -5319,6 +5337,8 @@
             // Update visual indicators immediately (cheap)
             updateSliderRange();
             updateTimeDisplay();
+            // Reset playback when slider moves
+            resetPlaybackPosition();
             // Debounce expensive redraws until slider stops moving
             debouncedRedrawAll();
         });
@@ -5405,6 +5425,7 @@
             document.getElementById('end-slider').value = 100;
             updateSliderRange();
             updateTimeDisplay();
+            resetPlaybackPosition();
             drawTracks();
             drawSpeedGraph();
             drawBatteryGraph();
@@ -5436,14 +5457,40 @@
 
         // Playback controls - animate through the selected range
         let playbackCurrentTime = 0;
+        let playbackPaused = false;  // true if paused (vs stopped/finished)
 
-        document.getElementById('play-btn').addEventListener('click', function() {
+        function updatePlaybackIndicator() {
+            const indicator = document.getElementById('playback-indicator');
+            if (playbackCurrentTime <= rangeStartTime || playbackCurrentTime >= rangeEndTime) {
+                indicator.style.display = 'none';
+                return;
+            }
+            // Calculate position as percentage of slider range
+            const pct = ((playbackCurrentTime - sliderMinTime) / (sliderMaxTime - sliderMinTime)) * 100;
+            // Account for thumb width like the slider-range positioning
+            indicator.style.left = `calc(10px + ${pct}% - ${pct * 0.2}px)`;
+            indicator.style.display = 'block';
+        }
+
+        function resetPlaybackPosition() {
+            playbackCurrentTime = rangeStartTime;
+            playbackPaused = false;
+            document.getElementById('playback-indicator').style.display = 'none';
             if (playbackInterval) {
                 clearInterval(playbackInterval);
                 playbackInterval = null;
+                document.getElementById('play-btn').textContent = '▶ Play';
+            }
+        }
+
+        document.getElementById('play-btn').addEventListener('click', function() {
+            if (playbackInterval) {
+                // Currently playing - pause
+                clearInterval(playbackInterval);
+                playbackInterval = null;
+                playbackPaused = true;
                 this.textContent = '▶ Play';
-                // Reset to show full range
-                drawTracks();
+                // Keep showing current position, don't reset
             } else {
                 if (selectedUsers.size === 0) {
                     alert('Select at least one user to play back');
@@ -5452,8 +5499,15 @@
 
                 this.textContent = '⏸ Pause';
 
-                // Start playback from start of range
-                playbackCurrentTime = rangeStartTime;
+                // Resume from paused position, or start from beginning
+                if (!playbackPaused || playbackCurrentTime >= rangeEndTime || playbackCurrentTime < rangeStartTime) {
+                    playbackCurrentTime = rangeStartTime;
+                }
+                playbackPaused = false;
+
+                // Draw initial state
+                drawTracksUpTo(playbackCurrentTime);
+                updatePlaybackIndicator();
 
                 playbackInterval = setInterval(() => {
                     // Advance time (playbackSpeed seconds per 100ms tick)
@@ -5463,11 +5517,17 @@
                         playbackCurrentTime = rangeEndTime;
                         clearInterval(playbackInterval);
                         playbackInterval = null;
+                        playbackPaused = false;
                         document.getElementById('play-btn').textContent = '▶ Play';
+                        // Show full tracks when finished
+                        drawTracks();
+                        document.getElementById('playback-indicator').style.display = 'none';
+                        return;
                     }
 
                     // Draw tracks up to current playback time
                     drawTracksUpTo(playbackCurrentTime);
+                    updatePlaybackIndicator();
                 }, 100);
             }
         });
