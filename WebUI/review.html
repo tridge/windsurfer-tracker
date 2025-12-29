@@ -335,6 +335,15 @@
             pointer-events: none;
         }
 
+        .playback-indicator.draggable {
+            pointer-events: auto;
+            cursor: grab;
+        }
+
+        .playback-indicator.dragging {
+            cursor: grabbing;
+        }
+
         .time-labels {
             display: flex;
             justify-content: space-between;
@@ -5503,6 +5512,7 @@
         // Playback controls - animate through the selected range
         let playbackCurrentTime = 0;
         let playbackPaused = false;  // true if paused (vs stopped/finished)
+        let indicatorDragging = false;  // true while dragging the playback indicator
 
         function updatePlaybackIndicator() {
             const indicator = document.getElementById('playback-indicator');
@@ -5520,7 +5530,9 @@
         function resetPlaybackPosition() {
             playbackCurrentTime = rangeStartTime;
             playbackPaused = false;
-            document.getElementById('playback-indicator').style.display = 'none';
+            const indicator = document.getElementById('playback-indicator');
+            indicator.style.display = 'none';
+            indicator.classList.remove('draggable', 'dragging');
             if (playbackInterval) {
                 clearInterval(playbackInterval);
                 playbackInterval = null;
@@ -5529,11 +5541,13 @@
         }
 
         document.getElementById('play-btn').addEventListener('click', function() {
+            const indicator = document.getElementById('playback-indicator');
             if (playbackInterval) {
                 // Currently playing - pause
                 clearInterval(playbackInterval);
                 playbackInterval = null;
                 playbackPaused = true;
+                indicator.classList.add('draggable');  // Enable dragging when paused
                 this.textContent = '▶ Play';
                 // Keep showing current position, don't reset
             } else {
@@ -5549,6 +5563,7 @@
                     playbackCurrentTime = rangeStartTime;
                 }
                 playbackPaused = false;
+                indicator.classList.remove('draggable', 'dragging');  // Disable dragging when playing
 
                 // Draw initial state
                 drawTracksUpTo(playbackCurrentTime);
@@ -5566,7 +5581,8 @@
                         document.getElementById('play-btn').textContent = '▶ Play';
                         // Show full tracks when finished
                         drawTracks();
-                        document.getElementById('playback-indicator').style.display = 'none';
+                        indicator.style.display = 'none';
+                        indicator.classList.remove('draggable');
                         return;
                     }
 
@@ -5576,6 +5592,43 @@
                 }, 100);
             }
         });
+
+        // Playback indicator drag handling - allows scrubbing when paused
+        (function setupIndicatorDrag() {
+            const indicator = document.getElementById('playback-indicator');
+            const container = document.querySelector('.time-slider-container');
+
+            indicator.addEventListener('mousedown', (e) => {
+                if (!playbackPaused) return;
+                indicatorDragging = true;
+                indicator.classList.add('dragging');
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!indicatorDragging) return;
+
+                const rect = container.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                // Account for thumb width adjustment (same formula as updateSliderRange)
+                const pct = Math.max(0, Math.min(100, ((x - 10) / (rect.width - 20)) * 100));
+                const time = sliderMinTime + (sliderMaxTime - sliderMinTime) * (pct / 100);
+
+                // Clamp to selected range
+                playbackCurrentTime = Math.max(rangeStartTime, Math.min(rangeEndTime, time));
+
+                // Update display
+                updatePlaybackIndicator();
+                drawTracksUpTo(playbackCurrentTime);
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (indicatorDragging) {
+                    indicatorDragging = false;
+                    indicator.classList.remove('dragging');
+                }
+            });
+        })();
 
         // Draw tracks up to a specific time (for playback animation)
         function drawTracksUpTo(upToTime) {
