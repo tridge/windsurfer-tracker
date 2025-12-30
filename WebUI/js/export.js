@@ -240,3 +240,305 @@ class FitEncoder {
         return combined;
     }
 }
+
+// ===== Format Generation Functions =====
+// These are pure functions that take track data and return formatted output
+
+/**
+ * Generate GPX format from track data
+ * @param {Array} tracks - Array of {name, entries} where entries have {ts, lat, lon, spd, hdg}
+ * @returns {string} GPX XML string
+ */
+function generateGPX(tracks) {
+    const now = new Date().toISOString();
+    let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Windsurfer Tracker"
+     xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2">
+  <metadata>
+    <name>Track Export</name>
+    <time>${now}</time>
+  </metadata>
+`;
+
+    for (const { name, entries } of tracks) {
+        gpx += `  <trk>
+    <name>${escapeXml(name)}</name>
+    <trkseg>
+`;
+        for (const e of entries) {
+            const time = new Date(e.ts * 1000).toISOString();
+            const speedMs = (e.spd || 0) * 0.514444; // knots to m/s
+            gpx += `      <trkpt lat="${e.lat.toFixed(7)}" lon="${e.lon.toFixed(7)}">
+        <time>${time}</time>
+        <extensions>
+          <gpxtpx:TrackPointExtension>
+            <gpxtpx:speed>${speedMs.toFixed(2)}</gpxtpx:speed>
+            <gpxtpx:course>${e.hdg || 0}</gpxtpx:course>
+          </gpxtpx:TrackPointExtension>
+        </extensions>
+      </trkpt>
+`;
+        }
+        gpx += `    </trkseg>
+  </trk>
+`;
+    }
+
+    gpx += `</gpx>`;
+    return gpx;
+}
+
+/**
+ * Generate CSV format from track data
+ * @param {Array} tracks - Array of {userId, name, entries} where entries have {ts, lat, lon, spd, hdg, bat, sig, hac, hr}
+ * @returns {string} CSV string
+ */
+function generateCSV(tracks) {
+    let csv = 'timestamp,user_id,user_name,latitude,longitude,speed_kn,speed_ms,heading,battery,signal,accuracy,heart_rate\n';
+
+    for (const { userId, name, entries } of tracks) {
+        for (const e of entries) {
+            const time = new Date(e.ts * 1000).toISOString();
+            const speedMs = (e.spd || 0) * 0.514444;
+            csv += `${time},${userId},"${name}",${e.lat.toFixed(7)},${e.lon.toFixed(7)},`;
+            csv += `${(e.spd || 0).toFixed(2)},${speedMs.toFixed(2)},${e.hdg || 0},`;
+            csv += `${e.bat !== undefined ? e.bat : ''},${e.sig !== undefined ? e.sig : ''},`;
+            csv += `${e.hac !== undefined ? e.hac.toFixed(1) : ''},${e.hr !== undefined ? e.hr : ''}\n`;
+        }
+    }
+
+    return csv;
+}
+
+/**
+ * Generate GeoJSON format from track data
+ * @param {Array} tracks - Array of {userId, name, entries} where entries have {ts, lat, lon, spd}
+ * @returns {object} GeoJSON FeatureCollection object
+ */
+function generateGeoJSON(tracks) {
+    const features = [];
+
+    for (const { userId, name, entries } of tracks) {
+        const coordinates = entries.map(e => [e.lon, e.lat]); // GeoJSON uses [lon, lat]
+        const timestamps = entries.map(e => new Date(e.ts * 1000).toISOString());
+        const speeds = entries.map(e => e.spd || 0);
+
+        features.push({
+            type: 'Feature',
+            properties: {
+                user_id: userId,
+                user_name: name,
+                start_time: timestamps[0],
+                end_time: timestamps[timestamps.length - 1],
+                point_count: entries.length,
+                avg_speed_kn: (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(2),
+                max_speed_kn: Math.max(...speeds).toFixed(2)
+            },
+            geometry: {
+                type: 'LineString',
+                coordinates: coordinates
+            }
+        });
+    }
+
+    return {
+        type: 'FeatureCollection',
+        features: features
+    };
+}
+
+/**
+ * Generate FIT format from single track data
+ * @param {Array} entries - Array of track points with {ts, lat, lon, spd, hr}
+ * @returns {Uint8Array} FIT file binary data
+ */
+function generateFIT(entries) {
+    if (!entries || entries.length === 0) return null;
+
+    const encoder = new FitEncoder();
+
+    // Get timestamps
+    const startTime = entries[0].ts;
+    const endTime = entries[entries.length - 1].ts;
+    const startFitTime = toFitTimestamp(startTime);
+
+    // Define file_id message
+    encoder.writeDefinition(0, FIT_MESG_FILE_ID, [
+        { num: 0, size: 1, baseType: FIT_ENUM },    // type
+        { num: 1, size: 2, baseType: FIT_UINT16 },  // manufacturer
+        { num: 2, size: 2, baseType: FIT_UINT16 },  // product
+        { num: 3, size: 4, baseType: FIT_UINT32 },  // serial_number
+        { num: 4, size: 4, baseType: FIT_UINT32 },  // time_created
+    ]);
+
+    // Write file_id: type=4 (activity), manufacturer=255 (development), product=1, serial=12345
+    encoder.writeData(FIT_MESG_FILE_ID, [
+        4,                  // type: activity
+        255,                // manufacturer: development
+        1,                  // product
+        12345,              // serial_number
+        startFitTime,       // time_created
+    ]);
+
+    // Define event message for start
+    encoder.writeDefinition(1, FIT_MESG_EVENT, [
+        { num: 0, size: 1, baseType: FIT_ENUM },     // event
+        { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
+        { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
+    ]);
+
+    // Write start event
+    encoder.writeData(FIT_MESG_EVENT, [
+        0,                  // event: timer
+        0,                  // event_type: start
+        startFitTime,       // timestamp
+    ]);
+
+    // Check if we have heart rate data
+    const hasHeartRate = entries.some(e => e.hr !== undefined && e.hr > 0);
+
+    // Pre-calculate cumulative distances
+    const distances = [0];
+    let totalDistance = 0;
+    for (let i = 1; i < entries.length; i++) {
+        const dist = haversineDistance(
+            entries[i-1].lat, entries[i-1].lon,
+            entries[i].lat, entries[i].lon
+        );
+        totalDistance += dist;
+        distances.push(totalDistance);
+    }
+
+    // Define record message - fields MUST be in ascending order by field number
+    const recordFields = [
+        { num: 0, size: 4, baseType: FIT_SINT32 },   // position_lat (semicircles)
+        { num: 1, size: 4, baseType: FIT_SINT32 },   // position_long (semicircles)
+    ];
+
+    if (hasHeartRate) {
+        recordFields.push({ num: 3, size: 1, baseType: FIT_UINT8 }); // heart_rate
+    }
+
+    recordFields.push({ num: 5, size: 4, baseType: FIT_UINT32 });   // distance (m * 100)
+    recordFields.push({ num: 6, size: 2, baseType: FIT_UINT16 });   // speed (m/s * 1000)
+    recordFields.push({ num: 253, size: 4, baseType: FIT_UINT32 }); // timestamp
+
+    encoder.writeDefinition(2, FIT_MESG_RECORD, recordFields);
+
+    // Write record messages
+    for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const fitTs = toFitTimestamp(e.ts);
+        const lat = toSemicircles(e.lat);
+        const lon = toSemicircles(e.lon);
+        const speedMs = (e.spd || 0) * 0.514444; // knots to m/s
+        const speedScaled = Math.round(speedMs * 1000); // FIT uses mm/s
+        const distScaled = Math.round(distances[i] * 100); // FIT uses centimeters
+
+        const recordValues = [lat, lon];
+
+        if (hasHeartRate) {
+            recordValues.push(e.hr || 0xFF); // 0xFF = invalid
+        }
+
+        recordValues.push(distScaled);              // distance (cumulative, cm)
+        recordValues.push(speedScaled & 0xFFFF);    // speed (16-bit, capped)
+        recordValues.push(fitTs);                   // timestamp
+
+        encoder.writeData(FIT_MESG_RECORD, recordValues);
+    }
+
+    // Total distance for session/lap (in centimeters for FIT)
+    const totalDistanceScaled = Math.round(totalDistance * 100);
+
+    // Write stop event
+    const endFitTime = toFitTimestamp(endTime);
+    encoder.writeData(FIT_MESG_EVENT, [
+        0,                  // event: timer
+        4,                  // event_type: stop_all
+        endFitTime,         // timestamp
+    ]);
+
+    // Calculate summary stats
+    const totalElapsedTime = (endTime - startTime) * 1000; // milliseconds
+    const totalTimerTime = totalElapsedTime;
+
+    // Define and write lap message
+    encoder.writeDefinition(3, FIT_MESG_LAP, [
+        { num: 0, size: 1, baseType: FIT_ENUM },     // event
+        { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
+        { num: 2, size: 4, baseType: FIT_UINT32 },   // start_time
+        { num: 7, size: 4, baseType: FIT_UINT32 },   // total_elapsed_time
+        { num: 8, size: 4, baseType: FIT_UINT32 },   // total_timer_time
+        { num: 9, size: 4, baseType: FIT_UINT32 },   // total_distance (m * 100)
+        { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
+        { num: 254, size: 2, baseType: FIT_UINT16 }, // message_index
+    ]);
+
+    encoder.writeData(FIT_MESG_LAP, [
+        9,                  // event: lap
+        1,                  // event_type: stop
+        startFitTime,       // start_time
+        totalElapsedTime,   // total_elapsed_time
+        totalTimerTime,     // total_timer_time
+        totalDistanceScaled, // total_distance
+        endFitTime,         // timestamp
+        0,                  // message_index
+    ]);
+
+    // Define and write session message
+    encoder.writeDefinition(4, FIT_MESG_SESSION, [
+        { num: 0, size: 1, baseType: FIT_ENUM },     // event
+        { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
+        { num: 2, size: 4, baseType: FIT_UINT32 },   // start_time
+        { num: 5, size: 1, baseType: FIT_ENUM },     // sport
+        { num: 6, size: 1, baseType: FIT_ENUM },     // sub_sport
+        { num: 7, size: 4, baseType: FIT_UINT32 },   // total_elapsed_time
+        { num: 8, size: 4, baseType: FIT_UINT32 },   // total_timer_time
+        { num: 9, size: 4, baseType: FIT_UINT32 },   // total_distance (m * 100)
+        { num: 25, size: 2, baseType: FIT_UINT16 },  // first_lap_index
+        { num: 26, size: 2, baseType: FIT_UINT16 },  // num_laps
+        { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
+        { num: 254, size: 2, baseType: FIT_UINT16 }, // message_index
+    ]);
+
+    // sport=43 (windsurfing), sub_sport=0 (generic)
+    encoder.writeData(FIT_MESG_SESSION, [
+        8,                  // event: session
+        1,                  // event_type: stop
+        startFitTime,       // start_time
+        43,                 // sport: windsurfing
+        0,                  // sub_sport: generic
+        totalElapsedTime,   // total_elapsed_time
+        totalTimerTime,     // total_timer_time
+        totalDistanceScaled, // total_distance
+        0,                  // first_lap_index
+        1,                  // num_laps
+        endFitTime,         // timestamp
+        0,                  // message_index
+    ]);
+
+    // Define and write activity message
+    encoder.writeDefinition(5, FIT_MESG_ACTIVITY, [
+        { num: 0, size: 4, baseType: FIT_UINT32 },   // total_timer_time
+        { num: 1, size: 2, baseType: FIT_UINT16 },   // num_sessions
+        { num: 2, size: 1, baseType: FIT_ENUM },     // type
+        { num: 3, size: 1, baseType: FIT_ENUM },     // event
+        { num: 4, size: 1, baseType: FIT_ENUM },     // event_type
+        { num: 5, size: 4, baseType: FIT_UINT32 },   // local_timestamp
+        { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
+    ]);
+
+    encoder.writeData(FIT_MESG_ACTIVITY, [
+        totalTimerTime,     // total_timer_time
+        1,                  // num_sessions
+        0,                  // type: generic
+        26,                 // event: activity
+        1,                  // event_type: stop
+        endFitTime,         // local_timestamp
+        endFitTime,         // timestamp
+    ]);
+
+    return encoder.getFile();
+}

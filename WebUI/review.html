@@ -5592,7 +5592,7 @@
         });
 
         // ===== Export Functions =====
-        // Uses: downloadFile, escapeXml, FitEncoder, etc. from export.js
+        // Uses: generateGPX, generateCSV, generateGeoJSON, generateFIT, downloadFile from export.js
 
         function getExportFilename(extension) {
             const date = document.getElementById('date-picker').value || 'tracks';
@@ -5610,7 +5610,7 @@
                     e => e.ts >= rangeStartTime && e.ts <= rangeEndTime
                 );
                 if (filtered.length > 0) {
-                    exportData.push({ userId, entries: filtered });
+                    exportData.push({ userId, name: getDisplayName(userId), entries: filtered });
                 }
             }
             return exportData;
@@ -5622,45 +5622,7 @@
                 alert('No data to export. Please select at least one user.');
                 return;
             }
-
-            const now = new Date().toISOString();
-            let gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Windsurfer Tracker"
-     xmlns="http://www.topografix.com/GPX/1/1"
-     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2">
-  <metadata>
-    <name>Track Export</name>
-    <time>${now}</time>
-  </metadata>
-`;
-
-            for (const { userId, entries } of data) {
-                const displayName = getDisplayName(userId);
-                gpx += `  <trk>
-    <name>${escapeXml(displayName)}</name>
-    <trkseg>
-`;
-                for (const e of entries) {
-                    const time = new Date(e.ts * 1000).toISOString();
-                    const speedMs = (e.spd || 0) * 0.514444; // knots to m/s
-                    gpx += `      <trkpt lat="${e.lat.toFixed(7)}" lon="${e.lon.toFixed(7)}">
-        <time>${time}</time>
-        <extensions>
-          <gpxtpx:TrackPointExtension>
-            <gpxtpx:speed>${speedMs.toFixed(2)}</gpxtpx:speed>
-            <gpxtpx:course>${e.hdg || 0}</gpxtpx:course>
-          </gpxtpx:TrackPointExtension>
-        </extensions>
-      </trkpt>
-`;
-                }
-                gpx += `    </trkseg>
-  </trk>
-`;
-            }
-
-            gpx += `</gpx>`;
-
+            const gpx = generateGPX(data);
             downloadFile(gpx, getExportFilename('gpx'), 'application/gpx+xml');
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
@@ -5671,22 +5633,7 @@
                 alert('No data to export. Please select at least one user.');
                 return;
             }
-
-            // CSV header
-            let csv = 'timestamp,user_id,user_name,latitude,longitude,speed_kn,speed_ms,heading,battery,signal,accuracy,heart_rate\n';
-
-            for (const { userId, entries } of data) {
-                const displayName = getDisplayName(userId);
-                for (const e of entries) {
-                    const time = new Date(e.ts * 1000).toISOString();
-                    const speedMs = (e.spd || 0) * 0.514444;
-                    csv += `${time},${userId},"${displayName}",${e.lat.toFixed(7)},${e.lon.toFixed(7)},`;
-                    csv += `${(e.spd || 0).toFixed(2)},${speedMs.toFixed(2)},${e.hdg || 0},`;
-                    csv += `${e.bat !== undefined ? e.bat : ''},${e.sig !== undefined ? e.sig : ''},`;
-                    csv += `${e.hac !== undefined ? e.hac.toFixed(1) : ''},${e.hr !== undefined ? e.hr : ''}\n`;
-                }
-            }
-
+            const csv = generateCSV(data);
             downloadFile(csv, getExportFilename('csv'), 'text/csv');
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
@@ -5697,38 +5644,7 @@
                 alert('No data to export. Please select at least one user.');
                 return;
             }
-
-            const features = [];
-
-            for (const { userId, entries } of data) {
-                const displayName = getDisplayName(userId);
-                const coordinates = entries.map(e => [e.lon, e.lat]); // GeoJSON uses [lon, lat]
-                const timestamps = entries.map(e => new Date(e.ts * 1000).toISOString());
-                const speeds = entries.map(e => e.spd || 0);
-
-                features.push({
-                    type: 'Feature',
-                    properties: {
-                        user_id: userId,
-                        user_name: displayName,
-                        start_time: timestamps[0],
-                        end_time: timestamps[timestamps.length - 1],
-                        point_count: entries.length,
-                        avg_speed_kn: (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(2),
-                        max_speed_kn: Math.max(...speeds).toFixed(2)
-                    },
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: coordinates
-                    }
-                });
-            }
-
-            const geojson = {
-                type: 'FeatureCollection',
-                features: features
-            };
-
+            const geojson = generateGeoJSON(data);
             downloadFile(JSON.stringify(geojson, null, 2), getExportFilename('geojson'), 'application/geo+json');
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
@@ -5739,209 +5655,16 @@
                 alert('No data to export. Please select at least one user.');
                 return;
             }
-
-            // FIT files are per-user, so if multiple selected, create one for the first
-            // or we could zip them - for now just export first user
+            // FIT files are per-user, export first selected
             if (data.length > 1) {
-                alert('FIT format exports one user at a time. Exporting: ' + getDisplayName(data[0].userId));
+                alert('FIT format exports one user at a time. Exporting: ' + data[0].name);
             }
-
-            const { userId, entries } = data[0];
+            const { name, entries } = data[0];
             if (entries.length === 0) return;
 
-            const encoder = new FitEncoder();
-
-            // Get timestamps
-            const startTime = entries[0].ts;
-            const endTime = entries[entries.length - 1].ts;
-            const startFitTime = toFitTimestamp(startTime);
-
-            // Define file_id message
-            // Fields: type(0), manufacturer(1), product(2), serial_number(3), time_created(4)
-            encoder.writeDefinition(0, FIT_MESG_FILE_ID, [
-                { num: 0, size: 1, baseType: FIT_ENUM },    // type
-                { num: 1, size: 2, baseType: FIT_UINT16 },  // manufacturer
-                { num: 2, size: 2, baseType: FIT_UINT16 },  // product
-                { num: 3, size: 4, baseType: FIT_UINT32 },  // serial_number
-                { num: 4, size: 4, baseType: FIT_UINT32 },  // time_created
-            ]);
-
-            // Write file_id: type=4 (activity), manufacturer=1 (garmin), product=1, serial=1234
-            encoder.writeData(FIT_MESG_FILE_ID, [
-                4,                  // type: activity
-                255,                // manufacturer: development
-                1,                  // product
-                12345,              // serial_number
-                startFitTime,       // time_created
-            ]);
-
-            // Define event message for start - fields in ascending order
-            encoder.writeDefinition(1, FIT_MESG_EVENT, [
-                { num: 0, size: 1, baseType: FIT_ENUM },     // event
-                { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
-                { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
-            ]);
-
-            // Write start event
-            encoder.writeData(FIT_MESG_EVENT, [
-                0,                  // event: timer
-                0,                  // event_type: start
-                startFitTime,       // timestamp
-            ]);
-
-            // Check if we have heart rate data
-            const hasHeartRate = entries.some(e => e.hr !== undefined && e.hr > 0);
-
-            // Pre-calculate cumulative distances (haversineDistance from export.js)
-            const distances = [0];
-            let totalDistance = 0;
-            for (let i = 1; i < entries.length; i++) {
-                const dist = haversineDistance(
-                    entries[i-1].lat, entries[i-1].lon,
-                    entries[i].lat, entries[i].lon
-                );
-                totalDistance += dist;
-                distances.push(totalDistance);
-            }
-
-            // Define record message - fields MUST be in ascending order by field number
-            // Fields: position_lat(0), position_long(1), heart_rate(3), distance(5), speed(6), timestamp(253)
-            const recordFields = [
-                { num: 0, size: 4, baseType: FIT_SINT32 },   // position_lat (semicircles)
-                { num: 1, size: 4, baseType: FIT_SINT32 },   // position_long (semicircles)
-            ];
-
-            if (hasHeartRate) {
-                recordFields.push({ num: 3, size: 1, baseType: FIT_UINT8 }); // heart_rate
-            }
-
-            recordFields.push({ num: 5, size: 4, baseType: FIT_UINT32 });   // distance (m * 100)
-            recordFields.push({ num: 6, size: 2, baseType: FIT_UINT16 });   // speed (m/s * 1000)
-            recordFields.push({ num: 253, size: 4, baseType: FIT_UINT32 }); // timestamp
-
-            encoder.writeDefinition(2, FIT_MESG_RECORD, recordFields);
-
-            // Write record messages
-            for (let i = 0; i < entries.length; i++) {
-                const e = entries[i];
-                const fitTs = toFitTimestamp(e.ts);
-                const lat = toSemicircles(e.lat);
-                const lon = toSemicircles(e.lon);
-                const speedMs = (e.spd || 0) * 0.514444; // knots to m/s
-                const speedScaled = Math.round(speedMs * 1000); // FIT uses mm/s
-                const distScaled = Math.round(distances[i] * 100); // FIT uses centimeters
-
-                const recordValues = [
-                    lat,
-                    lon,
-                ];
-
-                if (hasHeartRate) {
-                    recordValues.push(e.hr || 0xFF); // 0xFF = invalid
-                }
-
-                recordValues.push(distScaled);              // distance (cumulative, cm)
-                recordValues.push(speedScaled & 0xFFFF);    // speed (16-bit, capped)
-                recordValues.push(fitTs);                   // timestamp
-
-                encoder.writeData(FIT_MESG_RECORD, recordValues);
-            }
-
-            // Total distance for session/lap (in centimeters for FIT)
-            const totalDistanceScaled = Math.round(totalDistance * 100);
-
-            // Write stop event (reuses event definition from above)
-            const endFitTime = toFitTimestamp(endTime);
-            encoder.writeData(FIT_MESG_EVENT, [
-                0,                  // event: timer
-                4,                  // event_type: stop_all
-                endFitTime,         // timestamp
-            ]);
-
-            // Calculate summary stats
-            const totalElapsedTime = (endTime - startTime) * 1000; // milliseconds
-            const totalTimerTime = totalElapsedTime; // same for continuous activity
-
-            // Define lap message - fields in ascending order
-            encoder.writeDefinition(3, FIT_MESG_LAP, [
-                { num: 0, size: 1, baseType: FIT_ENUM },     // event
-                { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
-                { num: 2, size: 4, baseType: FIT_UINT32 },   // start_time
-                { num: 7, size: 4, baseType: FIT_UINT32 },   // total_elapsed_time
-                { num: 8, size: 4, baseType: FIT_UINT32 },   // total_timer_time
-                { num: 9, size: 4, baseType: FIT_UINT32 },   // total_distance (m * 100)
-                { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
-                { num: 254, size: 2, baseType: FIT_UINT16 }, // message_index
-            ]);
-
-            // Write lap
-            encoder.writeData(FIT_MESG_LAP, [
-                9,                  // event: lap
-                1,                  // event_type: stop
-                startFitTime,       // start_time
-                totalElapsedTime,   // total_elapsed_time
-                totalTimerTime,     // total_timer_time
-                totalDistanceScaled, // total_distance
-                endFitTime,         // timestamp
-                0,                  // message_index
-            ]);
-
-            // Define session message - fields in ascending order
-            encoder.writeDefinition(4, FIT_MESG_SESSION, [
-                { num: 0, size: 1, baseType: FIT_ENUM },     // event
-                { num: 1, size: 1, baseType: FIT_ENUM },     // event_type
-                { num: 2, size: 4, baseType: FIT_UINT32 },   // start_time
-                { num: 5, size: 1, baseType: FIT_ENUM },     // sport
-                { num: 6, size: 1, baseType: FIT_ENUM },     // sub_sport
-                { num: 7, size: 4, baseType: FIT_UINT32 },   // total_elapsed_time
-                { num: 8, size: 4, baseType: FIT_UINT32 },   // total_timer_time
-                { num: 9, size: 4, baseType: FIT_UINT32 },   // total_distance (m * 100)
-                { num: 25, size: 2, baseType: FIT_UINT16 },  // first_lap_index
-                { num: 26, size: 2, baseType: FIT_UINT16 },  // num_laps
-                { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
-                { num: 254, size: 2, baseType: FIT_UINT16 }, // message_index
-            ]);
-
-            // Write session: sport=43 (windsurfing), sub_sport=0 (generic)
-            encoder.writeData(FIT_MESG_SESSION, [
-                8,                  // event: session
-                1,                  // event_type: stop
-                startFitTime,       // start_time
-                43,                 // sport: windsurfing
-                0,                  // sub_sport: generic
-                totalElapsedTime,   // total_elapsed_time
-                totalTimerTime,     // total_timer_time
-                totalDistanceScaled, // total_distance
-                0,                  // first_lap_index
-                1,                  // num_laps
-                endFitTime,         // timestamp
-                0,                  // message_index
-            ]);
-
-            // Define activity message - fields in ascending order
-            encoder.writeDefinition(5, FIT_MESG_ACTIVITY, [
-                { num: 0, size: 4, baseType: FIT_UINT32 },   // total_timer_time
-                { num: 1, size: 2, baseType: FIT_UINT16 },   // num_sessions
-                { num: 2, size: 1, baseType: FIT_ENUM },     // type
-                { num: 3, size: 1, baseType: FIT_ENUM },     // event
-                { num: 4, size: 1, baseType: FIT_ENUM },     // event_type
-                { num: 5, size: 4, baseType: FIT_UINT32 },   // local_timestamp
-                { num: 253, size: 4, baseType: FIT_UINT32 }, // timestamp
-            ]);
-
-            // Write activity
-            encoder.writeData(FIT_MESG_ACTIVITY, [
-                totalTimerTime,     // total_timer_time
-                1,                  // num_sessions
-                0,                  // type: generic
-                26,                 // event: activity
-                1,                  // event_type: stop
-                endFitTime,         // local_timestamp
-                endFitTime,         // timestamp
-            ]);
-
-            const fitData = encoder.getFile();
-            downloadFile(fitData, getExportFilename('fit').replace(userId, getDisplayName(userId).replace(/\s+/g, '_')), 'application/octet-stream');
+            const fitData = generateFIT(entries);
+            const filename = getExportFilename('fit').replace(/[^-_.]+/, name.replace(/\s+/g, '_'));
+            downloadFile(fitData, filename, 'application/octet-stream');
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
 
