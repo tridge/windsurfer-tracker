@@ -1524,19 +1524,19 @@
     </div>
 
     <!-- Speed graph panel -->
-    <div id="speed-graph-panel">
-        <div id="speed-graph-resize"></div>
-        <div id="speed-graph-container">
-            <div class="speed-graph-title">Speed (knots)</div>
-            <div class="speed-y-axis" id="speed-y-labels">
+    <div id="speed-graph-panel" class="graph-panel">
+        <div id="speed-graph-resize" class="graph-resize"></div>
+        <div id="speed-graph-container" class="graph-container">
+            <div class="graph-title speed-graph-title">Speed (knots)</div>
+            <div class="graph-y-axis" id="speed-y-labels">
                 <span>40</span>
                 <span>30</span>
                 <span>20</span>
                 <span>10</span>
                 <span>0</span>
             </div>
-            <canvas id="speed-graph"></canvas>
-            <div class="speed-time-axis">
+            <canvas id="speed-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="speed-time-start">--:--</span>
                 <span id="speed-time-end">--:--</span>
             </div>
@@ -1544,19 +1544,19 @@
     </div>
 
     <!-- Battery graph panel -->
-    <div id="battery-graph-panel">
-        <div id="battery-graph-resize"></div>
-        <div id="battery-graph-container">
-            <div class="battery-graph-title">Battery Level (%)</div>
-            <div class="battery-y-axis" id="battery-y-labels">
+    <div id="battery-graph-panel" class="graph-panel">
+        <div id="battery-graph-resize" class="graph-resize"></div>
+        <div id="battery-graph-container" class="graph-container">
+            <div class="graph-title battery-graph-title">Battery Level (%)</div>
+            <div class="graph-y-axis" id="battery-y-labels">
                 <span>100</span>
                 <span>75</span>
                 <span>50</span>
                 <span>25</span>
                 <span>0</span>
             </div>
-            <canvas id="battery-graph"></canvas>
-            <div class="battery-x-axis">
+            <canvas id="battery-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="battery-time-start">--:--</span>
                 <span id="battery-time-end">--:--</span>
             </div>
@@ -1564,19 +1564,19 @@
     </div>
 
     <!-- Signal graph panel -->
-    <div id="signal-graph-panel">
-        <div id="signal-graph-resize"></div>
-        <div id="signal-graph-container">
-            <div class="signal-graph-title">Signal Strength</div>
-            <div class="signal-y-axis">
+    <div id="signal-graph-panel" class="graph-panel">
+        <div id="signal-graph-resize" class="graph-resize"></div>
+        <div id="signal-graph-container" class="graph-container">
+            <div class="graph-title signal-graph-title">Signal Strength</div>
+            <div class="graph-y-axis">
                 <span>4</span>
                 <span>3</span>
                 <span>2</span>
                 <span>1</span>
                 <span>0</span>
             </div>
-            <canvas id="signal-graph"></canvas>
-            <div class="signal-x-axis">
+            <canvas id="signal-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="signal-time-start">--:--</span>
                 <span id="signal-time-end">--:--</span>
             </div>
@@ -1584,19 +1584,19 @@
     </div>
 
     <!-- Latency graph panel -->
-    <div id="latency-graph-panel">
-        <div id="latency-graph-resize"></div>
-        <div id="latency-graph-container">
-            <div class="latency-graph-title">Network Latency (seconds)</div>
-            <div class="latency-y-axis" id="latency-y-labels">
+    <div id="latency-graph-panel" class="graph-panel">
+        <div id="latency-graph-resize" class="graph-resize"></div>
+        <div id="latency-graph-container" class="graph-container">
+            <div class="graph-title latency-graph-title">Network Latency (seconds)</div>
+            <div class="graph-y-axis" id="latency-y-labels">
                 <span>10</span>
                 <span>7.5</span>
                 <span>5</span>
                 <span>2.5</span>
                 <span>0</span>
             </div>
-            <canvas id="latency-graph"></canvas>
-            <div class="latency-x-axis">
+            <canvas id="latency-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="latency-time-start">--:--</span>
                 <span id="latency-time-end">--:--</span>
             </div>
@@ -1604,19 +1604,19 @@
     </div>
 
     <!-- Heart rate graph panel -->
-    <div id="heartrate-graph-panel">
-        <div id="heartrate-graph-resize"></div>
-        <div id="heartrate-graph-container">
-            <div class="heartrate-graph-title">Heart Rate (bpm)</div>
-            <div class="heartrate-y-axis" id="heartrate-y-labels">
+    <div id="heartrate-graph-panel" class="graph-panel">
+        <div id="heartrate-graph-resize" class="graph-resize"></div>
+        <div id="heartrate-graph-container" class="graph-container">
+            <div class="graph-title heartrate-graph-title">Heart Rate (bpm)</div>
+            <div class="graph-y-axis" id="heartrate-y-labels">
                 <span>200</span>
                 <span>150</span>
                 <span>100</span>
                 <span>50</span>
                 <span>0</span>
             </div>
-            <canvas id="heartrate-graph"></canvas>
-            <div class="heartrate-x-axis">
+            <canvas id="heartrate-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="heartrate-time-start">--:--</span>
                 <span id="heartrate-time-end">--:--</span>
             </div>
@@ -1624,19 +1624,19 @@
     </div>
 
     <!-- Accuracy graph panel -->
-    <div id="accuracy-graph-panel">
-        <div id="accuracy-graph-resize"></div>
-        <div id="accuracy-graph-container">
-            <div class="accuracy-graph-title">GPS Accuracy (meters)</div>
-            <div class="accuracy-y-axis" id="accuracy-y-labels">
+    <div id="accuracy-graph-panel" class="graph-panel">
+        <div id="accuracy-graph-resize" class="graph-resize"></div>
+        <div id="accuracy-graph-container" class="graph-container">
+            <div class="graph-title accuracy-graph-title">GPS Accuracy (meters)</div>
+            <div class="graph-y-axis" id="accuracy-y-labels">
                 <span>100</span>
                 <span>75</span>
                 <span>50</span>
                 <span>25</span>
                 <span>0</span>
             </div>
-            <canvas id="accuracy-graph"></canvas>
-            <div class="accuracy-x-axis">
+            <canvas id="accuracy-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="accuracy-time-start">--:--</span>
                 <span id="accuracy-time-end">--:--</span>
             </div>
@@ -1644,19 +1644,19 @@
     </div>
 
     <!-- Distance graph panel -->
-    <div id="distance-graph-panel">
-        <div id="distance-graph-resize"></div>
-        <div id="distance-graph-container">
-            <div class="distance-graph-title">Distance (meters)</div>
-            <div class="distance-y-axis" id="distance-y-labels">
+    <div id="distance-graph-panel" class="graph-panel">
+        <div id="distance-graph-resize" class="graph-resize"></div>
+        <div id="distance-graph-container" class="graph-container">
+            <div class="graph-title distance-graph-title">Distance (meters)</div>
+            <div class="graph-y-axis" id="distance-y-labels">
                 <span>10000</span>
                 <span>7500</span>
                 <span>5000</span>
                 <span>2500</span>
                 <span>0</span>
             </div>
-            <canvas id="distance-graph"></canvas>
-            <div class="distance-x-axis">
+            <canvas id="distance-graph" class="graph-canvas"></canvas>
+            <div class="graph-x-axis">
                 <span id="distance-time-start">--:--</span>
                 <span id="distance-time-end">--:--</span>
             </div>

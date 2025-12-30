@@ -101,3 +101,100 @@
 .event-modal-footer a:hover {
     color: #333;
 }
+
+/* Graph panel - shared styles for review.html graph panels */
+.graph-panel {
+    position: absolute;
+    bottom: 80px;
+    left: 0;
+    right: 300px;
+    height: 150px;
+    background: #1a252f;
+    border-top: 1px solid #34495e;
+    display: none;
+}
+
+.graph-panel.visible {
+    display: block;
+}
+
+.graph-resize {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    cursor: ns-resize;
+    background: linear-gradient(to bottom, #34495e, transparent);
+    z-index: 10;
+}
+
+.graph-resize:hover,
+.graph-resize.dragging {
+    background: linear-gradient(to bottom, #3498db, transparent);
+}
+
+.graph-resize::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    background: #5a6a7a;
+    border-radius: 2px;
+}
+
+.graph-resize:hover::after,
+.graph-resize.dragging::after {
+    background: #7a8a9a;
+}
+
+.graph-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    padding: 10px 50px 25px 50px;
+}
+
+.graph-canvas {
+    width: 100%;
+    height: 100%;
+    background: #2c3e50;
+    border-radius: 4px;
+}
+
+.graph-title {
+    position: absolute;
+    top: 5px;
+    left: 60px;
+    color: #bdc3c7;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.graph-y-axis {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    bottom: 25px;
+    width: 35px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    color: #7f8c8d;
+    font-size: 11px;
+}
+
+.graph-x-axis {
+    position: absolute;
+    bottom: 5px;
+    left: 50px;
+    right: 50px;
+    display: flex;
+    justify-content: space-between;
+    color: #7f8c8d;
+    font-size: 11px;
+}
