@@ -42,6 +42,7 @@
                 <label><input type="checkbox" id="filter-outliers" checked> Filter outliers</label>
                 <label><input type="checkbox" id="show-outliers"> Show outliers (red)</label>
                 <label><input type="checkbox" id="show-course" checked> Show course</label>
+                <label title="During playback, show full track instead of 30s tail"><input type="checkbox" id="playback-full-track"> Playback full track</label>
                 <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
                     <label style="font-size:11px;color:#aaa;margin-bottom:3px;display:block;">Map Type</label>
                     <label><input type="radio" name="map-type" value="osm" checked onchange="setMapType(this.value)"> OpenStreetMap</label>
@@ -4051,6 +4052,8 @@
         })();
 
         // Draw tracks up to a specific time (for playback animation)
+        const PLAYBACK_TAIL_SECONDS = 30;  // Show last 30 seconds of track by default
+
         function drawTracksUpTo(upToTime) {
             // Clear existing layers
             for (const layer of Object.values(trackLayers)) {
@@ -4073,6 +4076,11 @@
             const useSpeedColor = document.getElementById('speed-color').checked;
             const showMarkers = document.getElementById('show-markers').checked;
             const doFilterOutliers = document.getElementById('filter-outliers').checked;
+            const showFullTrack = document.getElementById('playback-full-track').checked;
+
+            // Calculate start time for track display
+            // If "Full track" is unchecked, only show the last PLAYBACK_TAIL_SECONDS
+            const trackStartTime = showFullTrack ? rangeStartTime : Math.max(rangeStartTime, upToTime - PLAYBACK_TAIL_SECONDS);
 
             let colorIdx = 0;
             for (const [userId, entries] of Object.entries(userData)) {
@@ -4084,8 +4092,8 @@
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
-                // Filter: start from rangeStartTime, end at upToTime
-                let timeFiltered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= upToTime);
+                // Filter: start from trackStartTime (or rangeStartTime if full track), end at upToTime
+                let timeFiltered = entries.filter(e => e.ts >= trackStartTime && e.ts <= upToTime);
                 if (timeFiltered.length < 2) continue;
 
                 // Apply outlier filtering if enabled
