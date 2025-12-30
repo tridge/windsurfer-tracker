@@ -1843,6 +1843,7 @@
             document.head.appendChild(script);
         }
     </script>
+    <script src="js/utils.js"></script>
     <script>
         // Event ID from URL parameter (default to 2)
         const urlParams = new URLSearchParams(window.location.search);
@@ -1851,13 +1852,6 @@
 
         // Store event info for modal
         let currentEventInfo = null;
-
-        // Convert URLs in text to clickable links
-        function linkifyText(text) {
-            if (!text) return '';
-            const urlPattern = /(https?:\/\/[^\s<]+)/g;
-            return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-        }
 
         // Show event description modal
         function showEventModal() {
