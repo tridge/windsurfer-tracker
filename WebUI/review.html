@@ -3318,7 +3318,7 @@
                 break;  // Just use first user for now
             }
 
-            const titleEl = document.querySelector('.distance-graph-title');
+            const titleEl = document.querySelector('#distance-graph-panel .graph-title');
             if (distAtCursor !== null) {
                 const label = distAtCursor >= 1000 ? `${(distAtCursor / 1000).toFixed(2)}km` : `${Math.round(distAtCursor)}m`;
                 titleEl.textContent = `Distance: ${label}`;
@@ -3330,7 +3330,7 @@
         document.getElementById('distance-graph').addEventListener('mouseleave', () => {
             clearGraphHighlight();
             // Reset title
-            document.querySelector('.distance-graph-title').textContent = 'Distance (meters)';
+            document.querySelector('#distance-graph-panel .graph-title').textContent = 'Distance (meters)';
         });
 
         // Graph resize functionality
