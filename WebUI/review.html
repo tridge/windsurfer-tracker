@@ -1750,29 +1750,15 @@
         }
     </script>
     <script src="js/utils.js"></script>
+    <script src="js/modal.js"></script>
     <script>
         // Event ID from URL parameter (default to 2)
         const urlParams = new URLSearchParams(window.location.search);
         const EVENT_ID = parseInt(urlParams.get('eid')) || 2;
         const DATA_BASE = `${EVENT_ID}/`;
 
-        // Store event info for modal
+        // Store event info for modal (used by modal.js)
         let currentEventInfo = null;
-
-        // Show event description modal
-        function showEventModal() {
-            if (!currentEventInfo) return;
-            document.getElementById('eventModalTitle').textContent = currentEventInfo.name;
-            const description = currentEventInfo.description || 'No description available.';
-            document.getElementById('eventModalDescription').innerHTML = linkifyText(description);
-            document.getElementById('eventModalOverlay').classList.add('visible');
-        }
-
-        // Hide event description modal
-        function hideEventModal(e) {
-            if (e && e.target !== e.currentTarget) return;
-            document.getElementById('eventModalOverlay').classList.remove('visible');
-        }
 
         // Event timezone (defaults to local, updated when event info is fetched)
         let eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;

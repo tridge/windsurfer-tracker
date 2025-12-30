@@ -1046,6 +1046,7 @@
     </div>
 
     <script src="js/utils.js"></script>
+    <script src="js/modal.js"></script>
     <script>
         // Initialize map centered on Auckland
         const map = L.map('map').setView([-36.8485, 174.7633], 13);
@@ -1360,23 +1361,8 @@
         // Load per-event admin password
         adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
 
-        // Store event info for modal
+        // Store event info for modal (used by modal.js)
         let currentEventInfo = null;
-
-        // Show event description modal
-        function showEventModal() {
-            if (!currentEventInfo) return;
-            document.getElementById('eventModalTitle').textContent = currentEventInfo.name;
-            const description = currentEventInfo.description || 'No description available.';
-            document.getElementById('eventModalDescription').innerHTML = linkifyText(description);
-            document.getElementById('eventModalOverlay').classList.add('visible');
-        }
-
-        // Hide event description modal
-        function hideEventModal(e) {
-            if (e && e.target !== e.currentTarget) return;
-            document.getElementById('eventModalOverlay').classList.remove('visible');
-        }
 
         // Fetch event name and update page title + banner
         (async function() {
