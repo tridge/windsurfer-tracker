@@ -1,0 +1,143 @@
+/**
+ * Graph panel styles for Windsurfer Tracker WebUI
+ * Generic styles for time-series graph panels with resize handles
+ */
+
+/* Base graph panel - positioned at bottom, hidden by default */
+.graph-panel {
+    position: absolute;
+    bottom: 80px;
+    left: 0;
+    right: 300px;
+    height: 150px;
+    background: #1a252f;
+    border-top: 1px solid #34495e;
+    display: none;
+}
+
+.graph-panel.visible {
+    display: block;
+}
+
+/* Resize handle at top of panel */
+.graph-resize {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    cursor: ns-resize;
+    background: linear-gradient(to bottom, #34495e, transparent);
+    z-index: 10;
+}
+
+.graph-resize:hover,
+.graph-resize.dragging {
+    background: linear-gradient(to bottom, var(--graph-color, #3498db), transparent);
+}
+
+.graph-resize::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    background: #5a6a7a;
+    border-radius: 2px;
+}
+
+.graph-resize:hover::after,
+.graph-resize.dragging::after {
+    background: #7a8a9a;
+}
+
+/* Container for graph content */
+.graph-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    padding: 10px 50px 25px 50px;
+}
+
+/* Canvas element */
+.graph-canvas {
+    width: 100%;
+    height: 100%;
+    background: #2c3e50;
+    border-radius: 4px;
+}
+
+/* Graph title */
+.graph-title {
+    position: absolute;
+    top: 5px;
+    left: 60px;
+    color: var(--graph-color, #bdc3c7);
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* Y-axis labels (left side) */
+.graph-y-axis {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    bottom: 25px;
+    width: 35px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    color: #7f8c8d;
+    font-size: 11px;
+}
+
+/* X-axis labels (bottom) */
+.graph-x-axis {
+    position: absolute;
+    bottom: 5px;
+    left: 50px;
+    right: 50px;
+    display: flex;
+    justify-content: space-between;
+    color: #7f8c8d;
+    font-size: 11px;
+}
+
+/* Graph type color themes using CSS custom properties */
+.graph-panel[data-type="speed"] { --graph-color: #3498db; }
+.graph-panel[data-type="battery"] { --graph-color: #f39c12; }
+.graph-panel[data-type="signal"] { --graph-color: #27ae60; }
+.graph-panel[data-type="latency"] { --graph-color: #e67e22; }
+.graph-panel[data-type="heartrate"] { --graph-color: #e91e63; }
+.graph-panel[data-type="accuracy"] { --graph-color: #9b59b6; }
+.graph-panel[data-type="distance"] { --graph-color: #1abc9c; }
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .graph-panel {
+        right: 0;
+    }
+
+    .graph-title {
+        left: 45px;
+        font-size: 11px;
+    }
+
+    .graph-y-axis {
+        font-size: 9px;
+        width: 30px;
+    }
+
+    .graph-x-axis {
+        font-size: 9px;
+        left: 35px;
+        right: 35px;
+    }
+
+    .graph-container {
+        padding: 10px 35px 25px 35px;
+    }
+}

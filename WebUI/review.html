@@ -7,6 +7,7 @@
     <title>Track Review - Windsurfer Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/common.css" />
+    <link rel="stylesheet" href="css/graphs.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -432,673 +433,6 @@
             font-size: 12px;
         }
 
-        /* Battery graph panel */
-        #speed-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #speed-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #speed-graph-resize:hover,
-        #speed-graph-resize.dragging {
-            background: linear-gradient(to bottom, #3498db, transparent);
-        }
-
-        #speed-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #speed-graph-resize:hover::after,
-        #speed-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #speed-graph-panel.visible {
-            display: block;
-        }
-
-        #speed-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #speed-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .speed-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 60px;
-            color: #3498db;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .speed-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            color: #7f8c8d;
-            font-size: 11px;
-            text-align: right;
-            padding-right: 5px;
-        }
-
-        .speed-time-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #7f8c8d;
-            font-size: 11px;
-        }
-
-        #battery-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #battery-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #battery-graph-resize:hover,
-        #battery-graph-resize.dragging {
-            background: linear-gradient(to bottom, #3498db, transparent);
-        }
-
-        #battery-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #battery-graph-resize:hover::after,
-        #battery-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #battery-graph-panel.visible {
-            display: block;
-        }
-
-        #battery-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #battery-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .battery-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #bdc3c7;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .battery-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .battery-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        /* Battery graph panel visibility is controlled by JavaScript for dynamic height */
-
-        /* Signal graph panel */
-        #signal-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #signal-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #signal-graph-resize:hover,
-        #signal-graph-resize.dragging {
-            background: linear-gradient(to bottom, #27ae60, transparent);
-        }
-
-        #signal-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #signal-graph-resize:hover::after,
-        #signal-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #signal-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #signal-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .signal-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #bdc3c7;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .signal-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .signal-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        /* Latency graph panel */
-        #latency-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #latency-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #latency-graph-resize:hover,
-        #latency-graph-resize.dragging {
-            background: linear-gradient(to bottom, #e67e22, transparent);
-        }
-
-        #latency-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #latency-graph-resize:hover::after,
-        #latency-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #latency-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #latency-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .latency-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #bdc3c7;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .latency-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .latency-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        /* Heart rate graph panel */
-        #heartrate-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #heartrate-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #heartrate-graph-resize:hover,
-        #heartrate-graph-resize.dragging {
-            background: linear-gradient(to bottom, #e91e63, transparent);
-        }
-
-        #heartrate-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #heartrate-graph-resize:hover::after,
-        #heartrate-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #heartrate-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #heartrate-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .heartrate-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #e91e63;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .heartrate-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .heartrate-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        /* Accuracy graph panel */
-        #accuracy-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #accuracy-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #accuracy-graph-resize:hover,
-        #accuracy-graph-resize.dragging {
-            background: linear-gradient(to bottom, #9b59b6, transparent);
-        }
-
-        #accuracy-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #accuracy-graph-resize:hover::after,
-        #accuracy-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #accuracy-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #accuracy-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .accuracy-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #9b59b6;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .accuracy-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .accuracy-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        /* Distance graph panel */
-        #distance-graph-panel {
-            position: absolute;
-            bottom: 80px;
-            left: 0;
-            right: 300px;
-            height: 150px;
-            background: #1a252f;
-            border-top: 1px solid #34495e;
-            display: none;
-        }
-
-        #distance-graph-resize {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 8px;
-            cursor: ns-resize;
-            background: linear-gradient(to bottom, #34495e, transparent);
-            z-index: 10;
-        }
-
-        #distance-graph-resize:hover,
-        #distance-graph-resize.dragging {
-            background: linear-gradient(to bottom, #27ae60, transparent);
-        }
-
-        #distance-graph-resize::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            background: #5a6a7a;
-            border-radius: 2px;
-        }
-
-        #distance-graph-resize:hover::after,
-        #distance-graph-resize.dragging::after {
-            background: #7a8a9a;
-        }
-
-        #distance-graph-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            padding: 10px 50px 25px 50px;
-        }
-
-        #distance-graph {
-            width: 100%;
-            height: 100%;
-            background: #2c3e50;
-            border-radius: 4px;
-        }
-
-        .distance-graph-title {
-            position: absolute;
-            top: 5px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #27ae60;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        .distance-y-axis {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            bottom: 25px;
-            width: 35px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: flex-end;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
-        .distance-x-axis {
-            position: absolute;
-            bottom: 5px;
-            left: 50px;
-            right: 50px;
-            display: flex;
-            justify-content: space-between;
-            color: #95a5a6;
-            font-size: 10px;
-        }
-
         /* Hamburger menu button (hidden on desktop) */
         #sidebar-toggle {
             display: none;
@@ -1317,45 +651,22 @@
                 max-width: 60px !important;
             }
 
-            #speed-graph-panel,
-            #distance-graph-panel,
-            #battery-graph-panel,
-            #signal-graph-panel,
-            #latency-graph-panel,
-            #heartrate-graph-panel,
-            #accuracy-graph-panel {
+            .graph-panel {
                 right: 0;
                 bottom: 130px;
             }
 
-            .speed-graph-title,
-            .distance-graph-title,
-            .battery-graph-title,
-            .signal-graph-title,
-            .latency-graph-title,
-            .heartrate-graph-title,
-            .accuracy-graph-title {
+            .graph-title {
                 font-size: 10px;
             }
 
-            .speed-y-axis,
-            .distance-y-axis,
-            .battery-y-axis,
-            .signal-y-axis,
-            .latency-y-axis,
-            .accuracy-y-axis {
+            .graph-y-axis {
                 font-size: 8px;
                 width: 25px;
                 left: 5px;
             }
 
-            #speed-graph-container,
-            #distance-graph-container,
-            #battery-graph-container,
-            #signal-graph-container,
-            #latency-graph-container,
-            #heartrate-graph-container,
-            #accuracy-graph-container {
+            .graph-container {
                 padding: 8px 35px 20px 35px;
             }
         }
@@ -1524,10 +835,10 @@
     </div>
 
     <!-- Speed graph panel -->
-    <div id="speed-graph-panel" class="graph-panel">
+    <div id="speed-graph-panel" class="graph-panel" data-type="speed">
         <div id="speed-graph-resize" class="graph-resize"></div>
         <div id="speed-graph-container" class="graph-container">
-            <div class="graph-title speed-graph-title">Speed (knots)</div>
+            <div class="graph-title">Speed (knots)</div>
             <div class="graph-y-axis" id="speed-y-labels">
                 <span>40</span>
                 <span>30</span>
@@ -1544,10 +855,10 @@
     </div>
 
     <!-- Battery graph panel -->
-    <div id="battery-graph-panel" class="graph-panel">
+    <div id="battery-graph-panel" class="graph-panel" data-type="battery">
         <div id="battery-graph-resize" class="graph-resize"></div>
         <div id="battery-graph-container" class="graph-container">
-            <div class="graph-title battery-graph-title">Battery Level (%)</div>
+            <div class="graph-title">Battery Level (%)</div>
             <div class="graph-y-axis" id="battery-y-labels">
                 <span>100</span>
                 <span>75</span>
@@ -1564,10 +875,10 @@
     </div>
 
     <!-- Signal graph panel -->
-    <div id="signal-graph-panel" class="graph-panel">
+    <div id="signal-graph-panel" class="graph-panel" data-type="signal">
         <div id="signal-graph-resize" class="graph-resize"></div>
         <div id="signal-graph-container" class="graph-container">
-            <div class="graph-title signal-graph-title">Signal Strength</div>
+            <div class="graph-title">Signal Strength</div>
             <div class="graph-y-axis">
                 <span>4</span>
                 <span>3</span>
@@ -1584,10 +895,10 @@
     </div>
 
     <!-- Latency graph panel -->
-    <div id="latency-graph-panel" class="graph-panel">
+    <div id="latency-graph-panel" class="graph-panel" data-type="latency">
         <div id="latency-graph-resize" class="graph-resize"></div>
         <div id="latency-graph-container" class="graph-container">
-            <div class="graph-title latency-graph-title">Network Latency (seconds)</div>
+            <div class="graph-title">Network Latency (seconds)</div>
             <div class="graph-y-axis" id="latency-y-labels">
                 <span>10</span>
                 <span>7.5</span>
@@ -1604,10 +915,10 @@
     </div>
 
     <!-- Heart rate graph panel -->
-    <div id="heartrate-graph-panel" class="graph-panel">
+    <div id="heartrate-graph-panel" class="graph-panel" data-type="heartrate">
         <div id="heartrate-graph-resize" class="graph-resize"></div>
         <div id="heartrate-graph-container" class="graph-container">
-            <div class="graph-title heartrate-graph-title">Heart Rate (bpm)</div>
+            <div class="graph-title">Heart Rate (bpm)</div>
             <div class="graph-y-axis" id="heartrate-y-labels">
                 <span>200</span>
                 <span>150</span>
@@ -1624,10 +935,10 @@
     </div>
 
     <!-- Accuracy graph panel -->
-    <div id="accuracy-graph-panel" class="graph-panel">
+    <div id="accuracy-graph-panel" class="graph-panel" data-type="accuracy">
         <div id="accuracy-graph-resize" class="graph-resize"></div>
         <div id="accuracy-graph-container" class="graph-container">
-            <div class="graph-title accuracy-graph-title">GPS Accuracy (meters)</div>
+            <div class="graph-title">GPS Accuracy (meters)</div>
             <div class="graph-y-axis" id="accuracy-y-labels">
                 <span>100</span>
                 <span>75</span>
@@ -1644,10 +955,10 @@
     </div>
 
     <!-- Distance graph panel -->
-    <div id="distance-graph-panel" class="graph-panel">
+    <div id="distance-graph-panel" class="graph-panel" data-type="distance">
         <div id="distance-graph-resize" class="graph-resize"></div>
         <div id="distance-graph-container" class="graph-container">
-            <div class="graph-title distance-graph-title">Distance (meters)</div>
+            <div class="graph-title">Distance (meters)</div>
             <div class="graph-y-axis" id="distance-y-labels">
                 <span>10000</span>
                 <span>7500</span>
