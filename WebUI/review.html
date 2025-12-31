@@ -109,6 +109,8 @@
                 <span>0</span>
             </div>
             <canvas id="speed-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="speed-time-start">--:--</span>
                 <span id="speed-time-end">--:--</span>
@@ -129,6 +131,8 @@
                 <span>0</span>
             </div>
             <canvas id="battery-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="battery-time-start">--:--</span>
                 <span id="battery-time-end">--:--</span>
@@ -149,6 +153,8 @@
                 <span>0</span>
             </div>
             <canvas id="signal-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="signal-time-start">--:--</span>
                 <span id="signal-time-end">--:--</span>
@@ -169,6 +175,8 @@
                 <span>0</span>
             </div>
             <canvas id="latency-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="latency-time-start">--:--</span>
                 <span id="latency-time-end">--:--</span>
@@ -189,6 +197,8 @@
                 <span>0</span>
             </div>
             <canvas id="heartrate-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="heartrate-time-start">--:--</span>
                 <span id="heartrate-time-end">--:--</span>
@@ -209,6 +219,8 @@
                 <span>0</span>
             </div>
             <canvas id="accuracy-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="accuracy-time-start">--:--</span>
                 <span id="accuracy-time-end">--:--</span>
@@ -229,6 +241,8 @@
                 <span>0</span>
             </div>
             <canvas id="distance-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
             <div class="graph-x-axis">
                 <span id="distance-time-start">--:--</span>
                 <span id="distance-time-end">--:--</span>
@@ -1473,6 +1487,125 @@
                 `<span style="color:#2ecc71">Start: ${formatTimeInTz(rangeStartTime)}</span> &nbsp;|&nbsp;` +
                 `<span style="color:#e74c3c">End: ${formatTimeInTz(rangeEndTime)}</span> &nbsp;|&nbsp;` +
                 `Duration: ${durationStr}`;
+        }
+
+        // Rubber-band selection state for graphs
+        let rubberBandState = null;
+
+        // Set up rubber-band selection on a graph canvas
+        function setupGraphRubberBand(canvas) {
+            const getX = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                if (e.touches) {
+                    return e.touches[0].clientX - rect.left;
+                }
+                return e.clientX - rect.left;
+            };
+
+            const startSelection = (e) => {
+                e.preventDefault();
+                const x = getX(e);
+                rubberBandState = {
+                    canvas: canvas,
+                    startX: x,
+                    currentX: x
+                };
+            };
+
+            const updateSelection = (e) => {
+                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
+                e.preventDefault();
+                rubberBandState.currentX = getX(e);
+                drawRubberBand();
+            };
+
+            const endSelection = (e) => {
+                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
+                e.preventDefault();
+
+                const startX = Math.min(rubberBandState.startX, rubberBandState.currentX);
+                const endX = Math.max(rubberBandState.startX, rubberBandState.currentX);
+                const width = canvas.offsetWidth;
+
+                // Only apply if selection is meaningful (> 5px)
+                if (endX - startX > 5) {
+                    // Convert pixel positions to slider percentages
+                    const startPercent = Math.max(0, Math.min(100, (startX / width) * 100));
+                    const endPercent = Math.max(0, Math.min(100, (endX / width) * 100));
+
+                    // Update sliders
+                    document.getElementById('start-slider').value = startPercent;
+                    document.getElementById('end-slider').value = endPercent;
+
+                    // Trigger updates
+                    updateSliderRange();
+                    updateTimeDisplay();
+                    resetPlaybackPosition();
+                    redrawAll();
+                }
+
+                rubberBandState = null;
+                clearRubberBand();
+            };
+
+            // Mouse events
+            canvas.addEventListener('mousedown', startSelection);
+            canvas.addEventListener('mousemove', updateSelection);
+            canvas.addEventListener('mouseup', endSelection);
+            canvas.addEventListener('mouseleave', () => {
+                if (rubberBandState && rubberBandState.canvas === canvas) {
+                    rubberBandState = null;
+                    clearRubberBand();
+                }
+            });
+
+            // Touch events for mobile
+            canvas.addEventListener('touchstart', startSelection, { passive: false });
+            canvas.addEventListener('touchmove', updateSelection, { passive: false });
+            canvas.addEventListener('touchend', endSelection, { passive: false });
+        }
+
+        // Draw rubber-band selection overlay on all visible graphs
+        function drawRubberBand() {
+            if (!rubberBandState) return;
+
+            const allPanels = document.querySelectorAll('.graph-panel');
+            const panels = Array.from(allPanels).filter(p => p.style.display === 'block');
+
+            panels.forEach(panel => {
+                const canvas = panel.querySelector('.graph-canvas');
+                const leftOverlay = panel.querySelector('.graph-range-overlay.left');
+                const rightOverlay = panel.querySelector('.graph-range-overlay.right');
+                if (!canvas || !leftOverlay || !rightOverlay) return;
+
+                const width = canvas.offsetWidth;
+                const startX = Math.min(rubberBandState.startX, rubberBandState.currentX);
+                const endX = Math.max(rubberBandState.startX, rubberBandState.currentX);
+
+                // Show grey overlay outside the selection
+                // Left overlay covers 0 to startX
+                if (startX > 0) {
+                    leftOverlay.style.width = startX + 'px';
+                    leftOverlay.classList.add('visible');
+                } else {
+                    leftOverlay.classList.remove('visible');
+                }
+
+                // Right overlay covers endX to width
+                if (endX < width) {
+                    rightOverlay.style.width = (width - endX) + 'px';
+                    rightOverlay.classList.add('visible');
+                } else {
+                    rightOverlay.classList.remove('visible');
+                }
+            });
+        }
+
+        // Clear rubber-band overlay from all graphs
+        function clearRubberBand() {
+            document.querySelectorAll('.graph-range-overlay').forEach(overlay => {
+                overlay.classList.remove('visible');
+            });
         }
 
         // Redraw all tracks and graphs (expensive operation)
@@ -3332,6 +3465,24 @@
             clearGraphHighlight();
             // Reset title
             document.querySelector('#distance-graph-panel .graph-title').textContent = 'Distance (meters)';
+        });
+
+        // Set up rubber-band selection on all graph canvases
+        ['speed-graph', 'battery-graph', 'signal-graph', 'latency-graph',
+         'heartrate-graph', 'accuracy-graph', 'distance-graph'].forEach(id => {
+            const canvas = document.getElementById(id);
+            if (canvas) {
+                setupGraphRubberBand(canvas);
+                // Double-click to reset to full time range
+                canvas.addEventListener('dblclick', () => {
+                    document.getElementById('start-slider').value = 0;
+                    document.getElementById('end-slider').value = 100;
+                    updateSliderRange();
+                    updateTimeDisplay();
+                    resetPlaybackPosition();
+                    redrawAll();
+                });
+            }
         });
 
         // Graph resize functionality

@@ -106,6 +106,31 @@
     font-size: 11px;
 }
 
+/* Range preview overlays - shown while dragging time sliders */
+.graph-range-overlay {
+    position: absolute;
+    top: 10px;
+    bottom: 25px;
+    background: rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    z-index: 5;
+    display: none;
+}
+
+.graph-range-overlay.visible {
+    display: block;
+}
+
+.graph-range-overlay.left {
+    left: 50px;
+    border-radius: 4px 0 0 4px;
+}
+
+.graph-range-overlay.right {
+    right: 50px;
+    border-radius: 0 4px 4px 0;
+}
+
 /* Graph type color themes using CSS custom properties */
 .graph-panel[data-type="speed"] { --graph-color: #3498db; }
 .graph-panel[data-type="battery"] { --graph-color: #f39c12; }
@@ -139,5 +164,13 @@
 
     .graph-container {
         padding: 10px 35px 25px 35px;
+    }
+
+    .graph-range-overlay.left {
+        left: 35px;
+    }
+
+    .graph-range-overlay.right {
+        right: 35px;
     }
 }
