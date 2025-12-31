@@ -740,3 +740,83 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     pointer-events: none;
     margin-top: 2px;
 }
+
+/* Sublog (race marker) items - indented below parent log */
+.sublog-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px 8px 35px;
+    margin-bottom: 4px;
+    margin-left: 15px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid #d0d0d0;
+    font-size: 12px;
+}
+
+.sublog-item:hover {
+    border-color: #3498db;
+    background: #f0f7ff;
+}
+
+.sublog-item.selected {
+    border-color: #2ecc71;
+    background: #e8f8f0;
+}
+
+.sublog-name {
+    flex: 1;
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.sublog-time {
+    color: #666;
+    font-size: 11px;
+    margin-right: 8px;
+}
+
+.sublog-delete {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sublog-delete:hover {
+    background: #c0392b;
+}
+
+.sublog-add {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    background: #27ae60;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.sublog-add:hover {
+    background: #219a52;
+}

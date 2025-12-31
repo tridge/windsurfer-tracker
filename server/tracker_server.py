@@ -357,6 +357,24 @@ def generate_log_summaries(log_dir: Path) -> int:
         if not logs_data:
             continue
 
+        # Preserve sublogs from existing summary if present
+        if summary_file.exists():
+            try:
+                with open(summary_file, 'r') as f:
+                    old_summary = json.load(f)
+                # Build map of file -> sublogs from old summary
+                old_sublogs = {}
+                for old_log in old_summary.get('logs', []):
+                    if old_log.get('sublogs'):
+                        old_sublogs[old_log.get('file')] = old_log['sublogs']
+                # Merge sublogs into new log entries
+                for log_entry in logs_data:
+                    file_name = log_entry.get('file')
+                    if file_name in old_sublogs:
+                        log_entry['sublogs'] = old_sublogs[file_name]
+            except Exception:
+                pass  # If we can't read old summary, just continue without sublogs
+
         # Sort by start time (most recent first for display)
         logs_data.sort(key=lambda x: x.get('start_ts', 0), reverse=True)
 
@@ -1431,6 +1449,99 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath.startswith('/log/') and '/sublog' in subpath:
+            # Add a sublog (race marker) to a log file's summary
+            # URL format: /log/{log_file}/sublog
+            parts = subpath[5:].split('/sublog')
+            if len(parts) != 2 or parts[1] != '':
+                self._send_json({"error": "Invalid sublog path"}, 400)
+                return
+            log_file = parts[0]
+            if not log_file:
+                self._send_json({"error": "Log file required"}, 400)
+                return
+
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+
+                # Validate required fields
+                if 'name' not in data or 'start_ts' not in data or 'end_ts' not in data:
+                    self._send_json({"error": "name, start_ts, and end_ts required"}, 400)
+                    return
+
+                name = str(data['name']).strip()
+                start_ts = int(data['start_ts'])
+                end_ts = int(data['end_ts'])
+
+                if not name:
+                    self._send_json({"error": "name cannot be empty"}, 400)
+                    return
+                if start_ts >= end_ts:
+                    self._send_json({"error": "start_ts must be before end_ts"}, 400)
+                    return
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                # Find the summary file for this log
+                # Extract date from log file name (e.g., 2025_01_15.jsonl -> 2025_01_15_summary.json)
+                date_match = re.match(r'^(\d{4}_\d{2}_\d{2})\.jsonl', log_file)
+                if not date_match:
+                    self._send_json({"error": "Invalid log file format"}, 400)
+                    return
+                date_str = date_match.group(1)
+                summary_file = tracker.log_dir / f"{date_str}_summary.json"
+
+                if not summary_file.exists():
+                    self._send_json({"error": "Summary file not found"}, 404)
+                    return
+
+                # Load summary, add sublog, save
+                with open(summary_file, 'r') as f:
+                    summary = json.load(f)
+
+                # Find the log entry
+                log_entry = None
+                for entry in summary.get('logs', []):
+                    if entry.get('file') == log_file:
+                        log_entry = entry
+                        break
+
+                if not log_entry:
+                    self._send_json({"error": f"Log {log_file} not found in summary"}, 404)
+                    return
+
+                # Add sublog
+                if 'sublogs' not in log_entry:
+                    log_entry['sublogs'] = []
+
+                log_entry['sublogs'].append({
+                    'name': name,
+                    'start_ts': start_ts,
+                    'end_ts': end_ts
+                })
+
+                # Sort sublogs by start time
+                log_entry['sublogs'].sort(key=lambda x: x.get('start_ts', 0))
+
+                # Save summary atomically
+                tmp_file = summary_file.with_suffix('.tmp')
+                with open(tmp_file, 'w') as f:
+                    json.dump(summary, f, indent=2)
+                tmp_file.rename(summary_file)
+
+                log(f"[EVENT {eid}] Added sublog '{name}' to {log_file}")
+                self._send_json(summary)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -1470,6 +1581,77 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 )
                 log(f"[EVENT {eid}] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
+
+        elif subpath.startswith('/log/') and '/sublog/' in subpath:
+            # Delete a sublog (race marker) from a log file's summary
+            # URL format: /log/{log_file}/sublog/{index}
+            parts = subpath[5:].split('/sublog/')
+            if len(parts) != 2:
+                self._send_json({"error": "Invalid sublog path"}, 400)
+                return
+            log_file = parts[0]
+            try:
+                sublog_index = int(parts[1])
+            except ValueError:
+                self._send_json({"error": "Invalid sublog index"}, 400)
+                return
+
+            if not log_file:
+                self._send_json({"error": "Log file required"}, 400)
+                return
+
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": "Could not get event tracker"}, 500)
+                return
+
+            # Find the summary file for this log
+            date_match = re.match(r'^(\d{4}_\d{2}_\d{2})\.jsonl', log_file)
+            if not date_match:
+                self._send_json({"error": "Invalid log file format"}, 400)
+                return
+            date_str = date_match.group(1)
+            summary_file = tracker.log_dir / f"{date_str}_summary.json"
+
+            if not summary_file.exists():
+                self._send_json({"error": "Summary file not found"}, 404)
+                return
+
+            try:
+                # Load summary
+                with open(summary_file, 'r') as f:
+                    summary = json.load(f)
+
+                # Find the log entry
+                log_entry = None
+                for entry in summary.get('logs', []):
+                    if entry.get('file') == log_file:
+                        log_entry = entry
+                        break
+
+                if not log_entry:
+                    self._send_json({"error": f"Log {log_file} not found in summary"}, 404)
+                    return
+
+                sublogs = log_entry.get('sublogs', [])
+                if sublog_index < 0 or sublog_index >= len(sublogs):
+                    self._send_json({"error": "Sublog index out of range"}, 400)
+                    return
+
+                # Remove the sublog
+                removed = sublogs.pop(sublog_index)
+
+                # Save summary atomically
+                tmp_file = summary_file.with_suffix('.tmp')
+                with open(tmp_file, 'w') as f:
+                    json.dump(summary, f, indent=2)
+                tmp_file.rename(summary_file)
+
+                log(f"[EVENT {eid}] Removed sublog '{removed.get('name', 'unnamed')}' from {log_file}")
+                self._send_json(summary)
+
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
 
         else:
             self._send_json({"error": "Not found"}, 404)

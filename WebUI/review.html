@@ -50,6 +50,9 @@
                     <label style="display:none"><input type="radio" name="map-type" value="satellite" onchange="setMapType(this.value)"> Google Satellite</label>
                     <label style="display:none"><input type="radio" name="map-type" value="hybrid" onchange="setMapType(this.value)"> Google Hybrid</label>
                 </div>
+                <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
+                    <label><input type="checkbox" id="admin-mode" onchange="toggleAdminMode(this.checked)"> Admin Mode</label>
+                </div>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -351,6 +354,184 @@
 
         // Event timezone (defaults to local, updated when event info is fetched)
         let eventTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        // Admin authentication state
+        let isAdmin = false;
+        let adminPassword = '';  // Loaded from localStorage after EVENT_ID is defined
+
+        // Load per-event admin password
+        adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+
+        async function toggleAdminMode(checked) {
+            if (checked) {
+                // Try cached password first
+                if (adminPassword) {
+                    try {
+                        const response = await fetch(`/api/event/${EVENT_ID}/auth/check`, {
+                            headers: { 'X-Admin-Password': adminPassword }
+                        });
+                        if (response.ok) {
+                            isAdmin = true;
+                            updateRaceList();
+                            return;
+                        }
+                    } catch (e) {
+                        // Fall through to prompt
+                    }
+                }
+                // Prompt for password
+                const password = prompt('Enter admin password:');
+                if (!password) {
+                    document.getElementById('admin-mode').checked = false;
+                    return;
+                }
+                try {
+                    const response = await fetch(`/api/event/${EVENT_ID}/auth/check`, {
+                        headers: { 'X-Admin-Password': password }
+                    });
+                    if (response.ok) {
+                        isAdmin = true;
+                        adminPassword = password;
+                        localStorage.setItem(`adminPassword_${EVENT_ID}`, password);
+                        updateRaceList();
+                    } else {
+                        alert('Invalid admin password');
+                        adminPassword = '';
+                        localStorage.removeItem(`adminPassword_${EVENT_ID}`);
+                        document.getElementById('admin-mode').checked = false;
+                    }
+                } catch (e) {
+                    alert('Connection error');
+                    document.getElementById('admin-mode').checked = false;
+                }
+            } else {
+                isAdmin = false;
+                adminPassword = '';
+                localStorage.removeItem(`adminPassword_${EVENT_ID}`);
+                updateRaceList();
+            }
+        }
+
+        function getAdminPassword() {
+            return adminPassword;
+        }
+
+        // Sublog (race marker) functions
+        function promptAddSublog() {
+            if (!currentLogFile) {
+                alert('Please load a log first');
+                return;
+            }
+            promptAddSublogForLog(currentLogFile);
+        }
+
+        function promptAddSublogForLog(logFile) {
+            if (!currentLogFile || currentLogFile !== logFile) {
+                alert('Please select this log first before adding a race marker');
+                return;
+            }
+            const name = prompt('Enter race name (e.g., "Race 1"):');
+            if (name && name.trim()) {
+                addSublog(name.trim());
+            }
+        }
+
+        async function addSublog(name) {
+            // Get current slider positions and convert to timestamps
+            const startPercent = parseFloat(document.getElementById('start-slider').value);
+            const endPercent = parseFloat(document.getElementById('end-slider').value);
+            const startTs = Math.round(sliderValueToTime(startPercent));
+            const endTs = Math.round(sliderValueToTime(endPercent));
+
+            if (startTs >= endTs) {
+                alert('Invalid time range');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/event/${EVENT_ID}/log/${currentLogFile}/sublog`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': getAdminPassword()
+                    },
+                    body: JSON.stringify({ name, start_ts: startTs, end_ts: endTs })
+                });
+
+                if (response.ok) {
+                    const summary = await response.json();
+                    // Update the current summary data
+                    currentSummary = summary;
+                    updateRaceList();
+                    alert(`Race "${name}" added successfully`);
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to add race: ${error.error || 'Unknown error'}`);
+                }
+            } catch (e) {
+                alert(`Failed to add race: ${e.message}`);
+            }
+        }
+
+        async function deleteSublog(logFile, sublogIndex) {
+            if (!confirm('Delete this race marker?')) return;
+
+            try {
+                const response = await fetch(`/api/event/${EVENT_ID}/log/${logFile}/sublog/${sublogIndex}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Admin-Password': getAdminPassword() }
+                });
+
+                if (response.ok) {
+                    const summary = await response.json();
+                    // Update the current summary data
+                    currentSummary = summary;
+                    updateRaceList();
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to delete race: ${error.error || 'Unknown error'}`);
+                }
+            } catch (e) {
+                alert(`Failed to delete race: ${e.message}`);
+            }
+        }
+
+        function selectSublog(logIndex, sublogIndex) {
+            // Get the log entry and sublog
+            if (!currentSummary || !currentSummary.logs || !currentSummary.logs[logIndex]) return;
+
+            const logEntry = currentSummary.logs[logIndex];
+            const sublog = logEntry.sublogs && logEntry.sublogs[sublogIndex];
+            if (!sublog) return;
+
+            // If a different log is loaded, load it first then apply sublog range
+            if (currentLogFile !== logEntry.file) {
+                loadRace(logEntry).then(() => applySublogTimeRange(logEntry, sublog));
+            } else {
+                applySublogTimeRange(logEntry, sublog);
+            }
+        }
+
+        function applySublogTimeRange(logEntry, sublog) {
+            // Store selected sublog for reset functionality
+            selectedSublog = sublog;
+
+            // Convert sublog timestamps to slider percentages
+            // Note: sliderMinTime/sliderMaxTime should already be set from the loaded log
+            const range = sliderMaxTime - sliderMinTime;
+            if (range <= 0) return;
+
+            const startPercent = Math.max(0, Math.min(100, ((sublog.start_ts - sliderMinTime) / range) * 100));
+            const endPercent = Math.max(0, Math.min(100, ((sublog.end_ts - sliderMinTime) / range) * 100));
+
+            document.getElementById('start-slider').value = startPercent;
+            document.getElementById('end-slider').value = endPercent;
+
+            updateSliderRange();
+            updateTimeDisplay();
+            resetPlaybackPosition();
+            redrawAll();
+        }
 
         // Get today's date in event timezone (for date picker)
         function getTodayInEventTz() {
@@ -681,6 +862,7 @@
         let currentSummary = null;  // Summary data for selected date
         let currentLogFile = null;  // Currently loaded log file
         let currentLogStartTs = null;  // Start timestamp of current log (for stable URLs)
+        let selectedSublog = null;  // Currently selected sublog {start_ts, end_ts, name}
         let sliderDebounceTimer = null;  // Debounce timer for slider redraw
         let courseMarkers = [];  // Course marker layers
         let courseLines = [];    // Course line layers
@@ -1104,8 +1286,12 @@
                 const duration = Math.round((log.end_ts - log.start_ts) / 60);
                 const sailorCount = Object.keys(log.sailors).length;
 
+                // Add "+" button for admin to add a sublog
+                const addBtn = isAdmin ?
+                    `<button class="sublog-add" onclick="event.stopPropagation(); promptAddSublogForLog('${log.file}')" title="Add race marker">+</button>` : '';
+
                 div.innerHTML = `
-                    <div class="race-time">Log ${currentSummary.logs.length - index}: ${startTime} - ${endTime}</div>
+                    <div class="race-time">Log ${currentSummary.logs.length - index}: ${startTime} - ${endTime}${addBtn}</div>
                     <div class="race-stats">
                         Duration: ${duration} min | ${sailorCount} sailors | ${log.point_count.toLocaleString()} points
                     </div>
@@ -1114,12 +1300,48 @@
                 div.addEventListener('click', () => {
                     // Clear previous selection
                     container.querySelectorAll('.race-item').forEach(el => el.classList.remove('selected'));
+                    container.querySelectorAll('.sublog-item').forEach(el => el.classList.remove('selected'));
                     div.classList.add('selected');
+                    selectedSublog = null;  // Clear sublog selection when selecting a main log
                     loadRace(log);
                     closeSidebarIfMobile();
                 });
 
                 container.appendChild(div);
+
+                // Add sublogs if present
+                if (log.sublogs && log.sublogs.length > 0) {
+                    log.sublogs.forEach((sublog, subIndex) => {
+                        const subDiv = document.createElement('div');
+                        subDiv.className = 'sublog-item';
+                        subDiv.dataset.logIndex = index;
+                        subDiv.dataset.sublogIndex = subIndex;
+
+                        const subStartTime = formatTimeShortInTz(sublog.start_ts);
+                        const subEndTime = formatTimeShortInTz(sublog.end_ts);
+                        const subDuration = Math.round((sublog.end_ts - sublog.start_ts) / 60);
+
+                        const deleteBtn = isAdmin ?
+                            `<button class="sublog-delete" onclick="event.stopPropagation(); deleteSublog('${log.file}', ${subIndex})" title="Delete race">−</button>` : '';
+
+                        subDiv.innerHTML = `
+                            <div class="sublog-name">${escapeHtml(sublog.name)}</div>
+                            <div class="sublog-time">${subStartTime} - ${subEndTime} (${subDuration}m)</div>
+                            ${deleteBtn}
+                        `;
+
+                        subDiv.addEventListener('click', () => {
+                            // Clear previous selection
+                            container.querySelectorAll('.race-item').forEach(el => el.classList.remove('selected'));
+                            container.querySelectorAll('.sublog-item').forEach(el => el.classList.remove('selected'));
+                            subDiv.classList.add('selected');
+                            selectSublog(index, subIndex);
+                            closeSidebarIfMobile();
+                        });
+
+                        container.appendChild(subDiv);
+                    });
+                }
             });
 
             // Auto-select log from URL params if present
@@ -1185,6 +1407,7 @@
             currentLogStartTs = logEntry.start_ts;
             allData = [];
             userData = {};
+            const previousSelectedUsers = new Set(selectedUsers);  // Preserve selection
             selectedUsers = new Set();
 
             try {
@@ -1236,6 +1459,17 @@
                 document.getElementById('end-slider').value = 100;
                 updateSliderRange();
                 updateTimeDisplay();
+
+                // Restore previous user selection for users that exist in new data
+                for (const userId of previousSelectedUsers) {
+                    if (userData[userId]) {
+                        selectedUsers.add(userId);
+                    }
+                }
+                // If no previous selection preserved, select all by default
+                if (selectedUsers.size === 0 && previousSelectedUsers.size === 0) {
+                    selectedUsers = new Set(Object.keys(userData));
+                }
 
                 // Update user list
                 updateUserList();
@@ -3473,10 +3707,22 @@
             const canvas = document.getElementById(id);
             if (canvas) {
                 setupGraphRubberBand(canvas);
-                // Double-click to reset to full time range
+                // Double-click to reset to full time range (or sublog range if selected)
                 canvas.addEventListener('dblclick', () => {
-                    document.getElementById('start-slider').value = 0;
-                    document.getElementById('end-slider').value = 100;
+                    if (selectedSublog) {
+                        // Reset to selected sublog's time range
+                        const range = sliderMaxTime - sliderMinTime;
+                        if (range > 0) {
+                            const startPercent = Math.max(0, Math.min(100, ((selectedSublog.start_ts - sliderMinTime) / range) * 100));
+                            const endPercent = Math.max(0, Math.min(100, ((selectedSublog.end_ts - sliderMinTime) / range) * 100));
+                            document.getElementById('start-slider').value = startPercent;
+                            document.getElementById('end-slider').value = endPercent;
+                        }
+                    } else {
+                        // Reset to full log range
+                        document.getElementById('start-slider').value = 0;
+                        document.getElementById('end-slider').value = 100;
+                    }
                     updateSliderRange();
                     updateTimeDisplay();
                     resetPlaybackPosition();
