@@ -745,7 +745,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .sublog-item {
     display: flex;
     align-items: center;
-    padding: 8px 10px 8px 35px;
+    padding: 8px 10px;
     margin-bottom: 4px;
     margin-left: 15px;
     background: #f0f0f0;

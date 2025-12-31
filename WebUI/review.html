@@ -405,9 +405,8 @@
                     document.getElementById('admin-mode').checked = false;
                 }
             } else {
+                // Just disable admin mode, keep password cached for re-enable
                 isAdmin = false;
-                adminPassword = '';
-                localStorage.removeItem(`adminPassword_${EVENT_ID}`);
                 updateRaceList();
             }
         }
@@ -516,16 +515,17 @@
             // Store selected sublog for reset functionality
             selectedSublog = sublog;
 
-            // Convert sublog timestamps to slider percentages
-            // Note: sliderMinTime/sliderMaxTime should already be set from the loaded log
-            const range = sliderMaxTime - sliderMinTime;
-            if (range <= 0) return;
+            // Set slider bounds to the race's time range (makes race feel like its own log)
+            sliderMinTime = sublog.start_ts;
+            sliderMaxTime = sublog.end_ts;
 
-            const startPercent = Math.max(0, Math.min(100, ((sublog.start_ts - sliderMinTime) / range) * 100));
-            const endPercent = Math.max(0, Math.min(100, ((sublog.end_ts - sliderMinTime) / range) * 100));
+            // Set sliders to full range (0-100) within the race bounds
+            document.getElementById('start-slider').value = 0;
+            document.getElementById('end-slider').value = 100;
 
-            document.getElementById('start-slider').value = startPercent;
-            document.getElementById('end-slider').value = endPercent;
+            // Update range times to match the race bounds
+            rangeStartTime = sliderMinTime;
+            rangeEndTime = sliderMaxTime;
 
             updateSliderRange();
             updateTimeDisplay();
@@ -590,6 +590,9 @@
 
             // Selected log (by start timestamp for stability across rotations)
             if (currentLogStartTs) params.set('logts', currentLogStartTs);
+
+            // Selected race/sublog (by start timestamp)
+            if (selectedSublog) params.set('racets', selectedSublog.start_ts);
 
             // Selected users
             if (selectedUsers.size > 0) {
@@ -682,6 +685,31 @@
 
             // Update slider endpoints based on selected users
             updateSliderEndpoints();
+
+            // Restore race/sublog selection (before time range, as it changes slider bounds)
+            if (params.has('racets') && currentSummary) {
+                const raceTs = parseInt(params.get('racets'));
+                // Find the sublog with matching start timestamp
+                for (const log of currentSummary.logs) {
+                    if (log.sublogs) {
+                        const sublog = log.sublogs.find(s => s.start_ts === raceTs);
+                        if (sublog) {
+                            // Apply race time range (sets slider bounds to race)
+                            applySublogTimeRange(log, sublog);
+                            // Update UI to show race as selected
+                            const logIndex = currentSummary.logs.indexOf(log);
+                            const subIndex = log.sublogs.indexOf(sublog);
+                            const subDiv = document.querySelector(`.sublog-item[data-log-index="${logIndex}"][data-sublog-index="${subIndex}"]`);
+                            if (subDiv) {
+                                document.querySelectorAll('.race-item').forEach(el => el.classList.remove('selected'));
+                                document.querySelectorAll('.sublog-item').forEach(el => el.classList.remove('selected'));
+                                subDiv.classList.add('selected');
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Time range (URL stores percentages of global log range)
             if (params.has('start') || params.has('end')) {
@@ -1474,8 +1502,8 @@
                 // Update user list
                 updateUserList();
 
-                // Draw tracks
-                drawTracks();
+                // Draw tracks and graphs
+                redrawAll();
 
                 // Fit map to data
                 fitMapToData();
@@ -1624,7 +1652,7 @@
                 const points = entries.length;
 
                 const div = document.createElement('div');
-                div.className = 'user-item';
+                div.className = selectedUsers.has(userId) ? 'user-item selected' : 'user-item';
                 div.dataset.userId = userId;
 
                 const color = userColors[colorIdx % userColors.length];
@@ -3707,22 +3735,10 @@
             const canvas = document.getElementById(id);
             if (canvas) {
                 setupGraphRubberBand(canvas);
-                // Double-click to reset to full time range (or sublog range if selected)
+                // Double-click to reset to full time range (slider bounds already set to race range if race selected)
                 canvas.addEventListener('dblclick', () => {
-                    if (selectedSublog) {
-                        // Reset to selected sublog's time range
-                        const range = sliderMaxTime - sliderMinTime;
-                        if (range > 0) {
-                            const startPercent = Math.max(0, Math.min(100, ((selectedSublog.start_ts - sliderMinTime) / range) * 100));
-                            const endPercent = Math.max(0, Math.min(100, ((selectedSublog.end_ts - sliderMinTime) / range) * 100));
-                            document.getElementById('start-slider').value = startPercent;
-                            document.getElementById('end-slider').value = endPercent;
-                        }
-                    } else {
-                        // Reset to full log range
-                        document.getElementById('start-slider').value = 0;
-                        document.getElementById('end-slider').value = 100;
-                    }
+                    document.getElementById('start-slider').value = 0;
+                    document.getElementById('end-slider').value = 100;
                     updateSliderRange();
                     updateTimeDisplay();
                     resetPlaybackPosition();
