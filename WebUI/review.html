@@ -1173,6 +1173,76 @@
             return userId;
         }
 
+        // Get role for a user ID (from most recent data point or override)
+        function getUserRole(userId) {
+            if (userOverrides[userId] && userOverrides[userId].role) {
+                return userOverrides[userId].role;
+            }
+            // Get from user data if available
+            if (userData[userId] && userData[userId].length > 0) {
+                const lastEntry = userData[userId][userData[userId].length - 1];
+                return lastEntry.role || 'sailor';
+            }
+            return 'sailor';
+        }
+
+        // Create a map marker based on role
+        // Returns a Leaflet layer with fixed pixel size (doesn't scale with zoom)
+        // options.interactive: if false, clicks pass through to map (for playback)
+        function createRoleMarker(latlng, role, color, options = {}) {
+            const radius = options.radius || 8;
+            const fillOpacity = options.fillOpacity || 1;
+            const weight = options.weight || 2;
+            const borderColor = options.color || '#fff';
+            const interactive = options.interactive !== false;  // default true
+
+            if (role === 'support') {
+                // Square marker using divIcon (fixed pixel size)
+                const size = radius * 2;
+                const icon = L.divIcon({
+                    className: 'role-marker-square',
+                    html: `<div style="
+                        width: ${size}px;
+                        height: ${size}px;
+                        background: ${color};
+                        border: ${weight}px solid ${borderColor};
+                        opacity: ${fillOpacity};
+                        border-radius: 2px;
+                    "></div>`,
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+                return L.marker(latlng, { icon: icon, interactive: interactive });
+            } else if (role === 'spectator') {
+                // Triangle marker using divIcon with CSS clip-path
+                const size = radius * 2.2;
+                const icon = L.divIcon({
+                    className: 'role-marker-triangle',
+                    html: `<div style="
+                        width: ${size}px;
+                        height: ${size}px;
+                        background: ${color};
+                        border: ${weight}px solid ${borderColor};
+                        opacity: ${fillOpacity};
+                        clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+                    "></div>`,
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+                return L.marker(latlng, { icon: icon, interactive: interactive });
+            } else {
+                // Default: circle marker (sailor)
+                return L.circleMarker(latlng, {
+                    radius: radius,
+                    fillColor: color,
+                    color: borderColor,
+                    weight: weight,
+                    fillOpacity: fillOpacity,
+                    interactive: interactive
+                });
+            }
+        }
+
         // Load user overrides on startup
         loadUserOverrides();
 
@@ -1667,8 +1737,11 @@
                 const color = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
+                const role = getUserRole(userId);
+                const roleClass = role === 'support' ? 'role-support' : (role === 'spectator' ? 'role-spectator' : 'role-sailor');
+
                 div.innerHTML = `
-                    <div class="user-color" style="background:${color}"></div>
+                    <div class="user-color ${roleClass}" style="background:${color}"></div>
                     <div class="user-info">
                         <div class="user-name">${getDisplayName(userId)}</div>
                         <div class="user-stats">
@@ -1719,6 +1792,13 @@
                 element.classList.add('selected');
             }
 
+            // During playback or pause: just redraw current state without resetting
+            if (playbackInterval || playbackPaused) {
+                drawTracksUpTo(playbackCurrentTime);
+                return;
+            }
+
+            // Not in playback: do full reset
             // Update slider endpoints based on newly selected users
             updateSliderEndpoints();
 
@@ -2191,13 +2271,13 @@
                         markerHacText = `<br>Accuracy: ${last.hac.toFixed(1)}m`;
                     }
 
-                    const marker = L.circleMarker([last.lat, last.lon], {
-                        radius: 8,
-                        fillColor: userColor,
-                        color: '#fff',
-                        weight: 2,
-                        fillOpacity: 1
-                    }).bindPopup(`
+                    const role = getUserRole(userId);
+                    const marker = createRoleMarker(
+                        L.latLng(last.lat, last.lon),
+                        role,
+                        userColor,
+                        { radius: 8, fillOpacity: 1, weight: 2, color: '#fff' }
+                    ).bindPopup(`
                         <b>${getDisplayName(userId)}</b><br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${last.hdg || 0}°<br>
@@ -3311,14 +3391,13 @@
                 }
 
                 // Create highlight marker on map
-                const marker = L.circleMarker([closest.lat, closest.lon], {
-                    radius: 12,
-                    fillColor: userColor,
-                    color: '#fff',
-                    weight: 3,
-                    fillOpacity: 0.9,
-                    opacity: 1
-                });
+                const role = getUserRole(userId);
+                const marker = createRoleMarker(
+                    L.latLng(closest.lat, closest.lon),
+                    role,
+                    userColor,
+                    { radius: 12, fillOpacity: 0.9, weight: 3, color: '#fff' }
+                );
 
                 // Add tooltip with info
                 const time = formatTimeInTz(closest.ts);
@@ -4783,13 +4862,13 @@
                 // Add current position marker
                 if (showMarkers && filtered.length > 0) {
                     const last = filtered[filtered.length - 1];
-                    const marker = L.circleMarker([last.lat, last.lon], {
-                        radius: 8,
-                        fillColor: userColor,
-                        color: '#fff',
-                        weight: 2,
-                        fillOpacity: 1
-                    }).addTo(map);
+                    const role = getUserRole(userId);
+                    const marker = createRoleMarker(
+                        L.latLng(last.lat, last.lon),
+                        role,
+                        userColor,
+                        { radius: 8, fillOpacity: 1, weight: 2, color: '#fff', interactive: false }
+                    ).addTo(map);
                     markerLayers[userId] = marker;
 
                     // Store position for hover/follow popup detection

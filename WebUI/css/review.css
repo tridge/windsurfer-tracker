@@ -207,6 +207,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     margin-right: 10px;
 }
 
+/* Role-based marker shapes in user list */
+.user-color.role-sailor {
+    border-radius: 50%;  /* Circle */
+}
+
+.user-color.role-support {
+    border-radius: 2px;  /* Square */
+}
+
+.user-color.role-spectator {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);  /* Triangle */
+}
+
+/* Remove default Leaflet divIcon styling for role markers */
+.role-marker-square,
+.role-marker-triangle {
+    background: transparent !important;
+    border: none !important;
+}
+
 .user-info {
     flex: 1;
 }
