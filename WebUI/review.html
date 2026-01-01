@@ -4441,8 +4441,8 @@
                 updatePlaybackIndicator();
 
                 playbackInterval = setInterval(() => {
-                    // Advance time (playbackSpeed seconds per 100ms tick)
-                    playbackCurrentTime += playbackSpeed;
+                    // Advance time: at 1x, advance 0.1s per 100ms tick = real-time
+                    playbackCurrentTime += playbackSpeed * 0.1;
 
                     if (playbackCurrentTime >= rangeEndTime) {
                         playbackCurrentTime = rangeEndTime;
