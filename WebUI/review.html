@@ -1256,9 +1256,12 @@
         let speedScaleMax = 15;
 
         // Speed to color (0 to speedScaleMax knots)
+        // Quantized to 20 levels for efficient track batching
+        const SPEED_COLOR_LEVELS = 20;
         function speedToColor(speedKnots) {
             const knots = speedKnots;  // spd is already in knots
-            const ratio = Math.min(knots / speedScaleMax, 1);
+            // Quantize to discrete levels for better polyline batching
+            const ratio = Math.min(Math.floor((knots / speedScaleMax) * SPEED_COLOR_LEVELS) / SPEED_COLOR_LEVELS, 1);
 
             if (ratio < 0.33) {
                 // Blue to green
@@ -1821,7 +1824,6 @@
             updateTimeDisplay();
             drawTracks();
             drawSpeedGraph();
-            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -2125,18 +2127,40 @@
                 const coords = filtered.map(e => [e.lat, e.lon]);
 
                 if (useSpeedColor) {
-                    // Draw segments colored by speed
+                    // Draw segments colored by speed - batch consecutive same-color segments
                     const layerGroup = L.layerGroup();
 
-                    for (let i = 1; i < filtered.length; i++) {
-                        const prev = filtered[i-1];
-                        const curr = filtered[i];
-                        const color = speedToColor(curr.spd || 0);
+                    // Group consecutive segments by color
+                    let currentColor = null;
+                    let currentCoords = [];
 
-                        const line = L.polyline(
-                            [[prev.lat, prev.lon], [curr.lat, curr.lon]],
-                            { color: color, weight: 3, opacity: 0.8 }
-                        );
+                    for (let i = 0; i < filtered.length; i++) {
+                        const point = filtered[i];
+                        const color = speedToColor(point.spd || 0);
+
+                        if (color !== currentColor && currentCoords.length > 1) {
+                            // Flush previous color batch
+                            const line = L.polyline(currentCoords, {
+                                color: currentColor,
+                                weight: 3,
+                                opacity: 0.8
+                            });
+                            layerGroup.addLayer(line);
+                            // Start new batch with last point of previous (for continuity)
+                            currentCoords = [currentCoords[currentCoords.length - 1]];
+                        }
+
+                        currentCoords.push([point.lat, point.lon]);
+                        currentColor = color;
+                    }
+
+                    // Flush final batch
+                    if (currentCoords.length > 1) {
+                        const line = L.polyline(currentCoords, {
+                            color: currentColor,
+                            weight: 3,
+                            opacity: 0.8
+                        });
                         layerGroup.addLayer(line);
                     }
 
@@ -4091,7 +4115,6 @@
 
             // Redraw graphs at new size
             drawSpeedGraph();
-            drawSpeedGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -4867,17 +4890,38 @@
                 if (filtered.length < 2) continue;
 
                 if (useSpeedColor) {
+                    // Batch consecutive same-color segments for performance
                     const layerGroup = L.layerGroup();
-                    for (let i = 1; i < filtered.length; i++) {
-                        const prev = filtered[i-1];
-                        const curr = filtered[i];
-                        const color = speedToColor(curr.spd || 0);
-                        const line = L.polyline(
-                            [[prev.lat, prev.lon], [curr.lat, curr.lon]],
-                            { color: color, weight: 3, opacity: 0.8 }
-                        );
+                    let currentColor = null;
+                    let currentCoords = [];
+
+                    for (let i = 0; i < filtered.length; i++) {
+                        const point = filtered[i];
+                        const color = speedToColor(point.spd || 0);
+
+                        if (color !== currentColor && currentCoords.length > 1) {
+                            const line = L.polyline(currentCoords, {
+                                color: currentColor,
+                                weight: 3,
+                                opacity: 0.8
+                            });
+                            layerGroup.addLayer(line);
+                            currentCoords = [currentCoords[currentCoords.length - 1]];
+                        }
+
+                        currentCoords.push([point.lat, point.lon]);
+                        currentColor = color;
+                    }
+
+                    if (currentCoords.length > 1) {
+                        const line = L.polyline(currentCoords, {
+                            color: currentColor,
+                            weight: 3,
+                            opacity: 0.8
+                        });
                         layerGroup.addLayer(line);
                     }
+
                     layerGroup.addTo(map);
                     trackLayers[userId] = layerGroup;
                 } else {
