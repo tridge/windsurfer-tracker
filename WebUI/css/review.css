@@ -221,6 +221,48 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     color: #666;
 }
 
+/* Follow checkbox in user list (playback mode) */
+.user-item {
+    position: relative;  /* For absolute positioning of checkbox */
+}
+
+.follow-checkbox {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #e67e22;
+    display: none;  /* Hidden until playback mode */
+}
+
+.follow-checkbox.playback-active {
+    display: block;
+}
+
+/* Playback sailor popup */
+.playback-popup .leaflet-popup-content-wrapper {
+    background: rgba(44, 62, 80, 0.95);
+    color: white;
+    border-radius: 6px;
+    padding: 0;
+}
+
+.playback-popup .leaflet-popup-content {
+    margin: 8px 12px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.playback-popup .leaflet-popup-tip {
+    background: rgba(44, 62, 80, 0.95);
+}
+
+.playback-popup.followed .leaflet-popup-content-wrapper {
+    border: 2px solid #e67e22;
+}
+
 #timeline {
     position: absolute;
     bottom: 0;

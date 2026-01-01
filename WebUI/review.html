@@ -874,6 +874,11 @@
         let cachedDistanceData = {};  // Cached distance calculations for hover display
         let trackHoverPopup = null;  // Popup shown when hovering over track
         let selectedUsers = new Set();
+        let followedUsers = new Set();  // Users being "followed" (always show popup during playback)
+        let currentMarkerPositions = {};  // userId -> {latlng, point} for proximity detection
+        let playbackHoverPopup = null;  // Popup shown when hovering near sailor during playback
+        let playbackHoverUserId = null;  // Currently hovered sailor (for click-to-follow)
+        let followedPopups = {};  // userId -> L.popup for followed users
         let playbackInterval = null;
         let playbackSpeed = 1;
         let minTime = 0;
@@ -1670,13 +1675,28 @@
                             ${points} pts | Max: ${maxSpeed.toFixed(1)} kts | Avg: ${avgSpeed.toFixed(1)} kts
                         </div>
                     </div>
+                    <input type="checkbox" class="follow-checkbox" data-user-id="${userId}" title="Follow this sailor during playback">
                 `;
 
-                div.addEventListener('click', () => toggleUser(userId, div));
+                div.addEventListener('click', (e) => {
+                    // Don't toggle selection if clicking the follow checkbox
+                    if (e.target.classList.contains('follow-checkbox')) return;
+                    toggleUser(userId, div);
+                });
                 div.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
                     zoomToUser(userId);
                 });
+
+                // Follow checkbox handler
+                const checkbox = div.querySelector('.follow-checkbox');
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();  // Don't trigger user selection
+                });
+                checkbox.addEventListener('change', (e) => {
+                    toggleFollowUser(userId);
+                });
+
                 container.appendChild(div);
             }
         }
@@ -1685,6 +1705,15 @@
             if (selectedUsers.has(userId)) {
                 selectedUsers.delete(userId);
                 element.classList.remove('selected');
+                // Also remove from followed if deselected
+                if (followedUsers.has(userId)) {
+                    followedUsers.delete(userId);
+                    if (followedPopups[userId]) {
+                        map.removeLayer(followedPopups[userId]);
+                        delete followedPopups[userId];
+                    }
+                    updateFollowCheckboxes();
+                }
             } else {
                 selectedUsers.add(userId);
                 element.classList.add('selected');
@@ -4388,6 +4417,7 @@
                 indicator.classList.add('draggable');  // Enable dragging when paused
                 this.textContent = '▶ Play';
                 // Keep showing current position, don't reset
+                // Keep follow checkboxes visible when paused
             } else {
                 if (selectedUsers.size === 0) {
                     alert('Select at least one user to play back');
@@ -4402,6 +4432,9 @@
                 }
                 playbackPaused = false;
                 indicator.classList.remove('draggable', 'dragging');  // Disable dragging when playing
+
+                // Show follow checkboxes during playback
+                setPlaybackCheckboxesVisible(true);
 
                 // Draw initial state
                 drawTracksUpTo(playbackCurrentTime);
@@ -4421,6 +4454,9 @@
                         drawTracks();
                         indicator.style.display = 'none';
                         indicator.classList.remove('draggable');
+                        // Hide follow checkboxes and clear popups when playback ends
+                        setPlaybackCheckboxesVisible(false);
+                        clearPlaybackPopups();
                         return;
                     }
 
@@ -4468,6 +4504,199 @@
             });
         })();
 
+        // Playback popup helper functions
+        const HOVER_DISTANCE_THRESHOLD = 40;  // Pixels - how close mouse must be to show popup
+
+        function createSailorPopupContent(userId, point) {
+            const name = getDisplayName(userId);
+            let html = `<b>${name}</b><br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
+            if (point.hr) {
+                html += `<br>HR: ${point.hr} bpm`;
+            }
+            return html;
+        }
+
+        function findClosestSailor(latlng) {
+            // Find sailor marker closest to mouse position (in screen pixels)
+            const mousePoint = map.latLngToContainerPoint(latlng);
+            let closest = null;
+            let minDist = Infinity;
+
+            for (const [userId, pos] of Object.entries(currentMarkerPositions)) {
+                if (!selectedUsers.has(userId)) continue;
+                const markerPoint = map.latLngToContainerPoint(pos.latlng);
+                const dx = mousePoint.x - markerPoint.x;
+                const dy = mousePoint.y - markerPoint.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = { userId, pos, dist };
+                }
+            }
+
+            return closest && closest.dist < HOVER_DISTANCE_THRESHOLD ? closest : null;
+        }
+
+        function updatePlaybackHoverPopup(latlng) {
+            // Only during playback
+            if (!playbackInterval && !playbackPaused) {
+                if (playbackHoverPopup) {
+                    map.removeLayer(playbackHoverPopup);
+                    playbackHoverPopup = null;
+                    playbackHoverUserId = null;
+                }
+                return;
+            }
+
+            const closest = findClosestSailor(latlng);
+
+            if (!closest) {
+                // Mouse not near any sailor - close hover popup
+                if (playbackHoverPopup) {
+                    map.removeLayer(playbackHoverPopup);
+                    playbackHoverPopup = null;
+                    playbackHoverUserId = null;
+                }
+                return;
+            }
+
+            // Don't show hover popup for followed sailors (they have persistent popups)
+            // But still track them for click-to-follow toggle
+            playbackHoverUserId = closest.userId;
+
+            if (followedUsers.has(closest.userId)) {
+                if (playbackHoverPopup) {
+                    map.removeLayer(playbackHoverPopup);
+                    playbackHoverPopup = null;
+                }
+                return;
+            }
+
+            const content = createSailorPopupContent(closest.userId, closest.pos.point);
+
+            if (playbackHoverPopup) {
+                playbackHoverPopup.setLatLng(closest.pos.latlng);
+                playbackHoverPopup.setContent(content);
+            } else {
+                playbackHoverPopup = L.popup({
+                    className: 'playback-popup',
+                    closeButton: false,
+                    offset: [0, -10],
+                    autoPan: false,
+                    autoClose: false,
+                    closeOnClick: false
+                })
+                .setLatLng(closest.pos.latlng)
+                .setContent(content)
+                .addTo(map);
+            }
+        }
+
+        function toggleFollowUser(userId) {
+            if (followedUsers.has(userId)) {
+                followedUsers.delete(userId);
+                // Close the followed popup
+                if (followedPopups[userId]) {
+                    map.removeLayer(followedPopups[userId]);
+                    delete followedPopups[userId];
+                }
+            } else {
+                followedUsers.add(userId);
+                // Create popup immediately if we have position data
+                if (currentMarkerPositions[userId]) {
+                    const pos = currentMarkerPositions[userId];
+                    const content = createSailorPopupContent(userId, pos.point);
+                    followedPopups[userId] = L.popup({
+                        className: 'playback-popup followed',
+                        closeButton: false,
+                        offset: [0, -10],
+                        autoPan: false,
+                        autoClose: false,
+                        closeOnClick: false
+                    })
+                    .setLatLng(pos.latlng)
+                    .setContent(content)
+                    .addTo(map);
+                }
+            }
+            // Update checkbox in user list
+            updateFollowCheckboxes();
+        }
+
+        function toggleFollowNearestSailor(latlng) {
+            const closest = findClosestSailor(latlng);
+            if (closest) {
+                toggleFollowUser(closest.userId);
+            }
+        }
+
+        function updateFollowedPopups() {
+            // Update positions of all followed user popups
+            for (const userId of followedUsers) {
+                const pos = currentMarkerPositions[userId];
+                if (!pos) {
+                    // User not visible, close popup
+                    if (followedPopups[userId]) {
+                        map.removeLayer(followedPopups[userId]);
+                        delete followedPopups[userId];
+                    }
+                    continue;
+                }
+
+                const content = createSailorPopupContent(userId, pos.point);
+
+                if (followedPopups[userId]) {
+                    followedPopups[userId].setLatLng(pos.latlng);
+                    followedPopups[userId].setContent(content);
+                } else {
+                    followedPopups[userId] = L.popup({
+                        className: 'playback-popup followed',
+                        closeButton: false,
+                        offset: [0, -10],
+                        autoPan: false,
+                        autoClose: false,
+                        closeOnClick: false
+                    })
+                    .setLatLng(pos.latlng)
+                    .setContent(content)
+                    .addTo(map);
+                }
+            }
+        }
+
+        function updateFollowCheckboxes() {
+            // Sync checkbox state with followedUsers set
+            document.querySelectorAll('.follow-checkbox').forEach(cb => {
+                const userId = cb.dataset.userId;
+                cb.checked = followedUsers.has(userId);
+            });
+        }
+
+        function setPlaybackCheckboxesVisible(visible) {
+            document.querySelectorAll('.follow-checkbox').forEach(cb => {
+                if (visible) {
+                    cb.classList.add('playback-active');
+                } else {
+                    cb.classList.remove('playback-active');
+                }
+            });
+        }
+
+        function clearPlaybackPopups() {
+            // Close hover popup
+            if (playbackHoverPopup) {
+                map.removeLayer(playbackHoverPopup);
+                playbackHoverPopup = null;
+            }
+            // Close all followed popups
+            for (const popup of Object.values(followedPopups)) {
+                map.removeLayer(popup);
+            }
+            followedPopups = {};
+            followedUsers.clear();
+            updateFollowCheckboxes();
+        }
+
         // Draw tracks up to a specific time (for playback animation)
         const PLAYBACK_TAIL_SECONDS = 30;  // Show last 30 seconds of track by default
 
@@ -4489,6 +4718,7 @@
             markerLayers = {};
             pointLayers = {};
             outlierLayers = {};
+            currentMarkerPositions = {};  // Clear marker positions for hover detection
 
             const useSpeedColor = document.getElementById('speed-color').checked;
             const showMarkers = document.getElementById('show-markers').checked;
@@ -4561,8 +4791,17 @@
                         fillOpacity: 1
                     }).addTo(map);
                     markerLayers[userId] = marker;
+
+                    // Store position for hover/follow popup detection
+                    currentMarkerPositions[userId] = {
+                        latlng: L.latLng(last.lat, last.lon),
+                        point: last
+                    };
                 }
             }
+
+            // Update followed user popups
+            updateFollowedPopups();
 
             // Update time display during playback
             document.getElementById('time-display').innerHTML =
@@ -4574,6 +4813,22 @@
         document.getElementById('speed-1x').addEventListener('click', () => playbackSpeed = 1);
         document.getElementById('speed-5x').addEventListener('click', () => playbackSpeed = 5);
         document.getElementById('speed-20x').addEventListener('click', () => playbackSpeed = 20);
+
+        // Playback hover/follow handlers
+        map.on('mousemove', (e) => {
+            updatePlaybackHoverPopup(e.latlng);
+        });
+
+        map.on('click', (e) => {
+            // Only handle follow toggle during playback
+            if (!playbackInterval && !playbackPaused) return;
+            // If hovering over a sailor, toggle follow for that sailor
+            if (playbackHoverUserId) {
+                toggleFollowUser(playbackHoverUserId);
+            } else {
+                toggleFollowNearestSailor(e.latlng);
+            }
+        });
 
         document.getElementById('show-all-btn').addEventListener('click', () => {
             selectedUsers = new Set(Object.keys(userData));
