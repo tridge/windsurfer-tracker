@@ -1496,10 +1496,12 @@
                         selectedUsers.add(userId);
                     }
                 }
-                // If no previous selection preserved, select all by default
-                if (selectedUsers.size === 0 && previousSelectedUsers.size === 0) {
+                // If previous selection existed but none of those users are in new data,
+                // select all users as fallback (don't leave empty when user had made a selection)
+                if (selectedUsers.size === 0 && previousSelectedUsers.size > 0) {
                     selectedUsers = new Set(Object.keys(userData));
                 }
+                // Otherwise: if no previous selection (first load), leave empty - user must select
 
                 // Update user list
                 updateUserList();
