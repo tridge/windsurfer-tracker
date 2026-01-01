@@ -670,21 +670,17 @@
         function restoreDataDependentState(params) {
             // First restore selected users (affects slider range)
             if (params.has('users')) {
+                // Clear default selection and use only URL-specified users
+                selectedUsers.clear();
                 const users = params.get('users').split(',');
                 for (const userId of users) {
                     if (userData[userId]) {
                         selectedUsers.add(userId);
-                        // Update UI to show selection
-                        const userDiv = document.querySelector(`.user-item[data-user-id="${userId}"]`);
-                        if (userDiv) {
-                            userDiv.classList.add('selected');
-                        }
                     }
                 }
+                // Update UI (redrawAll is called after this function returns)
+                updateUserList();
             }
-
-            // Update slider endpoints based on selected users
-            updateSliderEndpoints();
 
             // Restore race/sublog selection (before time range, as it changes slider bounds)
             if (params.has('racets') && currentSummary) {
@@ -712,6 +708,7 @@
             }
 
             // Time range (URL stores percentages of global log range)
+            // Restore time range BEFORE updateSliderEndpoints so it doesn't get overwritten
             if (params.has('start') || params.has('end')) {
                 const startPercent = parseFloat(params.get('start') || '0');
                 const endPercent = parseFloat(params.get('end') || '100');
@@ -719,20 +716,18 @@
                 // Convert global percentages to timestamps
                 rangeStartTime = globalPercentToTime(startPercent);
                 rangeEndTime = globalPercentToTime(endPercent);
+            }
 
-                // Update slider positions (will use current sliderMinTime/sliderMaxTime)
+            // Now update slider endpoints based on selected users
+            // This will adjust sliderMinTime/sliderMaxTime and clamp rangeStartTime/rangeEndTime
+            updateSliderEndpoints();
+
+            // Update slider positions to match restored time range
+            if (params.has('start') || params.has('end')) {
                 const startSlider = document.getElementById('start-slider');
                 const endSlider = document.getElementById('end-slider');
-
-                // Clamp to slider range and convert to slider percentage
-                const clampedStart = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeStartTime));
-                const clampedEnd = Math.max(sliderMinTime, Math.min(sliderMaxTime, rangeEndTime));
-                rangeStartTime = clampedStart;
-                rangeEndTime = clampedEnd;
-
-                startSlider.value = timeToSliderValue(clampedStart);
-                endSlider.value = timeToSliderValue(clampedEnd);
-
+                startSlider.value = timeToSliderValue(rangeStartTime);
+                endSlider.value = timeToSliderValue(rangeEndTime);
                 updateSliderRange();
                 updateTimeDisplay();
             }
@@ -1394,6 +1389,13 @@
                     loadRace(matchingLog).then(() => {
                         restoreDataDependentState(urlParams);
                         redrawAll();
+                        // Restore map position after loadRace's fitMapToData overwrote it
+                        const lat = parseFloat(urlParams.get('lat'));
+                        const lon = parseFloat(urlParams.get('lon'));
+                        const zoom = parseInt(urlParams.get('z'));
+                        if (!isNaN(lat) && !isNaN(lon) && !isNaN(zoom)) {
+                            map.setView([lat, lon], zoom);
+                        }
                     });
                 }
             }
