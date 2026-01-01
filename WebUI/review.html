@@ -4551,18 +4551,26 @@
             const indicator = document.getElementById('playback-indicator');
             const container = document.querySelector('.time-slider-container');
 
-            indicator.addEventListener('mousedown', (e) => {
+            function startDrag(e) {
+                // If playing, pause first so user can scrub
+                if (playbackInterval) {
+                    clearInterval(playbackInterval);
+                    playbackInterval = null;
+                    playbackPaused = true;
+                    indicator.classList.add('draggable');
+                    document.getElementById('play-btn').textContent = '▶ Play';
+                }
                 if (!playbackPaused) return;
                 indicatorDragging = true;
                 indicator.classList.add('dragging');
                 e.preventDefault();
-            });
+            }
 
-            document.addEventListener('mousemove', (e) => {
+            function moveDrag(clientX) {
                 if (!indicatorDragging) return;
 
                 const rect = container.getBoundingClientRect();
-                const x = e.clientX - rect.left;
+                const x = clientX - rect.left;
                 // Account for thumb width adjustment (same formula as updateSliderRange)
                 const pct = Math.max(0, Math.min(100, ((x - 10) / (rect.width - 20)) * 100));
                 const time = sliderMinTime + (sliderMaxTime - sliderMinTime) * (pct / 100);
@@ -4573,14 +4581,32 @@
                 // Update display
                 updatePlaybackIndicator();
                 drawTracksUpTo(playbackCurrentTime);
-            });
+            }
 
-            document.addEventListener('mouseup', () => {
+            function endDrag() {
                 if (indicatorDragging) {
                     indicatorDragging = false;
                     indicator.classList.remove('dragging');
                 }
-            });
+            }
+
+            // Mouse events
+            indicator.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', (e) => moveDrag(e.clientX));
+            document.addEventListener('mouseup', endDrag);
+
+            // Touch events for mobile
+            indicator.addEventListener('touchstart', (e) => {
+                startDrag(e);
+            }, { passive: false });
+            document.addEventListener('touchmove', (e) => {
+                if (indicatorDragging && e.touches.length > 0) {
+                    moveDrag(e.touches[0].clientX);
+                    e.preventDefault();  // Prevent scrolling while dragging
+                }
+            }, { passive: false });
+            document.addEventListener('touchend', endDrag);
+            document.addEventListener('touchcancel', endDrag);
         })();
 
         // Playback popup helper functions

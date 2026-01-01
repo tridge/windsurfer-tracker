@@ -390,11 +390,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     z-index: 10;
     display: none;
-    pointer-events: none;
+    pointer-events: auto;  /* Always interactive when visible */
+    cursor: grab;
 }
 
 .playback-indicator.draggable {
-    pointer-events: auto;
     cursor: grab;
 }
 
