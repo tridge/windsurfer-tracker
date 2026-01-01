@@ -183,6 +183,14 @@
             <h4>Clear Tracks</h4>
             <p>Reset before each race</p>
         </div>
+        <div class="feature-item">
+            <h4>Race Sub-logs</h4>
+            <p>Mark races in track review</p>
+        </div>
+        <div class="feature-item">
+            <h4>Export Tracks</h4>
+            <p>GPX, CSV, GeoJSON, FIT</p>
+        </div>
     </div>
 
     <h2>Creating and Managing Events</h2>
@@ -424,26 +432,89 @@
 
     <p>After a race, use the Track Review page to analyze tracks in detail. Access it at <a href="https://wstracker.org/review.html">https://wstracker.org/review.html</a> and select your event.</p>
 
-    <h3>Features</h3>
+    <h3>Basic Features</h3>
     <ul>
         <li><strong>Date selection:</strong> Review tracks from any day</li>
         <li><strong>Time range slider:</strong> Focus on specific portions of the race</li>
         <li><strong>Speed coloring:</strong> Tracks colored from green (slow) to red (fast)</li>
         <li><strong>Outlier filtering:</strong> Remove GPS glitches automatically</li>
+        <li><strong>Playback:</strong> Animate tracks with play/pause and draggable position indicator</li>
+        <li><strong>30-second tail mode:</strong> Show only recent track history during playback</li>
     </ul>
+
+    <h3>Race Sub-logs (Admin Feature)</h3>
+    <p>Admins can create named race markers to quickly jump to specific races within a day's log.</p>
+
+    <div class="step">
+        <span class="step-number">1</span>
+        <h3>Enable Admin Mode</h3>
+        <p>In Track Review, open the <strong>Options</strong> menu and check <strong>"Admin Mode"</strong>. Enter the event admin password when prompted.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">2</span>
+        <h3>Select Time Range</h3>
+        <p>Use the time sliders to select the portion of the log that corresponds to a race.</p>
+    </div>
+
+    <div class="step">
+        <span class="step-number">3</span>
+        <h3>Create Race Marker</h3>
+        <p>Click the green <strong>"+"</strong> button next to the log name. Enter a name for the race (e.g., "Race 1", "Race 2").</p>
+    </div>
+
+    <div class="info">
+        <strong>Using Race Markers:</strong>
+        <ul style="margin: 10px 0 0 20px;">
+            <li>Race markers appear indented below their parent log</li>
+            <li>Click a race to jump to that time range with full slider resolution</li>
+            <li>Double-click a graph or use Reset to return to full race range</li>
+            <li>Share links that include the race selection</li>
+            <li>Admins see a red <strong>"−"</strong> button to delete race markers</li>
+        </ul>
+    </div>
 
     <h3>Available Graphs</h3>
     <p>Enable graphs from the "Graphs" dropdown to visualize:</p>
     <ul>
         <li><strong>Speed:</strong> Speed over time in knots</li>
+        <li><strong>Distance:</strong> Cumulative distance traveled</li>
         <li><strong>Battery:</strong> Battery level over time</li>
         <li><strong>Signal:</strong> Mobile signal strength (0-4 bars)</li>
         <li><strong>Latency:</strong> Network delay from phone to server</li>
+        <li><strong>Heart Rate:</strong> Heart rate from connected devices (Apple Watch)</li>
+        <li><strong>Accuracy:</strong> GPS accuracy in meters</li>
     </ul>
 
     <div class="info">
-        <strong>Tip:</strong> Click on any graph to highlight the corresponding position on the map. Drag the bottom edge of a graph to resize it.
+        <strong>Graph Interactions:</strong>
+        <ul style="margin: 10px 0 0 20px;">
+            <li>Click on any graph to highlight the corresponding position on the map</li>
+            <li>Drag to select a time range (rubber-band selection)</li>
+            <li>Double-click to reset to full time range</li>
+            <li>Drag the bottom edge of a graph to resize it</li>
+        </ul>
     </div>
+
+    <h3>Export Tracks</h3>
+    <p>Export track data for selected users using the <strong>Export</strong> button:</p>
+    <ul>
+        <li><strong>GPX:</strong> Standard GPS format for most mapping apps</li>
+        <li><strong>CSV:</strong> Spreadsheet format with all data fields</li>
+        <li><strong>GeoJSON:</strong> Web mapping format</li>
+        <li><strong>FIT:</strong> Garmin format, compatible with Waterspeed app for GPS speed analysis</li>
+    </ul>
+
+    <h3>Sharing Links</h3>
+    <p>Click the <strong>Copy Link</strong> button to share a URL that includes:</p>
+    <ul>
+        <li>Selected date and log</li>
+        <li>Selected race (if any)</li>
+        <li>Selected users</li>
+        <li>Time range selection</li>
+        <li>Map position and zoom</li>
+        <li>Enabled graphs</li>
+    </ul>
 
     <h2>Troubleshooting</h2>
 
