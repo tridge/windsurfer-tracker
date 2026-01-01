@@ -4681,6 +4681,11 @@
                 }
             } else {
                 followedUsers.add(userId);
+                // Clear hover popup since this user now has a follow popup
+                if (playbackHoverPopup) {
+                    map.removeLayer(playbackHoverPopup);
+                    playbackHoverPopup = null;
+                }
                 // Create popup immediately if we have position data
                 if (currentMarkerPositions[userId]) {
                     const pos = currentMarkerPositions[userId];
