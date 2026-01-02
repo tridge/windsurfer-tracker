@@ -5069,7 +5069,8 @@
             if (entries.length === 0) return;
 
             const fitData = generateFIT(entries);
-            const filename = getExportFilename('fit').replace(/[^-_.]+/, name.replace(/\s+/g, '_'));
+            const date = document.getElementById('date-picker').value || 'tracks';
+            const filename = `${date}_${name.replace(/\s+/g, '_')}.fit`;
             downloadFile(fitData, filename, 'application/octet-stream');
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
