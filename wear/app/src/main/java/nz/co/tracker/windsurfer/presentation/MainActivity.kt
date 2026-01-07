@@ -10,13 +10,17 @@ import android.location.Location
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Log
+import android.view.KeyEvent
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -53,6 +57,10 @@ class MainActivity : ComponentActivity() {
     private val errorMessage = mutableStateOf<String?>(null)
     private val assistEnabled = mutableStateOf(true)  // Whether assist button should be shown
     private val settings = mutableStateOf(TrackerSettings())
+
+    // Race countdown timer state
+    private val countdownSeconds = mutableStateOf<Int?>(null)
+    private var lastCrownPressTime = 0L
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -95,6 +103,21 @@ class MainActivity : ComponentActivity() {
                 override fun onAssistEnabled(enabled: Boolean) {
                     assistEnabled.value = enabled
                 }
+
+                override fun onCountdownTick(secondsRemaining: Int) {
+                    countdownSeconds.value = secondsRemaining
+                }
+
+                override fun onCountdownFinished() {
+                    countdownSeconds.value = 0
+                    // Keep showing 0:00 briefly, then clear and allow screen to sleep
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        countdownSeconds.value = null
+                        // Turn off screen wake after race starts - no longer need quick timer access
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }, 3000)
+                }
+
             }
 
             isTracking.value = trackerService?.isTracking() == true
@@ -165,6 +188,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settingsRepository.settingsFlow.collect { newSettings ->
                 settings.value = newSettings
+                updateScreenWakeState()
             }
         }
 
@@ -181,6 +205,7 @@ class MainActivity : ComponentActivity() {
                 eventName = eventName.value,
                 errorMessage = errorMessage.value,
                 settings = settings.value,
+                countdownSeconds = countdownSeconds.value,
                 onToggleTracking = { toggleTracking() },
                 onAssistToggle = { toggleAssist() },
                 onSaveSettings = { newSettings ->
@@ -193,7 +218,9 @@ class MainActivity : ComponentActivity() {
                             startTracking()
                         }
                     }
-                }
+                },
+                onTimerStart = { startRaceTimer() },
+                onTimerReset = { resetRaceTimer() }
             )
         }
 
@@ -213,6 +240,34 @@ class MainActivity : ComponentActivity() {
             unbindService(serviceConnection)
             serviceBound = false
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_STEM_PRIMARY) {
+            // Only handle if race timer is enabled in settings and tracking is active
+            if (!settings.value.raceTimerEnabled || !isTracking.value) {
+                return super.onKeyDown(keyCode, event)
+            }
+
+            val now = System.currentTimeMillis()
+            val timeSinceLastPress = now - lastCrownPressTime
+            lastCrownPressTime = now
+
+            if (timeSinceLastPress < 500) {
+                // Double-press: reset countdown
+                trackerService?.resetCountdown()
+                countdownSeconds.value = null
+                Log.d(TAG, "Crown double-press: reset countdown")
+            } else {
+                // Single press: start countdown (if not already running)
+                if (trackerService?.isCountdownRunning() != true) {
+                    trackerService?.startCountdown(settings.value.raceTimerMinutes)
+                    Log.d(TAG, "Crown single-press: start countdown")
+                }
+            }
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     private fun bindToServiceIfRunning() {
@@ -294,12 +349,15 @@ class MainActivity : ComponentActivity() {
             putExtra("high_frequency_mode", currentSettings.highFrequencyMode)
             putExtra("heart_rate_enabled", currentSettings.heartRateEnabled)
             putExtra("tracker_beep", currentSettings.trackerBeep)
+            putExtra("race_timer_enabled", currentSettings.raceTimerEnabled)
+            putExtra("race_timer_minutes", currentSettings.raceTimerMinutes)
         }
 
         startForegroundService(intent)
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         isTracking.value = true
+        updateScreenWakeState()
         Log.d(TAG, "Starting tracking with ID=${currentSettings.sailorId}")
     }
 
@@ -323,6 +381,7 @@ class MainActivity : ComponentActivity() {
         speedKnots.floatValue = 0f
         distanceMeters.floatValue = 0f
         ackRate.floatValue = 0f
+        updateScreenWakeState()
         Log.d(TAG, "Stopped tracking")
     }
 
@@ -345,6 +404,19 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "Assist ${if (newState) "ACTIVATED" else "cancelled"}")
     }
 
+    private fun startRaceTimer() {
+        if (trackerService?.isCountdownRunning() != true) {
+            trackerService?.startCountdown(settings.value.raceTimerMinutes)
+            Log.d(TAG, "Race timer started: ${settings.value.raceTimerMinutes} minutes")
+        }
+    }
+
+    private fun resetRaceTimer() {
+        trackerService?.resetCountdown()
+        countdownSeconds.value = null
+        Log.d(TAG, "Race timer reset")
+    }
+
     private fun updateBatteryAndSignal() {
         // Battery
         try {
@@ -360,6 +432,21 @@ class MainActivity : ComponentActivity() {
             signalLevel.intValue = telephonyManager.signalStrength?.level ?: -1
         } catch (e: Exception) {
             signalLevel.intValue = -1
+        }
+    }
+
+    /**
+     * Keep screen on when race timer is enabled and tracking is active.
+     * This allows quick access to start the countdown when the horn sounds.
+     */
+    private fun updateScreenWakeState() {
+        val shouldKeepScreenOn = isTracking.value && settings.value.raceTimerEnabled
+        if (shouldKeepScreenOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d(TAG, "Screen wake lock enabled (race timer mode)")
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d(TAG, "Screen wake lock disabled")
         }
     }
 }

@@ -25,9 +25,12 @@ fun TrackerApp(
     eventName: String,
     errorMessage: String?,
     settings: TrackerSettings,
+    countdownSeconds: Int?,  // Race countdown timer (null = not active)
     onToggleTracking: () -> Unit,
     onAssistToggle: () -> Unit,
-    onSaveSettings: (TrackerSettings) -> Unit
+    onSaveSettings: (TrackerSettings) -> Unit,
+    onTimerStart: () -> Unit,
+    onTimerReset: () -> Unit
 ) {
     WindsurferTrackerTheme {
         val navController = rememberSwipeDismissableNavController()
@@ -54,11 +57,15 @@ fun TrackerApp(
                     eventName = eventName,
                     errorMessage = errorMessage,
                     highFrequencyMode = settings.highFrequencyMode,
+                    countdownSeconds = countdownSeconds,
+                    raceTimerEnabled = settings.raceTimerEnabled,
                     onToggleTracking = onToggleTracking,
                     onAssistLongPress = onAssistToggle,
                     onSettingsLongPress = {
                         navController.navigate(Screen.Settings.route)
-                    }
+                    },
+                    onTimerStart = onTimerStart,
+                    onTimerReset = onTimerReset
                 )
             }
 

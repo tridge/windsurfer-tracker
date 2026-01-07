@@ -1,8 +1,10 @@
 package nz.co.tracker.windsurfer
 
 import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -23,8 +25,10 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.speech.tts.TextToSpeech
 import android.telephony.TelephonyManager
 import android.util.Log
+import java.util.Locale
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import com.google.android.gms.location.*
@@ -51,6 +55,10 @@ class TrackerService : LifecycleService() {
         const val UDP_RETRY_DELAY_MS = 1500L
         const val ACK_TIMEOUT_MS = 2000L
         const val MAX_ACCURACY_METERS = 100.0f
+
+        // Notification action for race timer
+        const val ACTION_START_TIMER = "nz.co.tracker.windsurfer.START_TIMER"
+        const val ACTION_RESET_TIMER = "nz.co.tracker.windsurfer.RESET_TIMER"
     }
 
     // Binder for activity communication
@@ -77,6 +85,26 @@ class TrackerService : LifecycleService() {
     private var eventId: Int = 2  // Event ID for multi-event support
     private var highFrequencyMode: Boolean = false
     private var heartRateEnabled: Boolean = false
+    private var raceTimerEnabled: Boolean = false
+    private var raceTimerMinutes: Int = 5
+
+    // Broadcast receiver for notification timer actions
+    private val timerActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                ACTION_START_TIMER -> {
+                    if (!countdownRunning) {
+                        startCountdown(raceTimerMinutes)
+                        updateNotificationWithTimer()
+                    }
+                }
+                ACTION_RESET_TIMER -> {
+                    resetCountdown()
+                    updateNotificationWithTimer()
+                }
+            }
+        }
+    }
 
     // 1Hz mode position buffer: [[ts, lat, lon, spd], ...]
     private data class BufferedPosition(val ts: Long, val lat: Double, val lon: Double, val spd: Double)
@@ -122,6 +150,57 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    // Race countdown timer
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var countdownSeconds = 0
+    private var countdownRunning = false
+    private var countdownStartMinutes = 5
+    private val countdownHandler = Handler(Looper.getMainLooper())
+    private var countdownTargetTime = 0L  // SystemClock.elapsedRealtime() when countdown reaches 0
+    private val TTS_LATENCY_MS = 250L  // Announce early to compensate for TTS delay
+    private var lastAnnouncedSecond = -1  // Track to prevent duplicate announcements
+
+    private val countdownRunnable = object : Runnable {
+        override fun run() {
+            if (!countdownRunning) return
+
+            val now = android.os.SystemClock.elapsedRealtime()
+            val msRemaining = countdownTargetTime - now
+
+            if (msRemaining <= -500) {
+                // Past the start time
+                countdownRunning = false
+                statusListener?.onCountdownFinished()
+                return
+            }
+
+            // Calculate seconds for display (round to nearest)
+            val displaySeconds = maxOf(0, ((msRemaining + 500) / 1000).toInt())
+            if (displaySeconds != countdownSeconds) {
+                countdownSeconds = displaySeconds
+                statusListener?.onCountdownTick(countdownSeconds)
+            }
+
+            // Announce early to compensate for TTS latency
+            // Calculate which second we should announce now (accounting for latency)
+            val adjustedMs = msRemaining - TTS_LATENCY_MS
+            val announceSecond = ((adjustedMs + 999) / 1000).toInt()  // Ceiling
+
+            if (announceSecond != lastAnnouncedSecond && announceSecond >= 0) {
+                if (announceSecond == 0) {
+                    announceStart()
+                } else {
+                    announceCountdownIfNeeded(announceSecond)
+                }
+                lastAnnouncedSecond = announceSecond
+            }
+
+            // Run at high frequency for accurate timing
+            countdownHandler.postDelayed(this, 50L)
+        }
+    }
+
     // Wake lock to keep tracking alive during battery saver
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -147,6 +226,43 @@ class TrackerService : LifecycleService() {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    // Tap detection for race timer (acceleration magnitude spike above gravity)
+    private var accelerometer: Sensor? = null
+    private var lastTapTime: Long = 0
+    private val GRAVITY = 9.81f
+    private val TAP_THRESHOLD = 25f  // m/s² above gravity to detect tap
+    private val TAP_COOLDOWN_MS = 1000L  // Prevent multiple triggers
+
+    private val tapListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+            if (!raceTimerEnabled) return
+
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+
+            // Calculate magnitude and subtract gravity
+            val magnitude = Math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+            val accelAboveGravity = Math.abs(magnitude - GRAVITY)
+
+            // Detect tap (acceleration spike above gravity)
+            if (accelAboveGravity > TAP_THRESHOLD) {
+                val now = System.currentTimeMillis()
+                if (now - lastTapTime > TAP_COOLDOWN_MS) {
+                    lastTapTime = now
+                    if (countdownRunning) {
+                        resetCountdown()
+                    } else {
+                        startCountdown(raceTimerMinutes)
+                    }
+                    updateNotificationWithTimer()
+                }
+            }
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -162,6 +278,8 @@ class TrackerService : LifecycleService() {
         fun onError(message: String)
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
+        fun onCountdownTick(secondsRemaining: Int)  // Race timer countdown
+        fun onCountdownFinished()  // Race timer reached zero
     }
 
     /**
@@ -238,6 +356,24 @@ class TrackerService : LifecycleService() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
         setupLocationCallback()
+
+        // Initialize TTS for race countdown
+        tts = TextToSpeech(this) { status ->
+            ttsReady = status == TextToSpeech.SUCCESS
+            if (ttsReady) {
+                tts?.language = Locale.US
+                Log.d(TAG, "TTS initialized successfully")
+            } else {
+                Log.w(TAG, "TTS initialization failed")
+            }
+        }
+
+        // Register broadcast receiver for notification timer actions
+        val filter = IntentFilter().apply {
+            addAction(ACTION_START_TIMER)
+            addAction(ACTION_RESET_TIMER)
+        }
+        registerReceiver(timerActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -253,6 +389,8 @@ class TrackerService : LifecycleService() {
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
             heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
             trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
+            raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)
+            raceTimerMinutes = it.getIntExtra("race_timer_minutes", 5)
             positionBuffer.clear()
             totalDistance = 0f
             previousLocation = null
@@ -272,6 +410,22 @@ class TrackerService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         stopTracking()
+
+        // Unregister broadcast receiver
+        try {
+            unregisterReceiver(timerActionReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unregister timer receiver", e)
+        }
+
+        // Shutdown TTS
+        tts?.shutdown()
+        tts = null
+
+        // Stop countdown timer
+        countdownHandler.removeCallbacks(countdownRunnable)
+        countdownRunning = false
+
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed")
     }
@@ -290,24 +444,70 @@ class TrackerService : LifecycleService() {
     }
 
     private fun startForegroundService() {
-        val notification = buildNotification("Starting tracker...")
+        val notification = buildNotification("Starting tracker...", showTimerAction = raceTimerEnabled)
         startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String, showTimerAction: Boolean = false): Notification {
         val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Windsurfer Tracker")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .build()
+
+        // Add timer action button if race timer is enabled
+        if (raceTimerEnabled && showTimerAction) {
+            if (countdownRunning) {
+                // Show RESET action when timer is running
+                val resetIntent = Intent(ACTION_RESET_TIMER).setPackage(packageName)
+                val resetPendingIntent = PendingIntent.getBroadcast(
+                    this, 1, resetIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "RESET",
+                    resetPendingIntent
+                )
+            } else {
+                // Show START TIMER action when timer is not running
+                val startIntent = Intent(ACTION_START_TIMER).setPackage(packageName)
+                val startPendingIntent = PendingIntent.getBroadcast(
+                    this, 2, startIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(
+                    android.R.drawable.ic_media_play,
+                    "▶ START ${raceTimerMinutes}MIN",
+                    startPendingIntent
+                )
+            }
+        }
+
+        return builder.build()
+    }
+
+    /**
+     * Update the notification with timer action button
+     */
+    private fun updateNotificationWithTimer() {
+        val text = if (countdownRunning) {
+            val mins = countdownSeconds / 60
+            val secs = countdownSeconds % 60
+            "Timer: $mins:${String.format("%02d", secs)}"
+        } else {
+            "Tracking active"
+        }
+        val notification = buildNotification(text, showTimerAction = true)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun updateNotification(text: String) {
@@ -508,6 +708,21 @@ class TrackerService : LifecycleService() {
             Log.d(TAG, "Heart rate disabled by user preference")
         }
 
+        // Start accelerometer for tap detection if race timer is enabled
+        Log.d(TAG, "Race timer enabled: $raceTimerEnabled, minutes: $raceTimerMinutes")
+        if (raceTimerEnabled) {
+            if (sensorManager == null) {
+                sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            }
+            accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            if (accelerometer != null) {
+                val registered = sensorManager?.registerListener(tapListener, accelerometer, SensorManager.SENSOR_DELAY_FASTEST)
+                Log.d(TAG, "Tap detection registered: $registered for race timer")
+            } else {
+                Log.w(TAG, "Accelerometer not available for tap detection")
+            }
+        }
+
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
 
         // Request standalone network (LTE/WiFi) before creating socket
@@ -576,6 +791,10 @@ class TrackerService : LifecycleService() {
         // Unregister heart rate sensor
         sensorManager?.unregisterListener(heartRateListener)
         lastHeartRate = -1
+
+        // Unregister tap listener
+        sensorManager?.unregisterListener(tapListener)
+        accelerometer = null
 
         // Release wake lock
         wakeLock?.let {
@@ -1086,4 +1305,79 @@ class TrackerService : LifecycleService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
+
+    // Race countdown timer methods
+
+    private fun speak(text: String) {
+        if (ttsReady) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        }
+    }
+
+    private fun announceCountdownIfNeeded(seconds: Int) {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
+        when {
+            seconds % 60 == 0 && seconds > 0 -> {
+                // Each minute: "3 minutes", "2 minutes", "1 minute"
+                val minutes = seconds / 60
+                speak("$minutes minute${if (minutes > 1) "s" else ""}")
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+            seconds == 30 -> {
+                speak("30 seconds")
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+            seconds == 20 -> {
+                speak("20 seconds")
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+            seconds <= 10 && seconds > 0 -> {
+                // Final 10 seconds: "10", "9", ... "1"
+                speak("$seconds")
+                vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        }
+    }
+
+    private fun announceStart() {
+        speak("Start!")
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        // Triple buzz for start
+        vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 200, 100, 200, 100, 200), -1))
+    }
+
+    /**
+     * Start the race countdown timer.
+     * @param minutes Duration in minutes (1-9)
+     */
+    fun startCountdown(minutes: Int) {
+        countdownStartMinutes = minutes
+        countdownSeconds = minutes * 60
+        countdownTargetTime = android.os.SystemClock.elapsedRealtime() + (minutes * 60 * 1000L)
+        lastAnnouncedSecond = countdownSeconds + 1  // Prevent immediate re-announcement
+        countdownRunning = true
+        speak("$minutes minute${if (minutes > 1) "s" else ""}")
+        countdownHandler.postDelayed(countdownRunnable, 50L)
+        statusListener?.onCountdownTick(countdownSeconds)
+        Log.d(TAG, "Race countdown started: $minutes minutes")
+    }
+
+    /**
+     * Reset/cancel the race countdown timer.
+     */
+    fun resetCountdown() {
+        countdownHandler.removeCallbacks(countdownRunnable)
+        countdownRunning = false
+        countdownSeconds = 0
+        lastAnnouncedSecond = -1
+        speak("reset")
+        statusListener?.onCountdownFinished()
+        Log.d(TAG, "Race countdown reset")
+    }
+
+    /**
+     * Check if countdown is currently running.
+     */
+    fun isCountdownRunning(): Boolean = countdownRunning
 }

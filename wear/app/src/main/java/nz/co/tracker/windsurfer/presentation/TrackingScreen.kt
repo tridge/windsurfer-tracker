@@ -34,9 +34,13 @@ fun TrackingScreen(
     eventName: String,
     errorMessage: String?,
     highFrequencyMode: Boolean,
+    countdownSeconds: Int?,  // Race countdown timer (null = not active)
+    raceTimerEnabled: Boolean,  // Whether to show timer button
     onToggleTracking: () -> Unit,
     onAssistLongPress: () -> Unit,
     onSettingsLongPress: () -> Unit,
+    onTimerStart: () -> Unit,  // Start race countdown
+    onTimerReset: () -> Unit,  // Reset race countdown
     modifier: Modifier = Modifier
 ) {
     // Pulsing animation for assist mode
@@ -133,33 +137,89 @@ fun TrackingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Speed - large and prominent with "kts" on same line
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.Bottom
-            ) {
+            // Show countdown when active, otherwise show speed
+            if (countdownSeconds != null) {
+                // Race countdown timer display - tap to reset
+                val minutes = countdownSeconds / 60
+                val seconds = countdownSeconds % 60
+                val countdownColor = when {
+                    countdownSeconds <= 10 -> StoppedRed
+                    countdownSeconds <= 30 -> Color.Yellow
+                    else -> Color.Cyan
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onTimerReset() }
+                            )
+                        }
+                ) {
+                    Text(
+                        text = String.format("%d:%02d", minutes, seconds),
+                        color = countdownColor,
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = if (countdownSeconds == 0) "START!" else "Tap to reset",
+                        color = countdownColor,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else if (raceTimerEnabled && isTracking) {
+                // Show "Start Timer" button when timer is enabled but not running
+                Box(
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .background(Color(0xFF006666))
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onTimerStart() }
+                            )
+                        }
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "▶ START TIMER",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                // Speed - large and prominent with "kts" on same line
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = String.format("%.1f", speedKnots),
+                        color = Color.White,
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "kts",
+                        color = Color.Gray,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+
+                // Distance in km
                 Text(
-                    text = String.format("%.1f", speedKnots),
-                    color = Color.White,
-                    fontSize = 42.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "kts",
+                    text = String.format("%.1f km", distanceMeters / 1000f),
                     color = Color.Gray,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(bottom = 6.dp)
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
                 )
             }
-
-            // Distance in km
-            Text(
-                text = String.format("%.1f km", distanceMeters / 1000f),
-                color = Color.Gray,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
-            )
 
             Spacer(modifier = Modifier.height(4.dp))
 

@@ -42,6 +42,8 @@ fun SettingsScreen(
     var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
     var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
     var trackerBeep by remember { mutableStateOf(settings.trackerBeep) }
+    var raceTimerEnabled by remember { mutableStateOf(settings.raceTimerEnabled) }
+    var raceTimerMinutes by remember { mutableStateOf(settings.raceTimerMinutes) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     // Track original auth values to detect changes
@@ -300,6 +302,45 @@ fun SettingsScreen(
                 )
             }
 
+            // Race Timer Toggle
+            item {
+                ToggleChip(
+                    checked = raceTimerEnabled,
+                    onCheckedChange = { raceTimerEnabled = it },
+                    label = { Text("Race Timer") },
+                    secondaryLabel = { Text(if (raceTimerEnabled) "On" else "Off", fontSize = 10.sp) },
+                    toggleControl = {
+                        Switch(checked = raceTimerEnabled)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(top = 4.dp)
+                )
+            }
+
+            // Race Timer Minutes (only show if enabled)
+            if (raceTimerEnabled) {
+                item {
+                    Chip(
+                        onClick = {
+                            // Cycle through 1-9 minutes
+                            raceTimerMinutes = if (raceTimerMinutes >= 9) 1 else raceTimerMinutes + 1
+                        },
+                        label = {
+                            Text(
+                                text = "$raceTimerMinutes min",
+                                fontSize = 14.sp
+                            )
+                        },
+                        secondaryLabel = {
+                            Text("Tap to change", fontSize = 9.sp)
+                        },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                }
+            }
+
             // Role
             item {
                 Text(
@@ -428,7 +469,9 @@ fun SettingsScreen(
                                     eventId = selectedEventId,
                                     highFrequencyMode = highFrequencyMode,
                                     heartRateEnabled = heartRateEnabled,
-                                    trackerBeep = trackerBeep
+                                    trackerBeep = trackerBeep,
+                                    raceTimerEnabled = raceTimerEnabled,
+                                    raceTimerMinutes = raceTimerMinutes
                                 )
                             )
                             onBack()
