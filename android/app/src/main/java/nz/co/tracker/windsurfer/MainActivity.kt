@@ -868,16 +868,16 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(48, 0, 0, 16)
         }
 
-        // Tracker beep checkbox
+        // Tracking buzz checkbox
         val trackerBeepCheckbox = android.widget.CheckBox(this).apply {
-            text = "Tracker Beep"
+            text = "Tracking Buzz"
             isChecked = prefs.getBoolean("tracker_beep", true)
             setTextColor(0xFF000000.toInt())
             textSize = 14f
             setPadding(0, 8, 0, 0)
         }
         val trackerBeepHint = android.widget.TextView(this).apply {
-            text = "Beep once per minute while tracking to remind you it's running."
+            text = "Vibrate once per minute while tracking to remind you it's running."
             setTextColor(0xFF666666.toInt())
             textSize = 12f
             setPadding(48, 0, 0, 16)
