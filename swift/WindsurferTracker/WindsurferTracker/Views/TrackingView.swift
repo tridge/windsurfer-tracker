@@ -33,7 +33,7 @@ struct TrackingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // Speed and Course row
+                // Speed, Course, and Distance row
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Speed")
@@ -54,6 +54,18 @@ struct TrackingView: View {
                             .foregroundColor(Color(white: 0.27))
 
                         Text(headingText)
+                            .font(.system(size: 26, weight: .regular, design: .monospaced))
+                            .foregroundColor(.black)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dist")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(Color(white: 0.27))
+
+                        Text(distanceText)
                             .font(.system(size: 26, weight: .regular, design: .monospaced))
                             .foregroundColor(.black)
                     }
@@ -187,6 +199,11 @@ struct TrackingView: View {
             return "---°"
         }
         return String(format: "%03d°", pos.heading)
+    }
+
+    private var distanceText: String {
+        let km = viewModel.totalDistanceMeters / 1000.0
+        return String(format: "%.1f km", km)
     }
 
     private var ackRateText: String {

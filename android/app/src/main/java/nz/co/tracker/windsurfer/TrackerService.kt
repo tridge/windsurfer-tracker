@@ -121,6 +121,10 @@ class TrackerService : LifecycleService() {
         return cached
     }
 
+    // Distance tracking
+    private var totalDistance: Float = 0f  // Total distance in meters
+    private var distanceStartLocation: Location? = null  // For distance calculation
+
     // State
     private val isRunning = AtomicBoolean(false)
     private val assistRequested = AtomicBoolean(false)
@@ -160,7 +164,7 @@ class TrackerService : LifecycleService() {
     var statusListener: StatusListener? = null
     
     interface StatusListener {
-        fun onLocationUpdate(location: Location)
+        fun onLocationUpdate(location: Location, totalDistanceMeters: Float)
         fun onAckReceived(seq: Int)
         fun onPacketSent(seq: Int)
         fun onConnectionStatus(ackRate: Float)
@@ -349,7 +353,24 @@ class TrackerService : LifecycleService() {
                     }
 
                     lastLocation = location
-                    statusListener?.onLocationUpdate(location)
+
+                    // Calculate distance traveled
+                    distanceStartLocation?.let { prevLoc ->
+                        val distanceResult = FloatArray(1)
+                        Location.distanceBetween(
+                            prevLoc.latitude, prevLoc.longitude,
+                            location.latitude, location.longitude,
+                            distanceResult
+                        )
+                        val distance = distanceResult[0]
+                        // Filter out GPS noise (too small) and jumps (too large)
+                        if (distance > 0.5f && distance < 500f) {
+                            totalDistance += distance
+                        }
+                    }
+                    distanceStartLocation = location
+
+                    statusListener?.onLocationUpdate(location, totalDistance)
 
                     // Mark GPS as ready and update status line
                     if (!hasGpsFix.getAndSet(true)) {
@@ -392,6 +413,8 @@ class TrackerService : LifecycleService() {
         hasFirstAck.set(false)
         hasAuthFailure.set(false)
         currentEventName = ""
+        totalDistance = 0f
+        distanceStartLocation = null
         updateStatusLine()  // Show "GPS wait"
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")

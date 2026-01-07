@@ -609,20 +609,21 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
     }
     
-    private fun updateLocationDisplay(location: Location) {
+    private fun updateLocationDisplay(location: Location, totalDistanceMeters: Float = 0f) {
         val latDir = if (location.latitude < 0) "S" else "N"
         val lonDir = if (location.longitude < 0) "W" else "E"
-        
+
         binding.tvPosition.text = String.format(
             "%.5f°%s %.5f°%s",
             Math.abs(location.latitude), latDir,
             Math.abs(location.longitude), lonDir
         )
-        
+
         val speedKnots = location.speed * 1.94384
         binding.tvSpeed.text = String.format("%.1f kn", speedKnots)
         binding.tvHeading.text = String.format("%03d°", location.bearing.toInt())
-        
+        binding.tvDistance.text = String.format("%.1f km", totalDistanceMeters / 1000f)
+
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         binding.tvLastUpdate.text = sdf.format(Date())
     }
@@ -1064,9 +1065,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     
     // TrackerService.StatusListener implementation
     
-    override fun onLocationUpdate(location: Location) {
+    override fun onLocationUpdate(location: Location, totalDistanceMeters: Float) {
         runOnUiThread {
-            updateLocationDisplay(location)
+            updateLocationDisplay(location, totalDistanceMeters)
         }
     }
     

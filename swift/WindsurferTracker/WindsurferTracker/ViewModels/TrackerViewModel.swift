@@ -17,6 +17,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var assistEnabled = true  // Whether assist button should be shown
     @Published public var errorMessage: String?
     @Published public var showError = false
+    @Published public var totalDistanceMeters: Double = 0
 
     // MARK: - Settings (bound to PreferencesManager)
 
@@ -46,6 +47,7 @@ public class TrackerViewModel: ObservableObject {
     private let locationManager = LocationManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var beepTimer: Timer?
+    private var previousPositionForDistance: TrackerPosition?
 
     // MARK: - Initialization
 
@@ -140,7 +142,19 @@ public class TrackerViewModel: ObservableObject {
         TrackerService.shared.positionPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] position in
-                self?.lastPosition = position
+                guard let self = self else { return }
+                // Calculate distance from previous position
+                if let prevPos = self.previousPositionForDistance {
+                    let prevLocation = CLLocation(latitude: prevPos.latitude, longitude: prevPos.longitude)
+                    let newLocation = CLLocation(latitude: position.latitude, longitude: position.longitude)
+                    let distance = newLocation.distance(from: prevLocation)
+                    // Filter out GPS noise (too small) and jumps (too large)
+                    if distance > 0.5 && distance < 500 {
+                        self.totalDistanceMeters += distance
+                    }
+                }
+                self.previousPositionForDistance = position
+                self.lastPosition = position
             }
             .store(in: &cancellables)
 
@@ -213,6 +227,10 @@ public class TrackerViewModel: ObservableObject {
 
         // Clear event name - will be set when first ACK received
         eventName = ""
+
+        // Reset distance tracking
+        totalDistanceMeters = 0
+        previousPositionForDistance = nil
 
         Task {
             do {
