@@ -29,9 +29,9 @@
 	<key>WKWatchOnly</key>
 	<false/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Windsurfer Tracker needs your location to report your position during races.</string>
+	<string>Windsurfer Tracker uses GPS to calculate distance traveled and speed during your sailing workouts.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Windsurfer Tracker needs continuous location access to track your position during races.</string>
+	<string>Windsurfer Tracker needs continuous location access to track distance and speed throughout your sailing workout.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
@@ -41,8 +41,8 @@
 		<string>workout-processing</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Windsurfer Tracker uses workout sessions to enable background GPS tracking during races.</string>
+	<string>Windsurfer Tracker reads your heart rate to display during sailing workouts and track your fitness over time.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Windsurfer Tracker records workouts to enable background GPS tracking during races.</string>
+	<string>Windsurfer Tracker records your sailing workouts including distance traveled, heart rate, and workout duration to Apple Health.</string>
 </dict>
 </plist>

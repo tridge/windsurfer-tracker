@@ -24,6 +24,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     @Published public var packetsAcked: Int = 0
     @Published public var workoutState: String = ""
 
+    // MARK: - Fitness Metrics (for UI display and HealthKit)
+
+    @Published public var totalDistance: Double = 0  // meters
+    @Published public var currentHeartRate: Int = 0  // bpm
+    private var lastDistanceUpdate: Date?
+    private var workoutStartTime: Date?
+
     // MARK: - Workout Session (for background tracking)
 
     private let healthStore = HKHealthStore()
@@ -105,6 +112,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         TrackerService.shared.positionPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] position in
+                self?.updateDistance(from: self?.lastPosition, to: position)
                 self?.lastPosition = position
             }
             .store(in: &cancellables)
@@ -149,6 +157,16 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] error in
                 self?.errorMessage = error.localizedDescription
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to heart rate updates to add samples to workout
+        HeartRateMonitor.shared.$currentHeartRate
+            .compactMap { $0 }  // Filter nil values
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] heartRate in
+                guard let self = self, self.isTracking else { return }
+                self.addHeartRateSampleToWorkout(heartRate)
             }
             .store(in: &cancellables)
     }
@@ -227,11 +245,12 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         let workoutType = HKObjectType.workoutType()
         let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
         let activeEnergyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
+        let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
 
         do {
             try await healthStore.requestAuthorization(
-                toShare: [workoutType],
-                read: [heartRateType, activeEnergyType]
+                toShare: [workoutType, activeEnergyType, distanceType, heartRateType],
+                read: [heartRateType, activeEnergyType, distanceType]
             )
             return true
         } catch {
@@ -273,8 +292,11 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         // Start session and builder
         print("[WORKOUT] Starting workout session...")
-        session.startActivity(with: Date())
-        try await builder.beginCollection(at: Date())
+        let startTime = Date()
+        workoutStartTime = startTime
+        lastDistanceUpdate = startTime
+        session.startActivity(with: startTime)
+        try await builder.beginCollection(at: startTime)
         print("[WORKOUT] Workout session started successfully")
     }
 
@@ -286,13 +308,98 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         do {
             try await builder.endCollection(at: Date())
-            try await builder.finishWorkout()
+            if let workout = try await builder.finishWorkout() {
+                print("[WORKOUT] Workout saved to Health: \(workout.duration)s, \(workout.totalDistance?.doubleValue(for: .meter()) ?? 0)m")
+            }
         } catch {
-            // Ignore errors when ending workout
+            print("[WORKOUT] Failed to save workout: \(error.localizedDescription)")
         }
 
         workoutSession = nil
         workoutBuilder = nil
+    }
+
+    // MARK: - Fitness Data Collection
+
+    /// Calculate and accumulate distance from GPS position updates
+    private func updateDistance(from oldPosition: TrackerPosition?, to newPosition: TrackerPosition?) {
+        guard isTracking,
+              let old = oldPosition,
+              let new = newPosition,
+              old.latitude != 0, old.longitude != 0,
+              new.latitude != 0, new.longitude != 0 else { return }
+
+        // Calculate distance using Haversine formula
+        let distance = haversineDistance(
+            lat1: old.latitude, lon1: old.longitude,
+            lat2: new.latitude, lon2: new.longitude
+        )
+
+        // Only add reasonable distances (filter GPS noise)
+        if distance > 0.5 && distance < 500 {  // Between 0.5m and 500m
+            totalDistance += distance
+            addDistanceSampleToWorkout(distance)
+        }
+    }
+
+    /// Haversine formula to calculate distance between two GPS points in meters
+    private func haversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double) -> Double {
+        let R = 6371000.0  // Earth radius in meters
+        let dLat = (lat2 - lat1) * .pi / 180
+        let dLon = (lon2 - lon1) * .pi / 180
+        let a = sin(dLat/2) * sin(dLat/2) +
+                cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) *
+                sin(dLon/2) * sin(dLon/2)
+        let c = 2 * atan2(sqrt(a), sqrt(1-a))
+        return R * c
+    }
+
+    /// Add distance sample to workout builder
+    private func addDistanceSampleToWorkout(_ distance: Double) {
+        guard let builder = workoutBuilder else { return }
+
+        let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
+        let distanceQuantity = HKQuantity(unit: .meter(), doubleValue: distance)
+        let now = Date()
+        let sample = HKQuantitySample(
+            type: distanceType,
+            quantity: distanceQuantity,
+            start: lastDistanceUpdate ?? now,
+            end: now
+        )
+        lastDistanceUpdate = now
+
+        builder.add([sample]) { success, error in
+            if let error = error {
+                print("[WORKOUT] Failed to add distance sample: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Add heart rate sample to workout builder (called from HeartRateMonitor updates)
+    public func addHeartRateSampleToWorkout(_ heartRate: Int) {
+        guard let builder = workoutBuilder, heartRate > 0 else { return }
+
+        // Update published value for UI
+        Task { @MainActor in
+            self.currentHeartRate = heartRate
+        }
+
+        let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
+        let heartRateQuantity = HKQuantity(unit: HKUnit.count().unitDivided(by: .minute()), doubleValue: Double(heartRate))
+        let now = Date()
+        let sample = HKQuantitySample(
+            type: heartRateType,
+            quantity: heartRateQuantity,
+            start: now,
+            end: now
+        )
+
+        builder.add([sample]) { success, error in
+            if let error = error {
+                print("[WORKOUT] Failed to add heart rate sample: \(error.localizedDescription)")
+            }
+        }
     }
 
     public func stopTracking() {
@@ -310,6 +417,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             packetsSent = 0
             packetsAcked = 0
             workoutState = ""
+            totalDistance = 0  // Reset fitness metrics
+            currentHeartRate = 0
+            lastDistanceUpdate = nil
+            workoutStartTime = nil
             WKInterfaceDevice.current().play(.stop)
         }
     }

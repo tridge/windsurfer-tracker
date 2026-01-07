@@ -77,6 +77,31 @@ struct WatchTrackingView: View {
                         .foregroundColor(.gray)
                 }
 
+                // Fitness metrics row: heart rate and distance
+                HStack(spacing: 12) {
+                    // Heart rate (if enabled and available)
+                    if viewModel.heartRateEnabled && viewModel.currentHeartRate > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.red)
+                            Text("\(viewModel.currentHeartRate)")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                    }
+
+                    // Distance traveled
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.triangle.swap")
+                            .font(.system(size: 10))
+                            .foregroundColor(.cyan)
+                        Text(distanceText)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+
                 // Status row: ACK rate, sent/acked counts, connection indicator
                 HStack(spacing: 8) {
                     // ACK rate percentage
@@ -153,6 +178,15 @@ struct WatchTrackingView: View {
             return "0.0"
         }
         return String(format: "%.1f", pos.speedKnots)
+    }
+
+    private var distanceText: String {
+        let meters = viewModel.totalDistance
+        if meters < 1000 {
+            return String(format: "%.0fm", meters)
+        } else {
+            return String(format: "%.1fkm", meters / 1000)
+        }
     }
 
     private var ackRateColor: Color {
