@@ -21,6 +21,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -110,6 +112,7 @@ class TrackerService : LifecycleService() {
     private var trackerBeepEnabled: Boolean = true
     private val beepRunnable = object : Runnable {
         override fun run() {
+            Log.d(TAG, "Beep timer fired: isRunning=${isRunning.get()}, beepEnabled=$trackerBeepEnabled")
             if (isRunning.get() && trackerBeepEnabled) {
                 playTrackerBeep()
             }
@@ -177,29 +180,26 @@ class TrackerService : LifecycleService() {
 
     /**
      * Play tracker beep: bip-bip if ACK received in last minute, bip-boop if not.
+     * Uses vibration since watch speakers are often muted/unavailable.
      */
     private fun playTrackerBeep() {
         try {
-            if (toneGenerator == null) {
-                toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
-            }
-            val tone = toneGenerator ?: return
+            Log.d(TAG, "Playing tracker beep via vibration...")
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
             val lastAck = lastAckTime.get()
             val hasRecentAck = lastAck > 0 && (System.currentTimeMillis() - lastAck) < 60000L
+            Log.d(TAG, "hasRecentAck=$hasRecentAck, lastAck=$lastAck")
 
             if (hasRecentAck) {
-                // bip-bip (upbeat) - two high tones
-                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                beepHandler.postDelayed({
-                    tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                }, 150)
+                // One buzz - connection OK
+                vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
+                Log.d(TAG, "Played single buzz (OK)")
             } else {
-                // bip-boop (downbeat) - high then low tone
-                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                beepHandler.postDelayed({
-                    tone.startTone(ToneGenerator.TONE_PROP_NACK, 200)
-                }, 150)
+                // Two buzzes - no connection
+                val pattern = longArrayOf(0, 150, 150, 150)  // delay, buzz, pause, buzz
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                Log.d(TAG, "Played double buzz (no connection)")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to play tracker beep: ${e.message}")

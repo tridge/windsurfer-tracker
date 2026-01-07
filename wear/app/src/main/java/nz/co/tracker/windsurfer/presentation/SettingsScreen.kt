@@ -284,12 +284,12 @@ fun SettingsScreen(
                 )
             }
 
-            // Tracker Beep Toggle
+            // Tracking Buzz Toggle
             item {
                 ToggleChip(
                     checked = trackerBeep,
                     onCheckedChange = { trackerBeep = it },
-                    label = { Text("Tracker Beep") },
+                    label = { Text("Tracking Buzz") },
                     secondaryLabel = { Text(if (trackerBeep) "On" else "Off", fontSize = 10.sp) },
                     toggleControl = {
                         Switch(checked = trackerBeep)
