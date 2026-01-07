@@ -9,12 +9,15 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.BatteryManager
 import android.os.Binder
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -100,6 +103,21 @@ class TrackerService : LifecycleService() {
     // Track acknowledged sequence numbers to stop retransmissions
     private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
+    // Tracker beep - plays once per minute to remind user tracker is running
+    private var toneGenerator: ToneGenerator? = null
+    private val beepHandler = Handler(Looper.getMainLooper())
+    private var trackerBeepEnabled: Boolean = true
+    private val beepRunnable = object : Runnable {
+        override fun run() {
+            if (isRunning.get() && trackerBeepEnabled) {
+                playTrackerBeep()
+            }
+            if (isRunning.get()) {
+                beepHandler.postDelayed(this, 60000L)  // Every 60 seconds
+            }
+        }
+    }
+
     // Wake lock to keep tracking alive during battery saver
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -156,6 +174,37 @@ class TrackerService : LifecycleService() {
         statusListener?.onStatusLine(status)
     }
 
+    /**
+     * Play tracker beep: bip-bip if ACK received in last minute, bip-boop if not.
+     */
+    private fun playTrackerBeep() {
+        try {
+            if (toneGenerator == null) {
+                toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+            }
+            val tone = toneGenerator ?: return
+
+            val lastAck = lastAckTime.get()
+            val hasRecentAck = lastAck > 0 && (System.currentTimeMillis() - lastAck) < 60000L
+
+            if (hasRecentAck) {
+                // bip-bip (upbeat) - two high tones
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                beepHandler.postDelayed({
+                    tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                }, 150)
+            } else {
+                // bip-boop (downbeat) - high then low tone
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                beepHandler.postDelayed({
+                    tone.startTone(ToneGenerator.TONE_PROP_NACK, 200)
+                }, 150)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to play tracker beep: ${e.message}")
+        }
+    }
+
     private fun getServerAddress(): InetAddress? {
         val now = System.currentTimeMillis()
         val cached = cachedServerAddress
@@ -202,6 +251,7 @@ class TrackerService : LifecycleService() {
             eventId = it.getIntExtra("event_id", 2)
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
             heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
+            trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
             positionBuffer.clear()
         }
 
@@ -478,6 +528,9 @@ class TrackerService : LifecycleService() {
                 Looper.getMainLooper()
             )
             updateNotification("Tracking active")
+
+            // Start tracker beep timer (first beep after 60 seconds)
+            beepHandler.postDelayed(beepRunnable, 60000L)
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission denied", e)
         }
@@ -487,6 +540,12 @@ class TrackerService : LifecycleService() {
         if (!isRunning.getAndSet(false)) return
 
         Log.d(TAG, "Stopping tracking")
+
+        // Stop tracker beep timer
+        beepHandler.removeCallbacks(beepRunnable)
+        toneGenerator?.release()
+        toneGenerator = null
+
         fusedLocationClient.removeLocationUpdates(locationCallback)
 
         // Release network request before closing socket

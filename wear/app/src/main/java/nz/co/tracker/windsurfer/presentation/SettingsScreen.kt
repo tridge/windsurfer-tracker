@@ -41,6 +41,7 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.password) }
     var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
     var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
+    var trackerBeep by remember { mutableStateOf(settings.trackerBeep) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     // Track original auth values to detect changes
@@ -283,6 +284,22 @@ fun SettingsScreen(
                 )
             }
 
+            // Tracker Beep Toggle
+            item {
+                ToggleChip(
+                    checked = trackerBeep,
+                    onCheckedChange = { trackerBeep = it },
+                    label = { Text("Tracker Beep") },
+                    secondaryLabel = { Text(if (trackerBeep) "On" else "Off", fontSize = 10.sp) },
+                    toggleControl = {
+                        Switch(checked = trackerBeep)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(top = 4.dp)
+                )
+            }
+
             // Role
             item {
                 Text(
@@ -410,7 +427,8 @@ fun SettingsScreen(
                                     password = password,
                                     eventId = selectedEventId,
                                     highFrequencyMode = highFrequencyMode,
-                                    heartRateEnabled = heartRateEnabled
+                                    heartRateEnabled = heartRateEnabled,
+                                    trackerBeep = trackerBeep
                                 )
                             )
                             onBack()

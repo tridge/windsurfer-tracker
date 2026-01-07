@@ -27,6 +27,7 @@ public actor TrackerService {
     private var assistRequested = false
     private var sequenceNumber = 0
     private var lastAckSeq = 0
+    private var lastAckTime: Date?  // For tracker beep feature
     private var acknowledgedSeqs: Set<Int> = []
 
     // Status line state
@@ -105,6 +106,7 @@ public actor TrackerService {
         isRunning = true
         sequenceNumber = 0
         lastAckSeq = 0
+        lastAckTime = nil
         acknowledgedSeqs.removeAll()
         ackWindow.removeAll()
         recordedSeqs.removeAll()
@@ -226,6 +228,12 @@ public actor TrackerService {
     /// Check if currently tracking
     public var isTracking: Bool {
         isRunning
+    }
+
+    /// Check if we received an ACK in the last 60 seconds (for tracker beep feature)
+    public var hasRecentAck: Bool {
+        guard let time = lastAckTime else { return false }
+        return Date().timeIntervalSince(time) < 60
     }
 
     // MARK: - Position Handling
@@ -391,6 +399,7 @@ public actor TrackerService {
         if !acknowledgedSeqs.contains(response.ack) {
             acknowledgedSeqs.insert(response.ack)
             lastAckSeq = response.ack
+            lastAckTime = Date()  // Update for tracker beep feature
 
             // Record success in sliding window
             recordSendResult(seq: response.ack, success: true)

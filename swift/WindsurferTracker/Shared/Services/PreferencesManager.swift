@@ -18,6 +18,7 @@ public final class PreferencesManager: ObservableObject {
         static let eventId = "event_id"
         static let highFrequencyMode = "high_frequency_mode"
         static let heartRateEnabled = "heart_rate_enabled"
+        static let trackerBeep = "tracker_beep"
         static let trackingActive = "tracking_active"
         static let batteryOptAsked = "battery_opt_asked"
     }
@@ -60,6 +61,10 @@ public final class PreferencesManager: ObservableObject {
         didSet { defaults.set(heartRateEnabled, forKey: Keys.heartRateEnabled) }
     }
 
+    @Published public var trackerBeep: Bool {
+        didSet { defaults.set(trackerBeep, forKey: Keys.trackerBeep) }
+    }
+
     @Published public var trackingActive: Bool {
         didSet { defaults.set(trackingActive, forKey: Keys.trackingActive) }
     }
@@ -97,6 +102,12 @@ public final class PreferencesManager: ObservableObject {
 
         self.highFrequencyMode = defaults.bool(forKey: Keys.highFrequencyMode)
         self.heartRateEnabled = defaults.bool(forKey: Keys.heartRateEnabled)  // Default false
+        // trackerBeep defaults to true - need to check if key exists
+        if defaults.object(forKey: Keys.trackerBeep) == nil {
+            self.trackerBeep = true
+        } else {
+            self.trackerBeep = defaults.bool(forKey: Keys.trackerBeep)
+        }
         self.trackingActive = defaults.bool(forKey: Keys.trackingActive)
         self.batteryOptAsked = defaults.bool(forKey: Keys.batteryOptAsked)
     }
@@ -127,6 +138,7 @@ public final class PreferencesManager: ObservableObject {
         eventId = 2
         highFrequencyMode = false
         heartRateEnabled = false
+        trackerBeep = true
         trackingActive = false
         batteryOptAsked = false
     }

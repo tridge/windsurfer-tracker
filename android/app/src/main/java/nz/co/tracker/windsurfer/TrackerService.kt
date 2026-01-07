@@ -5,9 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -133,7 +136,21 @@ class TrackerService : LifecycleService() {
 
     // Track acknowledged sequence numbers to stop retransmissions
     private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
-    
+
+    // Tracker beep - plays once per minute to remind user tracker is running
+    private var toneGenerator: ToneGenerator? = null
+    private val beepHandler = Handler(Looper.getMainLooper())
+    private val beepRunnable = object : Runnable {
+        override fun run() {
+            if (isRunning.get() && isTrackerBeepEnabled()) {
+                playTrackerBeep()
+            }
+            if (isRunning.get()) {
+                beepHandler.postDelayed(this, 60000L)  // Every 60 seconds
+            }
+        }
+    }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -182,6 +199,45 @@ class TrackerService : LifecycleService() {
     private fun getCurrentEventId(): Int {
         val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
         return prefs.getInt("event_id", 2)
+    }
+
+    /**
+     * Check if tracker beep is enabled. Defaults to true.
+     */
+    private fun isTrackerBeepEnabled(): Boolean {
+        val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("tracker_beep", true)
+    }
+
+    /**
+     * Play tracker beep: bip-bip if ACK received in last minute, bip-boop if not.
+     */
+    private fun playTrackerBeep() {
+        try {
+            if (toneGenerator == null) {
+                toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+            }
+            val tone = toneGenerator ?: return
+
+            val lastAck = lastAckTime.get()
+            val hasRecentAck = lastAck > 0 && (System.currentTimeMillis() - lastAck) < 60000L
+
+            if (hasRecentAck) {
+                // bip-bip (upbeat) - two high tones
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                beepHandler.postDelayed({
+                    tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                }, 150)
+            } else {
+                // bip-boop (downbeat) - high then low tone
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                beepHandler.postDelayed({
+                    tone.startTone(ToneGenerator.TONE_PROP_NACK, 200)
+                }, 150)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to play tracker beep: ${e.message}")
+        }
     }
 
     override fun onCreate() {
@@ -376,15 +432,24 @@ class TrackerService : LifecycleService() {
                 Looper.getMainLooper()
             )
             updateNotification("Tracking active")
+
+            // Start tracker beep timer (first beep after 60 seconds)
+            beepHandler.postDelayed(beepRunnable, 60000L)
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission denied", e)
         }
     }
-    
+
     private fun stopTracking() {
         if (!isRunning.getAndSet(false)) return
 
         Log.d(TAG, "Stopping tracking")
+
+        // Stop tracker beep timer
+        beepHandler.removeCallbacks(beepRunnable)
+        toneGenerator?.release()
+        toneGenerator = null
+
         fusedLocationClient.removeLocationUpdates(locationCallback)
         socket?.close()
         socket = null

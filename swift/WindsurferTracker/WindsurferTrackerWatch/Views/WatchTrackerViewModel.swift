@@ -67,6 +67,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.eventId = eventId }
     }
 
+    @Published public var trackerBeep: Bool {
+        didSet { preferences.trackerBeep = trackerBeep }
+    }
+
     /// Returns true if required settings are missing
     public var needsSetup: Bool {
         sailorId.isEmpty || password.isEmpty
@@ -81,6 +85,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     private let preferences = PreferencesManager.shared
     private var cancellables = Set<AnyCancellable>()
+    private var beepTimer: Timer?
 
     // MARK: - Initialization
 
@@ -94,6 +99,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.heartRateEnabled = prefs.heartRateEnabled
         self.password = prefs.password
         self.eventId = prefs.eventId
+        self.trackerBeep = prefs.trackerBeep
 
         super.init()
         setupBindings()
@@ -211,6 +217,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 // Clear error and haptic for success
                 errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
+
+                // Start tracker beep timer (first beep after 60 seconds)
+                startBeepTimer()
 
                 // Start heart rate monitoring if enabled
                 if heartRateEnabled {
@@ -403,6 +412,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     }
 
     public func stopTracking() {
+        // Stop tracker beep timer
+        stopBeepTimer()
+
         Task {
             // Stop workout session
             await stopWorkoutSession()
@@ -464,6 +476,46 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     public var currentEventName: String {
         events.first(where: { $0.eid == eventId })?.name ?? "Event \(eventId)"
+    }
+
+    // MARK: - Tracker Beep
+
+    private func startBeepTimer() {
+        // Cancel any existing timer
+        beepTimer?.invalidate()
+
+        // Schedule beep every 60 seconds (first beep after 60 seconds)
+        beepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.playTrackerBeep()
+            }
+        }
+    }
+
+    private func stopBeepTimer() {
+        beepTimer?.invalidate()
+        beepTimer = nil
+    }
+
+    private func playTrackerBeep() {
+        guard preferences.trackerBeep else { return }
+
+        Task {
+            let hasRecentAck = await TrackerService.shared.hasRecentAck
+            let device = WKInterfaceDevice.current()
+
+            if hasRecentAck {
+                // bip-bip (upbeat) - two clicks
+                device.play(.click)
+                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+                device.play(.click)
+            } else {
+                // bip-boop (downbeat) - click then notification (heavier haptic)
+                device.play(.click)
+                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+                device.play(.notification)  // Heavier haptic for "down" feel
+            }
+        }
     }
 }
 

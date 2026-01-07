@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreLocation
+import AudioToolbox
 
 /// View model bridging TrackerService to SwiftUI
 @MainActor
@@ -26,6 +27,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var password: String
     @Published public var eventId: Int
     @Published public var highFrequencyMode: Bool
+    @Published public var trackerBeep: Bool
 
     // MARK: - UI State
 
@@ -43,6 +45,7 @@ public class TrackerViewModel: ObservableObject {
     private let preferences = PreferencesManager.shared
     private let locationManager = LocationManager.shared
     private var cancellables = Set<AnyCancellable>()
+    private var beepTimer: Timer?
 
     // MARK: - Initialization
 
@@ -55,6 +58,7 @@ public class TrackerViewModel: ObservableObject {
         self.password = preferences.password
         self.eventId = preferences.eventId
         self.highFrequencyMode = preferences.highFrequencyMode
+        self.trackerBeep = preferences.trackerBeep
 
         setupBindings()
 
@@ -114,6 +118,13 @@ public class TrackerViewModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] value in
                 self?.preferences.highFrequencyMode = value
+            }
+            .store(in: &cancellables)
+
+        $trackerBeep
+            .dropFirst()
+            .sink { [weak self] value in
+                self?.preferences.trackerBeep = value
             }
             .store(in: &cancellables)
 
@@ -206,6 +217,8 @@ public class TrackerViewModel: ObservableObject {
         Task {
             do {
                 try await TrackerService.shared.start()
+                // Start tracker beep timer (first beep after 60 seconds)
+                startBeepTimer()
             } catch let error as TrackerError {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -219,6 +232,9 @@ public class TrackerViewModel: ObservableObject {
     public func stopTracking() {
         // Clear event name on stop
         eventName = ""
+
+        // Stop tracker beep timer
+        stopBeepTimer()
 
         Task {
             await TrackerService.shared.stop()
@@ -261,5 +277,44 @@ public class TrackerViewModel: ObservableObject {
     public var configSummary: String {
         let id = sailorId.isEmpty ? "(not set)" : sailorId
         return "\(id) @ \(serverHost):\(serverPort)"
+    }
+
+    // MARK: - Tracker Beep
+
+    private func startBeepTimer() {
+        // Cancel any existing timer
+        beepTimer?.invalidate()
+
+        // Schedule beep every 60 seconds (first beep after 60 seconds)
+        beepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.playTrackerBeep()
+            }
+        }
+    }
+
+    private func stopBeepTimer() {
+        beepTimer?.invalidate()
+        beepTimer = nil
+    }
+
+    private func playTrackerBeep() {
+        guard preferences.trackerBeep else { return }
+
+        Task {
+            let hasRecentAck = await TrackerService.shared.hasRecentAck
+
+            if hasRecentAck {
+                // bip-bip (upbeat) - two high tones
+                AudioServicesPlaySystemSound(1057)  // Tink sound
+                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+                AudioServicesPlaySystemSound(1057)
+            } else {
+                // bip-boop (downbeat) - high then low tone
+                AudioServicesPlaySystemSound(1057)  // Tink sound
+                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+                AudioServicesPlaySystemSound(1053)  // Lower tone
+            }
+        }
     }
 }

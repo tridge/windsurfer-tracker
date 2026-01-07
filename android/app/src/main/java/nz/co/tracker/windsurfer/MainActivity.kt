@@ -868,6 +868,21 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(48, 0, 0, 16)
         }
 
+        // Tracker beep checkbox
+        val trackerBeepCheckbox = android.widget.CheckBox(this).apply {
+            text = "Tracker Beep"
+            isChecked = prefs.getBoolean("tracker_beep", true)
+            setTextColor(0xFF000000.toInt())
+            textSize = 14f
+            setPadding(0, 8, 0, 0)
+        }
+        val trackerBeepHint = android.widget.TextView(this).apply {
+            text = "Beep once per minute while tracking to remind you it's running."
+            setTextColor(0xFF666666.toInt())
+            textSize = 12f
+            setPadding(48, 0, 0, 16)
+        }
+
         // Check for Updates button (sideload builds only)
         val updateButton = if (BuildConfig.ENABLE_SELF_UPDATE) {
             android.widget.Button(this).apply {
@@ -898,6 +913,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(eventLoadingText)
         layout.addView(highFrequencyCheckbox)
         layout.addView(highFrequencyHint)
+        layout.addView(trackerBeepCheckbox)
+        layout.addView(trackerBeepHint)
         layout.addView(roleLabel)
         layout.addView(roleSpinner)
         layout.addView(serverLabel)
@@ -963,6 +980,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     fun saveSettings() {
                         // Validation passed, save settings
                         val newHighFrequencyMode = highFrequencyCheckbox.isChecked
+                        val newTrackerBeep = trackerBeepCheckbox.isChecked
                         val newRole = roleValues[selectedRoleIndex]
                         val newServerHost = serverInput.text.toString()
                         val newServerPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
@@ -975,6 +993,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putInt("event_id", selectedEventId)
                             putString("password", password)
                             putBoolean("high_frequency_mode", newHighFrequencyMode)
+                            putBoolean("tracker_beep", newTrackerBeep)
                             commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
                         }
                         // Always update the binding fields to keep them in sync

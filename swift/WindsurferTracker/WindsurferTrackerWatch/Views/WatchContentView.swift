@@ -197,6 +197,17 @@ struct WatchSettingsView: View {
                     }
                 }
 
+                // Tracker beep
+                Toggle(isOn: $viewModel.trackerBeep) {
+                    VStack(alignment: .leading) {
+                        Text("Tracker Beep")
+                            .font(.caption)
+                        Text("Reminder beep each minute")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
                 // Event selection
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Event")

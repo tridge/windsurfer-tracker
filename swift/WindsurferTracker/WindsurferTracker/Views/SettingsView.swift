@@ -102,6 +102,12 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
+
+                    Toggle("Tracker Beep", isOn: $viewModel.trackerBeep)
+
+                    Text("Plays a sound each minute to remind you the tracker is running")
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
 
                 // Role Section - less commonly changed
