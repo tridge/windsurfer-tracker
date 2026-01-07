@@ -67,17 +67,70 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Speed - large and prominent, kts inline to save space
-                HStack(alignment: .lastTextBaseline, spacing: 2) {
-                    Text(speedText)
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                // Show countdown when active, otherwise show speed or START TIMER button
+                if let countdown = viewModel.countdownSeconds {
+                    // Race countdown timer display
+                    let minutes = countdown / 60
+                    let seconds = countdown % 60
+                    let countdownColor: Color = {
+                        if countdown <= 10 { return .red }
+                        if countdown <= 30 { return .yellow }
+                        return .cyan
+                    }()
+
+                    VStack(spacing: 2) {
+                        Text(String(format: "%d:%02d", minutes, seconds))
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .foregroundColor(countdownColor)
+                        Text(countdown == 0 ? "START!" : "Tap to reset")
+                            .font(.caption2)
+                            .foregroundColor(countdownColor)
+                    }
+                    .onTapGesture {
+                        viewModel.resetCountdown()
+                    }
+                } else if viewModel.raceTimerEnabled {
+                    // Show START TIMER button when race timer enabled but not running
+                    Button {
+                        viewModel.startCountdown()
+                    } label: {
+                        HStack {
+                            Image(systemName: "play.fill")
+                                .font(.caption)
+                            Text("START TIMER")
+                                .font(.caption)
+                                .bold()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.teal)
                         .foregroundColor(.white)
-                    Text("kts")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                        .cornerRadius(16)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    // Speed - large and prominent, kts inline to save space
+                    HStack(alignment: .lastTextBaseline, spacing: 2) {
+                        Text(speedText)
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("kts")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+
+                    // Distance traveled (only when no timer)
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.triangle.swap")
+                            .font(.system(size: 10))
+                            .foregroundColor(.cyan)
+                        Text(distanceText)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
                 }
 
-                // Fitness metrics row: heart rate and distance
+                // Fitness metrics row: heart rate (and distance only if countdown active)
                 HStack(spacing: 12) {
                     // Heart rate (if enabled and available)
                     if viewModel.heartRateEnabled && viewModel.currentHeartRate > 0 {
@@ -91,14 +144,16 @@ struct WatchTrackingView: View {
                         }
                     }
 
-                    // Distance traveled
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.triangle.swap")
-                            .font(.system(size: 10))
-                            .foregroundColor(.cyan)
-                        Text(distanceText)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
+                    // Distance traveled (show here when countdown is active, since speed is hidden)
+                    if viewModel.countdownSeconds != nil || viewModel.raceTimerEnabled {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.triangle.swap")
+                                .font(.system(size: 10))
+                                .foregroundColor(.cyan)
+                            Text(distanceText)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
                     }
                 }
 

@@ -3,7 +3,7 @@ import WatchKit
 
 /// Main watch view with compact interface
 struct WatchContentView: View {
-    @StateObject private var viewModel = WatchTrackerViewModel()
+    @EnvironmentObject var viewModel: WatchTrackerViewModel
     @State private var navigateToSettings = false
 
     var body: some View {
@@ -208,6 +208,57 @@ struct WatchSettingsView: View {
                     }
                 }
 
+                // Race Timer
+                Toggle(isOn: $viewModel.raceTimerEnabled) {
+                    VStack(alignment: .leading) {
+                        Text("Race Timer")
+                            .font(.caption)
+                        Text("Countdown with voice")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
+                // Timer minutes (only show if race timer enabled)
+                if viewModel.raceTimerEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Countdown Minutes")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        HStack {
+                            Button {
+                                if viewModel.raceTimerMinutes > 1 {
+                                    viewModel.raceTimerMinutes -= 1
+                                }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(viewModel.raceTimerMinutes > 1 ? .blue : .gray)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.raceTimerMinutes <= 1)
+
+                            Text("\(viewModel.raceTimerMinutes)")
+                                .font(.title2)
+                                .bold()
+                                .frame(minWidth: 40)
+
+                            Button {
+                                if viewModel.raceTimerMinutes < 9 {
+                                    viewModel.raceTimerMinutes += 1
+                                }
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(viewModel.raceTimerMinutes < 9 ? .blue : .gray)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.raceTimerMinutes >= 9)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+
                 // Event selection
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Event")
@@ -379,4 +430,5 @@ struct WatchSettingsView: View {
 
 #Preview {
     WatchContentView()
+        .environmentObject(WatchTrackerViewModel())
 }

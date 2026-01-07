@@ -2,6 +2,8 @@ import Foundation
 import Combine
 import WatchKit
 import HealthKit
+import AVFoundation
+import CoreMotion
 
 /// View model for watchOS app
 @MainActor
@@ -71,6 +73,32 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.trackerBeep = trackerBeep }
     }
 
+    @Published public var raceTimerEnabled: Bool {
+        didSet { preferences.raceTimerEnabled = raceTimerEnabled }
+    }
+
+    @Published public var raceTimerMinutes: Int {
+        didSet { preferences.raceTimerMinutes = raceTimerMinutes }
+    }
+
+    // MARK: - Race Timer State
+
+    @Published public var countdownSeconds: Int? = nil  // nil = not active
+    private var countdownTargetTime: Date? = nil
+    private var countdownTimer: Timer? = nil
+    private var lastAnnouncedSecond: Int = -1
+    private let ttsLatencySeconds: TimeInterval = 0.25  // Announce early to compensate for TTS delay
+
+    // TTS
+    private let speechSynthesizer = AVSpeechSynthesizer()
+
+    // Tap detection (accelerometer)
+    private let motionManager = CMMotionManager()
+    private var lastTapTime: Date = .distantPast
+    private let tapThreshold: Double = 25.0  // m/s² above gravity
+    private let tapCooldown: TimeInterval = 1.0
+    private let gravity: Double = 9.81
+
     /// Returns true if required settings are missing
     public var needsSetup: Bool {
         sailorId.isEmpty || password.isEmpty
@@ -100,9 +128,22 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.password = prefs.password
         self.eventId = prefs.eventId
         self.trackerBeep = prefs.trackerBeep
+        self.raceTimerEnabled = prefs.raceTimerEnabled
+        self.raceTimerMinutes = prefs.raceTimerMinutes
 
         super.init()
         setupBindings()
+        setupAudioSession()
+    }
+
+    private func setupAudioSession() {
+        // Configure audio session for TTS to work alongside other audio
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers, .duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("[TTS] Audio session setup failed: \(error)")
+        }
     }
 
     private func setupBindings() {
@@ -220,6 +261,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
                 // Start tracker beep timer (first beep after 60 seconds)
                 startBeepTimer()
+
+                // Start tap detection for race timer
+                startTapDetection()
 
                 // Start heart rate monitoring if enabled
                 if heartRateEnabled {
@@ -415,6 +459,15 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         // Stop tracker beep timer
         stopBeepTimer()
 
+        // Stop tap detection and reset countdown
+        stopTapDetection()
+        if isCountdownRunning {
+            countdownTimer?.invalidate()
+            countdownTimer = nil
+            countdownSeconds = nil
+            countdownTargetTime = nil
+        }
+
         Task {
             // Stop workout session
             await stopWorkoutSession()
@@ -513,6 +566,187 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
                 device.play(.click)
             }
+        }
+    }
+
+    // MARK: - Race Timer
+
+    private func speak(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        speechSynthesizer.speak(utterance)
+    }
+
+    /// Start the race countdown timer
+    public func startCountdown() {
+        let minutes = raceTimerMinutes
+        countdownSeconds = minutes * 60
+        countdownTargetTime = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        lastAnnouncedSecond = (minutes * 60) + 1  // Prevent immediate re-announcement
+
+        // Announce start
+        speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
+
+        // Start high-frequency timer for accurate timing
+        countdownTimer?.invalidate()
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.runCountdownTick()
+            }
+        }
+
+        print("[TIMER] Race countdown started: \(minutes) minutes")
+    }
+
+    /// Reset/cancel the race countdown timer
+    public func resetCountdown() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        countdownSeconds = nil
+        countdownTargetTime = nil
+        lastAnnouncedSecond = -1
+        speak("reset")
+        print("[TIMER] Race countdown reset")
+    }
+
+    /// Check if countdown is currently running
+    public var isCountdownRunning: Bool {
+        countdownSeconds != nil && countdownTargetTime != nil
+    }
+
+    private func runCountdownTick() {
+        guard let targetTime = countdownTargetTime else { return }
+
+        let now = Date()
+        let msRemaining = targetTime.timeIntervalSince(now) * 1000
+
+        if msRemaining <= -500 {
+            // Past the start time
+            countdownTimer?.invalidate()
+            countdownTimer = nil
+            countdownSeconds = nil
+            countdownTargetTime = nil
+            return
+        }
+
+        // Calculate seconds for display (round to nearest)
+        let displaySeconds = max(0, Int((msRemaining + 500) / 1000))
+        if displaySeconds != countdownSeconds {
+            countdownSeconds = displaySeconds
+        }
+
+        // Announce early to compensate for TTS latency
+        let adjustedMs = msRemaining - (ttsLatencySeconds * 1000)
+        let announceSecond = Int(ceil(adjustedMs / 1000))
+
+        if announceSecond != lastAnnouncedSecond && announceSecond >= 0 {
+            if announceSecond == 0 {
+                announceStart()
+            } else {
+                announceCountdownIfNeeded(announceSecond)
+            }
+            lastAnnouncedSecond = announceSecond
+        }
+    }
+
+    private func announceCountdownIfNeeded(_ seconds: Int) {
+        let device = WKInterfaceDevice.current()
+
+        switch seconds {
+        case let s where s % 60 == 0 && s > 0:
+            // Each minute
+            let minutes = s / 60
+            speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
+            device.play(.notification)
+
+        case 30:
+            speak("30 seconds")
+            device.play(.notification)
+
+        case 20:
+            speak("20 seconds")
+            device.play(.notification)
+
+        case 1...10:
+            // Final 10 seconds
+            speak("\(seconds)")
+            device.play(.click)
+
+        default:
+            break
+        }
+    }
+
+    private func announceStart() {
+        speak("Start!")
+        let device = WKInterfaceDevice.current()
+        // Triple buzz for start
+        device.play(.notification)
+        Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            device.play(.notification)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            device.play(.notification)
+        }
+    }
+
+    // MARK: - Tap Detection (Accelerometer)
+
+    public func startTapDetection() {
+        guard raceTimerEnabled else { return }
+        guard motionManager.isAccelerometerAvailable else {
+            print("[TAP] Accelerometer not available")
+            return
+        }
+
+        motionManager.accelerometerUpdateInterval = 1.0 / 100.0  // 100 Hz
+        motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, error in
+            guard let self = self, let data = data else { return }
+
+            let x = data.acceleration.x * 9.81  // Convert to m/s²
+            let y = data.acceleration.y * 9.81
+            let z = data.acceleration.z * 9.81
+
+            // Calculate magnitude and subtract gravity
+            let magnitude = sqrt(x*x + y*y + z*z)
+            let accelAboveGravity = abs(magnitude - self.gravity)
+
+            // Detect tap (acceleration spike above gravity)
+            if accelAboveGravity > self.tapThreshold {
+                let now = Date()
+                if now.timeIntervalSince(self.lastTapTime) > self.tapCooldown {
+                    self.lastTapTime = now
+                    self.handleTap()
+                }
+            }
+        }
+        print("[TAP] Tap detection started")
+    }
+
+    public func stopTapDetection() {
+        motionManager.stopAccelerometerUpdates()
+        print("[TAP] Tap detection stopped")
+    }
+
+    private func handleTap() {
+        if isCountdownRunning {
+            resetCountdown()
+        } else {
+            startCountdown()
+        }
+    }
+
+    // MARK: - Action Button (Apple Watch Ultra)
+
+    /// Handle action button press (called from app delegate or extension delegate)
+    public func handleActionButton() {
+        guard raceTimerEnabled && isTracking else { return }
+
+        if isCountdownRunning {
+            resetCountdown()
+        } else {
+            startCountdown()
         }
     }
 }
