@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private val isTracking = mutableStateOf(false)
     private val isAssistActive = mutableStateOf(false)
     private val speedKnots = mutableFloatStateOf(0f)
+    private val distanceMeters = mutableFloatStateOf(0f)
     private val batteryPercent = mutableIntStateOf(100)
     private val signalLevel = mutableIntStateOf(-1)
     private val ackRate = mutableFloatStateOf(0f)
@@ -60,8 +61,9 @@ class MainActivity : ComponentActivity() {
             serviceBound = true
 
             trackerService?.statusListener = object : TrackerService.StatusListener {
-                override fun onLocationUpdate(location: Location) {
+                override fun onLocationUpdate(location: Location, totalDistanceMeters: Float) {
                     speedKnots.floatValue = (location.speed * 1.94384f).toFloat()  // m/s to knots
+                    distanceMeters.floatValue = totalDistanceMeters
                     updateBatteryAndSignal()
                 }
 
@@ -172,6 +174,7 @@ class MainActivity : ComponentActivity() {
                 isAssistActive = isAssistActive.value,
                 assistEnabled = assistEnabled.value,
                 speedKnots = speedKnots.floatValue,
+                distanceMeters = distanceMeters.floatValue,
                 batteryPercent = batteryPercent.intValue,
                 signalLevel = signalLevel.intValue,
                 ackRate = ackRate.floatValue,
@@ -318,6 +321,7 @@ class MainActivity : ComponentActivity() {
         isTracking.value = false
         isAssistActive.value = false
         speedKnots.floatValue = 0f
+        distanceMeters.floatValue = 0f
         ackRate.floatValue = 0f
         Log.d(TAG, "Stopped tracking")
     }

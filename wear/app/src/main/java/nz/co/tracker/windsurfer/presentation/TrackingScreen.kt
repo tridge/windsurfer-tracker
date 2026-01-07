@@ -26,6 +26,7 @@ fun TrackingScreen(
     isAssistActive: Boolean,
     assistEnabled: Boolean,
     speedKnots: Float,
+    distanceMeters: Float,
     batteryPercent: Int,
     signalLevel: Int,
     ackRate: Float,
@@ -132,17 +133,29 @@ fun TrackingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Speed - large and prominent
-            Text(
-                text = String.format("%.1f", speedKnots),
-                color = Color.White,
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
+            // Speed - large and prominent with "kts" on same line
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = String.format("%.1f", speedKnots),
+                    color = Color.White,
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "kts",
+                    color = Color.Gray,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
 
+            // Distance in km
             Text(
-                text = "kts",
+                text = String.format("%.1f km", distanceMeters / 1000f),
                 color = Color.Gray,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center

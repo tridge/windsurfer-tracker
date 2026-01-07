@@ -63,6 +63,7 @@ class TrackerService : LifecycleService() {
     private lateinit var locationCallback: LocationCallback
     private var lastLocation: Location? = null
     private var previousLocation: Location? = null
+    private var totalDistance: Float = 0f  // Total distance in meters
 
     // UDP
     private var socket: DatagramSocket? = null
@@ -150,7 +151,7 @@ class TrackerService : LifecycleService() {
     var statusListener: StatusListener? = null
 
     interface StatusListener {
-        fun onLocationUpdate(location: Location)
+        fun onLocationUpdate(location: Location, totalDistanceMeters: Float)
         fun onAckReceived(seq: Int)
         fun onPacketSent(seq: Int)
         fun onConnectionStatus(ackRate: Float)
@@ -253,6 +254,8 @@ class TrackerService : LifecycleService() {
             heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
             trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
             positionBuffer.clear()
+            totalDistance = 0f
+            previousLocation = null
         }
 
         startForegroundService()
@@ -335,8 +338,24 @@ class TrackerService : LifecycleService() {
                         return
                     }
 
+                    // Calculate distance from previous location
+                    previousLocation?.let { prevLoc ->
+                        val distanceResult = FloatArray(1)
+                        Location.distanceBetween(
+                            prevLoc.latitude, prevLoc.longitude,
+                            location.latitude, location.longitude,
+                            distanceResult
+                        )
+                        val distance = distanceResult[0]
+                        // Only add reasonable distances (filter GPS noise)
+                        if (distance > 0.5f && distance < 500f) {
+                            totalDistance += distance
+                        }
+                    }
+                    previousLocation = location
+
                     lastLocation = location
-                    statusListener?.onLocationUpdate(location)
+                    statusListener?.onLocationUpdate(location, totalDistance)
 
                     // Mark GPS as ready and update status line
                     if (!hasGpsFix.getAndSet(true)) {
