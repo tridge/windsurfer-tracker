@@ -505,15 +505,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             let device = WKInterfaceDevice.current()
 
             if hasRecentAck {
-                // bip-bip (upbeat) - two clicks
-                device.play(.click)
-                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+                // One buzz - connection OK
                 device.play(.click)
             } else {
-                // bip-boop (downbeat) - click then notification (heavier haptic)
+                // Two buzzes - no connection
                 device.play(.click)
                 try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
-                device.play(.notification)  // Heavier haptic for "down" feel
+                device.play(.click)
             }
         }
     }

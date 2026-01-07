@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import CoreLocation
-import AudioToolbox
+import UIKit
 
 /// View model bridging TrackerService to SwiftUI
 @MainActor
@@ -321,17 +321,17 @@ public class TrackerViewModel: ObservableObject {
 
         Task {
             let hasRecentAck = await TrackerService.shared.hasRecentAck
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.prepare()
 
             if hasRecentAck {
-                // bip-bip (upbeat) - two high tones
-                AudioServicesPlaySystemSound(1057)  // Tink sound
-                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
-                AudioServicesPlaySystemSound(1057)
+                // One buzz - connection OK
+                generator.impactOccurred()
             } else {
-                // bip-boop (downbeat) - high then low tone
-                AudioServicesPlaySystemSound(1057)  // Tink sound
+                // Two buzzes - no connection
+                generator.impactOccurred()
                 try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
-                AudioServicesPlaySystemSound(1053)  // Lower tone
+                generator.impactOccurred()
             }
         }
     }

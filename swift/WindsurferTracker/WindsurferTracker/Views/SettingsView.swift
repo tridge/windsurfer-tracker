@@ -103,9 +103,9 @@ struct SettingsView: View {
                             .foregroundColor(.gray)
                     }
 
-                    Toggle("Tracker Beep", isOn: $viewModel.trackerBeep)
+                    Toggle("Tracking Buzz", isOn: $viewModel.trackerBeep)
 
-                    Text("Plays a sound each minute to remind you the tracker is running")
+                    Text("Vibrates each minute to remind you the tracker is running")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

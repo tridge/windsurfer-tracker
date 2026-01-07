@@ -197,12 +197,12 @@ struct WatchSettingsView: View {
                     }
                 }
 
-                // Tracker beep
+                // Tracking buzz
                 Toggle(isOn: $viewModel.trackerBeep) {
                     VStack(alignment: .leading) {
-                        Text("Tracker Beep")
+                        Text("Tracking Buzz")
                             .font(.caption)
-                        Text("Reminder beep each minute")
+                        Text("Reminder buzz each minute")
                             .font(.caption2)
                             .foregroundColor(.gray)
                     }
