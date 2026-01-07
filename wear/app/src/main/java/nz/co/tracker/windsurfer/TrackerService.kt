@@ -348,7 +348,7 @@ class TrackerService : LifecycleService() {
                         )
                         val distance = distanceResult[0]
                         // Only add reasonable distances (filter GPS noise)
-                        if (distance > 0.5f && distance < 500f) {
+                        if (distance > 0.1f && distance < 500f) {
                             totalDistance += distance
                         }
                     }

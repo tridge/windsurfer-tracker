@@ -149,7 +149,7 @@ public class TrackerViewModel: ObservableObject {
                     let newLocation = CLLocation(latitude: position.latitude, longitude: position.longitude)
                     let distance = newLocation.distance(from: prevLocation)
                     // Filter out GPS noise (too small) and jumps (too large)
-                    if distance > 0.5 && distance < 500 {
+                    if distance > 0.1 && distance < 500 {
                         self.totalDistanceMeters += distance
                     }
                 }
