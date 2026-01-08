@@ -1729,7 +1729,8 @@
             let colorIdx = 0;
             for (const [userId, entries] of Object.entries(userData)) {
                 const speeds = entries.map(e => e.spd || 0);
-                const maxSpeed = Math.max(...speeds);
+                // Use reduce instead of spread to avoid stack overflow with large arrays
+                const maxSpeed = speeds.reduce((max, s) => s > max ? s : max, 0);
                 const avgSpeed = speeds.reduce((a,b) => a+b, 0) / speeds.length;
                 const points = entries.length;
 
