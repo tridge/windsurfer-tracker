@@ -16,3 +16,6 @@ rsync -av --delete \
     --exclude='*.xcodeproj' \
     --exclude='DerivedData' \
     "$LOCAL_SWIFT_DIR/" "$MAC_HOST:$REMOTE_PROJECT_DIR/"
+
+echo "=== Regenerating Xcode project with xcodegen ==="
+ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && /opt/homebrew/bin/xcodegen"

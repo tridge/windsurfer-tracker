@@ -94,7 +94,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     private let ttsLatencySeconds: TimeInterval = 0.25  // Announce early to compensate for TTS delay
 
     // Audio playback
-    private var audioPlayer: WKAudioFilePlayer?
+    private var audioPlayer: AVAudioPlayer?
 
     // Tap detection (accelerometer)
     private let motionManager = CMMotionManager()
@@ -640,15 +640,18 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         }
 
         // Stop any currently playing audio
-        audioPlayer?.pause()
+        audioPlayer?.stop()
 
-        // Create WKAudioFilePlayer - designed for watchOS audio playback
-        let player = WKAudioFilePlayer(playerItem: WKAudioFilePlayerItem(asset: WKAudioFileAsset(url: audioURL)))
-        audioPlayer = player
-
-        // Play audio
-        player.play()
-        print("[AUDIO] ✓ Playing \(filename).m4a with WKAudioFilePlayer")
+        do {
+            // Create AVAudioPlayer for audio playback
+            let player = try AVAudioPlayer(contentsOf: audioURL)
+            audioPlayer = player
+            player.prepareToPlay()
+            player.play()
+            print("[AUDIO] ✓ Playing \(filename).m4a with AVAudioPlayer")
+        } catch {
+            print("[AUDIO] Error creating AVAudioPlayer: \(error.localizedDescription)")
+        }
     }
 
     /// Start the race countdown timer
