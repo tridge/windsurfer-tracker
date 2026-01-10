@@ -3,54 +3,61 @@ import SwiftUI
 /// Pre-tracking configuration view - matches Android layout
 struct ConfigView: View {
     @EnvironmentObject var viewModel: TrackerViewModel
-    @State private var tempSailorId: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            // Configuration fields
+            // Configuration fields - read-only info display
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Spacing at top
                     Spacer()
-                        .frame(height: 24)
+                        .frame(height: 40)
 
-                    // Your Name
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Your Name")
-                            .font(.headline)
-                            .foregroundColor(.black)
+                    // Your Name (label)
+                    Text("Your Name")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
 
-                        TextField("e.g. John or S07", text: $tempSailorId)
-                            .font(.title3)
-                            .padding(12)
-                            .background(Color(white: 0.93))
-                            .foregroundColor(.black)
-                            .cornerRadius(4)
-                    }
+                    // Your Name (display value)
+                    Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
+                        .font(.title3)
+                        .foregroundColor(.black)
+                        .padding(.bottom, 8)
+
+                    // Event (label)
+                    Text("Event")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                        .padding(.top, 8)
 
                     // Event Display (name + ID)
                     if !viewModel.eventName.isEmpty {
                         Text("\(viewModel.eventName) (ID: \(viewModel.eventId))")
-                            .font(.body)
-                            .fontWeight(.bold)
+                            .font(.title3)
                             .foregroundColor(Color(red: 0.0, green: 0.4, blue: 0.67))
                     } else {
                         Text("Event \(viewModel.eventId)")
-                            .font(.body)
-                            .fontWeight(.bold)
+                            .font(.title3)
                             .foregroundColor(Color(red: 0.0, green: 0.4, blue: 0.67))
                     }
 
-                    // Live Tracking Link (opens in default browser)
+                    // Live Tracking (label)
+                    Text("Live Tracking")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                        .padding(.top, 8)
+
+                    // Live Tracking Link (clickable URL only, no label prefix)
                     if let url = URL(string: "https://\(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)") {
                         Link(destination: url) {
-                            Text("Live Tracking: \(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)")
-                                .font(.caption)
+                            Text("https://\(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)")
+                                .font(.body)
                                 .foregroundColor(.blue)
                         }
                     }
-
-                    // Server Address removed - now only in Settings
 
                     // Permission warning
                     if viewModel.needsLocationPermission {
@@ -83,7 +90,6 @@ struct ConfigView: View {
 
             // Start button
             Button {
-                saveFields()
                 viewModel.startTracking()
             } label: {
                 Text("Start Tracking")
@@ -99,7 +105,6 @@ struct ConfigView: View {
 
             // Settings button
             Button {
-                saveFields()
                 viewModel.showSettings = true
             } label: {
                 Text("Settings")
@@ -116,19 +121,11 @@ struct ConfigView: View {
         }
         .background(Color.white)
         .onAppear {
-            tempSailorId = viewModel.sailorId
-        }
-        .onChange(of: viewModel.showSettings) { isShowing in
-            // Refresh temp values when settings sheet closes
-            if !isShowing {
-                tempSailorId = viewModel.sailorId
+            // Fetch event name async if not already loaded
+            Task {
+                await viewModel.fetchEventName()
             }
         }
-    }
-
-    private func saveFields() {
-        viewModel.sailorId = tempSailorId
-        // Server host is now only in Settings, not on config screen
     }
 }
 

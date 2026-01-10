@@ -119,16 +119,31 @@
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
-        <!-- Frequency Mode Indicator -->
-        <TextView
-            android:id="@+id/tv1HzIndicator"
+        <!-- Sailor ID and Frequency Mode Indicator -->
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0.1Hz MODE"
-            android:textSize="14sp"
-            android:textColor="#00AAAA"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvSailorId"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="S01"
+                android:textSize="14sp"
+                android:textColor="#888888"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/tv1HzIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.1Hz"
+                android:textSize="14sp"
+                android:textColor="#00AAAA"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="wrap_content"

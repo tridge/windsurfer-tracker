@@ -2503,7 +2503,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
 
     try:
         while True:
-            data, addr = sock.recvfrom(1024)
+            # Increased buffer size to 4096 to handle 1Hz mode packets with 10 positions
+            data, addr = sock.recvfrom(4096)
             recv_time = time.time()
             client_ip = addr[0]
 

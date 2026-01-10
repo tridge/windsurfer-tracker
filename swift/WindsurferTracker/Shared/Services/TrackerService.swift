@@ -251,10 +251,19 @@ public actor TrackerService {
         }
 
         if preferences.highFrequencyMode {
-            // 1Hz mode - buffer positions
+            // 1Hz mode - buffer positions and send every 10 seconds
             positionBuffer.append(position)
 
-            if positionBuffer.count >= TrackerConfig.highFrequencyBatchSize {
+            // Send when we have accumulated enough time (10 seconds)
+            let shouldSend: Bool
+            if let lastSend = lastSendTime {
+                shouldSend = Date().timeIntervalSince(lastSend) >= 10.0
+            } else {
+                // First packet - send immediately for quick ACK
+                shouldSend = true
+            }
+
+            if shouldSend && !positionBuffer.isEmpty {
                 await sendPositionBatch()
             }
         } else {

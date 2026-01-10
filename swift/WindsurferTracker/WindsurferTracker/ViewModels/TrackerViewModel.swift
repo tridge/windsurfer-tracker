@@ -282,6 +282,26 @@ public class TrackerViewModel: ObservableObject {
         isLoadingEvents = false
     }
 
+    /// Fetch event name for current event ID and update eventName
+    public func fetchEventName() async {
+        // Only fetch if we don't already have the event name
+        guard eventName.isEmpty else { return }
+
+        let networkManager = NetworkManager()
+        await networkManager.configure(
+            host: serverHost,
+            port: UInt16(serverPort)
+        )
+        let fetchedEvents = await networkManager.fetchEvents()
+
+        // Find matching event and update eventName
+        if let event = fetchedEvents.first(where: { $0.eid == eventId }) {
+            await MainActor.run {
+                self.eventName = event.name
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     public var needsLocationPermission: Bool {

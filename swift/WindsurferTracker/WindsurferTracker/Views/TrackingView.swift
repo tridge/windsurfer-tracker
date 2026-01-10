@@ -14,11 +14,17 @@ struct TrackingView: View {
                     .fontWeight(.bold)
                     .foregroundColor(viewModel.statusLine == "auth failure" ? .red : Color(red: 0, green: 0.4, blue: 0.67))
 
-                // Frequency mode indicator (always show)
-                Text(viewModel.highFrequencyMode ? "1Hz MODE" : "0.1Hz MODE")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(Color(red: 0, green: 0.67, blue: 0.67))
+                // Sailor ID and Frequency mode indicator
+                HStack(spacing: 6) {
+                    Text(viewModel.sailorId)
+                        .font(.caption)
+                        .foregroundColor(Color(white: 0.53))
+
+                    Text(viewModel.highFrequencyMode ? "1Hz" : "0.1Hz")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(Color(red: 0, green: 0.67, blue: 0.67))
+                }
 
                 // Position
                 VStack(alignment: .leading, spacing: 2) {

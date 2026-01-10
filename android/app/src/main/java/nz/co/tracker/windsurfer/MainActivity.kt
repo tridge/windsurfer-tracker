@@ -578,10 +578,13 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.configGroup.visibility = View.GONE
             updateAssistButton(service.isAssistActive())
 
-            // Show frequency mode indicator
+            // Show sailor ID and frequency mode indicator
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            val sailorId = prefs.getString("sailor_id", "S01") ?: "S01"
             val highFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
-            binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz MODE" else "0.1Hz MODE"
+            binding.tvSailorId.text = sailorId
+            binding.tvSailorId.visibility = View.VISIBLE
+            binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz" else "0.1Hz"
             binding.tv1HzIndicator.visibility = View.VISIBLE
 
             service.getLastLocation()?.let { loc ->
