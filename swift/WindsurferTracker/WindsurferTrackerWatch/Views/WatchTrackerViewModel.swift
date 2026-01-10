@@ -703,10 +703,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         let msRemaining = targetTime.timeIntervalSince(now) * 1000
 
         if msRemaining <= -500 {
-            // Past the start time
+            // Past the start time - enter "expired" state (shows speed)
             countdownTimer?.invalidate()
             countdownTimer = nil
-            countdownSeconds = nil
+            countdownSeconds = 0  // 0 = expired state (shows speed)
             countdownTargetTime = nil
             return
         }
@@ -827,10 +827,20 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     }
 
     private func handleTap() {
-        print("[TAP] Handle tap - countdown running: \(isCountdownRunning)")
-        if isCountdownRunning {
+        // State machine:
+        // - Running (countdownTargetTime != nil): tap resets to waiting
+        // - Expired (countdownSeconds == 0): tap resets to waiting (shows stopwatch)
+        // - Waiting (countdownSeconds == nil): tap starts countdown
+        print("[TAP] Handle tap - countdownSeconds: \(String(describing: countdownSeconds)), targetTime: \(countdownTargetTime != nil ? "set" : "nil")")
+
+        if countdownTargetTime != nil {
+            // Running → Waiting
+            resetCountdown()
+        } else if countdownSeconds == 0 {
+            // Expired → Waiting (shows stopwatch)
             resetCountdown()
         } else {
+            // Waiting → Running
             startCountdown()
         }
     }
