@@ -112,12 +112,14 @@ class MainActivity : ComponentActivity() {
 
                 override fun onCountdownFinished() {
                     countdownSeconds.value = 0
-                    // Keep showing 0:00 briefly, then clear and allow screen to sleep
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        countdownSeconds.value = null
-                        // Turn off screen wake after race starts - no longer need quick timer access
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }, 3000)
+                    // Keep showing speed (countdownSeconds==0) until user manually resets
+                    // Turn off screen wake after race starts - no longer need quick timer access
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+
+                override fun onCountdownReset() {
+                    countdownSeconds.value = null
+                    // Timer cleared, back to stopwatch display
                 }
 
             }

@@ -282,7 +282,8 @@ class TrackerService : LifecycleService() {
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
         fun onCountdownTick(secondsRemaining: Int)  // Race timer countdown
-        fun onCountdownFinished()  // Race timer reached zero
+        fun onCountdownFinished()  // Race timer reached zero naturally
+        fun onCountdownReset()  // Race timer manually reset by user
     }
 
     /**
@@ -1414,7 +1415,7 @@ class TrackerService : LifecycleService() {
         countdownSeconds = 0
         lastAnnouncedSecond = -1
         speak("reset")
-        statusListener?.onCountdownFinished()
+        statusListener?.onCountdownReset()
         Log.d(TAG, "Race countdown reset")
     }
 
