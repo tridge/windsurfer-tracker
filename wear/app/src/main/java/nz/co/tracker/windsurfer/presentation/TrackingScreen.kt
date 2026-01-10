@@ -271,57 +271,7 @@ fun TrackingScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Status row: Battery, Signal, Connection
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Battery
-                val batteryColor = when {
-                    batteryPercent > 50 -> TrackingGreen
-                    batteryPercent > 20 -> Color.Yellow
-                    else -> StoppedRed
-                }
-                Text(
-                    text = "$batteryPercent%",
-                    color = batteryColor,
-                    fontSize = 12.sp
-                )
-
-                // Signal strength
-                val signalText = when (signalLevel) {
-                    -1 -> "---"
-                    0 -> "▁"
-                    1 -> "▁▂"
-                    2 -> "▁▂▃"
-                    3 -> "▁▂▃▄"
-                    4 -> "▁▂▃▄▅"
-                    else -> "▁▂▃▄▅"
-                }
-                Text(
-                    text = signalText,
-                    color = if (signalLevel >= 2) TrackingGreen else Color.Yellow,
-                    fontSize = 10.sp
-                )
-
-                // Connection indicator
-                val connColor = when {
-                    ackRate > 0.8f -> TrackingGreen
-                    ackRate > 0.4f -> Color.Yellow
-                    else -> StoppedRed
-                }
-                Text(
-                    text = if (ackRate > 0) "●" else "○",
-                    color = connColor,
-                    fontSize = 12.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // "Tap to stop/start" line removed - status shown via color coding
+            // Status row removed per user request - all status shown via color coding of TRACKING/STOPPED text
 
             // Error message
             if (!errorMessage.isNullOrEmpty()) {

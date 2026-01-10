@@ -95,7 +95,8 @@ class TrackerService : LifecycleService() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 ACTION_START_TIMER -> {
-                    if (!countdownRunning) {
+                    // Only start if in waiting state (-1), not if expired (0)
+                    if (!countdownRunning && countdownSeconds < 0) {
                         startCountdown(raceTimerMinutes)
                         updateNotificationWithTimer()
                     }
@@ -155,7 +156,7 @@ class TrackerService : LifecycleService() {
     // Race countdown timer
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private var countdownSeconds = 0
+    private var countdownSeconds = -1  // -1 = waiting to start, 0 = expired, > 0 = running
     private var countdownRunning = false
     private var countdownStartMinutes = 5
     private val countdownHandler = Handler(Looper.getMainLooper())
@@ -254,10 +255,16 @@ class TrackerService : LifecycleService() {
                 val now = System.currentTimeMillis()
                 if (now - lastTapTime > TAP_COOLDOWN_MS) {
                     lastTapTime = now
+                    // State machine:
+                    // - Running (countdownRunning=true): tap resets to waiting
+                    // - Expired (countdownSeconds=0): tap resets to waiting
+                    // - Waiting (countdownSeconds=-1): tap starts countdown
                     if (countdownRunning) {
-                        resetCountdown()
+                        resetCountdown()  // Running → Waiting
+                    } else if (countdownSeconds == 0) {
+                        resetCountdown()  // Expired → Waiting
                     } else {
-                        startCountdown(raceTimerMinutes)
+                        startCountdown(raceTimerMinutes)  // Waiting → Running
                     }
                     updateNotificationWithTimer()
                 }
@@ -396,6 +403,7 @@ class TrackerService : LifecycleService() {
             raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)
             raceTimerMinutes = it.getIntExtra("race_timer_minutes", 5)
             raceTimerTapGForce = it.getIntExtra("race_timer_tap_g_force", 3).coerceIn(2, 9)
+            Log.d(TAG, "Race timer settings: enabled=$raceTimerEnabled, minutes=$raceTimerMinutes, tapGForce=${raceTimerTapGForce}g (threshold=${TAP_THRESHOLD}m/s²)")
             positionBuffer.clear()
             totalDistance = 0f
             previousLocation = null
@@ -1412,11 +1420,11 @@ class TrackerService : LifecycleService() {
     fun resetCountdown() {
         countdownHandler.removeCallbacks(countdownRunnable)
         countdownRunning = false
-        countdownSeconds = 0
+        countdownSeconds = -1  // Back to waiting state
         lastAnnouncedSecond = -1
         speak("reset")
         statusListener?.onCountdownReset()
-        Log.d(TAG, "Race countdown reset")
+        Log.d(TAG, "Race countdown reset to waiting state")
     }
 
     /**

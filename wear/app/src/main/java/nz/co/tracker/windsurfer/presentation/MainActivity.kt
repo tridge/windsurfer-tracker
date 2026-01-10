@@ -220,6 +220,8 @@ class MainActivity : ComponentActivity() {
                         if (isTracking.value) {
                             Log.d(TAG, "Restarting tracking to apply new settings")
                             stopTracking()
+                            // Give service time to fully stop before restarting
+                            kotlinx.coroutines.delay(500)
                             startTracking()
                         }
                     }
