@@ -85,6 +85,11 @@
         android:padding="8dp"
         app:layout_constraintTop_toTopOf="parent">
 
+        <!-- Top spacing to prevent text cutoff -->
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="24dp" />
+
         <!-- Event Name -->
         <TextView
             android:id="@+id/tvEventName"

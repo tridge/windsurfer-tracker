@@ -364,6 +364,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val eventId = prefs.getInt("event_id", 2)
         val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
 
+        // Load saved event name from preferences if we don't have it in memory
+        if (currentEventName.isEmpty()) {
+            currentEventName = prefs.getString("event_name", "") ?: ""
+        }
+
         // Event display (name + ID)
         val eventText = if (currentEventName.isNotEmpty()) {
             "$currentEventName (ID: $eventId)"
@@ -961,9 +966,14 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val oldPassword = prefs.getString("password", "") ?: ""
         val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
 
+        // Wrap layout in ScrollView to make it scrollable
+        val scrollView = android.widget.ScrollView(this).apply {
+            addView(layout)
+        }
+
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
             .setTitle("Settings")
-            .setView(layout)
+            .setView(scrollView)
             .setPositiveButton("SAVE", null)  // Set listener later to prevent auto-dismiss
             .setNegativeButton("CANCEL", null)
             .create()
@@ -1120,6 +1130,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.tvEventName.text = if (name.isNotEmpty()) name else "---"
             // Update cached event name and idle screen
             currentEventName = name
+            // Save to preferences so it's available on idle screen
+            if (name.isNotEmpty()) {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString("event_name", name)
+                    .apply()
+            }
             updateIdleScreen()
         }
     }

@@ -386,8 +386,12 @@ class TrackerService : LifecycleService() {
                         positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
                         lastBufferedLocation = location
 
-                        // Send every 10 positions (10 seconds at 1Hz)
-                        if (positionBuffer.size >= 10) {
+                        // Send first packet immediately to get quick ACK, then batch every 10 positions
+                        if (positionBuffer.size == 1) {
+                            // First GPS lock - send immediately
+                            sendPositionArray()
+                        } else if (positionBuffer.size >= 10) {
+                            // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
                             sendPositionArray()
                         }
                     } else {
