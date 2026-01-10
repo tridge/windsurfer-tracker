@@ -356,19 +356,36 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val eventId = prefs.getInt("event_id", 2)
         val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+        val serverPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
 
         // Load saved event name from preferences if we don't have it in memory
         if (currentEventName.isEmpty()) {
             currentEventName = prefs.getString("event_name", "") ?: ""
         }
 
-        // Event display (name + ID)
+        // Event display (name + ID) - show initially, may update async
         val eventText = if (currentEventName.isNotEmpty()) {
             "$currentEventName (ID: $eventId)"
         } else {
             "Event $eventId"
         }
         binding.tvIdleEventName.text = eventText
+
+        // Async fetch event name if we don't have it cached
+        if (currentEventName.isEmpty()) {
+            lifecycleScope.launch {
+                val fetcher = EventFetcher()
+                val events = fetcher.fetchEvents(serverHost, serverPort)
+                val event = events.firstOrNull { it.eid == eventId }
+                if (event != null) {
+                    currentEventName = event.name
+                    // Save to preferences
+                    prefs.edit().putString("event_name", event.name).apply()
+                    // Update display
+                    binding.tvIdleEventName.text = "$currentEventName (ID: $eventId)"
+                }
+            }
+        }
 
         // Live tracking link
         val linkText = "Live Tracking: https://$serverHost/event.html?eid=$eventId"

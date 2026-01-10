@@ -75,6 +75,7 @@ class TrackerService : LifecycleService() {
     private data class BufferedPosition(val ts: Long, val lat: Double, val lon: Double, val spd: Double)
     private val positionBuffer = mutableListOf<BufferedPosition>()
     private var lastBufferedLocation: Location? = null
+    private var firstPacketSent = false  // Track if initial packet sent for quick ACK
 
     // Battery drain tracking
     private var trackingStartTime: Long = 0
@@ -265,6 +266,7 @@ class TrackerService : LifecycleService() {
             highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
             // Clear position buffer when mode changes
             positionBuffer.clear()
+            firstPacketSent = false  // Reset when buffer cleared
         }
         
         startForegroundService()
@@ -387,9 +389,10 @@ class TrackerService : LifecycleService() {
                         lastBufferedLocation = location
 
                         // Send first packet immediately to get quick ACK, then batch every 10 positions
-                        if (positionBuffer.size == 1) {
-                            // First GPS lock - send immediately
+                        if (!firstPacketSent && positionBuffer.size >= 1) {
+                            // First GPS lock - send immediately (even if only 1 position)
                             sendPositionArray()
+                            firstPacketSent = true
                         } else if (positionBuffer.size >= 10) {
                             // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
                             sendPositionArray()
@@ -419,6 +422,7 @@ class TrackerService : LifecycleService() {
         currentEventName = ""
         totalDistance = 0f
         distanceStartLocation = null
+        firstPacketSent = false  // Reset for new session to send first packet immediately
         updateStatusLine()  // Show "GPS wait"
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
