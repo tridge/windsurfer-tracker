@@ -12,8 +12,8 @@ attributes:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.10.0"
-    CURRENT_PROJECT_VERSION: "57"
+    MARKETING_VERSION: "1.10.1"
+    CURRENT_PROJECT_VERSION: "59"
 
 targets:
   WindsurferTracker:
@@ -101,7 +101,7 @@ targets:
           - workout-processing
     settings:
       base:
-        CURRENT_PROJECT_VERSION: "58"
+        CURRENT_PROJECT_VERSION: "60"
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.watchkitapp
         PRODUCT_NAME: "Windsurfer Tracker"
         INFOPLIST_FILE: WindsurferTrackerWatch/Resources/Info.plist
