@@ -97,16 +97,16 @@ struct WatchTrackingView: View {
                         }
 
                         #if targetEnvironment(simulator)
-                        // Reset button for simulator testing
+                        // Simulate Action button for testing
                         Button(action: {
-                            viewModel.resetCountdown()
+                            viewModel.handleActionButton()
                         }) {
-                            Text("RESET")
+                            Text("ACTION")
                                 .font(.caption2)
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, 12)
                                 .padding(.vertical, 4)
-                                .background(Color.red.opacity(0.3))
+                                .background(Color.orange.opacity(0.5))
                                 .cornerRadius(4)
                         }
                         .buttonStyle(.plain)
@@ -125,34 +125,19 @@ struct WatchTrackingView: View {
                         }
 
                         #if targetEnvironment(simulator)
-                        // Test buttons for simulator (no accelerometer available)
-                        HStack(spacing: 8) {
-                            Button(action: {
-                                viewModel.startCountdown()
-                            }) {
-                                Text("START")
-                                    .font(.caption2)
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.green.opacity(0.3))
-                                    .cornerRadius(4)
-                            }
-                            .buttonStyle(.plain)
-
-                            Button(action: {
-                                viewModel.resetCountdown()
-                            }) {
-                                Text("RESET")
-                                    .font(.caption2)
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.red.opacity(0.3))
-                                    .cornerRadius(4)
-                            }
-                            .buttonStyle(.plain)
+                        // Simulate Action button for testing (no accelerometer in simulator)
+                        Button(action: {
+                            viewModel.handleActionButton()
+                        }) {
+                            Text("ACTION")
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.5))
+                                .cornerRadius(4)
                         }
+                        .buttonStyle(.plain)
                         #endif
                     }
                 } else {

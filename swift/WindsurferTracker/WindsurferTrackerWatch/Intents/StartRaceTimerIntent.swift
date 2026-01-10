@@ -2,39 +2,31 @@ import Foundation
 import AppIntents
 import WatchKit
 
-/// App Intent for starting the race countdown timer from the Action button
+/// App Intent for race timer control from the Action button
 @available(watchOS 10.0, *)
 struct StartRaceTimerIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start Race Timer"
-    static var description: IntentDescription = IntentDescription("Starts the race countdown timer")
+    static var title: LocalizedStringResource = "Race Timer"
+    static var description: IntentDescription = IntentDescription("Start/reset the race countdown timer")
 
     static var openAppWhenRun: Bool = true
 
     @MainActor
-    func perform() async throws -> some IntentResult {
-        // Get the shared view model and start the countdown
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // Get the shared view model
         if let viewModel = await getViewModel() {
-            // Only start if tracking is active and race timer is enabled
+            // Only works if tracking is active and race timer is enabled
             if viewModel.isTracking && viewModel.raceTimerEnabled {
-                // If already running, reset and restart
-                if viewModel.countdownSeconds != nil {
-                    viewModel.resetCountdown()
-                    // Small delay to ensure reset completes
-                    try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
-                }
-
-                // Start the countdown
-                viewModel.startCountdown()
-
-                return .result(dialog: "Race timer started")
+                // Use the same state machine as tap detection
+                viewModel.handleActionButton()
+                return .result(value: "OK")
             } else if !viewModel.isTracking {
-                return .result(dialog: "Start tracking first")
+                return .result(value: "Start tracking first")
             } else {
-                return .result(dialog: "Enable race timer in settings")
+                return .result(value: "Enable race timer")
             }
         }
 
-        return .result(dialog: "Unable to start race timer")
+        return .result(value: "Error")
     }
 
     @MainActor

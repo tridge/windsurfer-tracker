@@ -851,7 +851,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     public func handleActionButton() {
         guard raceTimerEnabled && isTracking else { return }
 
-        if isCountdownRunning {
+        // Same state machine as handleTap():
+        // - Running (countdownTargetTime != nil): reset to waiting
+        // - Expired (countdownSeconds == 0): reset to waiting (shows stopwatch)
+        // - Waiting (countdownSeconds == nil): start countdown
+        if countdownTargetTime != nil {
+            resetCountdown()
+        } else if countdownSeconds == 0 {
             resetCountdown()
         } else {
             startCountdown()
