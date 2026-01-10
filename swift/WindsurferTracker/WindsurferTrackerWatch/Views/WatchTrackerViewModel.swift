@@ -590,7 +590,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         let minutes = raceTimerMinutes
         countdownSeconds = minutes * 60
         countdownTargetTime = Date().addingTimeInterval(TimeInterval(minutes * 60))
-        lastAnnouncedSecond = (minutes * 60) + 1  // Prevent immediate re-announcement
+        lastAnnouncedSecond = minutes * 60  // Prevent duplicate announcement at same second
 
         // Announce start
         speak("\(minutes) minute\(minutes > 1 ? "s" : "")")

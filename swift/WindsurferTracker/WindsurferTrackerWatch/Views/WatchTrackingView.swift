@@ -70,41 +70,86 @@ struct WatchTrackingView: View {
                 // Show countdown when active, otherwise show speed or stopwatch
                 if let countdown = viewModel.countdownSeconds {
                     // Race countdown timer display
-                    if countdown > 0 {
-                        // Timer running - show remaining time
-                        let minutes = countdown / 60
-                        let seconds = countdown % 60
-                        let countdownColor: Color = {
-                            if countdown <= 10 { return .red }
-                            if countdown <= 30 { return .yellow }
-                            return .cyan
-                        }()
+                    VStack(spacing: 4) {
+                        if countdown > 0 {
+                            // Timer running - show remaining time
+                            let minutes = countdown / 60
+                            let seconds = countdown % 60
+                            let countdownColor: Color = {
+                                if countdown <= 10 { return .red }
+                                if countdown <= 30 { return .yellow }
+                                return .cyan
+                            }()
 
-                        VStack(spacing: 2) {
                             Text(String(format: "%d:%02d", minutes, seconds))
                                 .font(.system(size: 42, weight: .bold, design: .rounded))
                                 .foregroundColor(countdownColor)
+                        } else {
+                            // Timer expired - show speed until reset
+                            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                                Text(speedText)
+                                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                Text("kts")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
                         }
-                    } else {
-                        // Timer expired - show speed until reset
-                        HStack(alignment: .lastTextBaseline, spacing: 2) {
-                            Text(speedText)
-                                .font(.system(size: 36, weight: .bold, design: .rounded))
+
+                        // Reset button for simulator testing
+                        Button(action: {
+                            viewModel.resetCountdown()
+                        }) {
+                            Text("RESET")
+                                .font(.caption2)
                                 .foregroundColor(.white)
-                            Text("kts")
-                                .font(.caption)
-                                .foregroundColor(.gray)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.red.opacity(0.3))
+                                .cornerRadius(4)
                         }
+                        .buttonStyle(.plain)
                     }
                 } else if viewModel.raceTimerEnabled {
-                    // Waiting for start - show stopwatch icon + time (no START button)
-                    HStack(spacing: 4) {
-                        Image(systemName: "stopwatch")
-                            .font(.title)
-                            .foregroundColor(.cyan)
-                        Text(String(format: "%d:%02d", viewModel.raceTimerMinutes, 0))
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
+                    // Waiting for start - show stopwatch icon + time
+                    VStack(spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "stopwatch")
+                                .font(.title)
+                                .foregroundColor(.cyan)
+                            Text(String(format: "%d:%02d", viewModel.raceTimerMinutes, 0))
+                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                        }
+
+                        // Test buttons for simulator (no accelerometer available)
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                viewModel.startCountdown()
+                            }) {
+                                Text("START")
+                                    .font(.caption2)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.green.opacity(0.3))
+                                    .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button(action: {
+                                viewModel.resetCountdown()
+                            }) {
+                                Text("RESET")
+                                    .font(.caption2)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.red.opacity(0.3))
+                                    .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 } else {
                     // Normal speed display (no race timer)

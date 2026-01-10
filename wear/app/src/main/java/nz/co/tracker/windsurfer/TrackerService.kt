@@ -1400,7 +1400,7 @@ class TrackerService : LifecycleService() {
         countdownStartMinutes = minutes
         countdownSeconds = minutes * 60
         countdownTargetTime = android.os.SystemClock.elapsedRealtime() + (minutes * 60 * 1000L)
-        lastAnnouncedSecond = countdownSeconds + 1  // Prevent immediate re-announcement
+        lastAnnouncedSecond = countdownSeconds  // Prevent duplicate announcement at same second
         countdownRunning = true
         speak("$minutes minute${if (minutes > 1) "s" else ""}")
 
