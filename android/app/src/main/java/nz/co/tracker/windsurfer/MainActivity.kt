@@ -322,17 +322,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
 
         // Save preferences when main screen fields change (so settings dialog stays in sync)
-        val saveOnChange = object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                if (!isLoadingPreferences) {
-                    savePreferences()
-                    updateIdleScreen()
-                }
-            }
-        }
-        binding.etSailorId.addTextChangedListener(saveOnChange)
+        // Idle screen is now read-only - no text change listeners needed
     }
 
     private fun getDefaultSailorId(): String {
@@ -346,7 +336,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private fun loadPreferences() {
         isLoadingPreferences = true
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        binding.etSailorId.setText(prefs.getString("sailor_id", getDefaultSailorId()))
+
+        // Display sailor name on idle screen (read-only)
+        val sailorId = prefs.getString("sailor_id", getDefaultSailorId()) ?: getDefaultSailorId()
+        binding.tvIdleSailorName.text = if (sailorId.isNotEmpty()) sailorId else "(not set)"
 
         // Migrate old server address for early beta testers
         var serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
@@ -382,15 +375,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         binding.tvLiveTrackingLink.text = linkText
     }
     
-    private fun savePreferences() {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        prefs.edit().apply {
-            putString("sailor_id", binding.etSailorId.text.toString())
-            // Server host and port are now only in settings dialog, not on main screen
-            apply()
-        }
-    }
-    
+    // savePreferences removed - idle screen is now read-only, all edits in settings dialog
+
     private fun checkPermissionsAndStart() {
         when {
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) 
@@ -496,8 +482,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private fun startTrackerService() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
-        // Validate ID and password before starting
-        val sailorId = binding.etSailorId.text.toString().trim()
+        // Validate ID and password before starting (read from preferences)
+        val sailorId = (prefs.getString("sailor_id", "") ?: "").trim()
         val password = prefs.getString("password", "") ?: ""
 
         if (sailorId.isEmpty() && password.isEmpty()) {
@@ -513,8 +499,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             return
         }
 
-        savePreferences()
-
         // Save tracking state
         prefs.edit().putBoolean("tracking_active", true).apply()
 
@@ -523,7 +507,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val serverPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
 
         val intent = Intent(this, TrackerService::class.java).apply {
-            putExtra("sailor_id", binding.etSailorId.text.toString())
+            putExtra("sailor_id", sailorId)
             putExtra("server_host", serverHost)
             putExtra("server_port", serverPort)
             putExtra("role", prefs.getString("role", "sailor"))
@@ -1027,9 +1011,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putBoolean("tracker_beep", newTrackerBeep)
                             commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
                         }
-                        // Always update the binding fields to keep them in sync
-                        binding.etSailorId.setText(sailorId)
-                        // Server fields no longer on main screen, only in settings
+                        // Update the idle screen display to keep it in sync
+                        binding.tvIdleSailorName.text = if (sailorId.isNotEmpty()) sailorId else "(not set)"
                         updateIdleScreen()  // Update event name and live tracking link
 
                         // Auto-restart tracking if any settings changed while tracking
