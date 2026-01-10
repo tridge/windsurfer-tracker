@@ -450,7 +450,8 @@ public actor TrackerService {
             lastAckSeq: lastAckSeq,
             packetsSent: ackWindow.count,
             packetsAcked: ackWindow.filter { $0 }.count,
-            usingHttpFallback: false  // Will update from network manager
+            usingHttpFallback: false,  // Will update from network manager
+            lastAckTime: lastAckTime
         )
 
         connectionStatusPublisher.send(status)

@@ -30,12 +30,14 @@ fun TrackingScreen(
     batteryPercent: Int,
     signalLevel: Int,
     ackRate: Float,
+    lastAckTime: Long,
     sailorId: String,
     eventName: String,
     errorMessage: String?,
     highFrequencyMode: Boolean,
     countdownSeconds: Int?,  // Race countdown timer (null = not active)
-    raceTimerEnabled: Boolean,  // Whether to show timer button
+    raceTimerEnabled: Boolean,  // Whether to show timer display
+    raceTimerMinutes: Int,  // Configured countdown duration
     onToggleTracking: () -> Unit,
     onAssistLongPress: () -> Unit,
     onSettingsLongPress: () -> Unit,
@@ -62,10 +64,19 @@ fun TrackingScreen(
         Color.Black
     }
 
+    // ACK-based color coding for TRACKING status
     val statusColor = when {
         isAssistActive -> StoppedRed
-        isTracking -> TrackingGreen
-        else -> StoppedRed
+        !isTracking -> StoppedRed
+        lastAckTime == 0L -> StoppedRed  // No ACK received yet
+        else -> {
+            val timeSinceAck = System.currentTimeMillis() - lastAckTime
+            when {
+                timeSinceAck < 30000L -> TrackingGreen  // Green < 30s
+                timeSinceAck < 60000L -> Color(0xFFFF8800)  // Orange 30-60s
+                else -> StoppedRed  // Red > 60s
+            }
+        }
     }
     val statusText = when {
         isAssistActive -> "⚠ ASSIST ⚠"
@@ -137,62 +148,101 @@ fun TrackingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Show countdown when active, otherwise show speed
-            if (countdownSeconds != null) {
-                // Race countdown timer display - tap to reset
-                val minutes = countdownSeconds / 60
-                val seconds = countdownSeconds % 60
-                val countdownColor = when {
-                    countdownSeconds <= 10 -> StoppedRed
-                    countdownSeconds <= 30 -> Color.Yellow
-                    else -> Color.Cyan
-                }
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { onTimerReset() }
+            // Race timer display or speed
+            if (raceTimerEnabled && isTracking) {
+                if (countdownSeconds != null) {
+                    if (countdownSeconds > 0) {
+                        // Countdown running - show remaining time
+                        val minutes = countdownSeconds / 60
+                        val seconds = countdownSeconds % 60
+                        val countdownColor = when {
+                            countdownSeconds <= 10 -> StoppedRed
+                            countdownSeconds <= 30 -> Color.Yellow
+                            else -> Color.Cyan
+                        }
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { onTimerReset() }
+                                    )
+                                }
+                        ) {
+                            Text(
+                                text = String.format("%d:%02d", minutes, seconds),
+                                color = countdownColor,
+                                fontSize = 48.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "Tap to reset",
+                                color = countdownColor,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
                             )
                         }
-                ) {
-                    Text(
-                        text = String.format("%d:%02d", minutes, seconds),
-                        color = countdownColor,
-                        fontSize = 48.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = if (countdownSeconds == 0) "START!" else "Tap to reset",
-                        color = countdownColor,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else if (raceTimerEnabled && isTracking) {
-                // Show "Start Timer" button when timer is enabled but not running
-                Box(
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .background(Color(0xFF006666))
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { onTimerStart() }
+                    } else {
+                        // Countdown expired (0:00) - show speed until reset
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { onTimerReset() }
+                                    )
+                                }
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Text(
+                                    text = String.format("%.1f", speedKnots),
+                                    color = Color.White,
+                                    fontSize = 42.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "kts",
+                                    color = Color.Gray,
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                            }
+                            Text(
+                                text = "Tap to reset",
+                                color = StoppedRed,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
                             )
                         }
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "▶ START TIMER",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    }
+                } else {
+                    // Timer enabled but not running - show stopwatch icon + configured time
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "⏱",
+                            fontSize = 40.sp,
+                            color = Color.Cyan
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = String.format("%d:%02d", raceTimerMinutes, 0),
+                            color = Color.White,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             } else {
-                // Speed - large and prominent with "kts" on same line
+                // Normal speed display (race timer disabled or not tracking)
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.Bottom
@@ -271,13 +321,7 @@ fun TrackingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Hint text
-            Text(
-                text = if (isTracking) "Tap to stop" else "Tap to start",
-                color = Color.DarkGray,
-                fontSize = 10.sp,
-                textAlign = TextAlign.Center
-            )
+            // "Tap to stop/start" line removed - status shown via color coding
 
             // Error message
             if (!errorMessage.isNullOrEmpty()) {

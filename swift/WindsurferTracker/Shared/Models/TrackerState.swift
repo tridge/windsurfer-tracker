@@ -83,18 +83,23 @@ public struct ConnectionStatus: Equatable, Sendable {
     /// Whether using HTTP fallback
     public let usingHttpFallback: Bool
 
+    /// Time when last ACK was received (nil if never received)
+    public let lastAckTime: Date?
+
     public init(
         ackRate: Double = 0,
         lastAckSeq: Int = 0,
         packetsSent: Int = 0,
         packetsAcked: Int = 0,
-        usingHttpFallback: Bool = false
+        usingHttpFallback: Bool = false,
+        lastAckTime: Date? = nil
     ) {
         self.ackRate = ackRate
         self.lastAckSeq = lastAckSeq
         self.packetsSent = packetsSent
         self.packetsAcked = packetsAcked
         self.usingHttpFallback = usingHttpFallback
+        self.lastAckTime = lastAckTime
     }
 
     /// Color indicator based on ACK rate

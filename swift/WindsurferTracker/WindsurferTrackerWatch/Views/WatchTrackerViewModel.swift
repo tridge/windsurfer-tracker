@@ -81,6 +81,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.raceTimerMinutes = raceTimerMinutes }
     }
 
+    @Published public var raceTimerTapGForce: Int {
+        didSet { preferences.raceTimerTapGForce = raceTimerTapGForce }
+    }
+
     // MARK: - Race Timer State
 
     @Published public var countdownSeconds: Int? = nil  // nil = not active
@@ -95,7 +99,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     // Tap detection (accelerometer)
     private let motionManager = CMMotionManager()
     private var lastTapTime: Date = .distantPast
-    private let tapThreshold: Double = 25.0  // m/s² above gravity
+    private var tapThreshold: Double {
+        Double(raceTimerTapGForce) * 9.81  // Convert g-force to m/s²
+    }
     private let tapCooldown: TimeInterval = 1.0
     private let gravity: Double = 9.81
 
@@ -130,6 +136,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.trackerBeep = prefs.trackerBeep
         self.raceTimerEnabled = prefs.raceTimerEnabled
         self.raceTimerMinutes = prefs.raceTimerMinutes
+        self.raceTimerTapGForce = prefs.raceTimerTapGForce
 
         super.init()
         setupBindings()
@@ -588,6 +595,12 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         // Announce start
         speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
 
+        // Preload remaining utterances after 2 second delay
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
+            await self.preloadRemainingUtterances(startingFrom: minutes)
+        }
+
         // Start high-frequency timer for accurate timing
         countdownTimer?.invalidate()
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -689,6 +702,37 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 200_000_000)
             device.play(.notification)
         }
+    }
+
+    /// Preload remaining TTS utterances to reduce latency
+    private func preloadRemainingUtterances(startingFrom minutes: Int) async {
+        // Build list of phrases we'll need
+        var phrases: [String] = []
+
+        // Add minute announcements
+        for m in stride(from: minutes - 1, through: 1, by: -1) {
+            phrases.append("\(m) minute\(m > 1 ? "s" : "")")
+        }
+
+        // Add final announcements
+        phrases.append("30 seconds")
+        phrases.append("20 seconds")
+        for s in stride(from: 10, through: 1, by: -1) {
+            phrases.append("\(s)")
+        }
+        phrases.append("Start!")
+
+        // Preload with volume=0 (silent)
+        for phrase in phrases {
+            let utterance = AVSpeechUtterance(string: phrase)
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+            utterance.volume = 0  // Silent preload to warm up TTS engine
+            speechSynthesizer.speak(utterance)
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms between preloads
+        }
+
+        print("[TIMER] Preloaded \(phrases.count) TTS utterances")
     }
 
     // MARK: - Tap Detection (Accelerometer)

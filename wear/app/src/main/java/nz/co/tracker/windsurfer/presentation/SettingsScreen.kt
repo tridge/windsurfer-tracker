@@ -44,6 +44,7 @@ fun SettingsScreen(
     var trackerBeep by remember { mutableStateOf(settings.trackerBeep) }
     var raceTimerEnabled by remember { mutableStateOf(settings.raceTimerEnabled) }
     var raceTimerMinutes by remember { mutableStateOf(settings.raceTimerMinutes) }
+    var raceTimerTapGForce by remember { mutableStateOf(settings.raceTimerTapGForce) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     // Track original auth values to detect changes
@@ -339,6 +340,27 @@ fun SettingsScreen(
                         colors = ChipDefaults.secondaryChipColors()
                     )
                 }
+
+                // Race Timer Tap Sensitivity (g-force)
+                item {
+                    Chip(
+                        onClick = {
+                            // Cycle through 2-9g
+                            raceTimerTapGForce = if (raceTimerTapGForce >= 9) 2 else raceTimerTapGForce + 1
+                        },
+                        label = {
+                            Text(
+                                text = "${raceTimerTapGForce}g",
+                                fontSize = 14.sp
+                            )
+                        },
+                        secondaryLabel = {
+                            Text("Tap sensitivity", fontSize = 9.sp)
+                        },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                }
             }
 
             // Role
@@ -471,7 +493,8 @@ fun SettingsScreen(
                                     heartRateEnabled = heartRateEnabled,
                                     trackerBeep = trackerBeep,
                                     raceTimerEnabled = raceTimerEnabled,
-                                    raceTimerMinutes = raceTimerMinutes
+                                    raceTimerMinutes = raceTimerMinutes,
+                                    raceTimerTapGForce = raceTimerTapGForce
                                 )
                             )
                             onBack()

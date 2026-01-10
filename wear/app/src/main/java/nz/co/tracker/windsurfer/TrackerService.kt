@@ -87,6 +87,7 @@ class TrackerService : LifecycleService() {
     private var heartRateEnabled: Boolean = false
     private var raceTimerEnabled: Boolean = false
     private var raceTimerMinutes: Int = 5
+    private var raceTimerTapGForce: Int = 3  // 2-9g, default 3g
 
     // Broadcast receiver for notification timer actions
     private val timerActionReceiver = object : BroadcastReceiver() {
@@ -230,7 +231,8 @@ class TrackerService : LifecycleService() {
     private var accelerometer: Sensor? = null
     private var lastTapTime: Long = 0
     private val GRAVITY = 9.81f
-    private val TAP_THRESHOLD = 25f  // m/s² above gravity to detect tap
+    private val TAP_THRESHOLD: Float
+        get() = raceTimerTapGForce * GRAVITY  // Convert g-force to m/s²
     private val TAP_COOLDOWN_MS = 1000L  // Prevent multiple triggers
 
     private val tapListener = object : SensorEventListener {
@@ -391,6 +393,7 @@ class TrackerService : LifecycleService() {
             trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
             raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)
             raceTimerMinutes = it.getIntExtra("race_timer_minutes", 5)
+            raceTimerTapGForce = it.getIntExtra("race_timer_tap_g_force", 3).coerceIn(2, 9)
             positionBuffer.clear()
             totalDistance = 0f
             previousLocation = null
@@ -1348,6 +1351,38 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Preload remaining TTS utterances to reduce latency.
+     */
+    private fun preloadRemainingUtterances(startingFromMinutes: Int) {
+        // Build list of phrases we'll need
+        val phrases = mutableListOf<String>()
+
+        // Add minute announcements
+        for (m in (startingFromMinutes - 1) downTo 1) {
+            phrases.add("$m minute${if (m > 1) "s" else ""}")
+        }
+
+        // Add final announcements
+        phrases.add("30 seconds")
+        phrases.add("20 seconds")
+        for (s in 10 downTo 1) {
+            phrases.add("$s")
+        }
+        phrases.add("Start!")
+
+        // Preload with volume=0 (silent)
+        val params = Bundle()
+        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0f)
+
+        phrases.forEach { phrase ->
+            tts?.speak(phrase, TextToSpeech.QUEUE_ADD, params, null)
+            Thread.sleep(100)  // Small delay between queued utterances
+        }
+
+        Log.d(TAG, "Preloaded ${phrases.size} TTS utterances")
+    }
+
+    /**
      * Start the race countdown timer.
      * @param minutes Duration in minutes (1-9)
      */
@@ -1358,6 +1393,12 @@ class TrackerService : LifecycleService() {
         lastAnnouncedSecond = countdownSeconds + 1  // Prevent immediate re-announcement
         countdownRunning = true
         speak("$minutes minute${if (minutes > 1) "s" else ""}")
+
+        // Preload remaining TTS utterances after 2 second delay
+        countdownHandler.postDelayed({
+            preloadRemainingUtterances(minutes)
+        }, 2000L)
+
         countdownHandler.postDelayed(countdownRunnable, 50L)
         statusListener?.onCountdownTick(countdownSeconds)
         Log.d(TAG, "Race countdown started: $minutes minutes")

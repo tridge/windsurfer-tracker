@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private val batteryPercent = mutableIntStateOf(100)
     private val signalLevel = mutableIntStateOf(-1)
     private val ackRate = mutableFloatStateOf(0f)
+    private val lastAckTime = mutableLongStateOf(0L)  // Time of last ACK in millis
     private val eventName = mutableStateOf("")
     private val errorMessage = mutableStateOf<String?>(null)
     private val assistEnabled = mutableStateOf(true)  // Whether assist button should be shown
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 override fun onAckReceived(seq: Int) {
                     // Clear error on successful ACK
                     errorMessage.value = null
+                    lastAckTime.longValue = System.currentTimeMillis()
                 }
 
                 override fun onPacketSent(seq: Int) {
@@ -202,6 +204,7 @@ class MainActivity : ComponentActivity() {
                 batteryPercent = batteryPercent.intValue,
                 signalLevel = signalLevel.intValue,
                 ackRate = ackRate.floatValue,
+                lastAckTime = lastAckTime.longValue,
                 eventName = eventName.value,
                 errorMessage = errorMessage.value,
                 settings = settings.value,
@@ -351,6 +354,7 @@ class MainActivity : ComponentActivity() {
             putExtra("tracker_beep", currentSettings.trackerBeep)
             putExtra("race_timer_enabled", currentSettings.raceTimerEnabled)
             putExtra("race_timer_minutes", currentSettings.raceTimerMinutes)
+            putExtra("race_timer_tap_g_force", currentSettings.raceTimerTapGForce)
         }
 
         startForegroundService(intent)

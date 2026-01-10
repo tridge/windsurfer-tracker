@@ -23,7 +23,8 @@ data class TrackerSettings(
     val heartRateEnabled: Boolean = false,  // Opt-in for health data privacy
     val trackerBeep: Boolean = true,  // Beep once per minute to remind user tracker is running
     val raceTimerEnabled: Boolean = false,  // Race countdown timer
-    val raceTimerMinutes: Int = 5  // Countdown duration (1-9 minutes)
+    val raceTimerMinutes: Int = 5,  // Countdown duration (1-9 minutes)
+    val raceTimerTapGForce: Int = 3  // Tap sensitivity in g-force (2-9g, default 3g)
 )
 
 class SettingsRepository(private val context: Context) {
@@ -39,6 +40,7 @@ class SettingsRepository(private val context: Context) {
         val TRACKER_BEEP = booleanPreferencesKey("tracker_beep")
         val RACE_TIMER_ENABLED = booleanPreferencesKey("race_timer_enabled")
         val RACE_TIMER_MINUTES = intPreferencesKey("race_timer_minutes")
+        val RACE_TIMER_TAP_G_FORCE = intPreferencesKey("race_timer_tap_g_force")
     }
 
     val settingsFlow: Flow<TrackerSettings> = context.dataStore.data.map { prefs ->
@@ -52,7 +54,8 @@ class SettingsRepository(private val context: Context) {
             heartRateEnabled = prefs[PreferencesKeys.HEART_RATE_ENABLED] ?: false,
             trackerBeep = prefs[PreferencesKeys.TRACKER_BEEP] ?: true,
             raceTimerEnabled = prefs[PreferencesKeys.RACE_TIMER_ENABLED] ?: false,
-            raceTimerMinutes = prefs[PreferencesKeys.RACE_TIMER_MINUTES] ?: 5
+            raceTimerMinutes = prefs[PreferencesKeys.RACE_TIMER_MINUTES] ?: 5,
+            raceTimerTapGForce = prefs[PreferencesKeys.RACE_TIMER_TAP_G_FORCE]?.coerceIn(2, 9) ?: 3
         )
     }
 
@@ -68,6 +71,7 @@ class SettingsRepository(private val context: Context) {
             prefs[PreferencesKeys.TRACKER_BEEP] = settings.trackerBeep
             prefs[PreferencesKeys.RACE_TIMER_ENABLED] = settings.raceTimerEnabled
             prefs[PreferencesKeys.RACE_TIMER_MINUTES] = settings.raceTimerMinutes
+            prefs[PreferencesKeys.RACE_TIMER_TAP_G_FORCE] = settings.raceTimerTapGForce
         }
     }
 

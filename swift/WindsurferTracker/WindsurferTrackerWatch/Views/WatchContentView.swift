@@ -25,84 +25,112 @@ struct WatchContentView: View {
     }
 }
 
-/// Pre-tracking config for watch
+/// Pre-tracking config for watch - matches tracking layout
 struct WatchConfigView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
     @Binding var navigateToSettings: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Header with settings gear - left side to avoid clock
-            HStack {
-                NavigationLink(isActive: $navigateToSettings) {
-                    WatchSettingsView(needsSetup: viewModel.needsSetup)
-                        .environmentObject(viewModel)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.body)
-                        .foregroundColor(.gray)
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-            .padding(.leading, 16)
-            .padding(.top, 20)
-
-            Spacer()
-
-            // ID display
+        ZStack {
             VStack(spacing: 4) {
-                Text("ID")
+                // Header with settings gear - top left to avoid clock
+                HStack {
+                    NavigationLink(isActive: $navigateToSettings) {
+                        WatchSettingsView(needsSetup: viewModel.needsSetup)
+                            .environmentObject(viewModel)
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .padding(.leading, 24)
+                .padding(.top, 16)
+
+                // Status: RED "STOPPED"
+                Text("STOPPED")
+                    .font(.caption)
+                    .bold()
+                    .foregroundColor(.red)
+
+                // Event name
+                Text(viewModel.currentEventName.isEmpty ? "---" : viewModel.currentEventName)
                     .font(.caption2)
-                    .foregroundColor(.gray)
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+
+                // Sailor ID with 1Hz indicator
                 HStack(spacing: 4) {
                     Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
-                        .font(.title2)
-                        .bold()
+                        .font(.caption2)
+                        .foregroundColor(.white)
                     if viewModel.highFrequencyMode {
                         Text("1Hz")
-                            .font(.caption2)
+                            .font(.system(size: 10))
                             .bold()
                             .foregroundColor(.cyan)
                     }
                 }
-            }
 
-            // Server
-            Text(viewModel.serverHost)
-                .font(.caption2)
-                .foregroundColor(.gray)
-
-            // Error message
-            if let error = viewModel.errorMessage {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 8)
-            }
-
-            Spacer()
-
-            // Start button - styled like WearOS
-            Button {
-                viewModel.startTracking()
-            } label: {
-                HStack {
-                    Image(systemName: "play.fill")
-                    Text("Start")
-                        .bold()
+                // Speed (always 0 when not tracking)
+                HStack(alignment: .lastTextBaseline, spacing: 2) {
+                    Text("0.0")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("kts")
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
-                .font(.body)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.green)
-                .foregroundColor(.black)
-                .cornerRadius(24)
+
+                // Heart rate + Distance (both 0)
+                HStack(spacing: 12) {
+                    // Heart rate (if enabled, show 0)
+                    if viewModel.heartRateEnabled {
+                        HStack(spacing: 2) {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.red)
+                            Text("0")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                    }
+
+                    // Distance (always 0)
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.triangle.swap")
+                            .font(.system(size: 10))
+                            .foregroundColor(.cyan)
+                        Text("0m")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                Spacer()
+
+                // Start button
+                Button {
+                    viewModel.startTracking()
+                } label: {
+                    HStack {
+                        Image(systemName: "play.fill")
+                        Text("Start")
+                            .bold()
+                    }
+                    .font(.body)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.green)
+                    .foregroundColor(.black)
+                    .cornerRadius(24)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
         }
     }
 }
@@ -142,6 +170,47 @@ struct WatchSettingsView: View {
                         .padding(8)
                         .background(Color.gray.opacity(0.3))
                         .cornerRadius(8)
+                }
+
+                // Password (visible, not SecureField)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Password")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    TextField("", text: $tempPassword)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
+                }
+
+                // Event selection
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Event")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Button {
+                        viewModel.cycleEvent()
+                    } label: {
+                        HStack {
+                            if viewModel.eventsLoading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Text(viewModel.currentEventName)
+                                    .font(.caption)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(8)
+                        .background(Color.gray.opacity(0.3))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Role (tap to cycle)
@@ -257,48 +326,46 @@ struct WatchSettingsView: View {
                         }
                         .frame(maxWidth: .infinity)
                     }
-                }
 
-                // Event selection
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Event")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                    Button {
-                        viewModel.cycleEvent()
-                    } label: {
+                    // Tap sensitivity (g-force threshold)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Tap Sensitivity (G-force)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
                         HStack {
-                            if viewModel.eventsLoading {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                            } else {
-                                Text(viewModel.currentEventName)
-                                    .font(.caption)
+                            Button {
+                                if viewModel.raceTimerTapGForce > 2 {
+                                    viewModel.raceTimerTapGForce -= 1
+                                }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(viewModel.raceTimerTapGForce > 2 ? .blue : .gray)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundColor(.gray)
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.raceTimerTapGForce <= 2)
+
+                            Text("\(viewModel.raceTimerTapGForce)g")
+                                .font(.title3)
+                                .frame(minWidth: 40)
+
+                            Button {
+                                if viewModel.raceTimerTapGForce < 9 {
+                                    viewModel.raceTimerTapGForce += 1
+                                }
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(viewModel.raceTimerTapGForce < 9 ? .blue : .gray)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.raceTimerTapGForce >= 9)
                         }
-                        .padding(8)
-                        .background(Color.gray.opacity(0.3))
-                        .cornerRadius(8)
+                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
                 }
 
-                // Password
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Password")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                    TextField("", text: $tempPassword)
-                        .textFieldStyle(.plain)
-                        .textInputAutocapitalization(.never)
-                        .padding(8)
-                        .background(Color.gray.opacity(0.3))
-                        .cornerRadius(8)
-                }
+                // Event and Password already appear above - duplicates removed
 
                 // Server (at bottom like WearOS)
                 VStack(alignment: .leading, spacing: 4) {

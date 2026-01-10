@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private var serviceBound = false
     private var bindingInProgress = false
     private lateinit var updateChecker: UpdateChecker
+    private var currentEventName: String = ""
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -327,12 +328,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             override fun afterTextChanged(s: android.text.Editable?) {
                 if (!isLoadingPreferences) {
                     savePreferences()
+                    updateIdleScreen()
                 }
             }
         }
         binding.etSailorId.addTextChangedListener(saveOnChange)
-        binding.etServerHost.addTextChangedListener(saveOnChange)
-        binding.etServerPort.addTextChangedListener(saveOnChange)
     }
 
     private fun getDefaultSailorId(): String {
@@ -354,18 +354,34 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             serverHost = "wstracker.org"
             prefs.edit().putString("server_host", serverHost).apply()
         }
-        binding.etServerHost.setText(serverHost)
 
-        binding.etServerPort.setText(prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT).toString())
         isLoadingPreferences = false
+        updateIdleScreen()
+    }
+
+    private fun updateIdleScreen() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val eventId = prefs.getInt("event_id", 2)
+        val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+
+        // Event display (name + ID)
+        val eventText = if (currentEventName.isNotEmpty()) {
+            "$currentEventName (ID: $eventId)"
+        } else {
+            "Event $eventId"
+        }
+        binding.tvIdleEventName.text = eventText
+
+        // Live tracking link
+        val linkText = "Live Tracking: https://$serverHost/event.html?eid=$eventId"
+        binding.tvLiveTrackingLink.text = linkText
     }
     
     private fun savePreferences() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         prefs.edit().apply {
             putString("sailor_id", binding.etSailorId.text.toString())
-            putString("server_host", binding.etServerHost.text.toString())
-            putInt("server_port", binding.etServerPort.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT)
+            // Server host and port are now only in settings dialog, not on main screen
             apply()
         }
     }
@@ -496,20 +512,24 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
         // Save tracking state
         prefs.edit().putBoolean("tracking_active", true).apply()
-        
+
+        // Get server settings from preferences (no longer on main screen)
+        val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+        val serverPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
+
         val intent = Intent(this, TrackerService::class.java).apply {
             putExtra("sailor_id", binding.etSailorId.text.toString())
-            putExtra("server_host", binding.etServerHost.text.toString())
-            putExtra("server_port", binding.etServerPort.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT)
+            putExtra("server_host", serverHost)
+            putExtra("server_port", serverPort)
             putExtra("role", prefs.getString("role", "sailor"))
             putExtra("password", prefs.getString("password", ""))
             putExtra("high_frequency_mode", prefs.getBoolean("high_frequency_mode", false))
         }
-        
+
         ContextCompat.startForegroundService(this, intent)
         bindingInProgress = true
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        
+
         binding.btnStartStop.text = "Stop Tracking"
         binding.statusGroup.visibility = View.VISIBLE
         binding.configGroup.visibility = View.GONE
@@ -998,10 +1018,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
                         }
                         // Always update the binding fields to keep them in sync
-                        // (even when not visible, to prevent savePreferences() from overwriting)
                         binding.etSailorId.setText(sailorId)
-                        binding.etServerHost.setText(newServerHost)
-                        binding.etServerPort.setText(newServerPort.toString())
+                        // Server fields no longer on main screen, only in settings
+                        updateIdleScreen()  // Update event name and live tracking link
 
                         // Auto-restart tracking if any settings changed while tracking
                         val isTracking = trackerService?.isTracking() == true
@@ -1099,6 +1118,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     override fun onEventName(name: String) {
         runOnUiThread {
             binding.tvEventName.text = if (name.isNotEmpty()) name else "---"
+            // Update cached event name and idle screen
+            currentEventName = name
+            updateIdleScreen()
         }
     }
 

@@ -29,7 +29,7 @@ struct WatchTrackingView: View {
                 .padding(.leading, 24)
                 .padding(.top, 16)
 
-                // Status title
+                // Status title with ACK-based color coding
                 if viewModel.assistRequested {
                     HStack(spacing: 4) {
                         Text("⚠")
@@ -45,7 +45,7 @@ struct WatchTrackingView: View {
                     Text("TRACKING")
                         .font(.caption)
                         .bold()
-                        .foregroundColor(.cyan)
+                        .foregroundColor(trackingStatusColor)
                 }
 
                 // Status line (GPS wait, connecting, auth failure, or event name)
@@ -67,49 +67,47 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Show countdown when active, otherwise show speed or START TIMER button
+                // Show countdown when active, otherwise show speed or stopwatch
                 if let countdown = viewModel.countdownSeconds {
                     // Race countdown timer display
-                    let minutes = countdown / 60
-                    let seconds = countdown % 60
-                    let countdownColor: Color = {
-                        if countdown <= 10 { return .red }
-                        if countdown <= 30 { return .yellow }
-                        return .cyan
-                    }()
+                    if countdown > 0 {
+                        // Timer running - show remaining time
+                        let minutes = countdown / 60
+                        let seconds = countdown % 60
+                        let countdownColor: Color = {
+                            if countdown <= 10 { return .red }
+                            if countdown <= 30 { return .yellow }
+                            return .cyan
+                        }()
 
-                    VStack(spacing: 2) {
-                        Text(String(format: "%d:%02d", minutes, seconds))
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundColor(countdownColor)
-                        Text(countdown == 0 ? "START!" : "Tap to reset")
-                            .font(.caption2)
-                            .foregroundColor(countdownColor)
-                    }
-                    .onTapGesture {
-                        viewModel.resetCountdown()
+                        VStack(spacing: 2) {
+                            Text(String(format: "%d:%02d", minutes, seconds))
+                                .font(.system(size: 42, weight: .bold, design: .rounded))
+                                .foregroundColor(countdownColor)
+                        }
+                    } else {
+                        // Timer expired - show speed until reset
+                        HStack(alignment: .lastTextBaseline, spacing: 2) {
+                            Text(speedText)
+                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("kts")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                 } else if viewModel.raceTimerEnabled {
-                    // Show START TIMER button when race timer enabled but not running
-                    Button {
-                        viewModel.startCountdown()
-                    } label: {
-                        HStack {
-                            Image(systemName: "play.fill")
-                                .font(.caption)
-                            Text("START TIMER")
-                                .font(.caption)
-                                .bold()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.teal)
-                        .foregroundColor(.white)
-                        .cornerRadius(16)
+                    // Waiting for start - show stopwatch icon + time (no START button)
+                    HStack(spacing: 4) {
+                        Image(systemName: "stopwatch")
+                            .font(.title)
+                            .foregroundColor(.cyan)
+                        Text(String(format: "%d:%02d", viewModel.raceTimerMinutes, 0))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
                     }
-                    .buttonStyle(.plain)
                 } else {
-                    // Speed - large and prominent, kts inline to save space
+                    // Normal speed display (no race timer)
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
                         Text(speedText)
                             .font(.system(size: 36, weight: .bold, design: .rounded))
@@ -117,16 +115,6 @@ struct WatchTrackingView: View {
                         Text("kts")
                             .font(.caption)
                             .foregroundColor(.gray)
-                    }
-
-                    // Distance traveled (only when no timer)
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.triangle.swap")
-                            .font(.system(size: 10))
-                            .foregroundColor(.cyan)
-                        Text(distanceText)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
                     }
                 }
 
@@ -157,36 +145,7 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Status row: ACK rate, sent/acked counts, connection indicator
-                HStack(spacing: 8) {
-                    // ACK rate percentage
-                    Text("\(viewModel.ackRatePercent)%")
-                        .font(.caption2)
-                        .bold()
-                        .foregroundColor(ackRateColor)
-
-                    // Sent/Acked counts
-                    Text("\(viewModel.packetsAcked)/\(viewModel.packetsSent)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.gray)
-
-                    // Connection dot
-                    Circle()
-                        .fill(connectionColor)
-                        .frame(width: 8, height: 8)
-                }
-
-                // Tap to stop hint + workout state
-                HStack(spacing: 4) {
-                    Text("Tap to stop")
-                        .font(.system(size: 10))
-                        .foregroundColor(.gray)
-                    if !viewModel.workoutState.isEmpty {
-                        Text("• \(viewModel.workoutState)")
-                            .font(.system(size: 10))
-                            .foregroundColor(viewModel.workoutState == "running" ? .green : .orange)
-                    }
-                }
+                // ACK% and "Tap to stop" lines removed - status shown via color coding above
 
                 // Error message
                 if let error = viewModel.errorMessage {
@@ -265,6 +224,22 @@ struct WatchTrackingView: View {
             return .red
         } else {
             return .gray
+        }
+    }
+
+    /// Color for TRACKING status based on last ACK time
+    private var trackingStatusColor: Color {
+        guard let lastAck = viewModel.connectionStatus.lastAckTime else {
+            return .red  // No ACK received yet
+        }
+
+        let timeSinceAck = Date().timeIntervalSince(lastAck)
+        if timeSinceAck < 30 {
+            return .green  // ACK within last 30s
+        } else if timeSinceAck < 60 {
+            return .orange  // ACK between 30-60s ago
+        } else {
+            return .red  // ACK more than 60s ago
         }
     }
 }

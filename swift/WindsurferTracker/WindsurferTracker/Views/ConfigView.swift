@@ -4,13 +4,16 @@ import SwiftUI
 struct ConfigView: View {
     @EnvironmentObject var viewModel: TrackerViewModel
     @State private var tempSailorId: String = ""
-    @State private var tempServerHost: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             // Configuration fields
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Spacing at top
+                    Spacer()
+                        .frame(height: 24)
+
                     // Your Name
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Your Name")
@@ -25,21 +28,29 @@ struct ConfigView: View {
                             .cornerRadius(4)
                     }
 
-                    // Server Address
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Server Address")
-                            .font(.headline)
-                            .foregroundColor(.black)
-
-                        TextField("IP address or hostname", text: $tempServerHost)
+                    // Event Display (name + ID)
+                    if !viewModel.eventName.isEmpty {
+                        Text("\(viewModel.eventName) (ID: \(viewModel.eventId))")
                             .font(.body)
-                            .padding(12)
-                            .background(Color(white: 0.93))
-                            .foregroundColor(.black)
-                            .cornerRadius(4)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                            .fontWeight(.bold)
+                            .foregroundColor(Color(red: 0.0, green: 0.4, blue: 0.67))
+                    } else {
+                        Text("Event \(viewModel.eventId)")
+                            .font(.body)
+                            .fontWeight(.bold)
+                            .foregroundColor(Color(red: 0.0, green: 0.4, blue: 0.67))
                     }
+
+                    // Live Tracking Link (opens in default browser)
+                    if let url = URL(string: "https://\(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)") {
+                        Link(destination: url) {
+                            Text("Live Tracking: \(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        }
+                    }
+
+                    // Server Address removed - now only in Settings
 
                     // Permission warning
                     if viewModel.needsLocationPermission {
@@ -106,20 +117,18 @@ struct ConfigView: View {
         .background(Color.white)
         .onAppear {
             tempSailorId = viewModel.sailorId
-            tempServerHost = viewModel.serverHost
         }
         .onChange(of: viewModel.showSettings) { isShowing in
             // Refresh temp values when settings sheet closes
             if !isShowing {
                 tempSailorId = viewModel.sailorId
-                tempServerHost = viewModel.serverHost
             }
         }
     }
 
     private func saveFields() {
         viewModel.sailorId = tempSailorId
-        viewModel.serverHost = tempServerHost
+        // Server host is now only in Settings, not on config screen
     }
 }
 

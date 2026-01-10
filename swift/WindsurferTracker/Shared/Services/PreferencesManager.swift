@@ -23,6 +23,7 @@ public final class PreferencesManager: ObservableObject {
         static let batteryOptAsked = "battery_opt_asked"
         static let raceTimerEnabled = "race_timer_enabled"
         static let raceTimerMinutes = "race_timer_minutes"
+        static let raceTimerTapGForce = "race_timer_tap_g_force"
     }
 
     // MARK: - Published Properties
@@ -83,6 +84,10 @@ public final class PreferencesManager: ObservableObject {
         didSet { defaults.set(raceTimerMinutes, forKey: Keys.raceTimerMinutes) }
     }
 
+    @Published public var raceTimerTapGForce: Int {
+        didSet { defaults.set(raceTimerTapGForce, forKey: Keys.raceTimerTapGForce) }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -123,6 +128,8 @@ public final class PreferencesManager: ObservableObject {
         self.raceTimerEnabled = defaults.bool(forKey: Keys.raceTimerEnabled)  // Default false
         let minutes = defaults.integer(forKey: Keys.raceTimerMinutes)
         self.raceTimerMinutes = minutes > 0 ? min(minutes, 9) : 5  // Default 5, range 1-9
+        let gForce = defaults.integer(forKey: Keys.raceTimerTapGForce)
+        self.raceTimerTapGForce = gForce > 0 ? min(max(gForce, 2), 9) : 3  // Default 3g, range 2-9g
     }
 
     // MARK: - Convenience Methods
@@ -156,6 +163,7 @@ public final class PreferencesManager: ObservableObject {
         batteryOptAsked = false
         raceTimerEnabled = false
         raceTimerMinutes = 5
+        raceTimerTapGForce = 3
     }
 
     /// Get current configuration summary for display
