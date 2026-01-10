@@ -387,8 +387,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             }
         }
 
-        // Live tracking link
-        val linkText = "Live Tracking: https://$serverHost/event.html?eid=$eventId"
+        // Live tracking link (just URL, label is separate)
+        val linkText = "https://$serverHost/event.html?eid=$eventId"
         binding.tvLiveTrackingLink.text = linkText
     }
     
