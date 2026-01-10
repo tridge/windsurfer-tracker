@@ -1361,38 +1361,6 @@ class TrackerService : LifecycleService() {
     }
 
     /**
-     * Preload remaining TTS utterances to reduce latency.
-     */
-    private fun preloadRemainingUtterances(startingFromMinutes: Int) {
-        // Build list of phrases we'll need
-        val phrases = mutableListOf<String>()
-
-        // Add minute announcements
-        for (m in (startingFromMinutes - 1) downTo 1) {
-            phrases.add("$m minute${if (m > 1) "s" else ""}")
-        }
-
-        // Add final announcements
-        phrases.add("30 seconds")
-        phrases.add("20 seconds")
-        for (s in 10 downTo 1) {
-            phrases.add("$s")
-        }
-        phrases.add("Start!")
-
-        // Preload with volume=0 (silent)
-        val params = Bundle()
-        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0f)
-
-        phrases.forEach { phrase ->
-            tts?.speak(phrase, TextToSpeech.QUEUE_ADD, params, null)
-            Thread.sleep(100)  // Small delay between queued utterances
-        }
-
-        Log.d(TAG, "Preloaded ${phrases.size} TTS utterances")
-    }
-
-    /**
      * Start the race countdown timer.
      * @param minutes Duration in minutes (1-9)
      */
@@ -1403,11 +1371,6 @@ class TrackerService : LifecycleService() {
         lastAnnouncedSecond = countdownSeconds  // Prevent duplicate announcement at same second
         countdownRunning = true
         speak("$minutes minute${if (minutes > 1) "s" else ""}")
-
-        // Preload remaining TTS utterances after 2 second delay
-        countdownHandler.postDelayed({
-            preloadRemainingUtterances(minutes)
-        }, 2000L)
 
         countdownHandler.postDelayed(countdownRunnable, 50L)
         statusListener?.onCountdownTick(countdownSeconds)

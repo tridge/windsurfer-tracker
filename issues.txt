@@ -1,0 +1,118 @@
+Issues in version v1.9.18
+
+Android Phone app Issues
+------------------------
+
+The "Your Name" label on idle screen is corrupted, move it lower (more
+while space at top of screen)
+
+On idle screen show "Your Name" and the event (event name and ID)
+
+Do not show "Server Address" or "Server Port", those should only be on
+the settings page.
+
+also show a web link "Live Tracking: https://wstracker.org/event.html?eid=2" with the
+URL derived from the server in settings and the selected event ID
+
+why does it spend so much time in "connecting ..." state on starting
+tracking? Is it waiting for better GPS lock? If that is the issue it
+should be showing "waiting for GPS"
+
+iPhone app issues
+-----------------
+
+should not auto-start tracking when app opened
+
+On idle screen show "Your Name" and the event (event name and ID)
+
+Do not show "Server Address" or "Server Port", those should only be on
+the settings page.
+
+also show a web link "Live Tracking: https://wstracker.org/event.html?eid=2" with the
+URL derived from the server in settings and the selected event ID
+
+why does it spend so much time in "connecting ..." state on starting
+tracking? Is it waiting for better GPS lock? If that is the issue it
+should be showing "waiting for GPS"
+
+
+Apple Watch App Issues
+----------------------
+
+On idle screen show same basic layout as when tracking.
+
+Top row of text when idle should be red STOPPED
+
+Below that should be the event name
+
+below that should be user name and either 1Hz or 0.1Hz
+
+below that speed and kts
+below that heartbeat (if enabled) and distance (as for tracking
+screen). Distance should be 0 when not tracking
+
+remove the percentage ack line completely, we will instead change the
+color of the "TRACKING" line at the top. Colors should be:
+
+ - red: not tracking
+ - green: when we have had an ack in the last 30s
+ - orange: when last ack was between 30s and 1 minute
+ - red: when no ack for more than 1 minute
+
+remove the "tap to stop" line completely
+
+In settings the top item should be "Your Name" then below that the
+password (not hidden) then the event, then the role, then 1Hz mode,
+heart rate, tracking buzz and race timer. Server should be last item
+
+within race timer allow the g-force of the tap to start/reset be
+settable in units of 1-g (9.81 m/s/s), mininum 2g, maximum 9g, default
+3g (measured as vector length over 1g).
+
+In the speech output for the race timer can we preload the speech? It
+has a long delay.
+
+remove the start timer button when tracking and race timer enabled,
+will only be triggered by action button (if available) or g-force
+
+when start timer enabled and waiting activation replace the speed
+display with a stopwatch symbol followed by the time in
+mins:secs. When timer is running show remaining time. After timer is
+expired go back to displaying speed until a reset is done. After reset
+is done go back to displaying stopwatch and time.
+
+is there a way to show the remaining time in the start timer on the
+clock screen you get when the watch is idle or locked?
+
+
+Wearos Watch App Issues
+-----------------------
+
+remove the percentage ack line completely, we will instead change the
+color of the "TRACKING" line at the top. Colors should be:
+
+ - red: not tracking
+ - green: when we have had an ack in the last 30s
+ - orange: when last ack was between 30s and 1 minute
+ - red: when no ack for more than 1 minute
+
+remove the "tap to stop/start" line completely
+
+within race timer allow the g-force of the tap to start/reset be
+settable in units of 1-g (9.81 m/s/s), mininum 2g, default 3g
+(measured as vector length over 1g).
+
+In the speech output for the race timer can we preload the speech?
+
+remove the start timer button when tracking and race timer enabled,
+will only be triggered by g-force
+
+when start timer enabled and waiting activation replace the speed
+display with a stopwatch symbol followed by the time in
+mins:secs. When timer is running show remaining time. After timer is
+expired go back to displaying speed until a reset is done. After reset
+is done go back to displaying stopwatch and time.
+
+is there a way to show the remaining time in the start timer on the
+clock screen you get when the watch is idle or locked? maybe by
+registering a "complication" the user can select?

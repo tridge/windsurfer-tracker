@@ -1,0 +1,41 @@
+{
+  "date": "2026_01_02",
+  "generated": 1767298864.670906,
+  "generated_iso": "2026-01-02T07:21:04.670907",
+  "logs": [
+    {
+      "file": "2026_01_02.jsonl",
+      "index": 0,
+      "start_ts": 1767308700,
+      "end_ts": 1767311460,
+      "point_count": 1385,
+      "sailors": {
+        "Test01": {
+          "points": 277,
+          "first_ts": 1767308700,
+          "last_ts": 1767311460
+        },
+        "Test02": {
+          "points": 277,
+          "first_ts": 1767308700,
+          "last_ts": 1767311460
+        },
+        "Test03": {
+          "points": 277,
+          "first_ts": 1767308700,
+          "last_ts": 1767311460
+        },
+        "V01": {
+          "points": 277,
+          "first_ts": 1767308700,
+          "last_ts": 1767311460
+        },
+        "V02": {
+          "points": 277,
+          "first_ts": 1767308700,
+          "last_ts": 1767311460
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "date": "2026_01_01",
+  "generated": 1767302791.0030153,
+  "generated_iso": "2026-01-02T08:26:31.003017",
+  "logs": [
+    {
+      "file": "2026_01_01.jsonl",
+      "index": 0,
+      "start_ts": 1767222309,
+      "end_ts": 1767235999,
+      "point_count": 29022,
+      "sailors": {
+        "Test01": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test02": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test03": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test04": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test05": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test06": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test07": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test08": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test09": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test10": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test11": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test12": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test13": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test14": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test15": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test16": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test17": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test18": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test19": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Test20": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        },
+        "Rescue01": {
+          "points": 1382,
+          "first_ts": 1767222309,
+          "last_ts": 1767235999
+        }
+      }
+    }
+  ]
+}

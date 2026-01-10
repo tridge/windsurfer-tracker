@@ -74,6 +74,9 @@ targets:
     sources:
       - Shared
       - WindsurferTrackerWatch
+    resources:
+      - path: WindsurferTrackerWatch/Resources/Audio
+        type: folder
     dependencies:
       - sdk: HealthKit.framework
     entitlements:

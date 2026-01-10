@@ -96,6 +96,7 @@ struct WatchTrackingView: View {
                             }
                         }
 
+                        #if targetEnvironment(simulator)
                         // Reset button for simulator testing
                         Button(action: {
                             viewModel.resetCountdown()
@@ -109,6 +110,7 @@ struct WatchTrackingView: View {
                                 .cornerRadius(4)
                         }
                         .buttonStyle(.plain)
+                        #endif
                     }
                 } else if viewModel.raceTimerEnabled {
                     // Waiting for start - show stopwatch icon + time
@@ -122,6 +124,7 @@ struct WatchTrackingView: View {
                                 .foregroundColor(.white)
                         }
 
+                        #if targetEnvironment(simulator)
                         // Test buttons for simulator (no accelerometer available)
                         HStack(spacing: 8) {
                             Button(action: {
@@ -150,6 +153,7 @@ struct WatchTrackingView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        #endif
                     }
                 } else {
                     // Normal speed display (no race timer)

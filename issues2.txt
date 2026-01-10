@@ -1,0 +1,27 @@
+ensure apple watch app is sending the special "stop" JSON when
+tracking is stopped by the user
+
+add screen complications
+
+android
+-------
+
+show event name and eid on idle screen, not just eid
+
+add white space above the top line of tracking screen (corrupted text)
+
+make settings screen scrollable, bottom row is cut off
+
+still takes a long time to start tracking. Maybe it doesn't try to
+send until 10s have passed? should send first pkt as soon as GPS lock
+available
+
+settings shown on idle screen should not be editable, just info
+display
+
+iPhone
+------
+
+settings shown on idle screen should not be editable, just info
+display
+

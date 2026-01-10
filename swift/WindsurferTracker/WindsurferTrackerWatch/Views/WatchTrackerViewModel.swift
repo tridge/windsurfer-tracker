@@ -93,8 +93,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     private var lastAnnouncedSecond: Int = -1
     private let ttsLatencySeconds: TimeInterval = 0.25  // Announce early to compensate for TTS delay
 
-    // TTS
-    private let speechSynthesizer = AVSpeechSynthesizer()
+    // Audio playback
+    private var audioPlayer: WKAudioFilePlayer?
 
     // Tap detection (accelerometer)
     private let motionManager = CMMotionManager()
@@ -144,12 +144,18 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     }
 
     private func setupAudioSession() {
-        // Configure audio session for TTS to work alongside other audio
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers, .duckOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
+            let session = AVAudioSession.sharedInstance()
+
+            // Use .playback category with .voicePrompt mode
+            // .voicePrompt tells watchOS this is voice content meant for the speaker
+            // This is what AVSpeechSynthesizer used and routes to built-in speaker
+            try session.setCategory(.playback, mode: .voicePrompt, options: [])
+            try session.setActive(true)
+
+            print("[AUDIO] Audio session configured with voicePrompt mode")
         } catch {
-            print("[TTS] Audio session setup failed: \(error)")
+            print("[AUDIO] Failed to setup audio session: \(error.localizedDescription)")
         }
     }
 
@@ -579,10 +585,70 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     // MARK: - Race Timer
 
     private func speak(_ text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        speechSynthesizer.speak(utterance)
+        print("[AUDIO] Playing: \"\(text)\"")
+
+        // Map text to audio filename
+        let filename: String
+        switch text {
+        case "9 minutes": filename = "9_minutes"
+        case "8 minutes": filename = "8_minutes"
+        case "7 minutes": filename = "7_minutes"
+        case "6 minutes": filename = "6_minutes"
+        case "5 minutes": filename = "5_minutes"
+        case "4 minutes": filename = "4_minutes"
+        case "3 minutes": filename = "3_minutes"
+        case "2 minutes": filename = "2_minutes"
+        case "1 minute": filename = "1_minute"
+        case "30 seconds": filename = "30_seconds"
+        case "20 seconds": filename = "20_seconds"
+        case "10": filename = "10"
+        case "9": filename = "9"
+        case "8": filename = "8"
+        case "7": filename = "7"
+        case "6": filename = "6"
+        case "5": filename = "5"
+        case "4": filename = "4"
+        case "3": filename = "3"
+        case "2": filename = "2"
+        case "1": filename = "1"
+        case "Start!": filename = "start"
+        case "reset": filename = "reset"
+        default:
+            print("[AUDIO] No audio file for: \"\(text)\"")
+            return
+        }
+
+        // Load audio file from bundle
+        // Try with subdirectory first
+        var url = Bundle.main.url(forResource: filename, withExtension: "m4a", subdirectory: "Audio")
+
+        // If not found, try without subdirectory
+        if url == nil {
+            url = Bundle.main.url(forResource: filename, withExtension: "m4a")
+        }
+
+        // If still not found, try looking in Resources/Audio
+        if url == nil {
+            url = Bundle.main.url(forResource: filename, withExtension: "m4a", subdirectory: "Resources/Audio")
+        }
+
+        guard let audioURL = url else {
+            print("[AUDIO] Audio file not found: \(filename).m4a")
+            print("[AUDIO] Bundle path: \(Bundle.main.bundlePath)")
+            print("[AUDIO] Bundle resources: \(Bundle.main.paths(forResourcesOfType: "m4a", inDirectory: nil))")
+            return
+        }
+
+        // Stop any currently playing audio
+        audioPlayer?.pause()
+
+        // Create WKAudioFilePlayer - designed for watchOS audio playback
+        let player = WKAudioFilePlayer(playerItem: WKAudioFilePlayerItem(asset: WKAudioFileAsset(url: audioURL)))
+        audioPlayer = player
+
+        // Play audio
+        player.play()
+        print("[AUDIO] ✓ Playing \(filename).m4a with WKAudioFilePlayer")
     }
 
     /// Start the race countdown timer
@@ -594,12 +660,6 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         // Announce start
         speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
-
-        // Preload remaining utterances after 2 second delay
-        Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
-            await self.preloadRemainingUtterances(startingFrom: minutes)
-        }
 
         // Start high-frequency timer for accurate timing
         countdownTimer?.invalidate()
@@ -704,41 +764,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// Preload remaining TTS utterances to reduce latency
-    private func preloadRemainingUtterances(startingFrom minutes: Int) async {
-        // Build list of phrases we'll need
-        var phrases: [String] = []
-
-        // Add minute announcements
-        for m in stride(from: minutes - 1, through: 1, by: -1) {
-            phrases.append("\(m) minute\(m > 1 ? "s" : "")")
-        }
-
-        // Add final announcements
-        phrases.append("30 seconds")
-        phrases.append("20 seconds")
-        for s in stride(from: 10, through: 1, by: -1) {
-            phrases.append("\(s)")
-        }
-        phrases.append("Start!")
-
-        // Preload with volume=0 (silent)
-        for phrase in phrases {
-            let utterance = AVSpeechUtterance(string: phrase)
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-            utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-            utterance.volume = 0  // Silent preload to warm up TTS engine
-            speechSynthesizer.speak(utterance)
-            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms between preloads
-        }
-
-        print("[TIMER] Preloaded \(phrases.count) TTS utterances")
-    }
-
     // MARK: - Tap Detection (Accelerometer)
 
     public func startTapDetection() {
-        guard raceTimerEnabled else { return }
+        guard raceTimerEnabled else {
+            print("[TAP] Race timer not enabled, tap detection disabled")
+            return
+        }
         guard motionManager.isAccelerometerAvailable else {
             print("[TAP] Accelerometer not available")
             return
@@ -761,11 +793,12 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 let now = Date()
                 if now.timeIntervalSince(self.lastTapTime) > self.tapCooldown {
                     self.lastTapTime = now
+                    print("[TAP] Tap detected! Acceleration: \(String(format: "%.1f", accelAboveGravity)) m/s² (threshold: \(String(format: "%.1f", self.tapThreshold)))")
                     self.handleTap()
                 }
             }
         }
-        print("[TAP] Tap detection started")
+        print("[TAP] Tap detection started - threshold: \(String(format: "%.1f", tapThreshold)) m/s² (\(raceTimerTapGForce)g)")
     }
 
     public func stopTapDetection() {
@@ -774,6 +807,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     }
 
     private func handleTap() {
+        print("[TAP] Handle tap - countdown running: \(isCountdownRunning)")
         if isCountdownRunning {
             resetCountdown()
         } else {

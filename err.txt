@@ -1,0 +1,34 @@
+
+Error getting activity mode Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+<HKWorkoutSession:0x16db7ab0 C7044AA7-AB6C-4AEF-9F01-80478717F570 not started [Primary]>: Failed to setup task server with error: Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+<HKWorkoutSession:0x16db7ab0 C7044AA7-AB6C-4AEF-9F01-80478717F570 not started [Primary]>: (#w0) Failed to update requested target state to Running(2): Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+Unable to update workout builder server's data sources with error: Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+Unable to update workout builder server's data sources with error: Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+HKLiveWorkoutBuilder_6F52 [F570]: (#w0) Failed to update target construction state: Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+[NET] UDP send seq=1 to wstracker.org:41234 -> wstracker.org
+[NET] Creating new UDP connection...
+Workout session error: Missing com.apple.developer.healthkit entitlement.
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP connection state changed: preparing
+Unable to start task server CDF20DEF-EE4C-42DF-8964-9D40811E6EB7 with error: Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement." UserInfo={NSLocalizedDescription=Missing com.apple.developer.healthkit entitlement.}
+nw_endpoint_flow_failed_with_error [C1 wstracker.org:41234 waiting parent-flow (unsatisfied (Path was denied by NECP policy), interface: ipsec1, ipv4, ipv6, proxy)] already failing, returning
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP send seq=2 to wstracker.org:41234 -> wstracker.org
+[NET] Creating new UDP connection...
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP connection state changed: preparing
+nw_endpoint_flow_failed_with_error [C2 wstracker.org:41234 waiting parent-flow (unsatisfied (Path was denied by NECP policy), interface: ipsec1, ipv4, ipv6, proxy)] already failing, returning
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP send seq=3 to wstracker.org:41234 -> wstracker.org
+[NET] Creating new UDP connection...
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP connection state changed: preparing
+nw_endpoint_flow_failed_with_error [C3 wstracker.org:41234 waiting parent-flow (unsatisfied (Path was denied by NECP policy), interface: ipsec1, ipv4, ipv6, proxy)] already failing, returning
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP send seq=4 to wstracker.org:41234 -> wstracker.org
+[NET] Creating new UDP connection...
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+[NET] UDP connection state changed: preparing
+nw_endpoint_flow_failed_with_error [C4 wstracker.org:41234 waiting parent-flow (unsatisfied (Path was denied by NECP policy), interface: ipsec1, ipv4, ipv6, proxy)] already failing, returning
+[NET] UDP connection state changed: waiting(POSIXErrorCode(rawValue: 50): Network is down)
+
