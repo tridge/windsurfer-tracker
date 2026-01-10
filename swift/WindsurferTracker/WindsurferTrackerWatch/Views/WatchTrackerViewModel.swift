@@ -661,8 +661,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         countdownTargetTime = Date().addingTimeInterval(TimeInterval(minutes * 60))
         lastAnnouncedSecond = minutes * 60  // Prevent duplicate announcement at same second
 
-        // Announce start
-        speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
+        // Announce start - bell first, then speech
+        let device = WKInterfaceDevice.current()
+        device.play(.notification)
+        Task {
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 300ms delay
+            await MainActor.run { self.speak("\(minutes) minute\(minutes > 1 ? "s" : "")") }
+        }
 
         // Start high-frequency timer for accurate timing
         countdownTimer?.invalidate()
@@ -731,23 +736,35 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         switch seconds {
         case let s where s % 60 == 0 && s > 0:
-            // Each minute
+            // Each minute - bell first, then speech
             let minutes = s / 60
-            speak("\(minutes) minute\(minutes > 1 ? "s" : "")")
             device.play(.notification)
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 300ms delay
+                await MainActor.run { self.speak("\(minutes) minute\(minutes > 1 ? "s" : "")") }
+            }
 
         case 30:
-            speak("30 seconds")
             device.play(.notification)
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await MainActor.run { self.speak("30 seconds") }
+            }
 
         case 20:
-            speak("20 seconds")
             device.play(.notification)
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await MainActor.run { self.speak("20 seconds") }
+            }
 
         case 1...10:
-            // Final 10 seconds
-            speak("\(seconds)")
+            // Final 10 seconds - click then speech
             device.play(.click)
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms delay
+                await MainActor.run { self.speak("\(seconds)") }
+            }
 
         default:
             break
