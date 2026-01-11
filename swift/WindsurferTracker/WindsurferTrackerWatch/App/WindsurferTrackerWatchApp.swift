@@ -22,9 +22,11 @@ struct WindsurferTrackerWatchApp: App {
                     }
                 }
                 .onContinueUserActivity("com.apple.watchkit.action-button") { _ in
-                    // Handle Action button press
-                    print("[ACTION] Action button via onContinueUserActivity")
-                    viewModel.handleActionButton()
+                    // Handle Action button press (race timer disabled for this release)
+                    if RACE_TIMER_FEATURE_ENABLED {
+                        print("[ACTION] Action button via onContinueUserActivity")
+                        viewModel.handleActionButton()
+                    }
                 }
         }
     }
@@ -39,10 +41,10 @@ class AppDelegate: NSObject, WKApplicationDelegate {
         print("[ACTION] App became active")
     }
 
-    // Handle Action button press when app is in foreground
+    // Handle Action button press when app is in foreground (race timer disabled for this release)
     func handleUserActivity(_ userActivity: NSUserActivity) {
         print("[ACTION] handleUserActivity: \(userActivity.activityType)")
-        if userActivity.activityType == "com.apple.watchkit.action-button" {
+        if RACE_TIMER_FEATURE_ENABLED && userActivity.activityType == "com.apple.watchkit.action-button" {
             print("[ACTION] Action button pressed!")
             Task { @MainActor in
                 viewModel?.handleActionButton()

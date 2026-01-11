@@ -68,7 +68,8 @@ struct WatchTrackingView: View {
                 }
 
                 // Show countdown when active, otherwise show speed or stopwatch
-                if let countdown = viewModel.countdownSeconds {
+                // Race timer feature is disabled for this release
+                if RACE_TIMER_FEATURE_ENABLED, let countdown = viewModel.countdownSeconds {
                     // Race countdown timer display
                     VStack(spacing: 4) {
                         if countdown > 0 {
@@ -96,23 +97,8 @@ struct WatchTrackingView: View {
                             }
                         }
 
-                        #if targetEnvironment(simulator)
-                        // Simulate Action button for testing
-                        Button(action: {
-                            viewModel.handleActionButton()
-                        }) {
-                            Text("ACTION")
-                                .font(.caption2)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.5))
-                                .cornerRadius(4)
-                        }
-                        .buttonStyle(.plain)
-                        #endif
                     }
-                } else if viewModel.raceTimerEnabled {
+                } else if RACE_TIMER_FEATURE_ENABLED && viewModel.raceTimerEnabled {
                     // Waiting for start - show stopwatch icon + time
                     VStack(spacing: 4) {
                         HStack(spacing: 4) {
@@ -123,22 +109,6 @@ struct WatchTrackingView: View {
                                 .font(.system(size: 36, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
                         }
-
-                        #if targetEnvironment(simulator)
-                        // Simulate Action button for testing (no accelerometer in simulator)
-                        Button(action: {
-                            viewModel.handleActionButton()
-                        }) {
-                            Text("ACTION")
-                                .font(.caption2)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.5))
-                                .cornerRadius(4)
-                        }
-                        .buttonStyle(.plain)
-                        #endif
                     }
                 } else {
                     // Normal speed display (no race timer)

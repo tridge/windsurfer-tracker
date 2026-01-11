@@ -1,6 +1,10 @@
 import SwiftUI
 import WatchKit
 
+// Feature flag: Race timer is disabled for this release due to audio issues
+// Set to true to re-enable race timer functionality
+let RACE_TIMER_FEATURE_ENABLED = false
+
 /// Main watch view with compact interface
 struct WatchContentView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
@@ -280,19 +284,21 @@ struct WatchSettingsView: View {
                     }
                 }
 
-                // Race Timer
-                Toggle(isOn: $viewModel.raceTimerEnabled) {
-                    VStack(alignment: .leading) {
-                        Text("Race Timer")
-                            .font(.caption)
-                        Text("Countdown with voice")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
+                // Race Timer (disabled for this release)
+                if RACE_TIMER_FEATURE_ENABLED {
+                    Toggle(isOn: $viewModel.raceTimerEnabled) {
+                        VStack(alignment: .leading) {
+                            Text("Race Timer")
+                                .font(.caption)
+                            Text("Countdown with voice")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
 
                 // Timer minutes (only show if race timer enabled)
-                if viewModel.raceTimerEnabled {
+                if RACE_TIMER_FEATURE_ENABLED && viewModel.raceTimerEnabled {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Countdown Minutes")
                             .font(.caption)

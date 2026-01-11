@@ -140,7 +140,9 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         super.init()
         setupBindings()
-        setupAudioSession()
+        if RACE_TIMER_FEATURE_ENABLED {
+            setupAudioSession()
+        }
     }
 
     private func setupAudioSession() {
