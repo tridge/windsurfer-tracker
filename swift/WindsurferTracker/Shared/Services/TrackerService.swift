@@ -21,6 +21,7 @@ public actor TrackerService {
     public nonisolated let errorPublisher = PassthroughSubject<TrackerError, Never>()
     public nonisolated let assistEnabledPublisher = CurrentValueSubject<Bool, Never>(true)  // Whether assist button should be shown
     public nonisolated let remoteStopPublisher = PassthroughSubject<Void, Never>()  // Signals remote stop command from server
+    public nonisolated let remoteCancelAssistPublisher = PassthroughSubject<Void, Never>()  // Signals remote cancel assist command from server
 
     // MARK: - State
 
@@ -447,6 +448,13 @@ public actor TrackerService {
             print("[TrackerService] Received remote STOP command from server")
             remoteStopPublisher.send()
             await stop()
+        }
+
+        // Check for remote cancel assist command
+        if response.isCancelAssistCommand {
+            print("[TrackerService] Received remote CANCEL ASSIST command from server")
+            assistRequested = false
+            remoteCancelAssistPublisher.send()
         }
 
         updateConnectionStatus()

@@ -755,6 +755,23 @@
             background: #b91c1c;
         }
 
+        .popup-cancel-assist-btn {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 2px 8px;
+            background: #f97316;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .popup-cancel-assist-btn:hover {
+            background: #ea580c;
+        }
+
         .popup-move-btn {
             display: inline-block;
             margin-left: 4px;
@@ -2187,6 +2204,33 @@
             }
         }
 
+        // Send remote cancel assist command to a user
+        async function cancelAssistUser(userId) {
+            if (!confirm(`Cancel assistance request for ${userId}? Their assist flag will be cleared within 30 seconds.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/cancel-assist/${encodeURIComponent(userId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    // Close any open popups and show feedback
+                    map.closePopup();
+                    alert(`Cancel assist command sent to ${userId}. Their assist flag will be cleared within 30 seconds.`);
+                } else {
+                    alert(`Failed to send cancel assist command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending cancel assist command:', error);
+                alert(`Error sending cancel assist command: ${error.message}`);
+            }
+        }
+
         async function saveEditUser() {
             if (!editingUserId) return;
 
@@ -3337,6 +3381,7 @@
                 const nameExtra = sailor.name ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
+                const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
 
                 const versionStr = sailor.ver || 'Unknown';
                 const osStr = sailor.os || '';
@@ -3367,7 +3412,7 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ' <span style="color:red;font-weight:bold">⚠ ASSIST</span>' : ''}<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}<br>
                     Speed: ${sailor.spd.toFixed(1)} kn<br>
                     Heading: ${sailor.hdg}°<br>
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>

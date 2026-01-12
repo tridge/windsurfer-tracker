@@ -1013,6 +1013,11 @@ _user_overrides: dict[str, dict] = {}  # id -> {"name": "...", "role": "..."}
 _pending_stops: dict[str, float] = {}
 _STOP_EXPIRY_SECONDS = 30.0
 
+# Pending cancel assist commands: {event_id}:{user_id} -> timestamp when cancel was requested
+# Commands expire after 30 seconds and are removed after being sent once
+_pending_cancel_assists: dict[str, float] = {}
+_CANCEL_ASSIST_EXPIRY_SECONDS = 30.0
+
 # Rate limiting for password guessing protection
 # Maps IP address -> timestamp of last failed auth attempt
 _failed_auth_times: dict[str, float] = {}
@@ -1480,6 +1485,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             stop_key = f"{eid}:{user_id}"
             _pending_stops[stop_key] = time.time()
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
+            self._send_json({"success": True, "user_id": user_id, "event_id": eid})
+
+        elif subpath.startswith('/admin/cancel-assist/'):
+            # Send remote cancel assist command to a user
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/cancel-assist/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            # Store pending cancel assist with timestamp
+            global _pending_cancel_assists
+            cancel_key = f"{eid}:{user_id}"
+            _pending_cancel_assists[cancel_key] = time.time()
+            log(f"[EVENT {eid}] Remote cancel assist queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
         elif subpath.startswith('/log/') and '/sublog' in subpath:
@@ -2048,6 +2068,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     log(f"[POST] Sending stop command to {sailor_id} (event {eid})")
                 # Remove after sending (or if expired)
                 del _pending_stops[stop_key]
+
+            # Check for pending cancel assist command (only if no stop command)
+            cancel_key = f"{eid}:{sailor_id}"
+            if "cmd" not in ack_response and cancel_key in _pending_cancel_assists:
+                cancel_time = _pending_cancel_assists[cancel_key]
+                if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
+                    ack_response["cmd"] = "cancel_assist"
+                    log(f"[POST] Sending cancel assist command to {sailor_id} (event {eid})")
+                # Remove after sending (or if expired)
+                del _pending_cancel_assists[cancel_key]
 
             self._send_json(ack_response)
 
@@ -2674,6 +2704,16 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         # Remove after sending (or if expired)
                         del _pending_stops[stop_key]
 
+                    # Check for pending cancel assist command (only if no stop command)
+                    cancel_key = f"{eid}:{sailor_id}"
+                    if "cmd" not in ack_data and cancel_key in _pending_cancel_assists:
+                        cancel_time = _pending_cancel_assists[cancel_key]
+                        if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
+                            ack_data["cmd"] = "cancel_assist"
+                            log(f"[UDP] Sending cancel assist command to {sailor_id} (event {eid})")
+                        # Remove after sending (or if expired)
+                        del _pending_cancel_assists[cancel_key]
+
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
 
@@ -2732,6 +2772,16 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             ack_data["cmd"] = "stop"
                             log(f"[UDP] Sending stop command to {sailor_id} (legacy mode)")
                         del _pending_stops[stop_key]
+
+                    # Check for pending cancel assist command (only if no stop command)
+                    cancel_key = f"1:{sailor_id}"  # Legacy mode uses event_id=1
+                    if "cmd" not in ack_data and cancel_key in _pending_cancel_assists:
+                        cancel_time = _pending_cancel_assists[cancel_key]
+                        if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
+                            ack_data["cmd"] = "cancel_assist"
+                            log(f"[UDP] Sending cancel assist command to {sailor_id} (legacy mode)")
+                        del _pending_cancel_assists[cancel_key]
+
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
 

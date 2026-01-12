@@ -1162,4 +1162,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             finishStopTrackerService()
         }
     }
+
+    override fun onRemoteCancelAssist() {
+        runOnUiThread {
+            Toast.makeText(this, "Assist request cancelled by admin", Toast.LENGTH_LONG).show()
+            updateAssistButton(false)
+        }
+    }
 }

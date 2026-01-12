@@ -200,6 +200,16 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Subscribe to remote cancel assist commands
+        TrackerService.shared.remoteCancelAssistPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.assistRequested = false
+                self?.errorMessage = "Assist cancelled by admin"
+                self?.showError = true
+            }
+            .store(in: &cancellables)
+
         // Subscribe to errors
         TrackerService.shared.errorPublisher
             .receive(on: DispatchQueue.main)

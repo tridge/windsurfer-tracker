@@ -163,6 +163,11 @@ public struct AckResponse: Codable {
     public var isStopCommand: Bool {
         return cmd == "stop"
     }
+
+    /// Whether this is a remote cancel assist command
+    public var isCancelAssistCommand: Bool {
+        return cmd == "cancel_assist"
+    }
 }
 
 /// Event info from /api/events endpoint

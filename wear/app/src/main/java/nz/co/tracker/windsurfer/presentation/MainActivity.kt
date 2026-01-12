@@ -129,6 +129,12 @@ class MainActivity : ComponentActivity() {
                     Log.w(TAG, "Tracking stopped by admin")
                 }
 
+                override fun onRemoteCancelAssist() {
+                    // Service has cancelled assist, update UI
+                    isAssistActive.value = false
+                    Log.w(TAG, "Assist cancelled by admin")
+                }
+
             }
 
             isTracking.value = trackerService?.isTracking() == true

@@ -174,6 +174,7 @@ class TrackerService : LifecycleService() {
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
         fun onRemoteStop()  // Server sent remote stop command
+        fun onRemoteCancelAssist()  // Server sent remote cancel assist command
     }
 
     /**
@@ -987,6 +988,13 @@ class TrackerService : LifecycleService() {
                                 Handler(Looper.getMainLooper()).post {
                                     statusListener?.onRemoteStop()
                                 }
+                            }
+                        } else if (cmd == "cancel_assist") {
+                            Log.w(TAG, "Received remote CANCEL ASSIST command from server")
+                            // Cancel assist as if user cancelled it
+                            assistRequested.set(false)
+                            Handler(Looper.getMainLooper()).post {
+                                statusListener?.onRemoteCancelAssist()
                             }
                         }
 
