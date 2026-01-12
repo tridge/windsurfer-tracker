@@ -739,6 +739,22 @@
             background: #0055aa;
         }
 
+        .popup-stop-btn {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #dc2626;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .popup-stop-btn:hover {
+            background: #b91c1c;
+        }
+
         .popup-move-btn {
             display: inline-block;
             margin-left: 4px;
@@ -2144,6 +2160,33 @@
             document.getElementById('editUserOverlay').classList.remove('visible');
         }
 
+        // Send remote stop command to a user
+        async function stopUser(userId) {
+            if (!confirm(`Send stop command to ${userId}? Their tracker will stop within 30 seconds if they have network connectivity.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/stop/${encodeURIComponent(userId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    // Close any open popups and show feedback
+                    map.closePopup();
+                    alert(`Stop command sent to ${userId}. They will stop tracking within 30 seconds.`);
+                } else {
+                    alert(`Failed to send stop command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending stop command:', error);
+                alert(`Error sending stop command: ${error.message}`);
+            }
+        }
+
         async function saveEditUser() {
             if (!editingUserId) return;
 
@@ -3293,6 +3336,7 @@
                 // Display name (use override if set, otherwise ID) - displayName already defined above
                 const nameExtra = sailor.name ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
+                const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
 
                 const versionStr = sailor.ver || 'Unknown';
                 const osStr = sailor.os || '';
@@ -3323,7 +3367,7 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${sailor.ast ? ' <span style="color:red;font-weight:bold">⚠ ASSIST</span>' : ''}<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ' <span style="color:red;font-weight:bold">⚠ ASSIST</span>' : ''}<br>
                     Speed: ${sailor.spd.toFixed(1)} kn<br>
                     Heading: ${sailor.hdg}°<br>
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>

@@ -173,6 +173,7 @@ class TrackerService : LifecycleService() {
         fun onEventName(name: String)
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
+        fun onRemoteStop()  // Server sent remote stop command
     }
 
     /**
@@ -975,6 +976,17 @@ class TrackerService : LifecycleService() {
                         } else {
                             // Default to enabled if not specified
                             statusListener?.onAssistEnabled(true)
+                        }
+
+                        // Check for remote stop command
+                        val cmd = ack.optString("cmd", "")
+                        if (cmd == "stop") {
+                            Log.w(TAG, "Received remote STOP command from server")
+                            // Stop tracking the same way as user pressing stop
+                            Handler(Looper.getMainLooper()).post {
+                                statusListener?.onRemoteStop()
+                                stopSelf()
+                            }
                         }
 
                         Log.d(TAG, "Received ACK for seq=$ackSeq")

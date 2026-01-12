@@ -775,8 +775,8 @@ class PositionTracker:
             log(f"!!! Position: {format_position(lat, lon)}")
             log("!" * 60)
 
-        # Update current positions (only if not a duplicate)
-        if not is_dup:
+        # Update current positions (only if not a duplicate, but always update if stopped)
+        if not is_dup or stopped:
             with self._lock:
                 pos_data = {
                     "id": sailor_id,
@@ -994,6 +994,11 @@ _tracker_password: str | None = None  # Password for UDP tracker packets (None =
 _course_file: Path | None = None
 _users_file: Path | None = None
 _user_overrides: dict[str, dict] = {}  # id -> {"name": "...", "role": "..."}
+
+# Pending stop commands: {event_id}:{user_id} -> timestamp when stop was requested
+# Commands expire after 30 seconds and are removed after being sent once
+_pending_stops: dict[str, float] = {}
+_STOP_EXPIRY_SECONDS = 30.0
 
 # Rate limiting for password guessing protection
 # Maps IP address -> timestamp of last failed auth attempt
@@ -1449,6 +1454,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath.startswith('/admin/stop/'):
+            # Send remote stop command to a user
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/stop/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            # Store pending stop with timestamp
+            global _pending_stops
+            stop_key = f"{eid}:{user_id}"
+            _pending_stops[stop_key] = time.time()
+            log(f"[EVENT {eid}] Remote stop queued for {user_id}")
+            self._send_json({"success": True, "user_id": user_id, "event_id": eid})
+
         elif subpath.startswith('/log/') and '/sublog' in subpath:
             # Add a sublog (race marker) to a log file's summary
             # URL format: /log/{log_file}/sublog
@@ -1776,6 +1796,26 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif path.startswith('/api/admin/stop/'):
+            # Send remote stop command to a user
+            user_id = path[len('/api/admin/stop/'):]
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            # Get event ID from query parameter or use default
+            parsed = urlparse(self.path)
+            from urllib.parse import parse_qs
+            query_params = parse_qs(parsed.query)
+            event_id = int(query_params.get('event_id', [1])[0])
+
+            # Store pending stop with timestamp
+            global _pending_stops
+            stop_key = f"{event_id}:{user_id}"
+            _pending_stops[stop_key] = time.time()
+            log(f"[ADMIN] Remote stop queued for {user_id} (event {event_id})")
+            self._send_json({"success": True, "user_id": user_id, "event_id": event_id})
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -1985,6 +2025,17 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 ack_response["event"] = event_name
             if not assist_enabled:
                 ack_response["assist"] = False
+
+            # Check for pending stop command
+            stop_key = f"{eid}:{sailor_id}"
+            if stop_key in _pending_stops:
+                stop_time = _pending_stops[stop_key]
+                if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
+                    ack_response["cmd"] = "stop"
+                    log(f"[POST] Sending stop command to {sailor_id} (event {eid})")
+                # Remove after sending (or if expired)
+                del _pending_stops[stop_key]
+
             self._send_json(ack_response)
 
         except json.JSONDecodeError as e:
@@ -2598,6 +2649,17 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     ack_data = {"ack": seq, "ts": int(recv_time), "event": event_name}
                     if not assist_enabled:
                         ack_data["assist"] = False
+
+                    # Check for pending stop command
+                    stop_key = f"{eid}:{sailor_id}"
+                    if stop_key in _pending_stops:
+                        stop_time = _pending_stops[stop_key]
+                        if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
+                            ack_data["cmd"] = "stop"
+                            log(f"[UDP] Sending stop command to {sailor_id} (event {eid})")
+                        # Remove after sending (or if expired)
+                        del _pending_stops[stop_key]
+
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
 
@@ -2647,8 +2709,16 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             sock.sendto(error_ack, addr)
                             continue
 
-                    # Send ACK
-                    ack = json.dumps({"ack": seq, "ts": int(recv_time)}).encode("utf-8")
+                    # Send ACK (check for pending stop command)
+                    ack_data = {"ack": seq, "ts": int(recv_time)}
+                    stop_key = f"1:{sailor_id}"  # Legacy mode uses event_id=1
+                    if stop_key in _pending_stops:
+                        stop_time = _pending_stops[stop_key]
+                        if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
+                            ack_data["cmd"] = "stop"
+                            log(f"[UDP] Sending stop command to {sailor_id} (legacy mode)")
+                        del _pending_stops[stop_key]
+                    ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
 
                     # If 1Hz array format, log as single entry with pos array (more compact)

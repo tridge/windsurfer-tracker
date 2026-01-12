@@ -20,6 +20,7 @@ public actor TrackerService {
     public nonisolated let statusLinePublisher = CurrentValueSubject<String, Never>("---")  // GPS wait, connecting..., auth failure, or event name
     public nonisolated let errorPublisher = PassthroughSubject<TrackerError, Never>()
     public nonisolated let assistEnabledPublisher = CurrentValueSubject<Bool, Never>(true)  // Whether assist button should be shown
+    public nonisolated let remoteStopPublisher = PassthroughSubject<Void, Never>()  // Signals remote stop command from server
 
     // MARK: - State
 
@@ -439,6 +440,13 @@ public actor TrackerService {
         if !assistEnabled && assistRequested {
             assistRequested = false
             print("[TrackerService] Assist cleared by server (assist disabled for event)")
+        }
+
+        // Check for remote stop command
+        if response.isStopCommand {
+            print("[TrackerService] Received remote STOP command from server")
+            remoteStopPublisher.send()
+            await stop()
         }
 
         updateConnectionStatus()

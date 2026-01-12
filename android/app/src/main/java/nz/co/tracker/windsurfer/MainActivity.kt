@@ -1154,4 +1154,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.btnAssist.visibility = if (enabled) View.VISIBLE else View.GONE
         }
     }
+
+    override fun onRemoteStop() {
+        runOnUiThread {
+            // Service is stopping itself, clean up UI and state
+            Toast.makeText(this, "Tracking stopped by admin", Toast.LENGTH_LONG).show()
+            finishStopTrackerService()
+        }
+    }
 }

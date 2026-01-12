@@ -122,6 +122,13 @@ class MainActivity : ComponentActivity() {
                     // Timer cleared, back to stopwatch display
                 }
 
+                override fun onRemoteStop() {
+                    // Service is stopping itself, we just need to update the UI
+                    isTracking.value = false
+                    countdownSeconds.value = null
+                    Log.w(TAG, "Tracking stopped by admin")
+                }
+
             }
 
             isTracking.value = trackerService?.isTracking() == true

@@ -190,6 +190,16 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Subscribe to remote stop commands
+        TrackerService.shared.remoteStopPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.isTracking = false
+                self?.errorMessage = "Tracking stopped by admin"
+                self?.showError = true
+            }
+            .store(in: &cancellables)
+
         // Subscribe to errors
         TrackerService.shared.errorPublisher
             .receive(on: DispatchQueue.main)

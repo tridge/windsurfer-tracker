@@ -214,6 +214,17 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Subscribe to remote stop commands
+        TrackerService.shared.remoteStopPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                // Use full stopTracking to clean up workout, timers, etc.
+                self.stopTracking()
+                self.errorMessage = "Stopped by admin"
+            }
+            .store(in: &cancellables)
+
         // Subscribe to errors
         TrackerService.shared.errorPublisher
             .receive(on: DispatchQueue.main)

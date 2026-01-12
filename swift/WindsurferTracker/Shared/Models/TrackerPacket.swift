@@ -143,6 +143,9 @@ public struct AckResponse: Codable {
     /// Whether assist button should be shown (nil = true, explicit false = disabled)
     public let assist: Bool?
 
+    /// Server command (optional, e.g., "stop" for remote stop)
+    public let cmd: String?
+
     public var isSuccess: Bool {
         return error == nil
     }
@@ -154,6 +157,11 @@ public struct AckResponse: Codable {
     /// Whether assist is enabled for this event (defaults to true if not specified)
     public var isAssistEnabled: Bool {
         return assist ?? true
+    }
+
+    /// Whether this is a remote stop command
+    public var isStopCommand: Bool {
+        return cmd == "stop"
     }
 }
 
