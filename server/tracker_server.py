@@ -964,7 +964,7 @@ class EventTracker:
         return result
 
     def clear_tracks(self):
-        """Clear tracks for this event."""
+        """Clear tracks for this event (rotates log file)."""
         if self.daily_logger:
             self.daily_logger.clear_today()
         if self.positions_file and self.positions_file.exists():
@@ -973,6 +973,19 @@ class EventTracker:
         # Recreate empty positions file
         write_current_positions({}, self.positions_file, self.user_overrides)
         log(f"[EVENT {self.eid}] Tracks cleared")
+
+    def clear_positions_only(self):
+        """Clear in-memory positions without rotating log file.
+
+        Used by midnight auto-clear since DailyLogger already handles
+        switching to a new date-named log file automatically.
+        """
+        if self.positions_file and self.positions_file.exists():
+            self.positions_file.unlink()
+        self.position_tracker.clear()
+        # Recreate empty positions file
+        write_current_positions({}, self.positions_file, self.user_overrides)
+        log(f"[EVENT {self.eid}] Positions cleared (midnight auto-clear)")
 
     def close(self):
         """Clean up resources."""
@@ -2380,12 +2393,13 @@ def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
                 # Check if it's just after midnight (within first check_interval*2 seconds of the day)
                 seconds_since_midnight = now_in_tz.hour * 3600 + now_in_tz.minute * 60 + now_in_tz.second
                 if seconds_since_midnight < check_interval * 2:
-                    # It's just after midnight - clear tracks
+                    # It's just after midnight - clear positions only (not the log file)
+                    # DailyLogger already handles switching to a new date-named file
                     tracker = get_event_tracker(eid)
                     if tracker:
-                        tracker.clear_tracks()
+                        tracker.clear_positions_only()
                         last_cleared_date[eid] = today_in_tz
-                        log(f"[MIDNIGHT] Auto-cleared tracks for event {eid} ({event_info.get('name', 'Unknown')}) "
+                        log(f"[MIDNIGHT] Auto-cleared positions for event {eid} ({event_info.get('name', 'Unknown')}) "
                             f"at midnight {tz_name}")
 
         except Exception as e:
