@@ -982,10 +982,11 @@ class TrackerService : LifecycleService() {
                         val cmd = ack.optString("cmd", "")
                         if (cmd == "stop") {
                             Log.w(TAG, "Received remote STOP command from server")
-                            // Stop tracking the same way as user pressing stop
-                            Handler(Looper.getMainLooper()).post {
-                                statusListener?.onRemoteStop()
-                                stopSelf()
+                            // Send stop packet to server, then notify UI and stop
+                            requestGracefulStop {
+                                Handler(Looper.getMainLooper()).post {
+                                    statusListener?.onRemoteStop()
+                                }
                             }
                         }
 
