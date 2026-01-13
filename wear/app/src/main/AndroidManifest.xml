@@ -37,7 +37,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@style/Theme.WindsurferTracker">
 
         <uses-library
             android:name="com.google.android.wearable"
@@ -52,7 +52,7 @@
             android:name=".presentation.MainActivity"
             android:exported="true"
             android:taskAffinity=""
-            android:theme="@android:style/Theme.DeviceDefault">
+            android:theme="@style/Theme.WindsurferTracker.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -68,6 +68,6 @@
         <activity
             android:name=".presentation.TextInputActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.DeviceDefault" />
+            android:theme="@style/Theme.WindsurferTracker" />
     </application>
 </manifest>

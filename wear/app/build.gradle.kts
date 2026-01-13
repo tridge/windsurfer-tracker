@@ -35,8 +35,8 @@ android {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 30  // Wear OS 3.0 minimum
         targetSdk = 35
-        versionCode = 74
-        versionName = "1.10.9"
+        versionCode = 76
+        versionName = "1.10.10"
 
         // Add version info as build config fields
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
@@ -94,6 +94,10 @@ dependencies {
     // Wear OS
     implementation("androidx.wear:wear:1.3.0")
     implementation("androidx.wear:wear-input:1.1.0")
+    implementation("androidx.wear:wear-ongoing:1.1.0")
+
+    // Splash screen (1.0.1+ for Wear OS support per docs)
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     // Wear Compose
     implementation("androidx.wear.compose:compose-material:1.3.0")

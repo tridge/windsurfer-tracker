@@ -1,6 +1,7 @@
 package nz.co.tracker.windsurfer
 
 import android.app.*
+import android.graphics.drawable.Icon
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -32,6 +33,8 @@ import android.util.Log
 import java.util.Locale
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -459,11 +462,43 @@ class TrackerService : LifecycleService() {
     }
 
     private fun startForegroundService() {
-        val notification = buildNotification("Starting tracker...", showTimerAction = raceTimerEnabled)
-        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        val notificationBuilder = buildNotificationBuilder("Starting tracker...", showTimerAction = raceTimerEnabled)
+
+        // Create ongoing activity for watch face tile
+        createOngoingActivity(notificationBuilder)
+
+        startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
     }
 
-    private fun buildNotification(text: String, showTimerAction: Boolean = false): Notification {
+    private var ongoingActivity: OngoingActivity? = null
+
+    private fun createOngoingActivity(notificationBuilder: NotificationCompat.Builder) {
+        val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val status = Status.Builder()
+            .addTemplate("Tracking active")
+            .build()
+
+        val icon = Icon.createWithResource(this, R.drawable.ic_notification)
+        ongoingActivity = OngoingActivity.Builder(this, NOTIFICATION_ID, notificationBuilder)
+            .setAnimatedIcon(icon)
+            .setStaticIcon(icon)
+            .setTouchIntent(pendingIntent)
+            .setStatus(status)
+            .build()
+
+        ongoingActivity?.apply(this)
+    }
+
+    private fun clearOngoingActivity() {
+        ongoingActivity = null
+    }
+
+    private fun buildNotificationBuilder(text: String, showTimerAction: Boolean = false): NotificationCompat.Builder {
         val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
@@ -473,9 +508,11 @@ class TrackerService : LifecycleService() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Windsurfer Tracker")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         // Add timer action button if race timer is enabled
         if (raceTimerEnabled && showTimerAction) {
@@ -506,7 +543,11 @@ class TrackerService : LifecycleService() {
             }
         }
 
-        return builder.build()
+        return builder
+    }
+
+    private fun buildNotification(text: String, showTimerAction: Boolean = false): Notification {
+        return buildNotificationBuilder(text, showTimerAction).build()
     }
 
     /**
@@ -1336,6 +1377,7 @@ class TrackerService : LifecycleService() {
 
     fun stopService() {
         stopTracking()
+        clearOngoingActivity()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

@@ -27,6 +27,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -191,7 +192,15 @@ class MainActivity : ComponentActivity() {
         startTracking()
     }
 
+    private var splashScreenReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+
+        // Keep splash screen visible for at least 500ms
+        splashScreen.setKeepOnScreenCondition { !splashScreenReady }
+        Handler(Looper.getMainLooper()).postDelayed({ splashScreenReady = true }, 500)
+
         super.onCreate(savedInstanceState)
 
         settingsRepository = SettingsRepository(this)
