@@ -3,16 +3,21 @@ import SwiftUI
 /// Main container view switching between config and tracking modes
 struct ContentView: View {
     @EnvironmentObject var viewModel: TrackerViewModel
+    @ObservedObject private var preferences = PreferencesManager.shared
 
     var body: some View {
         ZStack {
             Color.white.ignoresSafeArea()
 
-            Group {
-                if viewModel.isTracking {
-                    TrackingView()
-                } else {
-                    ConfigView()
+            if !preferences.eulaAccepted {
+                EULAView(eulaAccepted: $preferences.eulaAccepted)
+            } else {
+                Group {
+                    if viewModel.isTracking {
+                        TrackingView()
+                    } else {
+                        ConfigView()
+                    }
                 }
             }
         }

@@ -8,22 +8,27 @@ let RACE_TIMER_FEATURE_ENABLED = false
 /// Main watch view with compact interface
 struct WatchContentView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
+    @ObservedObject private var preferences = PreferencesManager.shared
     @State private var navigateToSettings = false
 
     var body: some View {
-        NavigationView {
-            if viewModel.isTracking {
-                WatchTrackingView()
-                    .environmentObject(viewModel)
-            } else {
-                WatchConfigView(navigateToSettings: $navigateToSettings)
-                    .environmentObject(viewModel)
+        if !preferences.eulaAccepted {
+            WatchEULAView(eulaAccepted: $preferences.eulaAccepted)
+        } else {
+            NavigationView {
+                if viewModel.isTracking {
+                    WatchTrackingView()
+                        .environmentObject(viewModel)
+                } else {
+                    WatchConfigView(navigateToSettings: $navigateToSettings)
+                        .environmentObject(viewModel)
+                }
             }
-        }
-        .onAppear {
-            // Auto-navigate to settings if ID or password is missing
-            if viewModel.needsSetup {
-                navigateToSettings = true
+            .onAppear {
+                // Auto-navigate to settings if ID or password is missing
+                if viewModel.needsSetup {
+                    navigateToSettings = true
+                }
             }
         }
     }
