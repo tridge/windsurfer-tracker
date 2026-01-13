@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CoreLocation
 import UIKit
+import HealthKit
 
 /// View model bridging TrackerService to SwiftUI
 @MainActor
@@ -29,6 +30,14 @@ public class TrackerViewModel: ObservableObject {
     @Published public var eventId: Int
     @Published public var highFrequencyMode: Bool
     @Published public var trackerBeep: Bool
+
+    // MARK: - HealthKit
+
+    private let healthStore = HKHealthStore()
+    private var workoutBuilder: HKWorkoutBuilder?
+    private var workoutStartTime: Date?
+    private var lastDistanceSampleTime: Date?
+    @Published public var workoutState: String = ""
 
     // MARK: - UI State
 
@@ -151,6 +160,8 @@ public class TrackerViewModel: ObservableObject {
                     // Filter out GPS noise (too small) and jumps (too large)
                     if distance > 0.1 && distance < 500 {
                         self.totalDistanceMeters += distance
+                        // Log distance to HealthKit
+                        self.addDistanceSampleToWorkout(distance)
                     }
                 }
                 self.previousPositionForDistance = position
@@ -257,6 +268,8 @@ public class TrackerViewModel: ObservableObject {
                 try await TrackerService.shared.start()
                 // Start tracker beep timer (first beep after 60 seconds)
                 startBeepTimer()
+                // Start HealthKit workout session
+                await startWorkoutSession()
             } catch let error as TrackerError {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -275,6 +288,13 @@ public class TrackerViewModel: ObservableObject {
         stopBeepTimer()
 
         Task {
+            // End HealthKit workout session
+            // Add final energy sample based on total duration
+            if let startTime = workoutStartTime {
+                let duration = Date().timeIntervalSince(startTime)
+                addEnergySampleToWorkout(durationSeconds: duration)
+            }
+            await endWorkoutSession()
             await TrackerService.shared.stop()
             assistRequested = false
         }
@@ -372,6 +392,158 @@ public class TrackerViewModel: ObservableObject {
                 generator.impactOccurred()
                 try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
                 generator.impactOccurred()
+            }
+        }
+    }
+
+    // MARK: - HealthKit Workout
+
+    /// Request HealthKit authorization for workouts
+    public func requestHealthKitAuthorization() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            print("[HealthKit] Health data not available on this device")
+            return false
+        }
+
+        let workoutType = HKObjectType.workoutType()
+        let activeEnergyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
+        let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
+
+        do {
+            try await healthStore.requestAuthorization(
+                toShare: [workoutType, activeEnergyType, distanceType],
+                read: [activeEnergyType, distanceType]
+            )
+            // Check actual authorization status
+            let workoutAuth = healthStore.authorizationStatus(for: workoutType)
+            print("[HealthKit] Authorization request completed. Workout status: \(workoutAuth.rawValue)")
+            // Note: authorizationStatus only tells us about read access, not write
+            // For write access, we just have to try and see if it fails
+            return true
+        } catch {
+            print("[HealthKit] Authorization failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Start a workout session for tracking
+    private func startWorkoutSession() async {
+        // Request authorization first
+        let authorized = await requestHealthKitAuthorization()
+        guard authorized else {
+            workoutState = "not authorized"
+            return
+        }
+
+        // End any existing workout
+        await endWorkoutSession()
+
+        // Create workout configuration for sailing/water sports
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .sailing  // Closest to windsurfing
+        configuration.locationType = .outdoor
+
+        do {
+            // Create workout builder (iOS doesn't use HKWorkoutSession like watchOS)
+            let builder = HKWorkoutBuilder(
+                healthStore: healthStore,
+                configuration: configuration,
+                device: .local()
+            )
+
+            workoutBuilder = builder
+            workoutStartTime = Date()
+            lastDistanceSampleTime = workoutStartTime
+
+            try await builder.beginCollection(at: workoutStartTime!)
+            workoutState = "running"
+            print("[HealthKit] Workout session started")
+        } catch {
+            print("[HealthKit] Failed to start workout: \(error.localizedDescription)")
+            workoutState = "error"
+        }
+    }
+
+    /// End the current workout session and save to HealthKit
+    private func endWorkoutSession() async {
+        guard let builder = workoutBuilder, let startTime = workoutStartTime else {
+            print("[HealthKit] endWorkoutSession: No active workout to end")
+            return
+        }
+
+        print("[HealthKit] Ending workout session...")
+        let endTime = Date()
+
+        do {
+            try await builder.endCollection(at: endTime)
+
+            // Finish and save the workout
+            if let workout = try await builder.finishWorkout() {
+                let duration = workout.duration
+                let distance = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
+                print("[HealthKit] Workout saved: \(String(format: "%.0f", duration))s, \(String(format: "%.0f", distance))m")
+                workoutState = "saved"
+            }
+        } catch {
+            print("[HealthKit] Failed to save workout: \(error.localizedDescription)")
+            workoutState = "save failed"
+        }
+
+        workoutBuilder = nil
+        workoutStartTime = nil
+        lastDistanceSampleTime = nil
+    }
+
+    /// Add a distance sample to the workout
+    private func addDistanceSampleToWorkout(_ distance: Double) {
+        guard let builder = workoutBuilder else { return }
+
+        let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
+        let distanceQuantity = HKQuantity(unit: .meter(), doubleValue: distance)
+        let now = Date()
+
+        let sample = HKQuantitySample(
+            type: distanceType,
+            quantity: distanceQuantity,
+            start: lastDistanceSampleTime ?? now,
+            end: now
+        )
+        lastDistanceSampleTime = now
+
+        builder.add([sample]) { success, error in
+            if let error = error {
+                print("[HealthKit] Failed to add distance sample: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Add an active energy sample to the workout
+    /// Estimated based on MET value for sailing (~3.0) and duration
+    private func addEnergySampleToWorkout(durationSeconds: TimeInterval) {
+        guard let builder = workoutBuilder else { return }
+
+        // MET for sailing is approximately 3.0
+        // Calories = MET * weight(kg) * duration(hours)
+        // Using approximate 70kg average weight
+        let metValue = 3.0
+        let weightKg = 70.0
+        let hours = durationSeconds / 3600.0
+        let kilocalories = metValue * weightKg * hours
+
+        let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
+        let energyQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: kilocalories)
+        let now = Date()
+
+        let sample = HKQuantitySample(
+            type: energyType,
+            quantity: energyQuantity,
+            start: workoutStartTime ?? now,
+            end: now
+        )
+
+        builder.add([sample]) { success, error in
+            if let error = error {
+                print("[HealthKit] Failed to add energy sample: \(error.localizedDescription)")
             }
         }
     }
