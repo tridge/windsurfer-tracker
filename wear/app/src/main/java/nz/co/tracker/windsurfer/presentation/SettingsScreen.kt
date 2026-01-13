@@ -472,6 +472,10 @@ fun SettingsScreen(
                                 validationError = "Password is required"
                                 return@Button
                             }
+                            selectedEventId == 0 -> {
+                                validationError = "Please select an event"
+                                return@Button
+                            }
                         }
 
                         // Check if auth fields changed

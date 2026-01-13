@@ -1,6 +1,5 @@
 package nz.co.tracker.windsurfer.presentation
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -84,255 +83,258 @@ fun TrackingScreen(
         else -> "STOPPED"
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(backgroundColor)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onToggleTracking() }
-                )
-            }
+    Scaffold(
+        timeText = { TimeText() },
+        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) }
     ) {
-        // Main content
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier
+        Box(
+            modifier = modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Status indicator
-            Text(
-                text = statusText,
-                color = statusColor,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-
-            // Event name (if available)
-            if (eventName.isNotEmpty()) {
-                Text(
-                    text = eventName,
-                    color = Color(0xFF6699FF),
-                    fontSize = 10.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1
-                )
-            }
-
-            // Sailor ID and 1Hz indicator
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = sailorId,
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center
-                )
-                if (highFrequencyMode) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "1Hz",
-                        color = Color.Cyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                .background(backgroundColor)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onToggleTracking() }
                     )
                 }
-            }
+        ) {
+            // Main content
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+            ) {
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(4.dp))
+                // Status indicator
+                Text(
+                    text = statusText,
+                    color = statusColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
 
-            // Race timer display or speed
-            if (raceTimerEnabled && isTracking) {
-                if (countdownSeconds != null) {
-                    if (countdownSeconds > 0) {
-                        // Countdown running - show remaining time
-                        val minutes = countdownSeconds / 60
-                        val seconds = countdownSeconds % 60
-                        val countdownColor = when {
-                            countdownSeconds <= 10 -> StoppedRed
-                            countdownSeconds <= 30 -> Color.Yellow
-                            else -> Color.Cyan
-                        }
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onTap = { onTimerReset() }
-                                    )
-                                }
-                        ) {
-                            Text(
-                                text = String.format("%d:%02d", minutes, seconds),
-                                color = countdownColor,
-                                fontSize = 48.sp,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                text = "Tap to reset",
-                                color = countdownColor,
-                                fontSize = 12.sp,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        // Countdown expired (0:00) - show speed until reset
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onTap = { onTimerReset() }
-                                    )
-                                }
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.Bottom
-                            ) {
-                                Text(
-                                    text = String.format("%.1f", speedKnots),
-                                    color = Color.White,
-                                    fontSize = 42.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "kts",
-                                    color = Color.Gray,
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.padding(bottom = 6.dp)
-                                )
-                            }
-                            Text(
-                                text = "Tap to reset",
-                                color = StoppedRed,
-                                fontSize = 12.sp,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                } else {
-                    // Timer enabled but not running - show stopwatch icon + configured time
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    ) {
+                // Event name (if available)
+                if (eventName.isNotEmpty()) {
+                    Text(
+                        text = eventName,
+                        color = Color(0xFF6699FF),
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
+                }
+
+                // Sailor ID and 1Hz indicator
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = sailorId,
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    if (highFrequencyMode) {
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "⏱",
-                            fontSize = 40.sp,
-                            color = Color.Cyan
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = String.format("%d:%02d", raceTimerMinutes, 0),
-                            color = Color.White,
-                            fontSize = 42.sp,
+                            text = "1Hz",
+                            color = Color.Cyan,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-            } else {
-                // Normal speed display (race timer disabled or not tracking)
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = String.format("%.1f", speedKnots),
-                        color = Color.White,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "kts",
-                        color = Color.Gray,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                }
 
-                // Distance in km
-                Text(
-                    text = String.format("%.1f km", distanceMeters / 1000f),
-                    color = Color.Gray,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
+                Spacer(modifier = Modifier.height(4.dp))
 
-            // Status row removed per user request - all status shown via color coding of TRACKING/STOPPED text
-
-            // Error message
-            if (!errorMessage.isNullOrEmpty()) {
-                Text(
-                    text = errorMessage,
-                    color = StoppedRed,
-                    fontSize = 10.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2
-                )
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // ASSIST button at bottom (only show if assist is enabled for this event)
-            if (assistEnabled) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .height(36.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(if (isAssistActive) Color.Red else Color.DarkGray)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { onAssistLongPress() }
+                // Race timer display or speed
+                if (raceTimerEnabled && isTracking) {
+                    if (countdownSeconds != null) {
+                        if (countdownSeconds > 0) {
+                            // Countdown running - show remaining time
+                            val minutes = countdownSeconds / 60
+                            val seconds = countdownSeconds % 60
+                            val countdownColor = when {
+                                countdownSeconds <= 10 -> StoppedRed
+                                countdownSeconds <= 30 -> Color.Yellow
+                                else -> Color.Cyan
+                            }
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { onTimerReset() }
+                                        )
+                                    }
+                            ) {
+                                Text(
+                                    text = String.format("%d:%02d", minutes, seconds),
+                                    color = countdownColor,
+                                    fontSize = 48.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "Tap to reset",
+                                    color = countdownColor,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            // Countdown expired (0:00) - show speed until reset
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { onTimerReset() }
+                                        )
+                                    }
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.Bottom
+                                ) {
+                                    Text(
+                                        text = String.format("%.1f", speedKnots),
+                                        color = Color.White,
+                                        fontSize = 42.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "kts",
+                                        color = Color.Gray,
+                                        fontSize = 16.sp,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Tap to reset",
+                                    color = StoppedRed,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        // Timer enabled but not running - show stopwatch icon + configured time
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "⏱",
+                                fontSize = 40.sp,
+                                color = Color.Cyan
                             )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = String.format("%d:%02d", raceTimerMinutes, 0),
+                                color = Color.White,
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else {
+                    // Normal speed display (race timer disabled or not tracking)
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = String.format("%.1f", speedKnots),
+                            color = Color.White,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "kts",
+                            color = Color.Gray,
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+
+                    // Distance in km
                     Text(
-                        text = if (isAssistActive) "CANCEL ASSIST" else "ASSIST",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        text = String.format("%.1f km", distanceMeters / 1000f),
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
+
+                // Error message
+                if (!errorMessage.isNullOrEmpty()) {
+                    Text(
+                        text = errorMessage,
+                        color = StoppedRed,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // ASSIST button at bottom (only show if assist is enabled for this event)
+                if (assistEnabled) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.75f)
+                            .height(36.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(if (isAssistActive) Color.Red else Color.DarkGray)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { onAssistLongPress() }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isAssistActive) "CANCEL ASSIST" else "ASSIST",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        // Gear icon - positioned for round watch face, rendered last for touch priority
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-                .offset(x = 50.dp)  // Offset right from center
-                .size(40.dp)
-                .clip(CircleShape)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onSettingsLongPress() }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "⚙",
-                fontSize = 24.sp,
-                color = Color.Gray
-            )
+            // Gear icon - positioned for round watch face, rendered last for touch priority
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .offset(x = 45.dp)  // Offset right from center
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { onSettingsLongPress() }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⚙",
+                    fontSize = 24.sp,
+                    color = Color.Gray
+                )
+            }
         }
     }
 }

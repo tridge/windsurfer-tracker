@@ -15,10 +15,10 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "se
 
 data class TrackerSettings(
     val serverHost: String = TrackerService.DEFAULT_SERVER_HOST,
-    val sailorId: String = "W01",  // W for Watch
+    val sailorId: String = "",  // No default - must be entered by user
     val role: String = "sailor",
     val password: String = "",
-    val eventId: Int = 2,  // Event ID for multi-event support
+    val eventId: Int = 2,  // Default to main event
     val highFrequencyMode: Boolean = false,  // 1Hz mode for racing
     val heartRateEnabled: Boolean = false,  // Opt-in for health data privacy
     val trackerBeep: Boolean = true,  // Beep once per minute to remind user tracker is running
@@ -46,7 +46,7 @@ class SettingsRepository(private val context: Context) {
     val settingsFlow: Flow<TrackerSettings> = context.dataStore.data.map { prefs ->
         TrackerSettings(
             serverHost = prefs[PreferencesKeys.SERVER_HOST] ?: TrackerService.DEFAULT_SERVER_HOST,
-            sailorId = prefs[PreferencesKeys.SAILOR_ID] ?: "W01",
+            sailorId = prefs[PreferencesKeys.SAILOR_ID] ?: "",
             role = prefs[PreferencesKeys.ROLE] ?: "sailor",
             password = prefs[PreferencesKeys.PASSWORD] ?: "",
             eventId = prefs[PreferencesKeys.EVENT_ID] ?: 2,

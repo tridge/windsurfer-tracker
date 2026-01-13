@@ -343,13 +343,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestLocationPermissions() {
-        locationPermissionRequest.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.BODY_SENSORS  // Optional - for heart rate
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        // Only request heart rate permission if enabled in settings
+        if (settings.value.heartRateEnabled) {
+            permissions.add(Manifest.permission.BODY_SENSORS)
+        }
+        locationPermissionRequest.launch(permissions.toTypedArray())
     }
 
     private fun requestBackgroundLocation() {
