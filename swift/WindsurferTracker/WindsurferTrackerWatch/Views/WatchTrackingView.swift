@@ -122,7 +122,7 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Fitness metrics row: heart rate (and distance only if countdown active)
+                // Fitness metrics row: heart rate and distance
                 HStack(spacing: 12) {
                     // Heart rate (if enabled and available)
                     if viewModel.heartRateEnabled && viewModel.currentHeartRate > 0 {
@@ -136,16 +136,14 @@ struct WatchTrackingView: View {
                         }
                     }
 
-                    // Distance traveled (show here when countdown is active, since speed is hidden)
-                    if viewModel.countdownSeconds != nil || viewModel.raceTimerEnabled {
-                        HStack(spacing: 2) {
-                            Image(systemName: "arrow.triangle.swap")
-                                .font(.system(size: 10))
-                                .foregroundColor(.cyan)
-                            Text(distanceText)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
+                    // Distance traveled - always show during tracking
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.triangle.swap")
+                            .font(.system(size: 10))
+                            .foregroundColor(.cyan)
+                        Text(distanceText)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
                     }
                 }
 

@@ -102,8 +102,8 @@ targets:
         GIT_HASH: "$(GIT_HASH)"
         NSLocationWhenInUseUsageDescription: "Windsurfer Tracker needs your location to report your position during races."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Windsurfer Tracker needs continuous location access to track your position during races."
-        NSHealthShareUsageDescription: "Windsurfer Tracker uses workout sessions to enable background GPS tracking during races."
-        NSHealthUpdateUsageDescription: "Windsurfer Tracker records workouts to enable background GPS tracking during races."
+        NSHealthShareUsageDescription: "Windsurfer Tracker records your sailing workouts including distance, heart rate, and calories burned."
+        NSHealthUpdateUsageDescription: "Windsurfer Tracker saves your sailing sessions as workouts to track your fitness over time."
         UIBackgroundModes:
           - location
         WKBackgroundModes:
