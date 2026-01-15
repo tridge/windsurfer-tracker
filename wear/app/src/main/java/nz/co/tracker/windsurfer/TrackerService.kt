@@ -1,7 +1,6 @@
 package nz.co.tracker.windsurfer
 
 import android.app.*
-import android.graphics.drawable.Icon
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -30,6 +29,9 @@ import android.os.Vibrator
 import android.speech.tts.TextToSpeech
 import android.telephony.TelephonyManager
 import android.util.Log
+import android.graphics.drawable.Icon
+import androidx.core.graphics.drawable.IconCompat
+import android.graphics.Color
 import java.util.Locale
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -50,7 +52,7 @@ class TrackerService : LifecycleService() {
     companion object {
         private const val TAG = "TrackerService"
         private const val NOTIFICATION_ID = 1
-        private const val CHANNEL_ID = "tracker_channel"
+        private const val CHANNEL_ID = "tracker_channel_v2"
 
         const val DEFAULT_SERVER_HOST = "wstracker.org"
         const val DEFAULT_SERVER_PORT = 41234
@@ -139,6 +141,7 @@ class TrackerService : LifecycleService() {
 
     // Track acknowledged sequence numbers to stop retransmissions
     private val acknowledgedSeqs = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+    private var pulseToggle = false
 
     // Tracker beep - plays once per minute to remind user tracker is running
     private var toneGenerator: ToneGenerator? = null
@@ -278,6 +281,9 @@ class TrackerService : LifecycleService() {
 
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Tracking start time for ongoing activity text
+    private var trackingStartRealtimeMs: Long = 0L
 
     // Listener for UI updates
     var statusListener: StatusListener? = null
@@ -452,7 +458,7 @@ class TrackerService : LifecycleService() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Tracker Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = "Shows when tracking is active"
         }
@@ -462,36 +468,56 @@ class TrackerService : LifecycleService() {
     }
 
     private fun startForegroundService() {
-        val notificationBuilder = buildNotificationBuilder("Starting tracker...", showTimerAction = raceTimerEnabled)
-
-        // Create ongoing activity for watch face tile
-        createOngoingActivity(notificationBuilder)
-
-        startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        val notification = buildNotification("Starting tracker...", showTimerAction = raceTimerEnabled)
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        // Ensure the system sees the OngoingActivity payload after foreground promotion
+        updateNotification(currentStatusText())
     }
 
     private var ongoingActivity: OngoingActivity? = null
 
-    private fun createOngoingActivity(notificationBuilder: NotificationCompat.Builder) {
+    private enum class ConnectionState { OK, WARN, ERROR }
+
+    private fun getConnectionState(): ConnectionState {
+        val diff = System.currentTimeMillis() - lastAckTime.get()
+        val sinceStart = System.currentTimeMillis() - trackingStartRealtimeMs
+        if (sinceStart in 0..20_000) {
+            return ConnectionState.OK
+        }
+        return when {
+            diff in 1..30_000 -> ConnectionState.OK
+            diff in 30_001..60_000 -> ConnectionState.WARN
+            else -> ConnectionState.ERROR
+        }
+    }
+
+    private fun getStateIconRes(): Int {
+        val diff = System.currentTimeMillis() - lastAckTime.get()
+        return if (diff in 1..30_000) {
+            R.drawable.ic_notification_ok
+        } else {
+            R.drawable.ic_notification_error
+        }
+    }
+
+    private fun applyOngoingActivity(notificationBuilder: NotificationCompat.Builder, statusText: String) {
         val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val status = Status.Builder()
-            .addTemplate("Tracking active")
-            .build()
-
-        val icon = Icon.createWithResource(this, R.drawable.ic_notification)
+        val status = Status.Builder().addTemplate(statusText).build()
+        val stateIconRes = getStateIconRes()
         ongoingActivity = OngoingActivity.Builder(this, NOTIFICATION_ID, notificationBuilder)
-            .setAnimatedIcon(icon)
-            .setStaticIcon(icon)
+            .setAnimatedIcon(stateIconRes)
+            .setStaticIcon(stateIconRes)
             .setTouchIntent(pendingIntent)
             .setStatus(status)
             .build()
 
         ongoingActivity?.apply(this)
+        Log.d(TAG, "Applied ongoing activity with status='$statusText'")
     }
 
     private fun clearOngoingActivity() {
@@ -505,14 +531,17 @@ class TrackerService : LifecycleService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val stateIconRes = getStateIconRes()
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Windsurfer Tracker")
             .setContentText(text)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(stateIconRes)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text).setBigContentTitle("Windsurfer Tracker"))
 
         // Add timer action button if race timer is enabled
         if (raceTimerEnabled && showTimerAction) {
@@ -547,7 +576,19 @@ class TrackerService : LifecycleService() {
     }
 
     private fun buildNotification(text: String, showTimerAction: Boolean = false): Notification {
-        return buildNotificationBuilder(text, showTimerAction).build()
+        val builder = buildNotificationBuilder(text, showTimerAction)
+        applyOngoingActivity(builder, text)
+        return builder.build()
+    }
+
+    private fun getStatusColor(): Int {
+        val now = System.currentTimeMillis()
+        val diff = now - lastAckTime.get()
+        return when {
+            diff in 1..30_000 -> Color.parseColor("#2ECC71") // green: healthy ACKs
+            diff in 30_001..60_000 -> Color.parseColor("#F5A623") // orange: stale
+            else -> Color.parseColor("#E53935") // red: no ACKs recently
+        }
     }
 
     /**
@@ -570,6 +611,18 @@ class TrackerService : LifecycleService() {
         val notification = buildNotification(text)
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun currentStatusText(): String {
+        val elapsedMs = if (trackingStartRealtimeMs > 0) {
+            android.os.SystemClock.elapsedRealtime() - trackingStartRealtimeMs
+        } else {
+            0L
+        }
+        val totalSeconds = elapsedMs / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "Tracking ${minutes}m ${String.format("%02d", seconds)}s"
     }
 
     private fun setupLocationCallback() {
@@ -634,6 +687,9 @@ class TrackerService : LifecycleService() {
                     } else {
                         sendPosition(location)
                     }
+
+                    // Refresh ongoing activity text with elapsed tracking time
+                    updateNotification(currentStatusText())
                 }
             }
         }
@@ -739,6 +795,7 @@ class TrackerService : LifecycleService() {
         hasAuthFailure.set(false)
         currentEventName = ""
         updateStatusLine()  // Show "GPS wait"
+        trackingStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
 
         // Acquire wake lock to keep tracking alive during battery saver
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -817,7 +874,7 @@ class TrackerService : LifecycleService() {
                 locationCallback,
                 Looper.getMainLooper()
             )
-            updateNotification("Tracking active")
+            updateNotification(currentStatusText())
 
             // Start tracker beep timer (first beep after 60 seconds)
             beepHandler.postDelayed(beepRunnable, 60000L)
@@ -830,6 +887,7 @@ class TrackerService : LifecycleService() {
         if (!isRunning.getAndSet(false)) return
 
         Log.d(TAG, "Stopping tracking")
+        trackingStartRealtimeMs = 0L
 
         // Stop tracker beep timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -1269,6 +1327,7 @@ class TrackerService : LifecycleService() {
                         val ackRate = getAckRate()
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
+                        updateNotification(currentStatusText())
 
                         // Extract event name from ACK if present and update status
                         val eventName = ack.optString("event", "")

@@ -16,6 +16,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.Build
 import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -27,6 +28,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
@@ -168,7 +170,7 @@ class MainActivity : ComponentActivity() {
                 // Request background location separately (Android 10+ requirement)
                 requestBackgroundLocation()
             } else {
-                checkBatteryOptimizationAndStart()
+                ensureNotificationsEnabled()
             }
         } else {
             Toast.makeText(this, "Location permission required", Toast.LENGTH_LONG).show()
@@ -179,7 +181,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            checkBatteryOptimizationAndStart()
+            ensureNotificationsEnabled()
         } else {
             Toast.makeText(this, "Background location required for tracking", Toast.LENGTH_LONG).show()
         }
@@ -190,6 +192,16 @@ class MainActivity : ComponentActivity() {
     ) {
         // Start tracking regardless of result - user made their choice
         startTracking()
+    }
+
+    private val notificationPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            ensureNotificationsEnabled()
+        } else {
+            Toast.makeText(this, "Notifications are required for background indicator", Toast.LENGTH_LONG).show()
+        }
     }
 
     private var splashScreenReady = false
@@ -315,9 +327,47 @@ class MainActivity : ComponentActivity() {
 
     private fun checkPermissionsAndStart() {
         when {
-            hasLocationPermissions() -> checkBatteryOptimizationAndStart()
+            hasLocationPermissions() -> ensureNotificationsEnabled()
             else -> requestLocationPermissions()
         }
+    }
+
+    private fun ensureNotificationsEnabled() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+
+        val notificationsAllowed = NotificationManagerCompat.from(this).areNotificationsEnabled()
+        if (!notificationsAllowed) {
+            Toast.makeText(this, "Enable notifications so tracking stays visible", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to open notification settings", e)
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                        }
+                    )
+                } catch (ignored: Exception) {
+                    // If we can't open settings, still proceed to start tracking
+                }
+            }
+            return
+        }
+
+        checkBatteryOptimizationAndStart()
     }
 
     private fun checkBatteryOptimizationAndStart() {
