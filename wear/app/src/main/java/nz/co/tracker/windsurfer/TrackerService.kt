@@ -127,6 +127,7 @@ class TrackerService : LifecycleService() {
     // State
     private val isRunning = AtomicBoolean(false)
     private val assistRequested = AtomicBoolean(false)
+    private val assistButtonEnabled = AtomicBoolean(true)  // Whether assist button should be shown (from server)
     private val sequenceNumber = AtomicInteger(0)
     private val lastAckTime = AtomicLong(0)
     private val hasGpsFix = AtomicBoolean(false)
@@ -501,7 +502,9 @@ class TrackerService : LifecycleService() {
     }
 
     private fun createMainPendingIntent(): PendingIntent {
-        val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
+        val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         return PendingIntent.getActivity(
             this, 1001, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -1345,6 +1348,7 @@ class TrackerService : LifecycleService() {
                         // Check for assist enabled status (missing = true, explicit false = disabled)
                         if (ack.has("assist")) {
                             val assistEnabled = ack.optBoolean("assist", true)
+                            assistButtonEnabled.set(assistEnabled)
                             statusListener?.onAssistEnabled(assistEnabled)
                             // Clear local assist flag if server says assist is disabled
                             if (!assistEnabled && assistRequested.getAndSet(false)) {
@@ -1352,6 +1356,7 @@ class TrackerService : LifecycleService() {
                             }
                         } else {
                             // Default to enabled if not specified
+                            assistButtonEnabled.set(true)
                             statusListener?.onAssistEnabled(true)
                         }
 
@@ -1431,7 +1436,7 @@ class TrackerService : LifecycleService() {
         if (currentEventName.isNotEmpty()) {
             statusListener?.onEventName(currentEventName)
         }
-        statusListener?.onAssistEnabled(assistRequested.get())
+        statusListener?.onAssistEnabled(assistButtonEnabled.get())
         if (countdownRunning && countdownSeconds >= 0) {
             statusListener?.onCountdownTick(countdownSeconds)
         }

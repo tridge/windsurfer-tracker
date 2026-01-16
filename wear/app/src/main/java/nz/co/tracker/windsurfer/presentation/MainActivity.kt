@@ -283,6 +283,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updateBatteryAndSignal()
+        // Re-sync state from service when activity resumes (e.g., from ongoing activity tap)
+        if (serviceBound) {
+            isTracking.value = trackerService?.isTracking() == true
+            isAssistActive.value = trackerService?.isAssistActive() == true
+            trackerService?.replayStatusForUi()
+        }
     }
 
     override fun onDestroy() {
