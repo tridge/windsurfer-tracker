@@ -158,6 +158,7 @@ class MainActivity : ComponentActivity() {
                 // Grace: assume OK until the next ACK arrives after binding
                 lastAckTime.longValue = System.currentTimeMillis()
             }
+            trackerService?.replayStatusForUi()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {

@@ -1424,6 +1424,19 @@ class TrackerService : LifecycleService() {
 
     fun isAssistActive(): Boolean = assistRequested.get()
 
+    fun replayStatusForUi() {
+        // Push last known values to the UI listener after (re)binding
+        lastLocation?.let { statusListener?.onLocationUpdate(it, totalDistance) }
+        statusListener?.onConnectionStatus(getAckRate())
+        if (currentEventName.isNotEmpty()) {
+            statusListener?.onEventName(currentEventName)
+        }
+        statusListener?.onAssistEnabled(assistRequested.get())
+        if (countdownRunning && countdownSeconds >= 0) {
+            statusListener?.onCountdownTick(countdownSeconds)
+        }
+    }
+
     fun requestAssist(enabled: Boolean) {
         assistRequested.set(enabled)
         Log.d(TAG, "Assist ${if (enabled) "ENABLED" else "disabled"}")
