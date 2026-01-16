@@ -149,6 +149,15 @@ class MainActivity : ComponentActivity() {
                 isAssistActive.value = trackerService?.isAssistActive() == true
             }
             Log.d(TAG, "Service connected, tracking=${isTracking.value}, assist=${isAssistActive.value}")
+
+            // Initialize lastAckTime from service to avoid false red status on first open
+            val svcLastAck = trackerService?.getLastAckTime() ?: 0L
+            if (svcLastAck > 0) {
+                lastAckTime.longValue = svcLastAck
+            } else if (isTracking.value) {
+                // Grace: assume OK until the next ACK arrives after binding
+                lastAckTime.longValue = System.currentTimeMillis()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
