@@ -500,12 +500,16 @@ class TrackerService : LifecycleService() {
         }
     }
 
-    private fun applyOngoingActivity(notificationBuilder: NotificationCompat.Builder, statusText: String) {
+    private fun createMainPendingIntent(): PendingIntent {
         val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
+        return PendingIntent.getActivity(
+            this, 1001, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    private fun applyOngoingActivity(notificationBuilder: NotificationCompat.Builder, statusText: String) {
+        val pendingIntent = createMainPendingIntent()
 
         val status = Status.Builder().addTemplate(statusText).build()
         val stateIconRes = getStateIconRes()
@@ -525,11 +529,7 @@ class TrackerService : LifecycleService() {
     }
 
     private fun buildNotificationBuilder(text: String, showTimerAction: Boolean = false): NotificationCompat.Builder {
-        val intent = Intent(this, nz.co.tracker.windsurfer.presentation.MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val pendingIntent = createMainPendingIntent()
 
         val stateIconRes = getStateIconRes()
 
