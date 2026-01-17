@@ -3533,7 +3533,7 @@
                 deviceMarker.setLatLng(pos);
                 deviceMarker.setIcon(icon);
             } else {
-                deviceMarker = L.marker(pos, { icon, zIndexOffset: 1000 }).addTo(map);
+                deviceMarker = L.marker(pos, { icon, zIndexOffset: -1000 }).addTo(map);
                 deviceMarker.bindPopup('<strong>Your Position</strong>');
             }
         }
