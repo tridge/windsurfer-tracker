@@ -1502,6 +1502,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     override['role'] = data['role']
                 if 'hidden' in data:
                     override['hidden'] = bool(data['hidden'])
+                if 'info' in data:
+                    override['info'] = str(data['info'])
 
                 if override:
                     tracker.user_overrides[user_id] = override
@@ -1516,7 +1518,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     log(f"[EVENT {eid}] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
-                    self._send_json({"error": "No valid fields (name, role)"}, 400)
+                    self._send_json({"error": "No valid fields (name, role, info)"}, 400)
 
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)
@@ -1849,7 +1851,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 data = json.loads(body)
 
                 global _user_overrides
-                # Only allow name, role, and hidden overrides
+                # Only allow name, role, hidden, and info overrides
                 override = {}
                 if 'name' in data:
                     override['name'] = str(data['name'])
@@ -1857,6 +1859,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     override['role'] = data['role']
                 if 'hidden' in data:
                     override['hidden'] = bool(data['hidden'])
+                if 'info' in data:
+                    override['info'] = str(data['info'])
 
                 if override:
                     _user_overrides[user_id] = override
@@ -1873,7 +1877,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     log(f"[ADMIN] User override set for {user_id}: {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
-                    self._send_json({"error": "No valid fields (name, role)"}, 400)
+                    self._send_json({"error": "No valid fields (name, role, info)"}, 400)
 
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)

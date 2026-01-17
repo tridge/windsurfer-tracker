@@ -1044,6 +1044,8 @@
                     <span>Hidden (not shown on map)</span>
                 </label>
             </div>
+            <label for="editUserInfo">Info (displayed below name)</label>
+            <textarea id="editUserInfo" placeholder="Optional notes about this sailor" rows="2" style="width:100%;resize:vertical;"></textarea>
             <div class="btn-row">
                 <button class="btn-cancel" onclick="closeEditUser()">Cancel</button>
                 <button class="btn-save" onclick="saveEditUser()">Save</button>
@@ -1096,6 +1098,43 @@
         let currentMapType = localStorage.getItem('mapType') || 'osm';
         let currentLayer = null;
 
+        function scheduleAutoRefresh(layer) {
+            const now = Date.now();
+            if (layer._pendingAutoRefresh) return;
+            if (layer._lastAutoRefresh && (now - layer._lastAutoRefresh) < 5000) return;
+            layer._pendingAutoRefresh = true;
+            setTimeout(() => {
+                layer._pendingAutoRefresh = false;
+                if (layer !== currentLayer || !map.hasLayer(layer)) return;
+                layer._lastAutoRefresh = Date.now();
+                map.removeLayer(layer);
+                map.addLayer(layer);
+            }, 600);
+        }
+
+        function attachTileRetry(layer, opts = {}) {
+            if (!layer || !layer.on) return;
+            layer.on('tileerror', (event) => {
+                const tile = event.tile;
+                if (!tile || !tile.src) return;
+                const retryCount = tile._retryCount || 0;
+                if (retryCount >= 1) return;
+                tile._retryCount = retryCount + 1;
+                const separator = tile.src.includes('?') ? '&' : '?';
+                setTimeout(() => {
+                    tile.src = `${tile.src}${separator}retry=${Date.now()}`;
+                }, 300);
+                if (opts.autoRefresh) {
+                    scheduleAutoRefresh(layer);
+                }
+            });
+            layer.on('tileload', (event) => {
+                if (event.tile) event.tile._retryCount = 0;
+            });
+        }
+
+        attachTileRetry(osmLayer);
+
         // Initialize with saved preference
         function initMapLayers() {
             // Show map type menu item if Google Maps is available
@@ -1106,6 +1145,9 @@
                 googleLayers.roads = L.gridLayer.googleMutant({ type: 'roadmap', maxZoom: 21 });
                 googleLayers.satellite = L.gridLayer.googleMutant({ type: 'satellite', maxZoom: 21 });
                 googleLayers.hybrid = L.gridLayer.googleMutant({ type: 'hybrid', maxZoom: 21 });
+                attachTileRetry(googleLayers.roads, { autoRefresh: true });
+                attachTileRetry(googleLayers.satellite, { autoRefresh: true });
+                attachTileRetry(googleLayers.hybrid, { autoRefresh: true });
 
                 // Apply saved map type
                 setMapType(currentMapType, true);
@@ -2164,6 +2206,7 @@
             document.getElementById('editUserName').value = override.name || '';
             document.getElementById('editUserRole').value = override.role || '';
             document.getElementById('editUserHidden').checked = override.hidden || false;
+            document.getElementById('editUserInfo').value = override.info || '';
 
             // Show remove button if override exists
             document.getElementById('btnRemoveOverride').style.display =
@@ -2237,11 +2280,13 @@
             const name = document.getElementById('editUserName').value.trim();
             const role = document.getElementById('editUserRole').value;
             const hidden = document.getElementById('editUserHidden').checked;
+            const info = document.getElementById('editUserInfo').value.trim();
 
             const data = {};
             if (name) data.name = name;
             if (role) data.role = role;
             data.hidden = hidden;  // Always include hidden state
+            if (info) data.info = info;
 
             if (Object.keys(data).length === 1 && !data.hidden) {
                 // Only hidden=false with no other data - treat as remove
@@ -3379,6 +3424,8 @@
 
                 // Display name (use override if set, otherwise ID) - displayName already defined above
                 const nameExtra = sailor.name ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
+                const userInfo = userOverrides[id]?.info || '';
+                const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
                 const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
@@ -3412,7 +3459,7 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
                     Speed: ${sailor.spd.toFixed(1)} kn<br>
                     Heading: ${sailor.hdg}°<br>
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
