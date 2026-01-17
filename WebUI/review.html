@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="css/common.css" />
     <link rel="stylesheet" href="css/graphs.css" />
     <link rel="stylesheet" href="css/review.css" />
+    <link rel="stylesheet" href="js/flatpickr/flatpickr.min.css" />
 </head>
 <body>
     <!-- Event description modal -->
@@ -30,10 +31,7 @@
     <div id="controls">
         <a id="live-link" href="event.html" style="color:white;text-decoration:none;padding:8px 12px;background:#27ae60;border-radius:4px;margin-right:10px;">← Live Tracking</a>
         <span class="event-header-name" id="eventHeaderName" onclick="showEventModal()" title="Click for event details"></span>
-        <span class="date-display" onclick="document.getElementById('date-picker').showPicker()" style="cursor:pointer;position:relative;">
-            <span id="date-display"></span>
-            <input type="date" id="date-picker" style="position:absolute;left:0;top:100%;width:0;height:0;border:none;padding:0;margin:0;opacity:0;">
-        </span>
+        <input type="text" id="date-picker" class="date-picker" readonly placeholder="Select date">
         <div class="graphs-dropdown">
             <button id="options-btn">Options ▼</button>
             <div id="options-dropdown-content" class="graphs-dropdown-content">
@@ -343,6 +341,7 @@
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
     <script src="js/export.js"></script>
+    <script src="js/flatpickr/flatpickr.min.js"></script>
     <script>
         // Event ID from URL parameter (default to 2)
         const urlParams = new URLSearchParams(window.location.search);
@@ -538,19 +537,6 @@
             // Get current date parts in event timezone
             const parts = new Date().toLocaleDateString('en-CA', { timeZone: eventTimezone });
             return parts; // Format: YYYY-MM-DD (en-CA gives ISO format)
-        }
-
-        // Format date as "DD Mon YYYY" for consistent display across platforms
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        function formatDateDisplay(dateStr) {
-            // Input: YYYY-MM-DD or YYYY_MM_DD
-            const normalized = dateStr.replace(/_/g, '-');
-            const parts = normalized.split('-');
-            if (parts.length !== 3) return dateStr;
-            const year = parts[0];
-            const month = parseInt(parts[1], 10) - 1;
-            const day = parseInt(parts[2], 10);
-            return `${day} ${monthNames[month]} ${year}`;
         }
 
         // Format time in event timezone
@@ -754,9 +740,8 @@
                             document.getElementById('timezone-display').style.display = 'block';
                             // Update date picker to use event timezone (only if no URL date param)
                             const urlDateParams = new URLSearchParams(window.location.search);
-                            if (!urlDateParams.has('date')) {
-                                document.getElementById('date-picker').value = getTodayInEventTz();
-                                updateDateDisplay();
+                            if (!urlDateParams.has('date') && datePicker) {
+                                datePicker.setDate(getTodayInEventTz(), false);
                             }
                         }
 
@@ -1293,35 +1278,20 @@
             return `rgb(${r},${g},${b})`;
         }
 
-        // Open date picker (with fallback for browsers without showPicker)
-        function openDatePicker() {
-            const picker = document.getElementById('date-picker');
-            if (picker.showPicker) {
-                picker.showPicker();
-            } else {
-                picker.focus();
-                picker.click();
-            }
-        }
-
-        // Update date display when picker changes
-        function updateDateDisplay() {
-            const dateStr = document.getElementById('date-picker').value;
-            document.getElementById('date-display').textContent = dateStr ? formatDateDisplay(dateStr) : 'Select date';
-        }
-        document.getElementById('date-picker').addEventListener('change', () => {
-            updateDateDisplay();
-            loadSummary();  // Auto-load when date changes
-        });
-
-        // Set date: use URL param if provided, otherwise today in event timezone
+        // Initialize date picker with flatpickr
         const initDateParams = new URLSearchParams(window.location.search);
-        if (initDateParams.has('date')) {
-            document.getElementById('date-picker').value = initDateParams.get('date');
-        } else {
-            document.getElementById('date-picker').value = getTodayInEventTz();
-        }
-        updateDateDisplay();  // Initialize display
+        const initialDate = initDateParams.has('date') ? initDateParams.get('date') : getTodayInEventTz();
+
+        const datePicker = flatpickr('#date-picker', {
+            dateFormat: 'Y-m-d',      // Internal value format (YYYY-MM-DD)
+            altInput: true,            // Show human-readable format
+            altFormat: 'j M Y',        // Display format: "18 Jan 2026"
+            defaultDate: initialDate,
+            disableMobile: true,       // Use flatpickr UI on mobile (consistent format)
+            onChange: function() {
+                loadSummary();
+            }
+        });
 
         // Load summary for a date (phase 1)
         async function loadSummary() {
