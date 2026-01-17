@@ -899,3 +899,97 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .sublog-add:hover {
     background: #219a52;
 }
+
+/* Search modal styles */
+#search-btn {
+    background: #9b59b6;
+    font-size: 16px;
+    padding: 8px 12px;
+}
+
+#search-btn:hover {
+    background: #8e44ad;
+}
+
+.search-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 80px;
+    z-index: 2000;
+}
+
+.search-modal-content {
+    background: #2c3e50;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+#search-input {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #3498db;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    box-sizing: border-box;
+}
+
+#search-results {
+    margin-bottom: 10px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.search-hint {
+    color: #95a5a6;
+    text-align: center;
+    padding: 20px;
+}
+
+.search-result {
+    padding: 10px;
+    margin: 5px 0;
+    background: #34495e;
+    border-radius: 4px;
+    cursor: pointer;
+    color: white;
+}
+
+.search-result:hover {
+    background: #3498db;
+}
+
+.search-result-detail {
+    font-size: 12px;
+    color: #bdc3c7;
+}
+
+.search-result:hover .search-result-detail {
+    color: white;
+}
+
+#search-close {
+    width: 100%;
+    padding: 10px;
+    background: #7f8c8d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#search-close:hover {
+    background: #95a5a6;
+}

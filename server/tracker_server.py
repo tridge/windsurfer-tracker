@@ -20,7 +20,7 @@ from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 # Force line-buffered output for real-time logging with tail -f
 sys.stdout.reconfigure(line_buffering=True)
@@ -1366,6 +1366,57 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"users": {}})
 
+        elif subpath == '/search':
+            # Search across all summary files for this event (public)
+            parsed = urlparse(self.path)
+            query_params = parse_qs(parsed.query)
+            query = query_params.get('q', [''])[0].strip().lower()
+
+            if not query or len(query) < 2:
+                self._send_json({"error": "Query parameter 'q' required (min 2 chars)"}, 400)
+                return
+
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+
+            # Load user overrides for display names
+            user_overrides = tracker.user_overrides or {}
+
+            results = []
+            # Scan all summary files
+            if tracker.log_dir.exists():
+                for summary_file in sorted(tracker.log_dir.glob('*_summary.json'), reverse=True):
+                    try:
+                        with open(summary_file, 'r') as f:
+                            summary = json.load(f)
+                        date = summary.get('date', summary_file.stem.replace('_summary', ''))
+
+                        for log in summary.get('logs', []):
+                            for sailor_id, sailor_data in log.get('sailors', {}).items():
+                                # Get display name from user overrides
+                                display_name = user_overrides.get(sailor_id, {}).get('name', '')
+
+                                # Match against sailor ID or display name
+                                if query in sailor_id.lower() or query in display_name.lower():
+                                    start_ts = sailor_data.get('first_ts', log.get('start_ts', 0))
+                                    end_ts = sailor_data.get('last_ts', log.get('end_ts', 0))
+                                    results.append({
+                                        'date': date,
+                                        'log_file': log.get('file', ''),
+                                        'sailor_id': sailor_id,
+                                        'name': display_name or sailor_id,
+                                        'start_ts': start_ts,
+                                        'end_ts': end_ts,
+                                        'duration_secs': end_ts - start_ts if end_ts > start_ts else 0
+                                    })
+                    except Exception as e:
+                        logging.warning(f"Error reading summary {summary_file}: {e}")
+                        continue
+
+            self._send_json({"results": results})
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -1838,7 +1889,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             # Get event ID from query parameter or use default
             parsed = urlparse(self.path)
-            from urllib.parse import parse_qs
             query_params = parse_qs(parsed.query)
             event_id = int(query_params.get('event_id', [1])[0])
 

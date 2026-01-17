@@ -74,8 +74,18 @@
                 <label><button id="export-geojson" class="export-format-btn">GeoJSON (Mapping)</button></label>
             </div>
         </div>
+        <button id="search-btn" title="Search sailors">🔍</button>
         <button id="reload-tiles-btn" title="Reload map tiles">⟳</button>
         <span id="status"></span>
+    </div>
+
+    <!-- Search modal -->
+    <div id="search-modal" class="search-modal" style="display:none;">
+        <div class="search-modal-content">
+            <input type="text" id="search-input" placeholder="Search sailor name...">
+            <div id="search-results"></div>
+            <button id="search-close">Close</button>
+        </div>
     </div>
 
     <!-- About modal -->
@@ -4298,6 +4308,121 @@
                 map.addLayer(googleLayers[currentMapType]);
             }
         });
+
+        // Search functionality
+        let searchDebounceTimer = null;
+
+        document.getElementById('search-btn').addEventListener('click', () => {
+            document.getElementById('search-modal').style.display = 'flex';
+            document.getElementById('search-input').focus();
+        });
+
+        document.getElementById('search-close').addEventListener('click', () => {
+            document.getElementById('search-modal').style.display = 'none';
+        });
+
+        document.getElementById('search-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'search-modal') {
+                document.getElementById('search-modal').style.display = 'none';
+            }
+        });
+
+        document.getElementById('search-input').addEventListener('input', (e) => {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => performSearch(e.target.value), 300);
+        });
+
+        async function performSearch(query) {
+            const resultsContainer = document.getElementById('search-results');
+            if (!query || query.length < 2) {
+                resultsContainer.innerHTML = '<p class="search-hint">Enter at least 2 characters</p>';
+                return;
+            }
+
+            resultsContainer.innerHTML = '<p class="search-hint">Searching...</p>';
+
+            try {
+                const response = await fetch(`/api/event/${EVENT_ID}/search?q=${encodeURIComponent(query)}`);
+                if (!response.ok) {
+                    throw new Error('Search failed');
+                }
+                const data = await response.json();
+                displaySearchResults(data.results);
+            } catch (e) {
+                resultsContainer.innerHTML = '<p class="search-hint">Search error</p>';
+            }
+        }
+
+        function displaySearchResults(results) {
+            const container = document.getElementById('search-results');
+            if (!results || results.length === 0) {
+                container.innerHTML = '<p class="search-hint">No results found</p>';
+                return;
+            }
+
+            container.innerHTML = results.map(r => {
+                const duration = formatDurationSecs(r.duration_secs);
+                const dateDisplay = r.date.replace(/_/g, '-');
+                return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${r.sailor_id}">
+                    <strong>${r.name}</strong><br>
+                    <span class="search-result-detail">${dateDisplay} | ${duration}</span>
+                </div>`;
+            }).join('');
+
+            // Add click handlers to results
+            container.querySelectorAll('.search-result').forEach(el => {
+                el.addEventListener('click', () => {
+                    const date = el.dataset.date;
+                    const logFile = el.dataset.logfile;
+                    const sailorId = el.dataset.sailor;
+                    selectSearchResult(date, logFile, sailorId);
+                });
+            });
+        }
+
+        function formatDurationSecs(secs) {
+            if (!secs || secs <= 0) return '0:00';
+            const mins = Math.floor(secs / 60);
+            const remSecs = Math.floor(secs % 60);
+            return `${mins}:${String(remSecs).padStart(2, '0')}`;
+        }
+
+        async function selectSearchResult(date, logFile, sailorId) {
+            // Close modal
+            document.getElementById('search-modal').style.display = 'none';
+
+            // Set date picker to the result's date
+            const dateFormatted = date.replace(/_/g, '-');
+            datePicker.setDate(dateFormatted, false);
+
+            // Load summary for that date
+            await loadSummary();
+
+            // Find the log entry by file name
+            if (currentSummary && currentSummary.logs) {
+                const logIndex = currentSummary.logs.findIndex(log => log.file === logFile);
+                if (logIndex >= 0) {
+                    const logEntry = currentSummary.logs[logIndex];
+                    await loadRace(logEntry);
+
+                    // Select the specific sailor
+                    selectedUsers.clear();
+                    if (userData[sailorId]) {
+                        selectedUsers.add(sailorId);
+                    }
+                    updateUserList();
+                    redrawAll();
+                    fitMapToData();
+
+                    // Highlight the log in the race list
+                    const raceItems = document.querySelectorAll('.race-item');
+                    raceItems.forEach(el => el.classList.remove('selected'));
+                    if (raceItems[logIndex]) {
+                        raceItems[logIndex].classList.add('selected');
+                    }
+                }
+            }
+        }
 
         document.getElementById('about-modal').addEventListener('click', (e) => {
             if (e.target.id === 'about-modal') {
