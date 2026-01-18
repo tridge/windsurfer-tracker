@@ -62,6 +62,23 @@
     opacity: 1;
 }
 
+.event-edit-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.5);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.event-edit-btn:hover {
+    background: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.8);
+}
+
 .event-modal-body {
     padding: 20px;
     overflow-y: auto;

@@ -313,6 +313,7 @@
             padding: 8px 14px;
             cursor: pointer;
             max-width: calc(100vw - 350px);
+            overflow: hidden;
             display: none;
         }
 
@@ -330,11 +331,6 @@
             text-overflow: ellipsis;
         }
 
-        .event-banner .event-hint {
-            font-size: 11px;
-            color: #888;
-            margin-top: 2px;
-        }
 
         /* Hamburger menu button and panel */
         .menu-btn {
@@ -880,7 +876,6 @@
     <!-- Event name banner -->
     <div class="event-banner" id="eventBanner" onclick="showEventModal()">
         <div class="event-name" id="eventBannerName"></div>
-        <div class="event-hint">Click for details</div>
     </div>
 
     <!-- Event description modal -->
@@ -888,6 +883,7 @@
         <div class="event-modal" onclick="event.stopPropagation()">
             <div class="event-modal-header">
                 <h2 id="eventModalTitle"></h2>
+                <button id="editEventInfoBtn" class="event-edit-btn" style="display:none;" onclick="showEditEventInfo()">Edit</button>
                 <button class="event-modal-close" onclick="hideEventModal()">&times;</button>
             </div>
             <div class="event-modal-body">
@@ -895,6 +891,24 @@
             </div>
             <div class="event-modal-footer">
                 <a href="index.html">← Back to Events List</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit event info dialog -->
+    <div class="event-modal-overlay" id="editEventInfoOverlay" onclick="hideEditEventInfo(event)">
+        <div class="event-modal" style="max-width:500px;" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <h2>Edit Event Info</h2>
+                <button class="event-modal-close" onclick="hideEditEventInfo()">&times;</button>
+            </div>
+            <div class="event-modal-body" style="padding:20px;">
+                <textarea id="eventInfoText" rows="10" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:4px;resize:vertical;"></textarea>
+                <p style="font-size:12px;color:#666;margin-top:8px;">URLs will be made clickable. Use blank lines for paragraphs.</p>
+            </div>
+            <div class="event-modal-footer" style="text-align:right;">
+                <button onclick="hideEditEventInfo()" style="margin-right:10px;padding:8px 16px;cursor:pointer;">Cancel</button>
+                <button onclick="saveEventInfo()" style="background:#2196F3;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">Save</button>
             </div>
         </div>
     </div>
@@ -1404,7 +1418,63 @@
                 return false;
             }
         }
-        
+
+        // Event info edit functions (overrides modal.js showEventModal)
+        async function loadEventInfo() {
+            try {
+                const response = await fetch(`${EVENT_API}/info`);
+                const data = await response.json();
+                return data.info || currentEventInfo?.description || 'No description available.';
+            } catch (e) {
+                return currentEventInfo?.description || 'No description available.';
+            }
+        }
+
+        async function showEventModal() {
+            if (!currentEventInfo) return;
+            document.getElementById('eventModalTitle').textContent = currentEventInfo.name;
+            const info = await loadEventInfo();
+            // Convert newlines to <br> and make links clickable
+            const formatted = linkifyText(info.replace(/\n/g, '<br>'));
+            document.getElementById('eventModalDescription').innerHTML = formatted;
+            document.getElementById('eventModalOverlay').classList.add('visible');
+            // Show edit button only in admin mode
+            document.getElementById('editEventInfoBtn').style.display = adminMode ? 'inline-block' : 'none';
+        }
+
+        async function showEditEventInfo() {
+            const info = await loadEventInfo();
+            document.getElementById('eventInfoText').value = info;
+            document.getElementById('editEventInfoOverlay').classList.add('visible');
+        }
+
+        function hideEditEventInfo(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('editEventInfoOverlay').classList.remove('visible');
+        }
+
+        async function saveEventInfo() {
+            const info = document.getElementById('eventInfoText').value;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/info`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify({ info })
+                });
+                if (response.ok) {
+                    hideEditEventInfo();
+                    showEventModal(); // Refresh display
+                } else {
+                    alert('Failed to save event info');
+                }
+            } catch (e) {
+                alert('Error saving event info: ' + e.message);
+            }
+        }
+
         async function toggleAdminMode() {
             // Close menu first
             menuOpen = false;

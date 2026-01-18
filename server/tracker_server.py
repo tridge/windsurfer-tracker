@@ -1419,6 +1419,30 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             self._send_json({"results": results})
 
+        elif subpath == '/info':
+            # Return custom event info (or default from events.json)
+            tracker = get_event_tracker(eid)
+            info_file = tracker.data_dir / 'info.json' if tracker else None
+
+            # Try to load custom info.json
+            if info_file and info_file.exists():
+                try:
+                    with open(info_file, 'r') as f:
+                        data = json.load(f)
+                    self._send_json({"info": data.get('info', ''), "source": "custom"})
+                    return
+                except Exception as e:
+                    logging.warning(f"Error reading info.json for event {eid}: {e}")
+
+            # Fall back to event description from events.json
+            if _event_manager:
+                event = _event_manager.get_event(eid)
+                if event and event.get('description'):
+                    self._send_json({"info": event['description'], "source": "default"})
+                    return
+
+            self._send_json({"info": "", "source": "default"})
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -1474,6 +1498,38 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"success": True})
                 else:
                     self._send_json({"error": "Could not get event tracker"}, 500)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath == '/admin/info':
+            # Save custom event info
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                info_data = {
+                    'info': str(data.get('info', '')),
+                    'updated': time.time(),
+                    'updated_iso': datetime.now().isoformat()
+                }
+
+                info_file = tracker.data_dir / 'info.json'
+                tmp_file = info_file.with_suffix('.tmp')
+                with open(tmp_file, 'w') as f:
+                    json.dump(info_data, f, indent=2)
+                tmp_file.rename(info_file)
+
+                log(f"[EVENT {eid}] Event info saved")
+                self._send_json({"success": True})
 
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)
