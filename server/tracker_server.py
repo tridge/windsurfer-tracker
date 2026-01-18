@@ -558,7 +558,7 @@ class EventManager:
 
 def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None, position_tails: dict | None = None):
     """Write current positions to a JSON file for web UI consumption."""
-    # Apply user overrides for display (name, role, hidden)
+    # Apply user overrides for display (name, role, hidden, info)
     display_positions = {}
     for sailor_id, pos in positions.items():
         display_pos = pos.copy()
@@ -570,6 +570,8 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
                 display_pos['role'] = override['role']
             if override.get('hidden'):
                 display_pos['hidden'] = True
+            if 'info' in override:
+                display_pos['info'] = override['info']
         # Add position tail if available (last 20 seconds of positions)
         if position_tails and sailor_id in position_tails:
             display_pos['tail'] = position_tails[sailor_id]
