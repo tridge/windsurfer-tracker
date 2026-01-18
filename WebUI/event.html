@@ -293,17 +293,12 @@
             white-space: nowrap;
         }
         
-        /* Legend above scale */
-        .legend {
-            position: fixed;
-            bottom: 60px;
-            left: 10px;
-            z-index: 9999;
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            font-size: 12px;
+        /* Legend in panel */
+        .panel-legend {
+            padding: 8px 12px;
+            border-top: 1px solid #eee;
+            font-size: 11px;
+            color: #666;
         }
         
         /* Event name banner */
@@ -857,27 +852,23 @@
                 <div class="category-content" id="spectatorList"></div>
             </div>
             <div class="last-update" id="lastUpdate" style="padding:8px 12px;"></div>
-        </div>
-    </div>
-    
-    <div class="legend">
-        <div class="legend-item">
-            <div class="status-dot status-green"></div>
-            <span>Updated &lt; 2 min (solid)</span>
-        </div>
-        <div class="legend-item">
-            <div class="status-dot status-orange"></div>
-            <span>Updated &gt; 2 min (faded)</span>
-        </div>
-        <div class="legend-item">
-            <div class="status-dot status-red"></div>
-            <span>Assistance requested</span>
-        </div>
-        <div class="legend-item" style="margin-top:8px;font-size:11px;color:#666;">
-            <span>Click sailor to center map</span>
-        </div>
-        <div class="legend-item" style="margin-top:8px;border-top:1px solid #eee;padding-top:8px;">
-            <span id="courseLengthDisplay">Course: No course</span>
+            <div class="panel-legend">
+                <div class="legend-item">
+                    <div class="status-dot status-green"></div>
+                    <span>Updated &lt; 2 min</span>
+                </div>
+                <div class="legend-item">
+                    <div class="status-dot status-orange"></div>
+                    <span>Updated &gt; 2 min (faded)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="status-dot status-red"></div>
+                    <span>Assistance requested</span>
+                </div>
+                <div class="legend-item" style="margin-top:6px;padding-top:6px;border-top:1px solid #eee;">
+                    <span id="courseLengthDisplay">Course: No course</span>
+                </div>
+            </div>
         </div>
     </div>
     
