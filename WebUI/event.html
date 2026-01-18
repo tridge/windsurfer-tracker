@@ -331,6 +331,32 @@
             text-overflow: ellipsis;
         }
 
+        .event-banner .info-icon {
+            display: none;
+            font-size: 20px;
+            font-weight: bold;
+            color: #2196F3;
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            border: 2px solid #2196F3;
+            border-radius: 50%;
+        }
+
+        /* Mobile: show info icon, hide name */
+        @media (max-width: 600px) {
+            .event-banner {
+                padding: 6px;
+                max-width: none;
+            }
+            .event-banner .event-name {
+                display: none;
+            }
+            .event-banner .info-icon {
+                display: block;
+            }
+        }
 
         /* Hamburger menu button and panel */
         .menu-btn {
@@ -876,6 +902,7 @@
     <!-- Event name banner -->
     <div class="event-banner" id="eventBanner" onclick="showEventModal()">
         <div class="event-name" id="eventBannerName"></div>
+        <div class="info-icon">i</div>
     </div>
 
     <!-- Event description modal -->
