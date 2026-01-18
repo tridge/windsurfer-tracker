@@ -467,9 +467,9 @@
             padding: 2px 6px;
             border-radius: 3px;
             font-size: 11px;
-            white-space: nowrap;
             pointer-events: none;
             margin-top: 2px;
+            text-align: center;
         }
         
         .admin-panel {
@@ -1072,7 +1072,7 @@
                 </select>
             </div>
             <label for="editMarkComment">Comment</label>
-            <input type="text" id="editMarkComment" placeholder="e.g., Port rounding">
+            <textarea id="editMarkComment" placeholder="e.g., Port rounding" rows="2" style="width:100%;resize:vertical;"></textarea>
             <div class="btn-row">
                 <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
                 <button class="btn-save" onclick="saveEditMark()">Save</button>
@@ -1989,19 +1989,21 @@
             
             // Start marker
             if (course.start) {
-                const startLabel = course.start.comment || null;
+                const startLabel = course.start.comment ? course.start.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
                 const marker = L.marker([course.start.lat, course.start.lon], {
                     icon: createStartIcon(startLabel)
                 }).addTo(map);
-                let startPopup = '<strong>Start</strong>';
+                let startPopup = '<div style="text-align:center"><strong>Start</strong>';
                 if (course.start.comment) {
-                    startPopup += `<br><em>${course.start.comment}</em>`;
+                    const comment = course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                    startPopup += `<br><em>${comment}</em>`;
                 }
                 if (adminMode) {
                     startPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
                     startPopup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
                     startPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start')">Del</button>`;
                 }
+                startPopup += '</div>';
                 marker.bindPopup(startPopup);
                 courseMarkers.push(marker);
                 points.push([course.start.lat, course.start.lon]);
@@ -2011,15 +2013,16 @@
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
                     const color = mark.color || '#f97316';
-                    const label = mark.comment || null;
+                    const label = mark.comment ? mark.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
                     const marker = L.marker([mark.lat, mark.lon], {
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
 
                     // Build popup with mark info
-                    let popupContent = `<strong>Mark ${idx + 1}</strong>`;
+                    let popupContent = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
                     if (mark.comment) {
-                        popupContent += `<br><em>${mark.comment}</em>`;
+                        const comment = mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                        popupContent += `<br><em>${comment}</em>`;
                     }
                     popupContent += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
                     if (adminMode) {
@@ -2028,6 +2031,7 @@
                         popupContent += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
                         popupContent += `<button class="popup-delete-btn" onclick="deleteCourseMark(${idx})">Del</button>`;
                     }
+                    popupContent += '</div>';
                     marker.bindPopup(popupContent);
 
                     courseMarkers.push(marker);
@@ -2037,13 +2041,14 @@
             
             // Finish marker
             if (course.finish) {
-                const finishLabel = course.finish.comment || null;
+                const finishLabel = course.finish.comment ? course.finish.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
                 const marker = L.marker([course.finish.lat, course.finish.lon], {
                     icon: createFinishIcon(finishLabel)
                 }).addTo(map);
-                let finishPopup = '<strong>Finish</strong>';
+                let finishPopup = '<div style="text-align:center"><strong>Finish</strong>';
                 if (course.finish.comment) {
-                    finishPopup += `<br><em>${course.finish.comment}</em>`;
+                    const comment = course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                    finishPopup += `<br><em>${comment}</em>`;
                 }
                 if (adminMode) {
                     finishPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
@@ -2051,6 +2056,7 @@
                     finishPopup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
                     finishPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish')">Del</button>`;
                 }
+                finishPopup += '</div>';
                 marker.bindPopup(finishPopup);
                 courseMarkers.push(marker);
                 points.push([course.finish.lat, course.finish.lon]);
@@ -2335,7 +2341,7 @@
         async function saveEditMark() {
             if (editingMarkIndex === null || !courseData) return;
 
-            const comment = document.getElementById('editMarkComment').value.trim();
+            const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
 
             // Update the appropriate item in courseData
             if (editingMarkIndex === 'start') {
