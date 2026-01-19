@@ -122,8 +122,10 @@ public actor TrackerService {
         currentEventName = ""
         updateStatusLine()  // Show "GPS wait"
 
-        // Start battery tracking
-        batteryMonitor.startDrainTracking()
+        // Start battery tracking on main thread (Published properties)
+        await MainActor.run {
+            batteryMonitor.startDrainTracking()
+        }
 
         // Start location updates
         locationManager.startUpdating(highFrequency: preferences.highFrequencyMode)
@@ -131,8 +133,10 @@ public actor TrackerService {
         // Update state
         statePublisher.send(.tracking)
 
-        // Save tracking state for auto-resume
-        preferences.trackingActive = true
+        // Save tracking state for auto-resume on main thread (Published property)
+        await MainActor.run {
+            preferences.trackingActive = true
+        }
     }
 
     /// Stop tracking
@@ -148,8 +152,10 @@ public actor TrackerService {
         // Stop location updates
         locationManager.stopUpdating()
 
-        // Stop battery tracking
-        batteryMonitor.stopDrainTracking()
+        // Stop battery tracking on main thread (Published properties)
+        await MainActor.run {
+            batteryMonitor.stopDrainTracking()
+        }
 
         // Clear buffer
         positionBuffer.removeAll()
@@ -157,8 +163,10 @@ public actor TrackerService {
         // Update state
         statePublisher.send(.idle)
 
-        // Save tracking state
-        preferences.trackingActive = false
+        // Save tracking state on main thread (Published property)
+        await MainActor.run {
+            preferences.trackingActive = false
+        }
     }
 
     /// Send a stop notification packet to the server
