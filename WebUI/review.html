@@ -3696,13 +3696,14 @@
             const height = rect.height;
             const valueRange = maxValue - minValue;
 
+            // Note: ctx already has scale(devicePixelRatio) applied from draw*Graph()
             // Draw vertical highlight line
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
             ctx.lineWidth = 1;
             ctx.setLineDash([5, 3]);
             ctx.beginPath();
-            ctx.moveTo(highlightX * window.devicePixelRatio, 0);
-            ctx.lineTo(highlightX * window.devicePixelRatio, height * window.devicePixelRatio);
+            ctx.moveTo(highlightX, 0);
+            ctx.lineTo(highlightX, height);
             ctx.stroke();
             ctx.setLineDash([]);
 
@@ -3734,11 +3735,11 @@
                     const y = height - ((value - minValue) / valueRange) * height;
 
                     ctx.beginPath();
-                    ctx.arc(x * window.devicePixelRatio, y * window.devicePixelRatio, 6 * window.devicePixelRatio, 0, Math.PI * 2);
+                    ctx.arc(x, y, 6, 0, Math.PI * 2);
                     ctx.fillStyle = userColor;
                     ctx.fill();
                     ctx.strokeStyle = '#fff';
-                    ctx.lineWidth = 2 * window.devicePixelRatio;
+                    ctx.lineWidth = 2;
                     ctx.stroke();
                 }
             }
