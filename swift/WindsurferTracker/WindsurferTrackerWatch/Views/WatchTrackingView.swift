@@ -5,6 +5,10 @@ import WatchKit
 struct WatchTrackingView: View {
     @EnvironmentObject var viewModel: WatchTrackerViewModel
 
+    // Throttled heart rate display (updates at most once per second)
+    @State private var displayedHeartRate: Int = 0
+    @State private var lastHeartRateUpdate: Date = .distantPast
+
     var body: some View {
         ZStack {
             // Red background when assist is active
@@ -125,13 +129,13 @@ struct WatchTrackingView: View {
 
                 // Fitness metrics row: heart rate, distance, and battery
                 HStack(spacing: 12) {
-                    // Heart rate (if enabled and available)
-                    if viewModel.heartRateEnabled && viewModel.currentHeartRate > 0 {
+                    // Heart rate (if enabled and available) - throttled to 1Hz
+                    if viewModel.heartRateEnabled && displayedHeartRate > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: "heart.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.red)
-                            Text("\(viewModel.currentHeartRate)")
+                            Text("\(displayedHeartRate)")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
                         }
@@ -195,6 +199,18 @@ struct WatchTrackingView: View {
         .navigationBarBackButtonHidden(true)
         .onTapGesture {
             viewModel.stopTracking()
+        }
+        .onChange(of: viewModel.currentHeartRate) { newValue in
+            // Throttle heart rate updates to at most once per second
+            let now = Date()
+            if now.timeIntervalSince(lastHeartRateUpdate) >= 1.0 {
+                displayedHeartRate = newValue
+                lastHeartRateUpdate = now
+            }
+        }
+        .onAppear {
+            // Initialize displayed heart rate
+            displayedHeartRate = viewModel.currentHeartRate
         }
     }
 
