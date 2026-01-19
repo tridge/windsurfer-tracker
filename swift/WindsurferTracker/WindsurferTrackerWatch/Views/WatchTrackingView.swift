@@ -123,7 +123,7 @@ struct WatchTrackingView: View {
                     }
                 }
 
-                // Fitness metrics row: heart rate and distance
+                // Fitness metrics row: heart rate, distance, and battery
                 HStack(spacing: 12) {
                     // Heart rate (if enabled and available)
                     if viewModel.heartRateEnabled && viewModel.currentHeartRate > 0 {
@@ -143,6 +143,16 @@ struct WatchTrackingView: View {
                             .font(.system(size: 10))
                             .foregroundColor(.cyan)
                         Text(distanceText)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+
+                    // Battery percentage
+                    HStack(spacing: 2) {
+                        Image(systemName: batteryIconName)
+                            .font(.system(size: 10))
+                            .foregroundColor(batteryColor)
+                        Text(batteryText)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
                     }
@@ -203,6 +213,50 @@ struct WatchTrackingView: View {
             return String(format: "%.0fm", meters)
         } else {
             return String(format: "%.1fkm", meters / 1000)
+        }
+    }
+
+    private var batteryLevel: Float {
+        let device = WKInterfaceDevice.current()
+        device.isBatteryMonitoringEnabled = true
+        return device.batteryLevel
+    }
+
+    private var batteryText: String {
+        let level = batteryLevel
+        if level < 0 {
+            return "--%"
+        }
+        return "\(Int(level * 100))%"
+    }
+
+    private var batteryIconName: String {
+        let level = batteryLevel
+        if level < 0 {
+            return "battery.0"
+        } else if level < 0.15 {
+            return "battery.0"
+        } else if level < 0.40 {
+            return "battery.25"
+        } else if level < 0.65 {
+            return "battery.50"
+        } else if level < 0.90 {
+            return "battery.75"
+        } else {
+            return "battery.100"
+        }
+    }
+
+    private var batteryColor: Color {
+        let level = batteryLevel
+        if level < 0 {
+            return .gray
+        } else if level < 0.20 {
+            return .red
+        } else if level < 0.40 {
+            return .yellow
+        } else {
+            return .green
         }
     }
 
