@@ -289,6 +289,17 @@ struct WatchSettingsView: View {
                     }
                 }
 
+                // Water Lock
+                Toggle(isOn: $viewModel.waterLock) {
+                    VStack(alignment: .leading) {
+                        Text("Water Lock")
+                            .font(.caption)
+                        Text("Lock screen when tracking")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+
                 // Race Timer (disabled for this release)
                 if RACE_TIMER_FEATURE_ENABLED {
                     Toggle(isOn: $viewModel.raceTimerEnabled) {

@@ -19,6 +19,7 @@ public final class PreferencesManager: ObservableObject {
         static let highFrequencyMode = "high_frequency_mode"
         static let heartRateEnabled = "heart_rate_enabled"
         static let trackerBeep = "tracker_beep"
+        static let waterLock = "water_lock"
         static let trackingActive = "tracking_active"
         static let batteryOptAsked = "battery_opt_asked"
         static let raceTimerEnabled = "race_timer_enabled"
@@ -67,6 +68,10 @@ public final class PreferencesManager: ObservableObject {
 
     @Published public var trackerBeep: Bool {
         didSet { defaults.set(trackerBeep, forKey: Keys.trackerBeep) }
+    }
+
+    @Published public var waterLock: Bool {
+        didSet { defaults.set(waterLock, forKey: Keys.waterLock) }
     }
 
     @Published public var trackingActive: Bool {
@@ -128,6 +133,12 @@ public final class PreferencesManager: ObservableObject {
         } else {
             self.trackerBeep = defaults.bool(forKey: Keys.trackerBeep)
         }
+        // waterLock defaults to true - need to check if key exists
+        if defaults.object(forKey: Keys.waterLock) == nil {
+            self.waterLock = true
+        } else {
+            self.waterLock = defaults.bool(forKey: Keys.waterLock)
+        }
         self.trackingActive = defaults.bool(forKey: Keys.trackingActive)
         self.batteryOptAsked = defaults.bool(forKey: Keys.batteryOptAsked)
         self.raceTimerEnabled = defaults.bool(forKey: Keys.raceTimerEnabled)  // Default false
@@ -165,6 +176,7 @@ public final class PreferencesManager: ObservableObject {
         highFrequencyMode = false
         heartRateEnabled = false
         trackerBeep = true
+        waterLock = true
         trackingActive = false
         batteryOptAsked = false
         raceTimerEnabled = false

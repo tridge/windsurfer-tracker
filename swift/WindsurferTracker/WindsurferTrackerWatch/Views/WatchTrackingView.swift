@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 /// Compact tracking display for watch - matches WearOS design
 struct WatchTrackingView: View {
@@ -42,7 +43,7 @@ struct WatchTrackingView: View {
                     }
                     .font(.caption)
                 } else {
-                    Text("TRACKING")
+                    Text(WKInterfaceDevice.current().isWaterLockEnabled ? "TRACKING(LOCKED)" : "TRACKING")
                         .font(.caption)
                         .bold()
                         .foregroundColor(trackingStatusColor)

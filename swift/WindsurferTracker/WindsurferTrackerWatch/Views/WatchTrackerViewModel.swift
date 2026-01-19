@@ -73,6 +73,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.trackerBeep = trackerBeep }
     }
 
+    @Published public var waterLock: Bool {
+        didSet { preferences.waterLock = waterLock }
+    }
+
     @Published public var raceTimerEnabled: Bool {
         didSet { preferences.raceTimerEnabled = raceTimerEnabled }
     }
@@ -134,6 +138,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.password = prefs.password
         self.eventId = prefs.eventId
         self.trackerBeep = prefs.trackerBeep
+        self.waterLock = prefs.waterLock
         self.raceTimerEnabled = prefs.raceTimerEnabled
         self.raceTimerMinutes = prefs.raceTimerMinutes
         self.raceTimerTapGForce = prefs.raceTimerTapGForce
@@ -256,6 +261,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     // MARK: - Actions
 
     public func startTracking() {
+        print("[START] ========== startTracking() called ==========")
+
         // Validate required fields
         if sailorId.isEmpty {
             errorMessage = "Name is required"
@@ -286,10 +293,13 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
         // Start tracking
         errorMessage = "Starting..."
+        print("[START] About to start TrackerService...")
 
         Task {
             do {
+                print("[START] Inside Task, calling TrackerService.start()...")
                 try await TrackerService.shared.start()
+                print("[START] TrackerService started successfully!")
                 // Clear error and haptic for success
                 errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
@@ -923,6 +933,12 @@ extension WatchTrackerViewModel: HKWorkoutSessionDelegate {
                 workoutSession.resume()
             case .running:
                 // Workout is running - good for background
+                if isTracking && waterLock {
+                    let device = WKInterfaceDevice.current()
+                    if !device.isWaterLockEnabled {
+                        device.enableWaterLock()
+                    }
+                }
                 break
             default:
                 break
