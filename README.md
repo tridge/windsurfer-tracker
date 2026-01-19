@@ -455,3 +455,6 @@ This project uses the following third-party resources:
 - **[OpenStreetMap](https://www.openstreetmap.org/)** - Map data © OpenStreetMap contributors (ODbL license)
 - **Windsurfer logo** - The app icon is based on the Windsurfer class logo, thanks to Windsurfing International
 - **[OwnTracks](https://owntracks.org/)** - Thanks to the OwnTracks project for inspiration and ideas
+
+I'd also like to thanks David Tangye for all his help developing this
+system, both on the design side and testing.
