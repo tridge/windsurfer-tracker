@@ -108,6 +108,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.compose.ui:ui:1.6.0")
     implementation("androidx.compose.ui:ui-tooling-preview:1.6.0")
+    implementation("androidx.compose.material:material:1.6.0")
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.0")
 
     // Lifecycle

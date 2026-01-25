@@ -1,15 +1,29 @@
 package nz.co.tracker.windsurfer.presentation
 
 import android.app.Activity
-import android.app.RemoteInput
 import android.content.Intent
 import android.os.Bundle
-import android.view.inputmethod.EditorInfo
 import androidx.activity.ComponentActivity
-import androidx.wear.input.RemoteInputIntentHelper
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.TextField
+import androidx.compose.material.TextFieldDefaults
+import androidx.wear.compose.material.*
 
 /**
- * Activity that launches the system text input (voice or keyboard) for Wear OS.
+ * Activity that provides text input with pre-filled value for Wear OS.
  */
 class TextInputActivity : ComponentActivity() {
 
@@ -21,8 +35,6 @@ class TextInputActivity : ComponentActivity() {
 
         const val INPUT_TYPE_TEXT = 0
         const val INPUT_TYPE_PASSWORD = 1
-
-        private const val REQUEST_CODE_INPUT = 1001
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,46 +44,105 @@ class TextInputActivity : ComponentActivity() {
         val currentValue = intent.getStringExtra(EXTRA_CURRENT_VALUE) ?: ""
         val inputType = intent.getIntExtra(EXTRA_INPUT_TYPE, INPUT_TYPE_TEXT)
 
-        // Create RemoteInput for text entry
-        val remoteInputs = listOf(
-            RemoteInput.Builder(RESULT_TEXT)
-                .setLabel(label)
-                .build()
-        )
-
-        // Create intent for system text input
-        val inputIntent = RemoteInputIntentHelper.createActionRemoteInputIntent()
-        RemoteInputIntentHelper.putRemoteInputsExtra(inputIntent, remoteInputs)
-
-        // Set input type hints
-        if (inputType == INPUT_TYPE_PASSWORD) {
-            // For password, prefer keyboard over voice
-            val wearableExtras = Bundle().apply {
-                putInt("android.support.wearable.input.EXTRA_INPUT_TYPE", EditorInfo.TYPE_TEXT_VARIATION_PASSWORD)
+        setContent {
+            MaterialTheme {
+                TextInputScreen(
+                    label = label,
+                    initialValue = currentValue,
+                    isPassword = inputType == INPUT_TYPE_PASSWORD,
+                    onConfirm = { text ->
+                        val resultIntent = Intent().apply {
+                            putExtra(RESULT_TEXT, text)
+                        }
+                        setResult(Activity.RESULT_OK, resultIntent)
+                        finish()
+                    },
+                    onCancel = {
+                        setResult(Activity.RESULT_CANCELED)
+                        finish()
+                    }
+                )
             }
-            inputIntent.putExtras(wearableExtras)
         }
+    }
+}
 
-        startActivityForResult(inputIntent, REQUEST_CODE_INPUT)
+@Composable
+fun TextInputScreen(
+    label: String,
+    initialValue: String,
+    isPassword: Boolean,
+    onConfirm: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
+    val focusRequester = remember { FocusRequester() }
+
+    Scaffold(
+        timeText = { TimeText() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.caption1,
+                color = MaterialTheme.colors.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { onConfirm(text) }
+                ),
+                colors = TextFieldDefaults.textFieldColors(
+                    textColor = Color.White,
+                    backgroundColor = Color.DarkGray,
+                    cursorColor = Color.White
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.secondaryButtonColors(),
+                    modifier = Modifier.size(ButtonDefaults.SmallButtonSize)
+                ) {
+                    Text("✕")
+                }
+
+                Button(
+                    onClick = { onConfirm(text) },
+                    colors = ButtonDefaults.primaryButtonColors(),
+                    modifier = Modifier.size(ButtonDefaults.SmallButtonSize)
+                ) {
+                    Text("✓")
+                }
+            }
+        }
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (requestCode == REQUEST_CODE_INPUT) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                val results = RemoteInput.getResultsFromIntent(data)
-                val text = results?.getCharSequence(RESULT_TEXT)?.toString() ?: ""
-
-                val resultIntent = Intent().apply {
-                    putExtra(RESULT_TEXT, text)
-                }
-                setResult(Activity.RESULT_OK, resultIntent)
-            } else {
-                setResult(Activity.RESULT_CANCELED)
-            }
-            finish()
-        }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
     }
 }

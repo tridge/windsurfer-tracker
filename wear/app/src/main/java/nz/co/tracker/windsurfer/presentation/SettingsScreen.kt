@@ -492,13 +492,9 @@ fun SettingsScreen(
                             password != originalPassword ||
                             selectedEventId != originalEventId
 
-                        // Function to save and exit
+                        // Function to save settings (not password - that's done in coroutine)
                         fun doSave() {
                             validationError = null
-                            // Save password for this event for quick switching
-                            coroutineScope.launch {
-                                settingsRepository.saveEventPassword(selectedEventId, password)
-                            }
                             onSave(
                                 TrackerSettings(
                                     serverHost = serverHost,
@@ -539,6 +535,8 @@ fun SettingsScreen(
                                     return@launch
                                 }
 
+                                // Save password for this event BEFORE navigating away
+                                settingsRepository.saveEventPassword(selectedEventId, password)
                                 doSave()
                             }
                         } else {
