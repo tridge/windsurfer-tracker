@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -91,5 +92,25 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.ROLE] = role
         }
+    }
+
+    /**
+     * Save password for a specific event ID for quick event switching.
+     */
+    suspend fun saveEventPassword(eventId: Int, password: String) {
+        val key = stringPreferencesKey("event_password_$eventId")
+        context.dataStore.edit { prefs ->
+            prefs[key] = password
+        }
+    }
+
+    /**
+     * Get saved password for a specific event ID, or null if none saved.
+     */
+    suspend fun getEventPassword(eventId: Int): String? {
+        val key = stringPreferencesKey("event_password_$eventId")
+        return context.dataStore.data.map { prefs ->
+            prefs[key]
+        }.first()
     }
 }

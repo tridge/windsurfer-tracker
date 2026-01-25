@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import nz.co.tracker.windsurfer.BuildConfig
 import nz.co.tracker.windsurfer.EventFetcher
 import nz.co.tracker.windsurfer.EventInfo
+import nz.co.tracker.windsurfer.SettingsRepository
 import nz.co.tracker.windsurfer.TrackerService
 import nz.co.tracker.windsurfer.TrackerSettings
 
@@ -69,6 +70,7 @@ fun SettingsScreen(
 
     val roles = listOf("sailor", "support", "spectator")
     val eventFetcher = remember { EventFetcher() }
+    val settingsRepository = remember { SettingsRepository(context) }
     val coroutineScope = rememberCoroutineScope()
 
     // Fetch events when screen loads or server changes
@@ -237,7 +239,14 @@ fun SettingsScreen(
                             // Cycle to next event
                             val currentIndex = events.indexOfFirst { it.eid == selectedEventId }
                             val nextIndex = (currentIndex + 1) % events.size
-                            selectedEventId = events[nextIndex].eid
+                            val newEventId = events[nextIndex].eid
+                            selectedEventId = newEventId
+                            // Auto-fill saved password for this event if available
+                            coroutineScope.launch {
+                                settingsRepository.getEventPassword(newEventId)?.let { savedPassword ->
+                                    password = savedPassword
+                                }
+                            }
                         },
                         label = {
                             Text(
@@ -486,6 +495,10 @@ fun SettingsScreen(
                         // Function to save and exit
                         fun doSave() {
                             validationError = null
+                            // Save password for this event for quick switching
+                            coroutineScope.launch {
+                                settingsRepository.saveEventPassword(selectedEventId, password)
+                            }
                             onSave(
                                 TrackerSettings(
                                     serverHost = serverHost,
