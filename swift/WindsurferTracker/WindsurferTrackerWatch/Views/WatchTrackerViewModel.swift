@@ -564,11 +564,17 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     public func cycleEvent() {
         guard !events.isEmpty else { return }
+        let newEventId: Int
         if let currentIndex = events.firstIndex(where: { $0.eid == eventId }) {
             let nextIndex = (currentIndex + 1) % events.count
-            eventId = events[nextIndex].eid
+            newEventId = events[nextIndex].eid
         } else {
-            eventId = events.first?.eid ?? 2
+            newEventId = events.first?.eid ?? 2
+        }
+        eventId = newEventId
+        // Auto-fill saved password for this event if available
+        if let savedPassword = preferences.getEventPassword(eventId: newEventId) {
+            password = savedPassword
         }
     }
 

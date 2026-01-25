@@ -260,6 +260,8 @@ struct WatchSettingsView: View {
                         .foregroundColor(.gray)
                     Button {
                         viewModel.cycleEvent()
+                        // Update tempPassword with newly loaded password
+                        tempPassword = viewModel.password
                     } label: {
                         HStack {
                             if viewModel.eventsLoading {
@@ -517,6 +519,8 @@ struct WatchSettingsView: View {
                                 viewModel.sailorId = tempId
                                 viewModel.serverHost = tempHost
                                 viewModel.password = tempPassword
+                                // Save password for this event for quick switching
+                                PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
                                 dismiss()
                             case .failure(let error):
                                 validationError = error.localizedDescription
@@ -528,6 +532,8 @@ struct WatchSettingsView: View {
                         viewModel.sailorId = tempId
                         viewModel.serverHost = tempHost
                         viewModel.password = tempPassword
+                        // Save password for this event for quick switching
+                        PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
                         dismiss()
                     }
                 } label: {

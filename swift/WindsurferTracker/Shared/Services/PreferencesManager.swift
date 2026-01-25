@@ -188,4 +188,16 @@ public final class PreferencesManager: ObservableObject {
     public var configSummary: String {
         "\(sailorId.isEmpty ? "(not set)" : sailorId) @ \(serverHost):\(serverPort)"
     }
+
+    // MARK: - Event Password Cache
+
+    /// Save password for a specific event ID for quick event switching
+    public func saveEventPassword(eventId: Int, password: String) {
+        defaults.set(password, forKey: "event_password_\(eventId)")
+    }
+
+    /// Get saved password for a specific event ID, or nil if none saved
+    public func getEventPassword(eventId: Int) -> String? {
+        defaults.string(forKey: "event_password_\(eventId)")
+    }
 }
