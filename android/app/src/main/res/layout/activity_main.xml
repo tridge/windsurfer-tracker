@@ -320,21 +320,27 @@
 
     </LinearLayout>
 
+    <!-- Barrier below both config and status groups -->
+    <androidx.constraintlayout.widget.Barrier
+        android:id="@+id/barrierBelowContent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:barrierDirection="bottom"
+        app:constraint_referenced_ids="configGroup,statusGroup" />
+
     <!-- Big Assist Button - High contrast for outdoor use -->
     <Button
         android:id="@+id/btnAssist"
         android:layout_width="match_parent"
-        android:layout_height="150dp"
-        android:layout_marginTop="32dp"
-        android:layout_marginBottom="16dp"
+        android:layout_height="120dp"
+        android:layout_marginTop="24dp"
         android:text="REQUEST ASSISTANCE\n\nLong press to activate"
         android:textSize="20sp"
         android:textStyle="bold"
         android:textColor="#000000"
         android:backgroundTint="#00AA00"
         android:gravity="center"
-        app:layout_constraintBottom_toTopOf="@id/btnStartStop"
-        app:layout_constraintTop_toBottomOf="@id/statusGroup" />
+        app:layout_constraintTop_toBottomOf="@id/barrierBelowContent" />
 
     <!-- Start/Stop Button - High contrast for outdoor use -->
     <Button
