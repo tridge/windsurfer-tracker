@@ -217,14 +217,14 @@ def find_applicable_course(event_dir: Path, log_end_ts: float) -> tuple[str, flo
             course_files.append((base.name, ts))
 
     # Check rotated versions (course.json.1, course.json.2, ...)
-    for i in range(1, 100):
-        rotated = event_dir / f"course.json.{i}"
-        if rotated.exists():
+    # Use glob to find all rotated files without arbitrary limit
+    for rotated in event_dir.glob("course.json.[0-9]*"):
+        # Verify the suffix is purely numeric (avoid matching course.json.backup etc)
+        suffix = rotated.name[12:]  # len("course.json.") == 12
+        if suffix.isdigit():
             ts = get_course_timestamp(rotated)
             if ts is not None:
                 course_files.append((rotated.name, ts))
-        else:
-            break
 
     if not course_files:
         return None
