@@ -90,6 +90,12 @@ struct SettingsView: View {
                                 Text(event.name).tag(event.eid)
                             }
                         }
+                        .onChange(of: viewModel.eventId) { newEventId in
+                            // Auto-fill saved password for this event if available
+                            if let savedPassword = PreferencesManager.shared.getEventPassword(eventId: newEventId) {
+                                tempPassword = savedPassword
+                            }
+                        }
                     }
                 }
 
@@ -204,6 +210,8 @@ struct SettingsView: View {
                                     viewModel.password = tempPassword
                                     viewModel.serverHost = tempServerHost
                                     viewModel.serverPort = tempServerPort
+                                    // Save password for this event for quick switching
+                                    PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
                                     dismiss()
                                 case .failure(let error):
                                     validationError = error.localizedDescription
@@ -215,6 +223,8 @@ struct SettingsView: View {
                             viewModel.password = tempPassword
                             viewModel.serverHost = tempServerHost
                             viewModel.serverPort = tempServerPort
+                            // Save password for this event for quick switching
+                            PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
                             dismiss()
                         }
                     }
