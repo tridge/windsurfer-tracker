@@ -77,6 +77,11 @@ class SimulatedEntity:
     gust_factor: float = 1.0  # Multiplier for wind gusts (0.6 = lull, 1.4 = gust)
     gust_trend: float = 0.0   # Rate of change of gust factor
 
+    # Support boat patrol state
+    section_idx: int = 0           # Which section of the course to patrol (0-indexed)
+    num_sections: int = 1          # Total number of sections
+    patrol_forward: bool = True    # Direction of patrol (true = toward finish)
+
     # 1Hz mode (batched position updates)
     is_1hz: bool = False
     pos_buffer: List[Tuple[int, float, float, float]] = field(default_factory=list)  # [(ts, lat, lon, spd), ...]
@@ -679,25 +684,64 @@ class SailingSimulator:
             entity, new_lat, new_lon, distance_m)
 
     def update_support(self, entity: SimulatedEntity, dt: float, sailors: List[SimulatedEntity]):
-        """Update support boat - patrols near sailors"""
-        if not sailors:
-            return
-
-        # Find center of sailors
-        center_lat = sum(s.lat for s in sailors) / len(sailors)
-        center_lon = sum(s.lon for s in sailors) / len(sailors)
-
-        # Move toward center with some randomness
-        target_bearing = bearing_to(entity.lat, entity.lon, center_lat, center_lon)
-        distance = haversine_distance(entity.lat, entity.lon, center_lat, center_lon)
-
-        if distance > 200:  # More than 200m from center
-            entity.hdg = target_bearing + random.uniform(-20, 20)
-            entity.spd = 8 + random.uniform(-2, 2)
+        """Update support boat - patrols back and forth along course within assigned section"""
+        # Calculate section bounds from course waypoints or fallback to start/end
+        if entity.course_waypoints and len(entity.course_waypoints) >= 2:
+            waypoints = entity.course_waypoints
         else:
-            # Patrol in circles
-            entity.hdg = (entity.hdg + random.uniform(2, 5)) % 360
-            entity.spd = 3 + random.uniform(-1, 1)
+            waypoints = [(self.start_lat, self.start_lon), (self.end_lat, self.end_lon)]
+
+        num_sections = max(1, entity.num_sections)
+        section_idx = entity.section_idx % num_sections
+        num_waypoints = len(waypoints)
+
+        # Assign waypoint ranges to each section
+        # Each section gets a range of waypoints to patrol through
+        wps_per_section = max(1, (num_waypoints - 1) / num_sections)
+        section_start_wp = int(section_idx * wps_per_section)
+        section_end_wp = int((section_idx + 1) * wps_per_section)
+        section_end_wp = min(section_end_wp, num_waypoints - 1)
+
+        # Ensure at least one waypoint difference
+        if section_end_wp <= section_start_wp:
+            section_end_wp = min(section_start_wp + 1, num_waypoints - 1)
+
+        # Initialize current_waypoint_idx if not set or out of range
+        if entity.current_waypoint_idx < section_start_wp or entity.current_waypoint_idx > section_end_wp:
+            # Start in the middle of the section
+            entity.current_waypoint_idx = (section_start_wp + section_end_wp) // 2
+
+        # Get current target waypoint
+        target_wp = waypoints[entity.current_waypoint_idx]
+        dist_to_target = haversine_distance(entity.lat, entity.lon, target_wp[0], target_wp[1])
+
+        # Check if reached current waypoint - advance to next
+        if dist_to_target < 50:
+            if entity.patrol_forward:
+                # Moving toward end of section
+                if entity.current_waypoint_idx >= section_end_wp:
+                    # Reached end, reverse direction
+                    entity.patrol_forward = False
+                    entity.current_waypoint_idx = max(section_start_wp, entity.current_waypoint_idx - 1)
+                else:
+                    entity.current_waypoint_idx += 1
+            else:
+                # Moving toward start of section
+                if entity.current_waypoint_idx <= section_start_wp:
+                    # Reached start, reverse direction
+                    entity.patrol_forward = True
+                    entity.current_waypoint_idx = min(section_end_wp, entity.current_waypoint_idx + 1)
+                else:
+                    entity.current_waypoint_idx -= 1
+
+            # Update target
+            target_wp = waypoints[entity.current_waypoint_idx]
+            dist_to_target = haversine_distance(entity.lat, entity.lon, target_wp[0], target_wp[1])
+
+        # Head toward current target waypoint
+        entity.hdg = bearing_to(entity.lat, entity.lon, target_wp[0], target_wp[1])
+        entity.hdg += random.uniform(-10, 10)  # Some wandering
+        entity.spd = 5 + random.uniform(-1, 2)  # Cruising speed
 
         entity.spd = max(0, entity.spd)
         distance_m = entity.spd * 0.514444 * dt
@@ -817,7 +861,7 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
             )
             entities.append(entity)
 
-        # Support boats spread along course
+        # Support boats spread along course - each gets its own section to patrol
         for i in range(num_support):
             progress = (i + 0.5) / max(1, num_support)
             lat, lon, _ = position_along_course(progress)
@@ -830,7 +874,11 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 lat=lat,
                 lon=lon,
                 battery=random.randint(80, 100),
-                signal=random.randint(3, 4)
+                signal=random.randint(3, 4),
+                section_idx=i,
+                num_sections=num_support,
+                patrol_forward=random.choice([True, False]),  # Randomize initial direction
+                course_waypoints=list(course_waypoints)  # Store course for section patrolling
             )
             entities.append(entity)
 
@@ -892,7 +940,10 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 lat=lat,
                 lon=lon,
                 battery=random.randint(80, 100),
-                signal=random.randint(3, 4)
+                signal=random.randint(3, 4),
+                section_idx=i,
+                num_sections=num_support,
+                patrol_forward=random.choice([True, False])
             )
             entities.append(entity)
 
