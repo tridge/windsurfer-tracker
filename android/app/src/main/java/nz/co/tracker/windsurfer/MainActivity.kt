@@ -759,6 +759,37 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(16, 16, 16, 16)
         }
 
+        // Password input (declared early so fetchEvents can reference it for auto-fill)
+        val passwordLabel = android.widget.TextView(this).apply {
+            text = "Password"
+            setPadding(0, 24, 0, 0)
+            setTextColor(0xFF000000.toInt())
+            textSize = 16f
+        }
+        val passwordInput = android.widget.EditText(this).apply {
+            setText(prefs.getString("password", ""))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            setTextColor(0xFF000000.toInt())
+            setBackgroundColor(0xFFEEEEEE.toInt())
+            textSize = 18f
+            setPadding(16, 16, 16, 16)
+        }
+        val showPasswordCheckbox = android.widget.CheckBox(this).apply {
+            text = "Show password"
+            isChecked = true
+            setTextColor(0xFF000000.toInt())
+            textSize = 14f
+            setOnCheckedChangeListener { _, isChecked ->
+                passwordInput.inputType = if (isChecked) {
+                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                } else {
+                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                // Keep cursor at end
+                passwordInput.setSelection(passwordInput.text.length)
+            }
+        }
+
         // Event selector
         val eventLabel = android.widget.TextView(this).apply {
             text = "Event"
@@ -821,6 +852,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                                 textSize = 18f
                                 setTextColor(0xFF000000.toInt())
                             }
+                            // Auto-fill saved password for this event if available
+                            val savedPassword = prefs.getString("event_password_$selectedEventId", null)
+                            if (savedPassword != null) {
+                                passwordInput.setText(savedPassword)
+                            }
                         }
                         override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
                     }
@@ -852,36 +888,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
         // Initial fetch
         fetchEvents()
-
-        val passwordLabel = android.widget.TextView(this).apply {
-            text = "Password"
-            setPadding(0, 24, 0, 0)
-            setTextColor(0xFF000000.toInt())
-            textSize = 16f
-        }
-        val passwordInput = android.widget.EditText(this).apply {
-            setText(prefs.getString("password", ""))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            setTextColor(0xFF000000.toInt())
-            setBackgroundColor(0xFFEEEEEE.toInt())
-            textSize = 18f
-            setPadding(16, 16, 16, 16)
-        }
-        val showPasswordCheckbox = android.widget.CheckBox(this).apply {
-            text = "Show password"
-            isChecked = true
-            setTextColor(0xFF000000.toInt())
-            textSize = 14f
-            setOnCheckedChangeListener { _, isChecked ->
-                passwordInput.inputType = if (isChecked) {
-                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                } else {
-                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                }
-                // Keep cursor at end
-                passwordInput.setSelection(passwordInput.text.length)
-            }
-        }
 
         // 1Hz mode checkbox
         val highFrequencyCheckbox = android.widget.CheckBox(this).apply {
@@ -1029,6 +1035,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putString("password", password)
                             putBoolean("high_frequency_mode", newHighFrequencyMode)
                             putBoolean("tracker_beep", newTrackerBeep)
+                            // Save password per event for quick switching
+                            putString("event_password_$selectedEventId", password)
                             commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
                         }
                         // Update the idle screen display to keep it in sync
