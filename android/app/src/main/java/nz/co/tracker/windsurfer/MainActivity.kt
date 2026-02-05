@@ -29,6 +29,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         private const val TAG = "MainActivity"
         private const val PREFS_NAME = "tracker_prefs"
     }
+
+    /**
+     * Get SharedPreferences using device-protected storage for Direct Boot compatibility.
+     * This must match TrackerService.getPrefs() so both read/write the same preferences file.
+     */
+    private fun getPrefs(): android.content.SharedPreferences {
+        val deviceContext = createDeviceProtectedStorageContext()
+        return deviceContext.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+    }
     
     private lateinit var binding: ActivityMainBinding
     private var trackerService: TrackerService? = null
@@ -126,7 +135,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
 
         // Check if we should auto-resume tracking
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val prefs = getPrefs()
 
         // Auto-open settings if ID or password is missing
         val sailorId = prefs.getString("sailor_id", "") ?: ""
@@ -335,7 +344,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     private fun loadPreferences() {
         isLoadingPreferences = true
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val prefs = getPrefs()
 
         // Display sailor name on idle screen (read-only)
         val sailorId = prefs.getString("sailor_id", getDefaultSailorId()) ?: getDefaultSailorId()
@@ -353,7 +362,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
 
     private fun updateIdleScreen() {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val prefs = getPrefs()
         val eventId = prefs.getInt("event_id", 2)
         val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
         val serverPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
@@ -497,7 +506,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun startTrackerService() {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val prefs = getPrefs()
 
         // Validate ID and password before starting (read from preferences)
         val sailorId = (prefs.getString("sailor_id", "") ?: "").trim()
@@ -550,7 +559,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     private fun finishStopTrackerService() {
         // Clear tracking state
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+        getPrefs().edit()
             .putBoolean("tracking_active", false)
             .apply()
 
@@ -579,7 +588,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             updateAssistButton(service.isAssistActive())
 
             // Show sailor ID and frequency mode indicator
-            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            val prefs = getPrefs()
             val sailorId = prefs.getString("sailor_id", "S01") ?: "S01"
             val highFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
             binding.tvSailorId.text = sailorId
@@ -683,7 +692,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setBackgroundColor(0xFFFFFFFF.toInt())
         }
         
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val prefs = getPrefs()
         
         val sailorIdLabel = android.widget.TextView(this).apply {
             text = "Your Name"
@@ -1181,7 +1190,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             currentEventName = name
             // Save to preferences so it's available on idle screen
             if (name.isNotEmpty()) {
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                getPrefs().edit()
                     .putString("event_name", name)
                     .apply()
             }
