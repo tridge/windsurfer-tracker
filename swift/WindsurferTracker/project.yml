@@ -12,8 +12,8 @@ attributes:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.10.14"
-    CURRENT_PROJECT_VERSION: "83"
+    MARKETING_VERSION: "1.10.15"
+    CURRENT_PROJECT_VERSION: "85"
 
 targets:
   WindsurferTracker:
@@ -48,6 +48,7 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
         NSHealthShareUsageDescription: "Windsurfer Tracker records your sailing workouts to the Health app, including distance traveled."
         NSHealthUpdateUsageDescription: "Windsurfer Tracker saves your sailing sessions as workouts with distance and calories to the Health app."
     entitlements:
@@ -58,7 +59,11 @@ targets:
       - target: WindsurferTrackerWatch
         embed: true
         codeSign: true
+      - target: TrackerWidgetExtension
+        embed: true
+        codeSign: true
       - sdk: HealthKit.framework
+      - sdk: ActivityKit.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer
@@ -110,7 +115,7 @@ targets:
           - workout-processing
     settings:
       base:
-        CURRENT_PROJECT_VERSION: "84"
+        CURRENT_PROJECT_VERSION: "86"
         PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.watchkitapp
         PRODUCT_NAME: "Windsurfer Tracker"
         INFOPLIST_FILE: WindsurferTrackerWatch/Resources/Info.plist
@@ -123,6 +128,43 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution: Andrew Tridgell (76AR6DVKBC)"
           PROVISIONING_PROFILE_SPECIFIER: "WindsurferTrackerWatch"
+
+  TrackerWidgetExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget:
+      iOS: "16.2"
+    sources:
+      - Shared/Models/TrackerActivityAttributes.swift
+      - TrackerWidgetExtension
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: ActivityKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: TrackerWidgetExtension/Info.plist
+      properties:
+        CFBundleDisplayName: "Tracker Widget"
+        CFBundleName: "TrackerWidgetExtension"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nz.co.tracker.windsurfer.widget
+        PRODUCT_NAME: "TrackerWidgetExtension"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 76AR6DVKBC
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: true
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution: Andrew Tridgell (76AR6DVKBC)"
+          PROVISIONING_PROFILE_SPECIFIER: ""
 
 schemes:
   WindsurferTracker:
