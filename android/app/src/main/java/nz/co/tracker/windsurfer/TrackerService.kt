@@ -1,15 +1,20 @@
 package nz.co.tracker.windsurfer
 
 import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -20,7 +25,6 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
-import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.DatagramPacket
@@ -56,9 +60,10 @@ class TrackerService : LifecycleService() {
         fun getService(): TrackerService = this@TrackerService
     }
     
-    // Location
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
+    // Location - using native LocationManager for Direct Boot support
+    // (FusedLocationProvider requires Google Play Services which isn't available before unlock)
+    private lateinit var locationManager: LocationManager
+    private lateinit var locationListener: LocationListener
     private var lastLocation: Location? = null
     private var previousLocation: Location? = null  // For calculating speed/bearing
     
@@ -158,6 +163,35 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    // Notification icon update - checks every 5 seconds for ACK status change
+    private val notificationHandler = Handler(Looper.getMainLooper())
+    private val notificationUpdateRunnable = object : Runnable {
+        override fun run() {
+            if (isRunning.get()) {
+                updateNotificationIconIfNeeded()
+                notificationHandler.postDelayed(this, 5000L)  // Every 5 seconds
+            }
+        }
+    }
+
+    // Receiver to restart location updates when user unlocks the device
+    // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
+    private var userUnlockedReceiver: BroadcastReceiver? = null
+
+    /**
+     * Update notification icon if ACK status has changed (connected <-> disconnected)
+     */
+    private fun updateNotificationIconIfNeeded() {
+        val lastAck = lastAckTime.get()
+        val hasRecentAck = lastAck > 0 && (System.currentTimeMillis() - lastAck) < ACK_TIMEOUT_FOR_ICON_MS
+
+        // Only update if icon state changed
+        if (lastNotificationIconOk != hasRecentAck) {
+            val text = if (hasRecentAck) "Tracking active" else "Tracking - no connection"
+            updateNotification(text)
+        }
+    }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -192,12 +226,20 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Get SharedPreferences, using device-protected storage for Direct Boot support.
+     */
+    private fun getPrefs(): android.content.SharedPreferences {
+        // Use device-protected storage so preferences are available during Direct Boot
+        val deviceContext = createDeviceProtectedStorageContext()
+        return deviceContext.getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
+    }
+
+    /**
      * Get the current password from SharedPreferences.
      * This is read on each send so settings changes take effect immediately.
      */
     private fun getCurrentPassword(): String {
-        val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
-        return prefs.getString("password", "") ?: ""
+        return getPrefs().getString("password", "") ?: ""
     }
 
     /**
@@ -206,16 +248,14 @@ class TrackerService : LifecycleService() {
      * Defaults to 1 for backwards compatibility.
      */
     private fun getCurrentEventId(): Int {
-        val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
-        return prefs.getInt("event_id", 2)
+        return getPrefs().getInt("event_id", 2)
     }
 
     /**
      * Check if tracker beep is enabled. Defaults to true.
      */
     private fun isTrackerBeepEnabled(): Boolean {
-        val prefs = getSharedPreferences("tracker_prefs", Context.MODE_PRIVATE)
-        return prefs.getBoolean("tracker_beep", true)
+        return getPrefs().getBoolean("tracker_beep", true)
     }
 
     /**
@@ -249,10 +289,11 @@ class TrackerService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
-        
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        // Use native LocationManager instead of FusedLocationProvider for Direct Boot support
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
-        setupLocationCallback()
+        setupLocationListener()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -312,19 +353,31 @@ class TrackerService : LifecycleService() {
         }
     }
     
+    // Timeout for considering connection "ok" (30 seconds)
+    private val ACK_TIMEOUT_FOR_ICON_MS = 30000L
+    // Track last icon state to avoid unnecessary notification updates
+    private var lastNotificationIconOk: Boolean? = null
+
     private fun buildNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
+
+        // Choose icon based on ACK status
+        val lastAck = lastAckTime.get()
+        val hasRecentAck = lastAck > 0 && (System.currentTimeMillis() - lastAck) < ACK_TIMEOUT_FOR_ICON_MS
+        val iconRes = if (hasRecentAck) R.drawable.ic_windsurfer_ok else R.drawable.ic_windsurfer_error
+        lastNotificationIconOk = hasRecentAck
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Windsurfer Tracker")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(iconRes)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)  // Show on lock screen
             .build()
     }
     
@@ -334,76 +387,90 @@ class TrackerService : LifecycleService() {
         manager.notify(NOTIFICATION_ID, notification)
     }
     
-    private fun setupLocationCallback() {
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { location ->
-                    // Filter out invalid 0,0 locations (can happen before GPS is ready)
-                    if (location.latitude == 0.0 && location.longitude == 0.0) {
-                        Log.d(TAG, "Skipping invalid 0,0 location - GPS not ready")
-                        return
-                    }
-
-                    // Filter out locations without accuracy (likely not a real GPS fix)
-                    if (!location.hasAccuracy()) {
-                        Log.d(TAG, "Skipping location without accuracy data")
-                        return
-                    }
-
-                    // Filter out inaccurate locations (technique from OwnTracks)
-                    if (MAX_ACCURACY_METERS > 0 && location.accuracy > MAX_ACCURACY_METERS) {
-                        Log.d(TAG, "Skipping inaccurate location: accuracy=${location.accuracy}m > ${MAX_ACCURACY_METERS}m")
-                        return
-                    }
-
-                    lastLocation = location
-
-                    // Calculate distance traveled
-                    distanceStartLocation?.let { prevLoc ->
-                        val distanceResult = FloatArray(1)
-                        Location.distanceBetween(
-                            prevLoc.latitude, prevLoc.longitude,
-                            location.latitude, location.longitude,
-                            distanceResult
-                        )
-                        val distance = distanceResult[0]
-                        // Filter out GPS noise (too small) and jumps (too large)
-                        if (distance > 0.1f && distance < 500f) {
-                            totalDistance += distance
-                        }
-                    }
-                    distanceStartLocation = location
-
-                    statusListener?.onLocationUpdate(location, totalDistance)
-
-                    // Mark GPS as ready and update status line
-                    if (!hasGpsFix.getAndSet(true)) {
-                        updateStatusLine()  // Show "connecting ..."
-                    }
-
-                    if (highFrequencyMode) {
-                        // Buffer position for batched sending
-                        val ts = System.currentTimeMillis() / 1000
-                        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
-                            (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
-                        } else 0.0
-                        positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
-                        lastBufferedLocation = location
-
-                        // Send first packet immediately to get quick ACK, then batch every 10 positions
-                        if (!firstPacketSent && positionBuffer.size >= 1) {
-                            // First GPS lock - send immediately (even if only 1 position)
-                            sendPositionArray()
-                            firstPacketSent = true
-                        } else if (positionBuffer.size >= 10) {
-                            // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
-                            sendPositionArray()
-                        }
-                    } else {
-                        sendPosition(location)
-                    }
-                }
+    private fun setupLocationListener() {
+        locationListener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                handleLocationUpdate(location)
             }
+
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
+                Log.d(TAG, "Location provider $provider status changed: $status")
+            }
+
+            override fun onProviderEnabled(provider: String) {
+                Log.d(TAG, "Location provider enabled: $provider")
+            }
+
+            override fun onProviderDisabled(provider: String) {
+                Log.w(TAG, "Location provider disabled: $provider")
+            }
+        }
+    }
+
+    private fun handleLocationUpdate(location: Location) {
+        // Filter out invalid 0,0 locations (can happen before GPS is ready)
+        if (location.latitude == 0.0 && location.longitude == 0.0) {
+            Log.d(TAG, "Skipping invalid 0,0 location - GPS not ready")
+            return
+        }
+
+        // Filter out locations without accuracy (likely not a real GPS fix)
+        if (!location.hasAccuracy()) {
+            Log.d(TAG, "Skipping location without accuracy data")
+            return
+        }
+
+        // Filter out inaccurate locations (technique from OwnTracks)
+        if (MAX_ACCURACY_METERS > 0 && location.accuracy > MAX_ACCURACY_METERS) {
+            Log.d(TAG, "Skipping inaccurate location: accuracy=${location.accuracy}m > ${MAX_ACCURACY_METERS}m")
+            return
+        }
+
+        lastLocation = location
+
+        // Calculate distance traveled
+        distanceStartLocation?.let { prevLoc ->
+            val distanceResult = FloatArray(1)
+            Location.distanceBetween(
+                prevLoc.latitude, prevLoc.longitude,
+                location.latitude, location.longitude,
+                distanceResult
+            )
+            val distance = distanceResult[0]
+            // Filter out GPS noise (too small) and jumps (too large)
+            if (distance > 0.1f && distance < 500f) {
+                totalDistance += distance
+            }
+        }
+        distanceStartLocation = location
+
+        statusListener?.onLocationUpdate(location, totalDistance)
+
+        // Mark GPS as ready and update status line
+        if (!hasGpsFix.getAndSet(true)) {
+            updateStatusLine()  // Show "connecting ..."
+        }
+
+        if (highFrequencyMode) {
+            // Buffer position for batched sending
+            val ts = System.currentTimeMillis() / 1000
+            val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+                (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
+            } else 0.0
+            positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
+            lastBufferedLocation = location
+
+            // Send first packet immediately to get quick ACK, then batch every 10 positions
+            if (!firstPacketSent && positionBuffer.size >= 1) {
+                // First GPS lock - send immediately (even if only 1 position)
+                sendPositionArray()
+                firstPacketSent = true
+            } else if (positionBuffer.size >= 10) {
+                // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
+                sendPositionArray()
+            }
+        } else {
+            sendPosition(location)
         }
     }
     
@@ -451,24 +518,30 @@ class TrackerService : LifecycleService() {
             }
         }
 
-        // Start location updates - use 1 second interval for 1Hz mode
+        // Start location updates using native LocationManager (works during Direct Boot)
         val intervalMs = if (highFrequencyMode) 1000L else LOCATION_INTERVAL_MS
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
-            .setMinUpdateIntervalMillis(intervalMs / 2)
-            .build()
-        
+
         try {
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
+            // Use GPS_PROVIDER directly - doesn't require Google Play Services
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                intervalMs,
+                0f,  // minDistance - we want time-based updates
+                locationListener,
                 Looper.getMainLooper()
             )
+            Log.i(TAG, "Started GPS location updates with interval ${intervalMs}ms")
             updateNotification("Tracking active")
 
             // Start tracker beep timer (first beep after 60 seconds)
             beepHandler.postDelayed(beepRunnable, 60000L)
+
+            // Start notification icon update timer (first check after 5 seconds)
+            notificationHandler.postDelayed(notificationUpdateRunnable, 5000L)
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission denied", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start location updates", e)
         }
     }
 
@@ -482,7 +555,16 @@ class TrackerService : LifecycleService() {
         toneGenerator?.release()
         toneGenerator = null
 
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        // Stop notification update timer
+        notificationHandler.removeCallbacks(notificationUpdateRunnable)
+
+        // Stop location updates
+        try {
+            locationManager.removeUpdates(locationListener)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error removing location updates: ${e.message}")
+        }
+
         socket?.close()
         socket = null
     }

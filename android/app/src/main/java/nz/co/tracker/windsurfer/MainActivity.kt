@@ -919,6 +919,21 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(48, 0, 0, 16)
         }
 
+        // Auto-start on boot checkbox
+        val autoStartCheckbox = android.widget.CheckBox(this).apply {
+            text = "Auto-Start on Boot"
+            isChecked = prefs.getBoolean("auto_start_on_boot", false)
+            setTextColor(0xFF000000.toInt())
+            textSize = 14f
+            setPadding(0, 8, 0, 0)
+        }
+        val autoStartHint = android.widget.TextView(this).apply {
+            text = "Automatically start tracking when phone boots. Requires name and password to be set."
+            setTextColor(0xFF666666.toInt())
+            textSize = 12f
+            setPadding(48, 0, 0, 16)
+        }
+
         // Check for Updates button (sideload builds only)
         val updateButton = if (BuildConfig.ENABLE_SELF_UPDATE) {
             android.widget.Button(this).apply {
@@ -951,6 +966,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(highFrequencyHint)
         layout.addView(trackerBeepCheckbox)
         layout.addView(trackerBeepHint)
+        layout.addView(autoStartCheckbox)
+        layout.addView(autoStartHint)
         layout.addView(roleLabel)
         layout.addView(roleSpinner)
         layout.addView(serverLabel)
@@ -1022,6 +1039,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         // Validation passed, save settings
                         val newHighFrequencyMode = highFrequencyCheckbox.isChecked
                         val newTrackerBeep = trackerBeepCheckbox.isChecked
+                        val newAutoStartOnBoot = autoStartCheckbox.isChecked
                         val newRole = roleValues[selectedRoleIndex]
                         val newServerHost = serverInput.text.toString()
                         val newServerPort = portInput.text.toString().toIntOrNull() ?: TrackerService.DEFAULT_SERVER_PORT
@@ -1035,9 +1053,24 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putString("password", password)
                             putBoolean("high_frequency_mode", newHighFrequencyMode)
                             putBoolean("tracker_beep", newTrackerBeep)
+                            putBoolean("auto_start_on_boot", newAutoStartOnBoot)
                             // Save password per event for quick switching
                             putString("event_password_$selectedEventId", password)
                             commit()  // Use commit() not apply() to ensure write completes before loadPreferences()
+                        }
+
+                        // Copy boot-related settings to device-protected storage for Direct Boot support
+                        // This allows BootReceiver to access them before user unlocks the device
+                        val deviceContext = createDeviceProtectedStorageContext()
+                        deviceContext.getSharedPreferences("tracker_prefs", MODE_PRIVATE).edit().apply {
+                            putBoolean("auto_start_on_boot", newAutoStartOnBoot)
+                            putString("sailor_id", sailorId)
+                            putString("password", password)
+                            putString("role", newRole)
+                            putString("server_host", newServerHost)
+                            putInt("server_port", newServerPort)
+                            putBoolean("high_frequency_mode", newHighFrequencyMode)
+                            commit()
                         }
                         // Update the idle screen display to keep it in sync
                         binding.tvIdleSailorName.text = if (sailorId.isNotEmpty()) sailorId else "(not set)"
