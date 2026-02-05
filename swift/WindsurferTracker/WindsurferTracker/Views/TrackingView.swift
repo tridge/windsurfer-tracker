@@ -156,7 +156,10 @@ struct TrackingView: View {
 
             // Stop button
             Button {
-                viewModel.showStopConfirmation = true
+                // Only show confirmation if no error alert is showing
+                if !viewModel.showError {
+                    viewModel.showStopConfirmation = true
+                }
             } label: {
                 Text("Stop Tracking")
                     .font(.title3)

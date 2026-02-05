@@ -3,6 +3,8 @@ import Combine
 import CoreLocation
 import UIKit
 import HealthKit
+import ActivityKit
+import AudioToolbox
 
 /// View model bridging TrackerService to SwiftUI
 @MainActor
@@ -166,6 +168,8 @@ public class TrackerViewModel: ObservableObject {
                 }
                 self.previousPositionForDistance = position
                 self.lastPosition = position
+                // Update Live Activity with new position
+                self.updateLiveActivity()
             }
             .store(in: &cancellables)
 
@@ -174,6 +178,7 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.connectionStatus = status
+                self?.updateLiveActivity()
             }
             .store(in: &cancellables)
 
@@ -190,6 +195,7 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.statusLine = status
+                self?.updateLiveActivity()
             }
             .store(in: &cancellables)
 
@@ -205,9 +211,13 @@ public class TrackerViewModel: ObservableObject {
         TrackerService.shared.remoteStopPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.isTracking = false
-                self?.errorMessage = "Tracking stopped by admin"
-                self?.showError = true
+                guard let self = self else { return }
+                self.isTracking = false
+                // Only show alert if no other dialog is showing
+                if !self.showStopConfirmation && !self.showSettings {
+                    self.errorMessage = "Tracking stopped by admin"
+                    self.showError = true
+                }
             }
             .store(in: &cancellables)
 
@@ -215,9 +225,13 @@ public class TrackerViewModel: ObservableObject {
         TrackerService.shared.remoteCancelAssistPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.assistRequested = false
-                self?.errorMessage = "Assist cancelled by admin"
-                self?.showError = true
+                guard let self = self else { return }
+                self.assistRequested = false
+                // Only show alert if no other dialog is showing
+                if !self.showStopConfirmation && !self.showSettings {
+                    self.errorMessage = "Assist cancelled by admin"
+                    self.showError = true
+                }
             }
             .store(in: &cancellables)
 
@@ -225,8 +239,12 @@ public class TrackerViewModel: ObservableObject {
         TrackerService.shared.errorPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] error in
-                self?.errorMessage = error.localizedDescription
-                self?.showError = true
+                guard let self = self else { return }
+                // Don't show error if another dialog is already showing
+                if !self.showStopConfirmation && !self.showSettings {
+                    self.errorMessage = error.localizedDescription
+                    self.showError = true
+                }
             }
             .store(in: &cancellables)
 
@@ -270,6 +288,8 @@ public class TrackerViewModel: ObservableObject {
                 startBeepTimer()
                 // Start HealthKit workout session
                 await startWorkoutSession()
+                // Start Live Activity for lock screen status (iOS 16.2+)
+                startLiveActivity()
             } catch let error as TrackerError {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -286,6 +306,9 @@ public class TrackerViewModel: ObservableObject {
 
         // Stop tracker beep timer
         stopBeepTimer()
+
+        // End Live Activity
+        endLiveActivity()
 
         Task {
             // End HealthKit workout session
@@ -369,6 +392,8 @@ public class TrackerViewModel: ObservableObject {
                 self?.playTrackerBeep()
             }
         }
+        // Ensure timer runs even when scrolling or app is in background
+        RunLoop.main.add(beepTimer!, forMode: .common)
     }
 
     private func stopBeepTimer() {
@@ -381,19 +406,24 @@ public class TrackerViewModel: ObservableObject {
 
         Task {
             let hasRecentAck = await TrackerService.shared.hasRecentAck
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.prepare()
 
             if hasRecentAck {
-                // One buzz - connection OK
-                generator.impactOccurred()
+                // One vibration - connection OK
+                vibrate()
             } else {
-                // Two buzzes - no connection
-                generator.impactOccurred()
-                try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
-                generator.impactOccurred()
+                // Two vibrations - no connection
+                vibrate()
+                try? await Task.sleep(nanoseconds: 300_000_000)  // 300ms gap
+                vibrate()
             }
         }
+    }
+
+    /// Trigger device vibration - works on all iPhones including SE
+    private func vibrate() {
+        // Use system vibration which works on all devices
+        // kSystemSoundID_Vibrate (4095) works on all iPhones
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     }
 
     // MARK: - HealthKit Workout
@@ -545,6 +575,45 @@ public class TrackerViewModel: ObservableObject {
             if let error = error {
                 print("[HealthKit] Failed to add energy sample: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // MARK: - Live Activity
+
+    /// Start Live Activity for lock screen tracking status (iOS 16.2+)
+    private func startLiveActivity() {
+        if #available(iOS 16.2, *) {
+            LiveActivityManager.shared.startActivity(
+                sailorId: sailorId,
+                eventId: eventId
+            )
+        }
+    }
+
+    /// End Live Activity
+    private func endLiveActivity() {
+        if #available(iOS 16.2, *) {
+            LiveActivityManager.shared.endActivity()
+        }
+    }
+
+    /// Update Live Activity with current state
+    private func updateLiveActivity() {
+        guard isTracking else { return }
+
+        if #available(iOS 16.2, *) {
+            // Determine if connected based on recent ACK (within 30 seconds)
+            let isConnected = connectionStatus.lastAckTime.map {
+                Date().timeIntervalSince($0) < 30
+            } ?? false
+
+            LiveActivityManager.shared.updateActivity(
+                isConnected: isConnected,
+                speedKnots: lastPosition?.speedKnots ?? 0,
+                ackRatePercent: Int(connectionStatus.ackRate),
+                statusLine: statusLine,
+                assistActive: assistRequested
+            )
         }
     }
 }
