@@ -178,6 +178,9 @@ class TrackerService : LifecycleService() {
     // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
     private var userUnlockedReceiver: BroadcastReceiver? = null
 
+    // Receiver to send stop packet when device is shutting down
+    private var shutdownReceiver: BroadcastReceiver? = null
+
     /**
      * Update notification icon if ACK status has changed (connected <-> disconnected)
      */
@@ -259,6 +262,32 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Save last position to device-protected storage so BootReceiver can send
+     * a stop packet on shutdown even if the service is killed first.
+     */
+    private fun saveLastPosition(location: Location) {
+        getPrefs().edit().apply {
+            putFloat("last_lat", location.latitude.toFloat())
+            putFloat("last_lon", location.longitude.toFloat())
+            putLong("last_ts", System.currentTimeMillis())
+            apply()
+        }
+    }
+
+    /**
+     * Clear saved last position (called when tracking stops normally).
+     */
+    private fun clearLastPosition() {
+        getPrefs().edit().apply {
+            remove("last_lat")
+            remove("last_lon")
+            remove("last_ts")
+            putBoolean("tracking_active", false)
+            apply()
+        }
+    }
+
+    /**
      * Play tracker beep: one buzz if ACK received in last minute, two buzzes if not.
      * Uses vibration since audio may be muted.
      */
@@ -324,7 +353,13 @@ class TrackerService : LifecycleService() {
     }
     
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy called, isRunning=${isRunning.get()}")
         super.onDestroy()
+        // Send stop packet before cleaning up (catches shutdown/reboot)
+        if (isRunning.get()) {
+            Log.i(TAG, "Service being destroyed while tracking, sending stop packet")
+            sendStopPacketSync()
+        }
         stopTracking()
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed")
@@ -334,7 +369,7 @@ class TrackerService : LifecycleService() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Tracker Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = "Shows when tracking is active"
         }
@@ -427,6 +462,9 @@ class TrackerService : LifecycleService() {
         }
 
         lastLocation = location
+
+        // Save last position to device-protected storage for shutdown stop packet
+        saveLastPosition(location)
 
         // Calculate distance traveled
         distanceStartLocation?.let { prevLoc ->
@@ -538,10 +576,79 @@ class TrackerService : LifecycleService() {
 
             // Start notification icon update timer (first check after 5 seconds)
             notificationHandler.postDelayed(notificationUpdateRunnable, 5000L)
+
+            // Register for shutdown to send stop packet before power off
+            registerShutdownReceiver()
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission denied", e)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start location updates", e)
+        }
+    }
+
+    /**
+     * Register a receiver for ACTION_SHUTDOWN to send a stop packet
+     * when the device is being powered off deliberately.
+     */
+    private fun registerShutdownReceiver() {
+        if (shutdownReceiver != null) return  // Already registered
+
+        shutdownReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                Log.i(TAG, "Received ${intent.action}, sending stop packet")
+                sendStopPacketSync()
+            }
+        }
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SHUTDOWN)
+            addAction("android.intent.action.QUICKBOOT_POWEROFF")  // Some devices use this
+            addAction("com.htc.intent.action.QUICKBOOT_POWEROFF")  // HTC
+        }
+        registerReceiver(shutdownReceiver, filter, Context.RECEIVER_EXPORTED)
+        Log.d(TAG, "Registered SHUTDOWN receiver")
+    }
+
+    /**
+     * Send stop packet synchronously (blocking). Used during shutdown
+     * when we can't use coroutines and need to send immediately.
+     * Sends minimal packet without position (server accepts this for stop).
+     */
+    private fun sendStopPacketSync() {
+        if (sailorId.isEmpty()) {
+            Log.w(TAG, "No sailor ID, cannot send stop packet")
+            return
+        }
+
+        val seq = sequenceNumber.incrementAndGet()
+        val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("stopped", true)  // Deliberate stop
+            put("ver", BuildConfig.VERSION_STRING)
+            if (currentPassword.isNotEmpty()) {
+                put("pwd", currentPassword)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+
+        try {
+            val address = cachedServerAddress
+            if (address == null) {
+                Log.w(TAG, "No cached server address for stop packet")
+                return
+            }
+            val dgram = DatagramPacket(data, data.size, address, serverPort)
+            socket?.send(dgram)
+            Log.i(TAG, "Sent shutdown stop packet to $serverHost:$serverPort")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send shutdown stop packet", e)
         }
     }
 
@@ -557,6 +664,16 @@ class TrackerService : LifecycleService() {
 
         // Stop notification update timer
         notificationHandler.removeCallbacks(notificationUpdateRunnable)
+
+        // Unregister shutdown receiver
+        shutdownReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unregistering shutdown receiver: ${e.message}")
+            }
+            shutdownReceiver = null
+        }
 
         // Stop location updates
         try {
@@ -644,6 +761,8 @@ class TrackerService : LifecycleService() {
 
         serviceScope.launch {
             sendStopPacket()
+            // Clear saved position since we sent the stop packet successfully
+            clearLastPosition()
             withContext(Dispatchers.Main) {
                 stopTracking()
                 callback?.invoke()

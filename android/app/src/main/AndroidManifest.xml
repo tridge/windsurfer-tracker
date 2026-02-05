@@ -48,7 +48,7 @@
             android:exported="false"
             android:directBootAware="true" />
 
-        <!-- Boot receiver for auto-restart tracking after device reboot -->
+        <!-- Boot/shutdown receiver for auto-start tracking and stop notification -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -58,6 +58,8 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.ACTION_SHUTDOWN" />
+                <action android:name="android.intent.action.QUICKBOOT_POWEROFF" />
             </intent-filter>
         </receiver>
 
