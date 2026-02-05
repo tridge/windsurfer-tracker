@@ -899,6 +899,7 @@
                 // Expand into individual entries, each inheriting all metadata
                 return entry.pos.map(p => ({
                     id: entry.id,
+                    displayid: entry.displayid,  // Preserve display name mapping
                     ts: p[0],
                     lat: p[1],
                     lon: p[2],
@@ -1160,16 +1161,72 @@
             }
         }
 
+        // Get the original tracker ID for a userId key
+        // If the key is a displayid, returns the actual tracker ID (entry.id)
+        // Otherwise returns the userId itself
+        function getOriginalTrackerId(userId) {
+            if (userData[userId] && userData[userId].length > 0) {
+                return userData[userId][0].id;  // entry.id is always the original tracker ID
+            }
+            return userId;
+        }
+
         // Get display name for a user ID
+        // Priority: displayid from track data > userOverrides name > userId
         function getDisplayName(userId) {
+            // Check track data for displayid (use most recent entry that has it)
+            if (userData[userId] && userData[userId].length > 0) {
+                for (let i = userData[userId].length - 1; i >= 0; i--) {
+                    if (userData[userId][i].displayid) {
+                        return userData[userId][i].displayid;
+                    }
+                }
+            }
+            // Fall back to user overrides (check by both key and original tracker ID)
+            const originalId = getOriginalTrackerId(userId);
+            if (userOverrides[originalId] && userOverrides[originalId].name) {
+                return userOverrides[originalId].name;
+            }
             if (userOverrides[userId] && userOverrides[userId].name) {
                 return userOverrides[userId].name;
             }
             return userId;
         }
 
+        // Check if user has a display name mapping (for showing admin suffix)
+        // Returns true if the userId key is a displayid (different from original tracker id)
+        function hasDisplayMapping(userId) {
+            // Check track data - if entry.id differs from userId key, it's a displayid
+            if (userData[userId] && userData[userId].length > 0) {
+                const entry = userData[userId][0];
+                if (entry.id !== userId) {
+                    return true;  // Key is displayid, entry.id is original tracker ID
+                }
+                // Also check if entries have displayid field (for backwards compat)
+                for (let i = userData[userId].length - 1; i >= 0; i--) {
+                    if (userData[userId][i].displayid) {
+                        return true;
+                    }
+                }
+            }
+            // Check user overrides (check by both key and original tracker ID)
+            const originalId = getOriginalTrackerId(userId);
+            if (userOverrides[originalId] && userOverrides[originalId].name) {
+                return true;
+            }
+            if (userOverrides[userId] && userOverrides[userId].name) {
+                return true;
+            }
+            return false;
+        }
+
         // Get role for a user ID (from most recent data point or override)
         function getUserRole(userId) {
+            // Try user overrides with both the key and the original tracker ID
+            const originalId = getOriginalTrackerId(userId);
+            if (userOverrides[originalId] && userOverrides[originalId].role) {
+                return userOverrides[originalId].role;
+            }
             if (userOverrides[userId] && userOverrides[userId].role) {
                 return userOverrides[userId].role;
             }
@@ -1526,13 +1583,15 @@
                 // Sort by timestamp
                 allData.sort((a, b) => a.ts - b.ts);
 
-                // Group by user
+                // Group by user - use displayid if present, otherwise id
+                // This allows the same tracker to appear as multiple entries if
+                // its display name was changed during the log session
                 for (const entry of allData) {
-                    const id = entry.id;
-                    if (!userData[id]) {
-                        userData[id] = [];
+                    const key = entry.displayid || entry.id;
+                    if (!userData[key]) {
+                        userData[key] = [];
                     }
-                    userData[id].push(entry);
+                    userData[key].push(entry);
                 }
 
                 // Calculate time range
@@ -1651,13 +1710,15 @@
             // Sort by timestamp
             allData.sort((a, b) => a.ts - b.ts);
 
-            // Group by user
+            // Group by user - use displayid if present, otherwise id
+            // This allows the same tracker to appear as multiple entries if
+            // its display name was changed during the log session
             for (const entry of allData) {
-                const id = entry.id;
-                if (!userData[id]) {
-                    userData[id] = [];
+                const key = entry.displayid || entry.id;
+                if (!userData[key]) {
+                    userData[key] = [];
                 }
-                userData[id].push(entry);
+                userData[key].push(entry);
             }
 
             // Calculate time range
@@ -1724,10 +1785,13 @@
                 const role = getUserRole(userId);
                 const roleClass = role === 'support' ? 'role-support' : (role === 'spectator' ? 'role-spectator' : 'role-sailor');
 
+                // Show original ID suffix for admins when displayid is set
+                const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+
                 div.innerHTML = `
                     <div class="user-color ${roleClass}" style="background:${color}"></div>
                     <div class="user-info">
-                        <div class="user-name">${getDisplayName(userId)}</div>
+                        <div class="user-name">${getDisplayName(userId)}${idSuffix}</div>
                         <div class="user-stats">
                             ${points} pts | Max: ${maxSpeed.toFixed(1)} kts | Avg: ${avgSpeed.toFixed(1)} kts
                         </div>
@@ -2205,7 +2269,8 @@
                     // Build popup content
                     const speedKnots = (closest.spd || 0).toFixed(1);
                     const time = formatTimeInTz(closest.ts);
-                    let content = `<b>${getDisplayName(userId)}</b><br>
+                    const popupIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+                    let content = `<b>${getDisplayName(userId)}</b>${popupIdSuffix}<br>
                         Time: ${time}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${closest.hdg || 0}°<br>
@@ -2277,13 +2342,14 @@
                     }
 
                     const role = getUserRole(userId);
+                    const markerIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
                     const marker = createRoleMarker(
                         L.latLng(last.lat, last.lon),
                         role,
                         userColor,
                         { radius: 8, fillOpacity: 1, weight: 2, color: '#fff' }
                     ).bindPopup(`
-                        <b>${getDisplayName(userId)}</b><br>
+                        <b>${getDisplayName(userId)}</b>${markerIdSuffix}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${last.hdg || 0}°<br>
                         Battery: ${last.bat || '?'}%${markerHacText}${markerHrText}${markerWarnings}
@@ -3406,8 +3472,9 @@
 
                 // Add tooltip with info
                 const time = formatTimeInTz(closest.ts);
+                const tooltipIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
                 let tooltipHtml = `
-                    <b>${getDisplayName(userId)}</b><br>
+                    <b>${getDisplayName(userId)}</b>${tooltipIdSuffix}<br>
                     Time: ${time}<br>
                     Battery: ${closest.bat !== undefined ? closest.bat + '%' : 'N/A'}<br>
                     Speed: ${(closest.spd || 0).toFixed(1)} kts`;
@@ -4364,7 +4431,9 @@
             container.innerHTML = results.map(r => {
                 const duration = formatDurationSecs(r.duration_secs);
                 const dateDisplay = r.date.replace(/_/g, '-');
-                return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${r.sailor_id}">
+                // Use r.key (displayid or original id) for selection - this matches how userData is keyed
+                const userKey = r.key || r.sailor_id;
+                return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${userKey}">
                     <strong>${r.name}</strong><br>
                     <span class="search-result-detail">${dateDisplay} | ${duration}</span>
                 </div>`;
@@ -4734,7 +4803,8 @@
 
         function createSailorPopupContent(userId, point) {
             const name = getDisplayName(userId);
-            let html = `<b>${name}</b><br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
+            const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+            let html = `<b>${name}</b>${idSuffix}<br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
             if (point.hr) {
                 html += `<br>HR: ${point.hr} bpm`;
             }

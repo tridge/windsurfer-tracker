@@ -293,7 +293,9 @@ def generate_log_summaries(log_dir: Path) -> int:
             start_ts = None
             end_ts = None
             point_count = 0
-            sailors: dict[str, dict] = {}  # id -> {points, first_ts, last_ts}
+            sailors: dict[str, dict] = {}  # key -> {points, first_ts, last_ts, id, displayid}
+            # Key is displayid if present, otherwise id. This allows the same tracker
+            # to appear as multiple entries if its display name changed during the log.
 
             try:
                 with open(log_file, 'r') as f:
@@ -305,6 +307,7 @@ def generate_log_summaries(log_dir: Path) -> int:
                             entry = json.loads(line)
                             ts = entry.get('ts')
                             sailor_id = entry.get('id')
+                            displayid = entry.get('displayid')
 
                             if ts is None or sailor_id is None:
                                 continue
@@ -316,18 +319,26 @@ def generate_log_summaries(log_dir: Path) -> int:
                             if end_ts is None or ts > end_ts:
                                 end_ts = ts
 
-                            if sailor_id not in sailors:
-                                sailors[sailor_id] = {
+                            # Use displayid as the key if present, otherwise sailor_id
+                            # This groups entries by their display name at the time of logging
+                            key = displayid if displayid else sailor_id
+
+                            if key not in sailors:
+                                sailors[key] = {
                                     'points': 0,
                                     'first_ts': ts,
-                                    'last_ts': ts
+                                    'last_ts': ts,
+                                    'id': sailor_id  # Store original tracker ID
                                 }
+                                # Store displayid if present (for search)
+                                if displayid:
+                                    sailors[key]['displayid'] = displayid
 
-                            sailors[sailor_id]['points'] += 1
-                            if ts < sailors[sailor_id]['first_ts']:
-                                sailors[sailor_id]['first_ts'] = ts
-                            if ts > sailors[sailor_id]['last_ts']:
-                                sailors[sailor_id]['last_ts'] = ts
+                            sailors[key]['points'] += 1
+                            if ts < sailors[key]['first_ts']:
+                                sailors[key]['first_ts'] = ts
+                            if ts > sailors[key]['last_ts']:
+                                sailors[key]['last_ts'] = ts
 
                         except json.JSONDecodeError:
                             continue
@@ -566,6 +577,7 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
             override = user_overrides[sailor_id]
             if 'name' in override:
                 display_pos['name'] = override['name']
+                display_pos['displayid'] = override['name']
             if 'role' in override:
                 display_pos['role'] = override['role']
             if override.get('hidden'):
@@ -723,7 +735,7 @@ class PositionTracker:
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
                          skip_log: bool = False, stopped: bool = False,
-                         pos_array: list | None = None) -> bool:
+                         pos_array: list | None = None, user_overrides: dict | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -855,6 +867,11 @@ class PositionTracker:
                     track_entry["os"] = os_version
                 if horizontal_accuracy is not None:
                     track_entry["hac"] = horizontal_accuracy
+                # Add displayid if user has a name mapping
+                if user_overrides and sailor_id in user_overrides:
+                    override = user_overrides[sailor_id]
+                    if override.get('name'):
+                        track_entry["displayid"] = override['name']
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -926,10 +943,14 @@ class EventTracker:
                 track_entry["os"] = os_version
             if horizontal_accuracy is not None:
                 track_entry["hac"] = horizontal_accuracy
+            # Add displayid if user has a name mapping
+            if self.user_overrides and sailor_id in self.user_overrides:
+                override = self.user_overrides[sailor_id]
+                if override.get('name'):
+                    track_entry["displayid"] = override['name']
             self.daily_logger.write(track_entry)
 
         # Process through position tracker
-        # We pass user_overrides via the global for now (will refactor later)
         result = self.position_tracker.process_position(
             sailor_id=sailor_id,
             lat=lat,
@@ -951,7 +972,8 @@ class EventTracker:
             horizontal_accuracy=horizontal_accuracy,
             skip_log=has_batch or skip_log,
             stopped=stopped,
-            pos_array=pos_array
+            pos_array=pos_array,
+            user_overrides=self.user_overrides
         )
 
         # Write positions with event-specific user overrides
@@ -1396,19 +1418,31 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         date = summary.get('date', summary_file.stem.replace('_summary', ''))
 
                         for log in summary.get('logs', []):
-                            for sailor_id, sailor_data in log.get('sailors', {}).items():
-                                # Get display name from user overrides
-                                display_name = user_overrides.get(sailor_id, {}).get('name', '')
+                            for key, sailor_data in log.get('sailors', {}).items():
+                                # Get the original tracker ID and displayid from summary
+                                # In new format: sailor_data has 'id' (original tracker ID) and optionally 'displayid'
+                                # In old format: key is the sailor_id
+                                original_id = sailor_data.get('id', key)
+                                displayid = sailor_data.get('displayid', '')
 
-                                # Match against sailor ID or display name
-                                if query in sailor_id.lower() or query in display_name.lower():
+                                # Get display name from user overrides (fallback for old summaries)
+                                override_name = user_overrides.get(original_id, {}).get('name', '')
+
+                                # The display name is: displayid (from log) > override name > key
+                                display_name = displayid or override_name or key
+
+                                # Match against key (which may be displayid or id), original id, and display name
+                                if (query in key.lower() or
+                                    query in original_id.lower() or
+                                    query in display_name.lower()):
                                     start_ts = sailor_data.get('first_ts', log.get('start_ts', 0))
                                     end_ts = sailor_data.get('last_ts', log.get('end_ts', 0))
                                     results.append({
                                         'date': date,
                                         'log_file': log.get('file', ''),
-                                        'sailor_id': sailor_id,
-                                        'name': display_name or sailor_id,
+                                        'sailor_id': original_id,  # Original tracker ID
+                                        'key': key,  # The key used in userData (displayid or original id)
+                                        'name': display_name,
                                         'start_ts': start_ts,
                                         'end_ts': end_ts,
                                         'duration_secs': end_ts - start_ts if end_ts > start_ts else 0
@@ -2138,6 +2172,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         track_entry["os"] = os_version
                     if horizontal_accuracy is not None:
                         track_entry["hac"] = horizontal_accuracy
+                    # Add displayid if user has a name mapping
+                    if _user_overrides and sailor_id in _user_overrides:
+                        override = _user_overrides[sailor_id]
+                        if override.get('name'):
+                            track_entry["displayid"] = override['name']
                     _daily_logger.write(track_entry)
 
                 _position_tracker.process_position(
@@ -2161,7 +2200,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     horizontal_accuracy=horizontal_accuracy,
                     skip_log=has_batch,
                     stopped=stopped,
-                    pos_array=pos_array
+                    pos_array=pos_array,
+                    user_overrides=_user_overrides
                 )
 
             # Send ACK response (same format as UDP)
@@ -2922,6 +2962,11 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             track_entry["os"] = os_version
                         if horizontal_accuracy is not None:
                             track_entry["hac"] = horizontal_accuracy
+                        # Add displayid if user has a name mapping
+                        if user_overrides and sailor_id in user_overrides:
+                            override = user_overrides[sailor_id]
+                            if override.get('name'):
+                                track_entry["displayid"] = override['name']
                         daily_logger.write(track_entry)
 
                     # Process position through shared tracker (updates live display)
@@ -2947,7 +2992,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         horizontal_accuracy=horizontal_accuracy,
                         skip_log=has_batch,
                         stopped=stopped,
-                        pos_array=pos_array
+                        pos_array=pos_array,
+                        user_overrides=user_overrides
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)

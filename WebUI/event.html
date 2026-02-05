@@ -3344,9 +3344,9 @@
                     const hasWarning = hasPowerSave || (flg.bo === false);  // Warn if power save ON or bat opt NOT ignored
                     const warningBadge = hasWarning ? '<span style="background:#f97316;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;" title="' + (hasPowerSave ? 'Power saver ON' : 'Battery optimization enabled') + '">⚡</span>' : '';
 
-                    // Show display name with ID in parentheses if different
-                    const displayName = sailor.name || sailor.id;
-                    const idSuffix = sailor.name ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
+                    // Show display name with ID in parentheses if different (for admins)
+                    const displayName = sailor.displayid || sailor.id;
+                    const idSuffix = (adminMode && sailor.displayid) ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
                     const hiddenBadge = sailor.hidden ? '<span style="background:#888;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">HIDDEN</span>' : '';
                     const rowStyle = sailor.hidden ? 'opacity:0.6;' : '';
 
@@ -3422,7 +3422,7 @@
                 const age = now - sailor.last_seen;
                 const isRecent = age < 120;
                 const role = sailor.role || 'sailor';
-                const displayName = sailor.name || sailor.id;
+                const displayName = sailor.displayid || sailor.id;
                 const label = showLabels ? displayName : null;
                 const icon = createRoleIcon(role, sailor.hdg, isRecent, sailor.ast, label);
                 const pos = [sailor.lat, sailor.lon];
@@ -3477,7 +3477,8 @@
                 const batOptWarning = flg.bo === false ? '<br><span style="color:#f97316;font-weight:bold">⚡ Battery Optimization Enabled</span>' : '';
 
                 // Display name (use override if set, otherwise ID) - displayName already defined above
-                const nameExtra = sailor.name ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
+                // Show original ID suffix for admins when displayid is set
+                const nameExtra = (adminMode && sailor.displayid) ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
                 const userInfo = (sailor.info || '').replace(/\n+$/, '').replace(/\n/g, '<br>');
                 const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
