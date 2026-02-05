@@ -318,6 +318,28 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Live Tracking Link -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Live Tracking"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="#444444"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tvLiveTrackingLinkActive"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="https://wstracker.org/event.html?eid=2"
+            android:autoLink="web"
+            android:textColor="#2196F3"
+            android:textColorLink="#2196F3"
+            android:linksClickable="true"
+            android:textSize="14sp" />
+
     </LinearLayout>
 
     <!-- Barrier below both config and status groups -->

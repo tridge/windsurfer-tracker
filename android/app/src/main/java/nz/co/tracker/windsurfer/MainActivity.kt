@@ -587,6 +587,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz" else "0.1Hz"
             binding.tv1HzIndicator.visibility = View.VISIBLE
 
+            // Update live tracking link for active screen
+            val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
+            val eventId = prefs.getInt("event_id", 2)
+            binding.tvLiveTrackingLinkActive.text = "https://$serverHost/event.html?eid=$eventId"
+
             service.getLastLocation()?.let { loc ->
                 updateLocationDisplay(loc)
             }

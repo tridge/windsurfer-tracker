@@ -118,6 +118,23 @@ struct TrackingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.top, 12)
+
+                // Live Tracking link
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Live Tracking")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(Color(white: 0.27))
+
+                    if let url = URL(string: "https://\(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)") {
+                        Link(destination: url) {
+                            Text("https://\(viewModel.serverHost)/event.html?eid=\(viewModel.eventId)")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+                .padding(.top, 12)
             }
             .padding(16)
 
