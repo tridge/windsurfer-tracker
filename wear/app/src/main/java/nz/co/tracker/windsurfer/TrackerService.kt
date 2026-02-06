@@ -921,6 +921,11 @@ class TrackerService : LifecycleService() {
             }
         }
         wakeLock = null
+
+        // Clear ongoing activity and remove the foreground notification
+        clearOngoingActivity()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     /**

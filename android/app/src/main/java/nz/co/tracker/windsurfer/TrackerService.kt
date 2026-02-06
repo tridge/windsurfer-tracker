@@ -684,6 +684,10 @@ class TrackerService : LifecycleService() {
 
         socket?.close()
         socket = null
+
+        // Remove the foreground notification and stop the service
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     /**
