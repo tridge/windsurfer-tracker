@@ -836,6 +836,104 @@
         .popup-split-btn:hover {
             background: #6d28d9;
         }
+
+        /* Upload track dialog */
+        .upload-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .upload-overlay.visible {
+            display: flex;
+        }
+
+        .upload-dialog {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            width: 320px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .upload-dialog h3 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+        }
+
+        .upload-dialog label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .upload-dialog input[type="text"],
+        .upload-dialog input[type="password"] {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .upload-dialog input[type="file"] {
+            width: 100%;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+
+        .upload-dialog .btn-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .upload-dialog button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .upload-dialog .btn-cancel {
+            background: #eee;
+            color: #333;
+        }
+
+        .upload-dialog .btn-upload {
+            background: #0066cc;
+            color: white;
+        }
+
+        .upload-dialog .btn-upload:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        .upload-status {
+            margin-top: 10px;
+            font-size: 13px;
+            min-height: 20px;
+        }
+
+        .upload-status.error {
+            color: #c00;
+        }
+
+        .upload-status.success {
+            color: #060;
+        }
     </style>
 </head>
 <body>
@@ -967,6 +1065,10 @@
                 <span>📊</span>
                 <span>Track Review</span>
             </a>
+        </div>
+        <div class="menu-item" id="menuUpload" onclick="showUploadDialog()">
+            <span>📁</span>
+            <span>Upload Track</span>
         </div>
         <div class="menu-item" id="menuAdmin" onclick="toggleAdminMode()">
             <span>⚙️</span>
@@ -1112,6 +1214,30 @@
                 <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
                 <button class="btn-save" onclick="saveEditMark()">Save</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Upload track dialog -->
+    <div class="upload-overlay" id="uploadOverlay" onclick="if(event.target===this)hideUploadDialog()">
+        <div class="upload-dialog">
+            <h3>Upload Track (GPX)</h3>
+            <form onsubmit="event.preventDefault(); doUpload();">
+                <label for="uploadFile">GPX File</label>
+                <input type="file" id="uploadFile" accept=".gpx">
+                <label for="uploadName">Display Name</label>
+                <input type="text" id="uploadName" placeholder="e.g. Alice">
+                <label for="uploadPassword">Event Password</label>
+                <input type="password" id="uploadPassword" placeholder="Tracker password">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
+                    <input type="checkbox" id="showUploadPwd" onchange="document.getElementById('uploadPassword').type=this.checked?'text':'password'" style="width:16px;height:16px;">
+                    <span>Show password</span>
+                </label>
+                <div class="btn-row">
+                    <button type="button" class="btn-cancel" onclick="hideUploadDialog()">Cancel</button>
+                    <button type="submit" class="btn-upload" id="uploadBtn">Upload</button>
+                </div>
+            </form>
+            <div class="upload-status" id="uploadStatus"></div>
         </div>
     </div>
 
@@ -1310,6 +1436,76 @@
                 hideAbout();
             }
         });
+
+        // Upload track functions
+        function showUploadDialog() {
+            document.getElementById('menuPanel').classList.remove('visible');
+            menuOpen = false;
+            document.getElementById('uploadFile').value = '';
+            document.getElementById('uploadName').value = '';
+            // Pre-fill password from localStorage if available
+            document.getElementById('uploadPassword').value = localStorage.getItem(`uploadPassword_${EVENT_ID}`) || '';
+            document.getElementById('uploadStatus').textContent = '';
+            document.getElementById('uploadStatus').className = 'upload-status';
+            document.getElementById('uploadBtn').disabled = false;
+            document.getElementById('uploadOverlay').classList.add('visible');
+        }
+
+        function hideUploadDialog() {
+            document.getElementById('uploadOverlay').classList.remove('visible');
+        }
+
+        async function doUpload() {
+            const fileInput = document.getElementById('uploadFile');
+            const name = document.getElementById('uploadName').value.trim();
+            const password = document.getElementById('uploadPassword').value;
+            const statusEl = document.getElementById('uploadStatus');
+            const btn = document.getElementById('uploadBtn');
+
+            if (!fileInput.files.length) {
+                statusEl.textContent = 'Please select a GPX file';
+                statusEl.className = 'upload-status error';
+                return;
+            }
+            if (!name) {
+                statusEl.textContent = 'Please enter a display name';
+                statusEl.className = 'upload-status error';
+                return;
+            }
+
+            btn.disabled = true;
+            statusEl.textContent = 'Uploading...';
+            statusEl.className = 'upload-status';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('name', name);
+            formData.append('password', password);
+
+            try {
+                const resp = await fetch(`${EVENT_API}/upload-track`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    // Remember password on success
+                    localStorage.setItem(`uploadPassword_${EVENT_ID}`, password);
+                    statusEl.textContent = `Uploaded ${data.points} points to ${data.files.length} file(s)`;
+                    statusEl.className = 'upload-status success';
+                    // Auto-close after 2 seconds
+                    setTimeout(hideUploadDialog, 2000);
+                } else {
+                    statusEl.textContent = data.error || 'Upload failed';
+                    statusEl.className = 'upload-status error';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                statusEl.textContent = 'Network error: ' + e.message;
+                statusEl.className = 'upload-status error';
+                btn.disabled = false;
+            }
+        }
 
         function toggleMenu() {
             const menuPanel = document.getElementById('menuPanel');

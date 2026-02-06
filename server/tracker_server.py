@@ -614,6 +614,7 @@ class DailyLogger:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.current_date = None
         self.log_fh = None
+        self._write_lock = threading.Lock()
         # Store timezone for date calculations
         try:
             self.tz = ZoneInfo(tz_name)
@@ -641,27 +642,95 @@ class DailyLogger:
 
     def write(self, entry: dict):
         """Write a log entry, rolling over at midnight if needed."""
-        self._open_log_for_today()
-        self.log_fh.write(json.dumps(entry) + "\n")
-        self.log_fh.flush()
+        with self._write_lock:
+            self._open_log_for_today()
+            self.log_fh.write(json.dumps(entry) + "\n")
+            self.log_fh.flush()
 
     def close(self):
-        if self.log_fh:
-            self.log_fh.close()
-            self.log_fh = None
+        with self._write_lock:
+            if self.log_fh:
+                self.log_fh.close()
+                self.log_fh = None
 
     def clear_today(self):
         """Clear today's log file by rotating it to .1, .2, etc."""
-        self._open_log_for_today()
-        if self.log_fh:
-            self.log_fh.close()
-            self.log_fh = None
-        log_path = self._get_log_filename(self._get_today_in_tz())
-        # Rotate the file instead of truncating
-        rotate_file(log_path)
-        # Open a fresh log file
-        self.log_fh = open(log_path, 'a')
-        log(f"Cleared track log: {log_path}")
+        with self._write_lock:
+            self._open_log_for_today()
+            if self.log_fh:
+                self.log_fh.close()
+                self.log_fh = None
+            log_path = self._get_log_filename(self._get_today_in_tz())
+            # Rotate the file instead of truncating
+            rotate_file(log_path)
+            # Open a fresh log file
+            self.log_fh = open(log_path, 'a')
+            log(f"Cleared track log: {log_path}")
+
+    def merge_entries(self, date_str: str, new_entries: list[dict]):
+        """Merge new entries into a JSONL log file, sorted by timestamp.
+
+        Holds _write_lock for the entire read-modify-write to prevent
+        DailyLogger.write() from appending during the merge. Uses
+        temp file + atomic rename to prevent corruption.
+        """
+        import tempfile
+
+        log_file = self.log_dir / f"{date_str}.jsonl"
+        today_str = self._get_today_in_tz().strftime('%Y_%m_%d')
+        is_today = (date_str == today_str)
+
+        with self._write_lock:
+            # If merging into today's file, close the append handle first
+            if is_today and self.log_fh:
+                self.log_fh.flush()
+                self.log_fh.close()
+                self.log_fh = None
+
+            try:
+                # Read existing entries
+                existing = []
+                if log_file.exists():
+                    with open(log_file, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    existing.append(json.loads(line))
+                                except json.JSONDecodeError:
+                                    pass  # Skip corrupt lines
+
+                # Merge and sort by timestamp
+                merged = existing + new_entries
+                merged.sort(key=lambda e: e.get('ts', 0))
+
+                # Write to temp file in same directory for atomic rename
+                tmp_fd, tmp_path = tempfile.mkstemp(
+                    dir=str(self.log_dir), suffix='.jsonl.tmp')
+                try:
+                    with os.fdopen(tmp_fd, 'w') as f:
+                        for entry in merged:
+                            f.write(json.dumps(entry) + '\n')
+                    # Atomic replace
+                    os.rename(tmp_path, str(log_file))
+                    # Set mtime to the last entry's timestamp so mtime-based
+                    # caching in the summary generator and compressor reflects
+                    # the actual data content, not the upload time
+                    if merged:
+                        last_ts = merged[-1].get('ts', 0)
+                        if last_ts > 0:
+                            os.utime(str(log_file), (last_ts, last_ts))
+                except Exception:
+                    # Clean up temp file on failure
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+            finally:
+                # If we closed today's file, force reopen on next write()
+                if is_today:
+                    self.current_date = None
 
 
 class PositionTracker:
@@ -1112,6 +1181,73 @@ _static_dir: Path | None = None
 _positions_file: Path | None = None
 
 
+def parse_gpx_to_entries(gpx_content: str, name: str) -> list[dict]:
+    """Parse GPX XML content into JSONL track entries.
+
+    Returns a list of entry dicts sorted by timestamp.
+    """
+    import xml.etree.ElementTree as ET
+
+    entries = []
+    root = ET.fromstring(gpx_content)
+
+    # Handle GPX namespace (1.0 and 1.1)
+    ns = ''
+    if root.tag.startswith('{'):
+        ns = root.tag.split('}')[0] + '}'
+
+    sailor_id = f"{name}(GPX)"
+
+    for trk in root.iter(f'{ns}trk'):
+        for trkseg in trk.iter(f'{ns}trkseg'):
+            for trkpt in trkseg.iter(f'{ns}trkpt'):
+                lat = float(trkpt.get('lat'))
+                lon = float(trkpt.get('lon'))
+
+                # Parse time
+                time_el = trkpt.find(f'{ns}time')
+                if time_el is None or not time_el.text:
+                    continue
+                time_str = time_el.text.strip()
+                # Handle Z suffix for UTC
+                if time_str.endswith('Z'):
+                    time_str = time_str[:-1] + '+00:00'
+                dt = datetime.fromisoformat(time_str)
+                unix_ts = int(dt.timestamp())
+
+                # Parse optional speed (m/s -> knots)
+                speed = 0.0
+                speed_el = trkpt.find(f'{ns}speed')
+                if speed_el is not None and speed_el.text:
+                    speed = float(speed_el.text) / 0.514444
+
+                # Parse optional course/heading
+                heading = 0
+                course_el = trkpt.find(f'{ns}course')
+                if course_el is not None and course_el.text:
+                    heading = int(float(course_el.text))
+
+                entries.append({
+                    "id": sailor_id,
+                    "ts": unix_ts,
+                    "recv_ts": unix_ts,
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                    "spd": round(speed, 1),
+                    "hdg": heading,
+                    "ast": False,
+                    "bat": -1,
+                    "sig": -1,
+                    "role": "sailor",
+                    "ver": "gpx-upload",
+                    "displayid": name,
+                    "src": "gpx"
+                })
+
+    entries.sort(key=lambda e: e['ts'])
+    return entries
+
+
 class AdminHTTPHandler(BaseHTTPRequestHandler):
     """HTTP handler for admin API endpoints and optional static file serving."""
     
@@ -1480,6 +1616,195 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"error": "Not found"}, 404)
 
+    @staticmethod
+    def _compress_log_files(log_dir: Path, filenames: list[str]):
+        """Compress JSONL log files to .gz for efficient serving.
+
+        Sets .gz mtime to match source JSONL mtime so browser
+        If-Modified-Since caching works correctly.
+        """
+        import gzip
+        for fname in filenames:
+            log_file = log_dir / fname
+            if not log_file.exists():
+                continue
+            gz_file = log_file.with_suffix('.jsonl.gz')
+            tmp_gz = gz_file.parent / f"{gz_file.name}.tmp"
+            with open(log_file, 'rb') as f_in:
+                with gzip.open(tmp_gz, 'wb') as f_out:
+                    f_out.write(f_in.read())
+            tmp_gz.rename(gz_file)
+            # Match source mtime so If-Modified-Since caching is correct
+            src_mtime = log_file.stat().st_mtime
+            os.utime(str(gz_file), (src_mtime, src_mtime))
+
+    def _handle_track_upload(self, eid: int, event: dict):
+        """Handle GPX track file upload with tracker password auth."""
+        from collections import defaultdict
+
+        client_ip = self._get_client_ip()
+
+        # Rate limiting
+        if is_rate_limited(client_ip):
+            self._send_json({"error": "Too many attempts, please wait"}, 429)
+            return
+
+        # Parse multipart form data
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_json({"error": "Expected multipart/form-data"}, 400)
+            return
+
+        # Extract boundary
+        boundary = None
+        for part in content_type.split(';'):
+            part = part.strip()
+            if part.startswith('boundary='):
+                boundary = part[len('boundary='):]
+                break
+        if not boundary:
+            self._send_json({"error": "Missing boundary in Content-Type"}, 400)
+            return
+
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length > 50 * 1024 * 1024:  # 50MB limit
+            self._send_json({"error": "File too large (max 50MB)"}, 413)
+            return
+        body = self.rfile.read(content_length)
+
+        # Parse multipart parts manually
+        boundary_bytes = boundary.encode('utf-8')
+        parts = body.split(b'--' + boundary_bytes)
+        fields = {}  # name -> value (str)
+        file_content = None
+
+        for part in parts:
+            if part in (b'', b'--\r\n', b'--'):
+                continue
+            # Split headers from body
+            if b'\r\n\r\n' not in part:
+                continue
+            header_section, part_body = part.split(b'\r\n\r\n', 1)
+            # Strip trailing \r\n
+            if part_body.endswith(b'\r\n'):
+                part_body = part_body[:-2]
+
+            headers_str = header_section.decode('utf-8', errors='replace')
+            # Extract field name from Content-Disposition
+            field_name = None
+            is_file = False
+            for line in headers_str.split('\r\n'):
+                if line.lower().startswith('content-disposition:'):
+                    for item in line.split(';'):
+                        item = item.strip()
+                        if item.startswith('name="') and item.endswith('"'):
+                            field_name = item[6:-1]
+                        if item.startswith('filename='):
+                            is_file = True
+
+            if field_name == 'file' and is_file:
+                file_content = part_body
+            elif field_name:
+                fields[field_name] = part_body.decode('utf-8', errors='replace')
+
+        # Validate required fields
+        name = fields.get('name', '').strip()
+        password = fields.get('password', '')
+
+        if not name:
+            self._send_json({"error": "Display name is required"}, 400)
+            return
+        if file_content is None:
+            self._send_json({"error": "No file uploaded"}, 400)
+            return
+
+        # Authenticate with tracker password
+        event_tracker_pwd = event.get('tracker_password', '') if event else ''
+        if event_tracker_pwd:
+            if password != event_tracker_pwd:
+                record_failed_auth(client_ip)
+                log(f"[EVENT {eid}] Upload auth failed from {client_ip}")
+                self._send_json({"error": "Invalid event password"}, 401)
+                return
+
+        # Parse GPX
+        try:
+            gpx_str = file_content.decode('utf-8')
+            entries = parse_gpx_to_entries(gpx_str, name)
+        except Exception as e:
+            log(f"[EVENT {eid}] GPX parse error: {e}")
+            self._send_json({"error": f"Failed to parse GPX file: {e}"}, 400)
+            return
+
+        if not entries:
+            self._send_json({"error": "No trackpoints found in GPX file"}, 400)
+            return
+
+        # Get event tracker
+        tracker = get_event_tracker(eid)
+        if not tracker:
+            self._send_json({"error": "Could not get event tracker"}, 500)
+            return
+
+        if not tracker.daily_logger:
+            self._send_json({"error": "Track logging not enabled"}, 500)
+            return
+
+        # Group entries by local date in the event timezone
+        event_tz = ZoneInfo(event.get('timezone', 'Australia/Sydney') if event else 'Australia/Sydney')
+        date_groups = defaultdict(list)
+        for entry in entries:
+            local_dt = datetime.fromtimestamp(entry['ts'], tz=event_tz)
+            date_str = local_dt.strftime('%Y_%m_%d')
+            date_groups[date_str].append(entry)
+
+        # Merge each day's entries via DailyLogger (holds _write_lock to
+        # prevent data loss from concurrent appends during read-modify-write)
+        merged_files = []
+        errors = []
+        for date_str, day_entries in date_groups.items():
+            try:
+                tracker.daily_logger.merge_entries(date_str, day_entries)
+                merged_files.append(f"{date_str}.jsonl")
+            except Exception as e:
+                log(f"[EVENT {eid}] Merge failed for {date_str}: {e}")
+                errors.append(f"{date_str}.jsonl: {e}")
+
+        # Regenerate summaries and .gz files for modified log files.
+        # Delete stale summaries first so generate_log_summaries() doesn't
+        # skip them due to mtime-based caching.
+        if merged_files:
+            for fname in merged_files:
+                date_str = fname.replace('.jsonl', '')
+                for suffix in ('_summary.json',):
+                    stale = tracker.log_dir / f"{date_str}{suffix}"
+                    if stale.exists():
+                        stale.unlink()
+            try:
+                generate_log_summaries(tracker.log_dir)
+            except Exception as e:
+                log(f"[EVENT {eid}] Summary regeneration failed: {e}")
+            try:
+                self._compress_log_files(tracker.log_dir, merged_files)
+            except Exception as e:
+                log(f"[EVENT {eid}] Log compression failed: {e}")
+
+        if errors:
+            log(f"[EVENT {eid}] Upload partial failure: {errors}")
+            self._send_json({
+                "error": f"Some files failed: {'; '.join(errors)}",
+                "success": len(merged_files) > 0,
+                "points": len(entries),
+                "files": merged_files
+            }, 207)  # Multi-Status
+        else:
+            log(f"[EVENT {eid}] Uploaded {len(entries)} GPX points for '{name}' to {merged_files}")
+            self._send_json({
+                "success": True,
+                "points": len(entries),
+                "files": sorted(merged_files)
+            })
+
     def _handle_event_post(self, path: str):
         """Handle POST requests for per-event endpoints."""
         eid, subpath = self._parse_event_path(path)
@@ -1496,6 +1821,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if event.get('archived'):
                 self._send_json({"error": f"Event {eid} is archived"}, 400)
                 return
+
+        # Upload track endpoint - uses tracker password, not admin password
+        if subpath == '/upload-track':
+            self._handle_track_upload(eid, event)
+            return
 
         # Admin endpoints require per-event admin auth
         if not self._check_event_admin_auth(eid):
