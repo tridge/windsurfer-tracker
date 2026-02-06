@@ -42,6 +42,7 @@
 android/app/build/
 build/
 current_positions.json
+version.json
 WebUI/config.js
 key.properties
 keys/
