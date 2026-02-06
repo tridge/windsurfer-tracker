@@ -213,6 +213,8 @@ public class TrackerViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 self.isTracking = false
+                self.stopBeepTimer()
+                self.endLiveActivity()
                 // Only show alert if no other dialog is showing
                 if !self.showStopConfirmation && !self.showSettings {
                     self.errorMessage = "Tracking stopped by admin"

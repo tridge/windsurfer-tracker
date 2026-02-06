@@ -111,12 +111,13 @@ public class LiveActivityManager {
                 speedKnots: 0,
                 ackRatePercent: 0,
                 statusLine: "Stopped",
-                assistActive: false
+                assistActive: false,
+                isStopped: true
             )
 
             await activity.end(
                 ActivityContent(state: finalState, staleDate: nil),
-                dismissalPolicy: .immediate
+                dismissalPolicy: .default
             )
             print("[LiveActivity] Ended activity: \(activity.id)")
         }

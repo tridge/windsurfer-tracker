@@ -83,31 +83,41 @@ private struct LockScreenView: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
-                // Speed
-                HStack(spacing: 2) {
-                    Text(String(format: "%.1f", context.state.speedKnots))
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .monospacedDigit()
-                    Text("kn")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+            if context.state.isStopped {
+                Text("STOPPED")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.red)
+            } else {
+                VStack(alignment: .trailing, spacing: 4) {
+                    // Speed
+                    HStack(spacing: 2) {
+                        Text(String(format: "%.1f", context.state.speedKnots))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .monospacedDigit()
+                        Text("kn")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
 
-                // Connection rate
-                HStack(spacing: 4) {
-                    Image(systemName: connectionIcon)
-                        .foregroundColor(connectionColor)
-                    Text("\(context.state.ackRatePercent)%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .monospacedDigit()
+                    // Connection rate
+                    HStack(spacing: 4) {
+                        Image(systemName: connectionIcon)
+                            .foregroundColor(connectionColor)
+                        Text("\(context.state.ackRatePercent)%")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
                 }
             }
         }
         .padding()
-        .activityBackgroundTint(context.state.assistActive ? Color.orange.opacity(0.2) : Color.black.opacity(0.7))
+        .activityBackgroundTint(
+            context.state.isStopped ? Color.red.opacity(0.2) :
+            context.state.assistActive ? Color.orange.opacity(0.2) : Color.black.opacity(0.7)
+        )
     }
 
     private var connectionIcon: String {
@@ -147,13 +157,19 @@ private struct CompactTrailingView: View {
     let context: ActivityViewContext<TrackerActivityAttributes>
 
     var body: some View {
-        HStack(spacing: 2) {
-            Text(String(format: "%.1f", context.state.speedKnots))
+        if context.state.isStopped {
+            Text("STOP")
                 .fontWeight(.semibold)
-                .monospacedDigit()
-            Text("kn")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundColor(.red)
+        } else {
+            HStack(spacing: 2) {
+                Text(String(format: "%.1f", context.state.speedKnots))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                Text("kn")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }
@@ -163,7 +179,14 @@ private struct MinimalView: View {
     let context: ActivityViewContext<TrackerActivityAttributes>
 
     var body: some View {
-        WindsurferIcon(isConnected: context.state.isConnected, size: 16)
+        if context.state.isStopped {
+            Image("windsurfer_error")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+        } else {
+            WindsurferIcon(isConnected: context.state.isConnected, size: 16)
+        }
     }
 }
 
@@ -188,24 +211,31 @@ private struct ExpandedTrailingView: View {
     let context: ActivityViewContext<TrackerActivityAttributes>
 
     var body: some View {
-        VStack(alignment: .trailing) {
-            HStack(spacing: 2) {
-                Text(String(format: "%.1f", context.state.speedKnots))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .monospacedDigit()
-                Text("kn")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        if context.state.isStopped {
+            Text("STOPPED")
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+        } else {
+            VStack(alignment: .trailing) {
+                HStack(spacing: 2) {
+                    Text(String(format: "%.1f", context.state.speedKnots))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                    Text("kn")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: connectionIcon)
+                        .font(.caption)
+                    Text("\(context.state.ackRatePercent)%")
+                        .font(.caption)
+                        .monospacedDigit()
+                }
+                .foregroundColor(connectionColor)
             }
-            HStack(spacing: 4) {
-                Image(systemName: connectionIcon)
-                    .font(.caption)
-                Text("\(context.state.ackRatePercent)%")
-                    .font(.caption)
-                    .monospacedDigit()
-            }
-            .foregroundColor(connectionColor)
         }
     }
 
@@ -231,13 +261,19 @@ private struct ExpandedCenterView: View {
     let context: ActivityViewContext<TrackerActivityAttributes>
 
     var body: some View {
-        HStack {
-            Text(context.state.statusLine)
+        if context.state.isStopped {
+            Text("Tracking stopped")
                 .font(.caption)
-                .foregroundColor(.secondary)
-            if context.state.assistActive {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
+                .foregroundColor(.red)
+        } else {
+            HStack {
+                Text(context.state.statusLine)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if context.state.assistActive {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                }
             }
         }
     }
@@ -248,7 +284,17 @@ private struct ExpandedBottomView: View {
     let context: ActivityViewContext<TrackerActivityAttributes>
 
     var body: some View {
-        if context.state.assistActive {
+        if context.state.isStopped {
+            HStack {
+                Image(systemName: "stop.circle.fill")
+                    .foregroundColor(.red)
+                Text("STOPPED")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.red)
+            }
+            .padding(.vertical, 4)
+        } else if context.state.assistActive {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)

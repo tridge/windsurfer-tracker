@@ -29,19 +29,23 @@ public struct TrackerActivityAttributes: ActivityAttributes {
         public var statusLine: String
         /// Whether assist is currently active
         public var assistActive: Bool
+        /// Whether tracking has been stopped (for final Live Activity display)
+        public var isStopped: Bool
 
         public init(
             isConnected: Bool = false,
             speedKnots: Double = 0,
             ackRatePercent: Int = 0,
             statusLine: String = "---",
-            assistActive: Bool = false
+            assistActive: Bool = false,
+            isStopped: Bool = false
         ) {
             self.isConnected = isConnected
             self.speedKnots = speedKnots
             self.ackRatePercent = ackRatePercent
             self.statusLine = statusLine
             self.assistActive = assistActive
+            self.isStopped = isStopped
         }
     }
 }
