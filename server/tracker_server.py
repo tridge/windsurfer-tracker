@@ -1617,6 +1617,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath == '/admin/stop-all':
+            # Send remote stop command to all active trackers
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+
+            global _pending_stops
+            now = time.time()
+            stopped_ids = []
+            for user_id, pos in tracker.position_tracker.current_positions.items():
+                if not pos.get("stopped", False):
+                    stop_key = f"{eid}:{user_id}"
+                    _pending_stops[stop_key] = now
+                    stopped_ids.append(user_id)
+
+            log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
+            self._send_json({"success": True, "stopped_count": len(stopped_ids), "user_ids": stopped_ids})
+
         elif subpath.startswith('/admin/stop/'):
             # Send remote stop command to a user
             from urllib.parse import unquote
@@ -1626,7 +1645,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             # Store pending stop with timestamp
-            global _pending_stops
             stop_key = f"{eid}:{user_id}"
             _pending_stops[stop_key] = time.time()
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
@@ -1976,6 +1994,29 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif path == '/api/admin/stop-all':
+            # Send remote stop command to all active trackers
+            parsed = urlparse(self.path)
+            query_params = parse_qs(parsed.query)
+            event_id = int(query_params.get('event_id', [1])[0])
+
+            global _pending_stops
+            now = time.time()
+            stopped_ids = []
+
+            # Try event-based tracker first, fall back to legacy
+            tracker = get_event_tracker(event_id)
+            positions = tracker.position_tracker.current_positions if tracker else (_position_tracker.current_positions if _position_tracker else {})
+
+            for user_id, pos in positions.items():
+                if not pos.get("stopped", False):
+                    stop_key = f"{event_id}:{user_id}"
+                    _pending_stops[stop_key] = now
+                    stopped_ids.append(user_id)
+
+            log(f"[ADMIN] Remote stop-all queued for {len(stopped_ids)} trackers (event {event_id}): {stopped_ids}")
+            self._send_json({"success": True, "stopped_count": len(stopped_ids), "user_ids": stopped_ids})
+
         elif path.startswith('/api/admin/stop/'):
             # Send remote stop command to a user
             user_id = path[len('/api/admin/stop/'):]
@@ -1989,7 +2030,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             event_id = int(query_params.get('event_id', [1])[0])
 
             # Store pending stop with timestamp
-            global _pending_stops
             stop_key = f"{event_id}:{user_id}"
             _pending_stops[stop_key] = time.time()
             log(f"[ADMIN] Remote stop queued for {user_id} (event {event_id})")

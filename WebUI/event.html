@@ -1034,6 +1034,9 @@
                 <button class="admin-action-btn danger" onclick="clearTracks()">
                     🗑 Clear Today's Tracks
                 </button>
+                <button class="admin-action-btn danger" onclick="stopAllUsers()">
+                    ⏹ Stop All Trackers
+                </button>
             </div>
         </div>
         
@@ -2298,6 +2301,31 @@
             } catch (error) {
                 console.error('Error sending stop command:', error);
                 alert(`Error sending stop command: ${error.message}`);
+            }
+        }
+
+        // Send remote stop command to all active trackers
+        async function stopAllUsers() {
+            if (!confirm('Stop ALL active trackers? This will send a remote stop command to every tracker on this event.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/stop-all`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Stop command sent to ${result.stopped_count} tracker(s). They will stop tracking within 30 seconds.`);
+                } else {
+                    alert(`Failed to send stop-all command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending stop-all command:', error);
+                alert(`Error sending stop-all command: ${error.message}`);
             }
         }
 
