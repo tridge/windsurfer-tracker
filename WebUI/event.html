@@ -3780,7 +3780,7 @@
         // Fetch positions from server
         async function fetchPositions() {
             try {
-                const response = await fetch(`${DATA_BASE}current_positions.json?` + Date.now());
+                const response = await fetch(`${DATA_BASE}current_positions.json`, { cache: 'no-cache' });
                 if (!response.ok) throw new Error('Failed to fetch');
                 
                 currentPositions = await response.json();

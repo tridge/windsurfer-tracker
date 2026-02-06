@@ -1151,7 +1151,7 @@
         // Load user overrides (name mappings)
         async function loadUserOverrides() {
             try {
-                const response = await fetch(`${DATA_BASE}users.json?` + Date.now());
+                const response = await fetch(`${DATA_BASE}users.json`, { cache: 'no-cache' });
                 if (response.ok) {
                     const data = await response.json();
                     userOverrides = data.users || {};
@@ -1382,8 +1382,8 @@
 
             try {
                 // Try to fetch summary file
-                const summaryUrl = `${DATA_BASE}logs/${logDate}_summary.json?${Date.now()}`;
-                const response = await fetch(summaryUrl);
+                const summaryUrl = `${DATA_BASE}logs/${logDate}_summary.json`;
+                const response = await fetch(summaryUrl, { cache: 'no-cache' });
 
                 if (response.ok) {
                     currentSummary = await response.json();
@@ -1524,7 +1524,7 @@
             if (canDecompress) {
                 try {
                     const gzUrl = url + '.gz';
-                    const response = await fetch(gzUrl);
+                    const response = await fetch(gzUrl, { cache: 'no-cache' });
                     if (response.ok) {
                         const ds = new DecompressionStream('gzip');
                         const decompressed = response.body.pipeThrough(ds);
@@ -1536,7 +1536,7 @@
             }
 
             // Try uncompressed
-            const response = await fetch(url);
+            const response = await fetch(url, { cache: 'no-cache' });
             if (response.ok) {
                 return await response.text();
             }

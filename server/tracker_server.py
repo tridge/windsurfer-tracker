@@ -1352,6 +1352,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', len(content))
             self.send_header('Last-Modified', last_modified)
+            self.send_header('Cache-Control', 'no-cache')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(content)
@@ -1682,8 +1683,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     def _compress_log_files(log_dir: Path, filenames: list[str]):
         """Compress JSONL log files to .gz for efficient serving.
 
-        Sets .gz mtime to match source JSONL mtime so browser
-        If-Modified-Since caching works correctly.
+        The .gz files keep their natural mtime (time of compression) so
+        browser If-Modified-Since caching detects new uploads correctly.
         """
         import gzip
         for fname in filenames:
@@ -1696,9 +1697,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 with gzip.open(tmp_gz, 'wb') as f_out:
                     f_out.write(f_in.read())
             tmp_gz.rename(gz_file)
-            # Match source mtime so If-Modified-Since caching is correct
-            src_mtime = log_file.stat().st_mtime
-            os.utime(str(gz_file), (src_mtime, src_mtime))
 
     def _handle_track_upload(self, eid: int, event: dict):
         """Handle GPX track file upload with tracker password auth."""
