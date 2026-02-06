@@ -1248,6 +1248,68 @@ def parse_gpx_to_entries(gpx_content: str, name: str) -> list[dict]:
     return entries
 
 
+def parse_fit_to_entries(fit_content: bytes, name: str) -> list[dict]:
+    """Parse FIT binary content into JSONL track entries.
+
+    Returns a list of entry dicts sorted by timestamp.
+    Requires the fitparse library.
+    """
+    import fitparse
+
+    entries = []
+    fitfile = fitparse.FitFile(fit_content)
+    sailor_id = f"{name}(FIT)"
+
+    # Semicircles to degrees: degrees = semicircles * (180 / 2^31)
+    SEMI_TO_DEG = 180.0 / (2 ** 31)
+
+    for record in fitfile.get_messages('record'):
+        lat_semi = record.get_value('position_lat')
+        lon_semi = record.get_value('position_long')
+        ts = record.get_value('timestamp')
+
+        if lat_semi is None or lon_semi is None or ts is None:
+            continue
+
+        lat = lat_semi * SEMI_TO_DEG
+        lon = lon_semi * SEMI_TO_DEG
+
+        # FIT timestamps are naive UTC datetimes
+        unix_ts = int(ts.replace(tzinfo=timezone.utc).timestamp())
+
+        # Speed: m/s -> knots
+        speed = 0.0
+        spd_val = record.get_value('enhanced_speed') or record.get_value('speed')
+        if spd_val is not None:
+            speed = spd_val / 0.514444
+
+        entry = {
+            "id": sailor_id,
+            "ts": unix_ts,
+            "recv_ts": unix_ts,
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "spd": round(speed, 1),
+            "hdg": 0,
+            "ast": False,
+            "bat": -1,
+            "sig": -1,
+            "role": "sailor",
+            "ver": "fit-upload",
+            "displayid": name,
+            "src": "fit"
+        }
+
+        hr = record.get_value('heart_rate')
+        if hr is not None and hr > 0:
+            entry["hr"] = int(hr)
+
+        entries.append(entry)
+
+    entries.sort(key=lambda e: e['ts'])
+    return entries
+
+
 class AdminHTTPHandler(BaseHTTPRequestHandler):
     """HTTP handler for admin API endpoints and optional static file serving."""
     
@@ -1677,6 +1739,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         parts = body.split(b'--' + boundary_bytes)
         fields = {}  # name -> value (str)
         file_content = None
+        file_name = ''
 
         for part in parts:
             if part in (b'', b'--\r\n', b'--'):
@@ -1690,20 +1753,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 part_body = part_body[:-2]
 
             headers_str = header_section.decode('utf-8', errors='replace')
-            # Extract field name from Content-Disposition
+            # Extract field name and filename from Content-Disposition
             field_name = None
-            is_file = False
+            part_filename = ''
             for line in headers_str.split('\r\n'):
                 if line.lower().startswith('content-disposition:'):
                     for item in line.split(';'):
                         item = item.strip()
                         if item.startswith('name="') and item.endswith('"'):
                             field_name = item[6:-1]
-                        if item.startswith('filename='):
-                            is_file = True
+                        if item.startswith('filename="') and item.endswith('"'):
+                            part_filename = item[10:-1]
 
-            if field_name == 'file' and is_file:
+            if field_name == 'file' and part_filename:
                 file_content = part_body
+                file_name = part_filename
             elif field_name:
                 fields[field_name] = part_body.decode('utf-8', errors='replace')
 
@@ -1727,17 +1791,23 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid event password"}, 401)
                 return
 
-        # Parse GPX
+        # Parse track file based on extension
+        ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else ''
         try:
-            gpx_str = file_content.decode('utf-8')
-            entries = parse_gpx_to_entries(gpx_str, name)
+            if ext == 'gpx':
+                entries = parse_gpx_to_entries(file_content.decode('utf-8'), name)
+            elif ext == 'fit':
+                entries = parse_fit_to_entries(file_content, name)
+            else:
+                self._send_json({"error": f"Unsupported file type: .{ext} (use .gpx or .fit)"}, 400)
+                return
         except Exception as e:
-            log(f"[EVENT {eid}] GPX parse error: {e}")
-            self._send_json({"error": f"Failed to parse GPX file: {e}"}, 400)
+            log(f"[EVENT {eid}] {ext.upper()} parse error: {e}")
+            self._send_json({"error": f"Failed to parse {ext.upper()} file: {e}"}, 400)
             return
 
         if not entries:
-            self._send_json({"error": "No trackpoints found in GPX file"}, 400)
+            self._send_json({"error": f"No trackpoints found in {ext.upper()} file"}, 400)
             return
 
         # Get event tracker
@@ -1798,7 +1868,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "files": merged_files
             }, 207)  # Multi-Status
         else:
-            log(f"[EVENT {eid}] Uploaded {len(entries)} GPX points for '{name}' to {merged_files}")
+            log(f"[EVENT {eid}] Uploaded {len(entries)} {ext.upper()} points for '{name}' to {merged_files}")
             self._send_json({
                 "success": True,
                 "points": len(entries),

@@ -1220,10 +1220,10 @@
     <!-- Upload track dialog -->
     <div class="upload-overlay" id="uploadOverlay" onclick="if(event.target===this)hideUploadDialog()">
         <div class="upload-dialog">
-            <h3>Upload Track (GPX)</h3>
+            <h3>Upload Track</h3>
             <form onsubmit="event.preventDefault(); doUpload();">
-                <label for="uploadFile">GPX File</label>
-                <input type="file" id="uploadFile" accept=".gpx">
+                <label for="uploadFile">Track File (GPX or FIT)</label>
+                <input type="file" id="uploadFile" accept=".gpx,.fit">
                 <label for="uploadName">Display Name</label>
                 <input type="text" id="uploadName" placeholder="e.g. Alice">
                 <label for="uploadPassword">Event Password</label>
