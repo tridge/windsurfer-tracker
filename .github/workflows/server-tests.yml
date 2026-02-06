@@ -1,0 +1,25 @@
+name: Server Tests
+on:
+  push:
+    branches: [master, main]
+    paths: ['server/**', 'test/**', '.github/workflows/server-tests.yml']
+  pull_request:
+    branches: [master, main]
+    paths: ['server/**', 'test/**']
+  workflow_dispatch:
+
+jobs:
+  test-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install pytest fitparse
+      - run: python3 -m pytest test/ -v --tb=short --junitxml=test-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
