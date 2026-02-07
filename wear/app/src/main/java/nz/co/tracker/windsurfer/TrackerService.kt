@@ -89,7 +89,7 @@ class TrackerService : LifecycleService() {
     private var role: String = "sailor"
     private var password: String = ""
     private var eventId: Int = 2  // Event ID for multi-event support
-    private var highFrequencyMode: Boolean = false
+    private var highFrequencyMode: Boolean = true
     private var heartRateEnabled: Boolean = false
     private var raceTimerEnabled: Boolean = false
     private var raceTimerMinutes: Int = 5
@@ -409,7 +409,7 @@ class TrackerService : LifecycleService() {
             role = it.getStringExtra("role") ?: "sailor"
             password = it.getStringExtra("password") ?: ""
             eventId = it.getIntExtra("event_id", 2)
-            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
+            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", true)
             heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
             trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
             raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)

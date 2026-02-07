@@ -538,7 +538,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             putExtra("server_port", serverPort)
             putExtra("role", prefs.getString("role", "sailor"))
             putExtra("password", prefs.getString("password", ""))
-            putExtra("high_frequency_mode", prefs.getBoolean("high_frequency_mode", false))
+            putExtra("high_frequency_mode", prefs.getBoolean("high_frequency_mode", true))
         }
 
         ContextCompat.startForegroundService(this, intent)
@@ -590,7 +590,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             // Show sailor ID and frequency mode indicator
             val prefs = getPrefs()
             val sailorId = prefs.getString("sailor_id", "S01") ?: "S01"
-            val highFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
+            val highFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
             binding.tvSailorId.text = sailorId
             binding.tvSailorId.visibility = View.VISIBLE
             binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz" else "0.1Hz"
@@ -906,7 +906,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         // 1Hz mode checkbox
         val highFrequencyCheckbox = android.widget.CheckBox(this).apply {
             text = "1Hz Mode"
-            isChecked = prefs.getBoolean("high_frequency_mode", false)
+            isChecked = prefs.getBoolean("high_frequency_mode", true)
             setTextColor(0xFF000000.toInt())
             textSize = 14f
             setPadding(0, 24, 0, 0)
@@ -1005,7 +1005,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val oldServerPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
         val oldEventId = prefs.getInt("event_id", 2)
         val oldPassword = prefs.getString("password", "") ?: ""
-        val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", false)
+        val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
 
         // Wrap layout in ScrollView to make it scrollable
         val scrollView = android.widget.ScrollView(this).apply {

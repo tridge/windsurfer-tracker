@@ -125,7 +125,12 @@ public final class PreferencesManager: ObservableObject {
         let eid = defaults.integer(forKey: Keys.eventId)
         self.eventId = eid > 0 ? eid : 2
 
-        self.highFrequencyMode = defaults.bool(forKey: Keys.highFrequencyMode)
+        // highFrequencyMode defaults to true - need to check if key exists
+        if defaults.object(forKey: Keys.highFrequencyMode) == nil {
+            self.highFrequencyMode = true
+        } else {
+            self.highFrequencyMode = defaults.bool(forKey: Keys.highFrequencyMode)
+        }
         self.heartRateEnabled = defaults.bool(forKey: Keys.heartRateEnabled)  // Default false
         // trackerBeep defaults to true - need to check if key exists
         if defaults.object(forKey: Keys.trackerBeep) == nil {
@@ -173,7 +178,7 @@ public final class PreferencesManager: ObservableObject {
         role = .sailor
         password = ""
         eventId = 2
-        highFrequencyMode = false
+        highFrequencyMode = true
         heartRateEnabled = false
         trackerBeep = true
         waterLock = true

@@ -103,7 +103,7 @@ public final class LocationManager: NSObject, ObservableObject {
 
     /// Start location updates
     /// - Parameter highFrequency: If true, updates come at 1Hz; otherwise throttled to 10 seconds
-    public func startUpdating(highFrequency: Bool = false) {
+    public func startUpdating(highFrequency: Bool = true) {
         guard hasTrackingAuthorization else {
             errorPublisher.send(TrackerError.locationPermissionDenied)
             return

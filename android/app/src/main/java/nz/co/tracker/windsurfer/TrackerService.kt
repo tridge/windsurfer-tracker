@@ -74,7 +74,7 @@ class TrackerService : LifecycleService() {
     private var sailorId: String = ""
     private var role: String = "sailor"  // sailor, support, spectator
     // Note: password is read from SharedPreferences on each send to pick up changes immediately
-    private var highFrequencyMode: Boolean = false  // 1Hz mode - send positions as array
+    private var highFrequencyMode: Boolean = true  // 1Hz mode - send positions as array
 
     // 1Hz mode position buffer: [[ts, lat, lon, spd], ...]
     private data class BufferedPosition(val ts: Long, val lat: Double, val lon: Double, val spd: Double)
@@ -335,7 +335,7 @@ class TrackerService : LifecycleService() {
             sailorId = it.getStringExtra("sailor_id") ?: ""
             role = it.getStringExtra("role") ?: "sailor"
             // Password is read from SharedPreferences on each send (not cached)
-            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", false)
+            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", true)
             // Clear position buffer when mode changes
             positionBuffer.clear()
             firstPacketSent = false  // Reset when buffer cleared
