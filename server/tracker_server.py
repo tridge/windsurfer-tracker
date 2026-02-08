@@ -148,6 +148,8 @@ def sanitize_tracker_packet(packet: dict) -> dict:
         sanitized['bdr'] = sanitize_float(packet.get('bdr'), default=0.0, min_val=0.0, max_val=100.0)
     if 'hac' in packet and packet.get('hac') is not None:
         sanitized['hac'] = sanitize_float(packet.get('hac'), default=0.0, min_val=0.0, max_val=10000.0)
+    if 'nsats' in packet and packet.get('nsats') is not None:
+        sanitized['nsats'] = sanitize_int(packet.get('nsats'), default=0, min_val=0, max_val=200)
 
     # Boolean fields
     sanitized['ast'] = sanitize_bool(packet.get('ast'), default=False)
@@ -819,6 +821,7 @@ class PositionTracker:
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
+                         nsats: int | None = None,
                          skip_log: bool = False, stopped: bool = False,
                          pos_array: list | None = None, user_overrides: dict | None = None,
                          idle: bool = False) -> bool:
@@ -941,6 +944,8 @@ class PositionTracker:
                     pos_data["os"] = os_version
                 if horizontal_accuracy is not None:
                     pos_data["hac"] = horizontal_accuracy
+                if nsats is not None:
+                    pos_data["nsats"] = nsats
                 if stopped:
                     pos_data["stopped"] = True
                 self.current_positions[sailor_id] = pos_data
@@ -991,6 +996,8 @@ class PositionTracker:
                     track_entry["os"] = os_version
                 if horizontal_accuracy is not None:
                     track_entry["hac"] = horizontal_accuracy
+                if nsats is not None:
+                    track_entry["nsats"] = nsats
                 # Add displayid if user has a name mapping
                 if user_overrides and sailor_id in user_overrides:
                     override = user_overrides[sailor_id]
@@ -1037,6 +1044,7 @@ class EventTracker:
                          role: str, version: str, flags: dict, src_ip: str, source: str = "UDP",
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
+                         nsats: int | None = None,
                          skip_log: bool = False, pos_array: list | None = None,
                          stopped: bool = False, idle: bool = False) -> bool:
         """Process a position update for this event."""
@@ -1078,6 +1086,8 @@ class EventTracker:
                 track_entry["os"] = os_version
             if horizontal_accuracy is not None:
                 track_entry["hac"] = horizontal_accuracy
+            if nsats is not None:
+                track_entry["nsats"] = nsats
             # Add displayid if user has a name mapping
             if self.user_overrides and sailor_id in self.user_overrides:
                 override = self.user_overrides[sailor_id]
@@ -1105,6 +1115,7 @@ class EventTracker:
             heart_rate=heart_rate,
             os_version=os_version,
             horizontal_accuracy=horizontal_accuracy,
+            nsats=nsats,
             skip_log=has_batch or skip_log,
             stopped=stopped,
             pos_array=pos_array,
@@ -2585,6 +2596,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             battery_drain_rate = packet.get("bdr")
             os_version = packet.get("os")  # OS version string (optional)
             horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
+            nsats = packet.get("nsats")  # Number of GPS satellites (optional)
             stopped = packet.get("stopped", False)  # User deliberately stopped tracking
             idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
 
@@ -2697,6 +2709,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     heart_rate=heart_rate,
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
+                    nsats=nsats,
                     pos_array=pos_array,
                     stopped=stopped,
                     idle=idle
@@ -2727,6 +2740,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         track_entry["os"] = os_version
                     if horizontal_accuracy is not None:
                         track_entry["hac"] = horizontal_accuracy
+                    if nsats is not None:
+                        track_entry["nsats"] = nsats
                     # Add displayid if user has a name mapping
                     if _user_overrides and sailor_id in _user_overrides:
                         override = _user_overrides[sailor_id]
@@ -2753,6 +2768,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     heart_rate=heart_rate,
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
+                    nsats=nsats,
                     skip_log=has_batch,
                     stopped=stopped,
                     pos_array=pos_array,
@@ -3334,6 +3350,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 battery_drain_rate = packet.get("bdr")  # Battery drain rate %/hr
                 os_version = packet.get("os")  # OS version string (optional)
                 horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
+                nsats = packet.get("nsats")  # Number of GPS satellites (optional)
                 stopped = packet.get("stopped", False)  # User deliberately stopped tracking
                 idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
 
@@ -3440,6 +3457,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         heart_rate=heart_rate,
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
+                        nsats=nsats,
                         pos_array=pos_array,
                         stopped=stopped,
                         idle=idle
@@ -3501,6 +3519,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             track_entry["os"] = os_version
                         if horizontal_accuracy is not None:
                             track_entry["hac"] = horizontal_accuracy
+                        if nsats is not None:
+                            track_entry["nsats"] = nsats
                         # Add displayid if user has a name mapping
                         if user_overrides and sailor_id in user_overrides:
                             override = user_overrides[sailor_id]
@@ -3529,6 +3549,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         heart_rate=heart_rate,
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
+                        nsats=nsats,
                         skip_log=has_batch,
                         stopped=stopped,
                         pos_array=pos_array,

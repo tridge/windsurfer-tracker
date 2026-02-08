@@ -66,6 +66,8 @@ class TrackerService : LifecycleService() {
     private lateinit var locationListener: LocationListener
     private var lastLocation: Location? = null
     private var previousLocation: Location? = null  // For calculating speed/bearing
+    private var lastSatelliteCount: Int = 0  // From GnssStatus callback
+    private var gnssStatusCallback: android.location.GnssStatus.Callback? = null
     
     // UDP
     private var socket: DatagramSocket? = null
@@ -600,6 +602,25 @@ class TrackerService : LifecycleService() {
                 Looper.getMainLooper()
             )
             Log.i(TAG, "Started GPS location updates with interval ${intervalMs}ms")
+
+            // Register GNSS status callback to track satellite count
+            gnssStatusCallback = object : android.location.GnssStatus.Callback() {
+                override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+                    var usedInFix = 0
+                    for (i in 0 until status.satelliteCount) {
+                        if (status.usedInFix(i)) usedInFix++
+                    }
+                    lastSatelliteCount = usedInFix
+                    Log.d(TAG, "GNSS status: ${status.satelliteCount} visible, $usedInFix used in fix")
+                }
+            }
+            try {
+                locationManager.registerGnssStatusCallback(mainExecutor, gnssStatusCallback!!)
+                Log.i(TAG, "Registered GNSS status callback for satellite count")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to register GNSS status callback", e)
+            }
+
             updateNotification("Tracking active")
 
             // Start tracker beep timer (first beep after 60 seconds)
@@ -712,6 +733,11 @@ class TrackerService : LifecycleService() {
         } catch (e: Exception) {
             Log.w(TAG, "Error removing location updates: ${e.message}")
         }
+        gnssStatusCallback?.let {
+            locationManager.unregisterGnssStatusCallback(it)
+            gnssStatusCallback = null
+        }
+        lastSatelliteCount = 0
 
         socket?.close()
         socket = null
@@ -828,6 +854,11 @@ class TrackerService : LifecycleService() {
         } catch (e: Exception) {
             Log.w(TAG, "Error removing location updates for idle mode: ${e.message}")
         }
+        gnssStatusCallback?.let {
+            locationManager.unregisterGnssStatusCallback(it)
+            gnssStatusCallback = null
+        }
+        lastSatelliteCount = 0
 
         // Stop beep timer and notification timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -1051,6 +1082,7 @@ class TrackerService : LifecycleService() {
             if (location.hasAccuracy()) {
                 put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
             }
+            if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
             put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
@@ -1213,6 +1245,7 @@ class TrackerService : LifecycleService() {
             if (location.hasAccuracy()) {
                 put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
             }
+            if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
             put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())

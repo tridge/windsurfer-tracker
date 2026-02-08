@@ -3690,7 +3690,7 @@
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
                                 ${sailor.idle ? '<span style="background:#2563eb;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">IDLE</span>' : ''}
                                 <div class="sailor-details">
-                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : '')}
+                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr}${sailor.nsats !== undefined ? ' · <span style="color:#16a34a" title="GPS satellites">&#128752;' + sailor.nsats + '</span>' : ''} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : '')}
                                 </div>
                             </div>
                         </div>
@@ -3833,6 +3833,7 @@
                 const osStr = sailor.os || '';
                 const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
                 const heartRateLine = (sailor.hr && sailor.hr > 0) ? `<br>Heart Rate: <span style="color:#e91e63">${sailor.hr} bpm</span>` : '';
+                const nsatsLine = (sailor.nsats !== undefined) ? `<br>&#128752; Satellites: <span style="color:#16a34a">${sailor.nsats}</span>` : '';
 
                 // Calculate sampling rate from track data
                 const trackPoints = sailorTrackData[id] || [];
@@ -3863,7 +3864,7 @@
                     ${sailor.hdg !== undefined ? `Heading: ${sailor.hdg}°<br>` : ''}
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
-                    Signal: ${sigStr}${heartRateLine}<br>
+                    Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
                     Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : '')}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">

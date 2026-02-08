@@ -63,6 +63,7 @@
                 <label><input type="checkbox" id="show-latency-graph"> Latency</label>
                 <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
                 <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
+                <label><input type="checkbox" id="show-satellites-graph"> Satellites</label>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -235,6 +236,28 @@
             <div class="graph-x-axis">
                 <span id="accuracy-time-start">--:--</span>
                 <span id="accuracy-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Satellites graph panel -->
+    <div id="satellites-graph-panel" class="graph-panel" data-type="satellites">
+        <div id="satellites-graph-resize" class="graph-resize"></div>
+        <div id="satellites-graph-container" class="graph-container">
+            <div class="graph-title">GPS Satellites</div>
+            <div class="graph-y-axis" id="satellites-y-labels">
+                <span>30</span>
+                <span>22</span>
+                <span>15</span>
+                <span>7</span>
+                <span>0</span>
+            </div>
+            <canvas id="satellites-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
+            <div class="graph-x-axis">
+                <span id="satellites-time-start">--:--</span>
+                <span id="satellites-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -619,6 +642,7 @@
             if (document.getElementById('show-latency-graph').checked) graphs.push('latency');
             if (document.getElementById('show-heartrate-graph').checked) graphs.push('heartrate');
             if (document.getElementById('show-accuracy-graph').checked) graphs.push('accuracy');
+            if (document.getElementById('show-satellites-graph').checked) graphs.push('satellites');
             if (graphs.length > 0) params.set('graphs', graphs.join(','));
 
             // Build URL
@@ -656,6 +680,7 @@
                 if (graphs.includes('latency')) document.getElementById('show-latency-graph').checked = true;
                 if (graphs.includes('heartrate')) document.getElementById('show-heartrate-graph').checked = true;
                 if (graphs.includes('accuracy')) document.getElementById('show-accuracy-graph').checked = true;
+                if (graphs.includes('satellites')) document.getElementById('show-satellites-graph').checked = true;
                 updateGraphPositions();
             }
 
@@ -909,6 +934,7 @@
                     sig: entry.sig,
                     hr: entry.hr,
                     hac: entry.hac,
+                    nsats: entry.nsats,
                     role: entry.role,
                     ver: entry.ver,
                     flg: entry.flg,
@@ -2277,6 +2303,9 @@
                         Battery: ${closest.bat || '?'}%`;
                     if (closest.hac !== undefined) {
                         content += `<br>Accuracy: ${closest.hac.toFixed(1)}m`;
+                        if (closest.nsats !== undefined && closest.nsats > 0) {
+                            content += ` · &#128752;${closest.nsats}`;
+                        }
                     }
                     if (closest.hr !== undefined && closest.hr > 0) {
                         content += `<br>Heart Rate: <span style="color:#e91e63">${closest.hr} bpm</span>`;
@@ -2339,6 +2368,9 @@
                     let markerHacText = '';
                     if (last.hac !== undefined) {
                         markerHacText = `<br>Accuracy: ${last.hac.toFixed(1)}m`;
+                        if (last.nsats !== undefined && last.nsats > 0) {
+                            markerHacText += ` · &#128752;${last.nsats}`;
+                        }
                     }
 
                     const role = getUserRole(userId);
@@ -3191,6 +3223,133 @@
             }
         }
 
+        function drawSatellitesGraph() {
+            // Only draw if satellites graph is visible
+            if (!document.getElementById('show-satellites-graph').checked) return;
+
+            const canvas = document.getElementById('satellites-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            document.getElementById('satellites-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('satellites-time-end').textContent = formatTimeShortInTz(rangeEndTime);
+
+            // Calculate satellite range for Y axis scaling (only from visible time range)
+            let maxSats = 0;
+            let hasSatData = false;
+            for (const [userId, entries] of Object.entries(userData)) {
+                if (!selectedUsers.has(userId)) continue;
+                for (const entry of entries) {
+                    if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                    if (entry.nsats !== undefined && entry.nsats > 0) {
+                        maxSats = Math.max(maxSats, entry.nsats);
+                        hasSatData = true;
+                    }
+                }
+            }
+
+            // Set sensible defaults and add padding
+            if (!hasSatData || maxSats === 0) {
+                maxSats = 30;
+            } else {
+                maxSats = Math.ceil((maxSats * 1.1) / 5) * 5;
+                maxSats = Math.max(maxSats, 10);
+            }
+
+            // Update Y axis labels
+            const yLabels = document.getElementById('satellites-y-labels');
+            yLabels.innerHTML = `
+                <span>${maxSats}</span>
+                <span>${Math.round(maxSats * 0.75)}</span>
+                <span>${Math.round(maxSats * 0.5)}</span>
+                <span>${Math.round(maxSats * 0.25)}</span>
+                <span>0</span>
+            `;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see satellites graph', width / 2, height / 2);
+                return;
+            }
+
+            if (!hasSatData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No satellite data available', width / 2, height / 2);
+                return;
+            }
+
+            // Draw satellites line for each selected user
+            let colorIdx = 0;
+            for (const [userId, entries] of Object.entries(userData)) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range and having satellite data
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime && e.nsats !== undefined && e.nsats > 0);
+                if (filtered.length < 2) continue;
+
+                // Draw the satellites line
+                ctx.strokeStyle = '#16a34a'; // Green color for satellites
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                for (const entry of filtered) {
+                    const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (entry.nsats / maxSats) * height;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw user label at the end of the line
+                if (filtered.length > 0) {
+                    const last = filtered[filtered.length - 1];
+                    const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
+                    const y = height - (last.nsats / maxSats) * height;
+                    ctx.fillStyle = '#16a34a';
+                    ctx.font = 'bold 10px sans-serif';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`${getDisplayName(userId)}: ${last.nsats} sats`, Math.min(x, width - 5), y - 5);
+                }
+            }
+        }
+
         function drawDistanceGraph() {
             // Only draw if distance graph is visible
             if (!document.getElementById('show-distance-graph').checked) return;
@@ -3399,6 +3558,9 @@
             if (document.getElementById('show-accuracy-graph').checked) {
                 drawAccuracyGraph();
             }
+            if (document.getElementById('show-satellites-graph').checked) {
+                drawSatellitesGraph();
+            }
             if (document.getElementById('show-distance-graph').checked) {
                 drawDistanceGraph();
             }
@@ -3483,6 +3645,9 @@
                 if (closest.hac !== undefined) {
                     const hacColor = closest.hac > 50 ? '#e74c3c' : closest.hac > 20 ? '#f39c12' : '#2ecc71';
                     tooltipHtml += `<br>Accuracy: <span style="color:${hacColor}">${closest.hac.toFixed(1)}m</span>`;
+                    if (closest.nsats !== undefined && closest.nsats > 0) {
+                        tooltipHtml += ` · <span style="color:#16a34a">&#128752;${closest.nsats}</span>`;
+                    }
                 }
 
                 // Add signal strength if available
@@ -3697,6 +3862,30 @@
                 }
                 drawHighlightOnGraph('accuracy-graph', highlightX, ratio, timestamp, 'hac', maxAcc, 0);
             }
+
+            // Draw satellites graph with highlight if visible
+            if (document.getElementById('show-satellites-graph').checked) {
+                drawSatellitesGraph();
+                let maxSats = 0;
+                let hasSatData = false;
+                for (const [userId, entries] of Object.entries(userData)) {
+                    if (!selectedUsers.has(userId)) continue;
+                    for (const entry of entries) {
+                        if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
+                        if (entry.nsats !== undefined && entry.nsats > 0) {
+                            maxSats = Math.max(maxSats, entry.nsats);
+                            hasSatData = true;
+                        }
+                    }
+                }
+                if (!hasSatData || maxSats === 0) {
+                    maxSats = 30;
+                } else {
+                    maxSats = Math.ceil((maxSats * 1.1) / 5) * 5;
+                    maxSats = Math.max(maxSats, 10);
+                }
+                drawHighlightOnGraph('satellites-graph', highlightX, ratio, timestamp, 'nsats', maxSats, 0);
+            }
         }
 
         function drawLatencyHighlightOnGraph(canvasId, highlightX, ratio, timestamp, maxLatency) {
@@ -3873,6 +4062,16 @@
             clearGraphHighlight();
         });
 
+        document.getElementById('satellites-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'satellites-graph');
+        });
+
+        document.getElementById('satellites-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
         document.getElementById('distance-graph').addEventListener('mousemove', (e) => {
             const rect = e.target.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -3916,7 +4115,7 @@
 
         // Set up rubber-band selection on all graph canvases
         ['speed-graph', 'battery-graph', 'signal-graph', 'latency-graph',
-         'heartrate-graph', 'accuracy-graph', 'distance-graph'].forEach(id => {
+         'heartrate-graph', 'accuracy-graph', 'satellites-graph', 'distance-graph'].forEach(id => {
             const canvas = document.getElementById(id);
             if (canvas) {
                 setupGraphRubberBand(canvas);
@@ -3939,6 +4138,7 @@
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
         let heartrateGraphHeight = parseInt(localStorage.getItem('heartrateGraphHeight')) || 150;
         let accuracyGraphHeight = parseInt(localStorage.getItem('accuracyGraphHeight')) || 150;
+        let satellitesGraphHeight = parseInt(localStorage.getItem('satellitesGraphHeight')) || 150;
         let distanceGraphHeight = parseInt(localStorage.getItem('distanceGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
@@ -3946,6 +4146,7 @@
         const latencyPanel = document.getElementById('latency-graph-panel');
         const heartratePanel = document.getElementById('heartrate-graph-panel');
         const accuracyPanel = document.getElementById('accuracy-graph-panel');
+        const satellitesPanel = document.getElementById('satellites-graph-panel');
         const distancePanel = document.getElementById('distance-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
@@ -3953,6 +4154,7 @@
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
         const heartrateResizeHandle = document.getElementById('heartrate-graph-resize');
         const accuracyResizeHandle = document.getElementById('accuracy-graph-resize');
+        const satellitesResizeHandle = document.getElementById('satellites-graph-resize');
         const distanceResizeHandle = document.getElementById('distance-graph-resize');
         let isResizing = false;
         let resizingPanel = null;
@@ -3966,6 +4168,7 @@
         latencyPanel.style.height = latencyGraphHeight + 'px';
         heartratePanel.style.height = heartrateGraphHeight + 'px';
         accuracyPanel.style.height = accuracyGraphHeight + 'px';
+        satellitesPanel.style.height = satellitesGraphHeight + 'px';
         distancePanel.style.height = distanceGraphHeight + 'px';
 
         function updateGraphPositions() {
@@ -3976,6 +4179,7 @@
             const latencyVisible = document.getElementById('show-latency-graph').checked;
             const heartrateVisible = document.getElementById('show-heartrate-graph').checked;
             const accuracyVisible = document.getElementById('show-accuracy-graph').checked;
+            const satellitesVisible = document.getElementById('show-satellites-graph').checked;
             const distanceVisible = document.getElementById('show-distance-graph').checked;
 
             // Get actual timeline height (different on mobile vs desktop)
@@ -3991,6 +4195,15 @@
                 totalHeight += distanceGraphHeight;
             } else {
                 distancePanel.style.display = 'none';
+            }
+
+            if (satellitesVisible) {
+                satellitesPanel.style.display = 'block';
+                satellitesPanel.style.bottom = currentBottom + 'px';
+                currentBottom += satellitesGraphHeight;
+                totalHeight += satellitesGraphHeight;
+            } else {
+                satellitesPanel.style.display = 'none';
             }
 
             if (accuracyVisible) {
@@ -4120,6 +4333,17 @@
             e.preventDefault();
         });
 
+        satellitesResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'satellites';
+            startY = e.clientY;
+            startHeight = satellitesPanel.offsetHeight;
+            satellitesResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
         distanceResizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
             resizingPanel = 'distance';
@@ -4155,6 +4379,9 @@
             } else if (resizingPanel === 'accuracy') {
                 accuracyPanel.style.height = newHeight + 'px';
                 accuracyGraphHeight = newHeight;
+            } else if (resizingPanel === 'satellites') {
+                satellitesPanel.style.height = newHeight + 'px';
+                satellitesGraphHeight = newHeight;
             } else if (resizingPanel === 'distance') {
                 distancePanel.style.height = newHeight + 'px';
                 distanceGraphHeight = newHeight;
@@ -4169,6 +4396,7 @@
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawSatellitesGraph();
             drawDistanceGraph();
         });
 
@@ -4181,6 +4409,7 @@
                 latencyResizeHandle.classList.remove('dragging');
                 heartrateResizeHandle.classList.remove('dragging');
                 accuracyResizeHandle.classList.remove('dragging');
+                satellitesResizeHandle.classList.remove('dragging');
                 distanceResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
@@ -4190,6 +4419,7 @@
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
                 localStorage.setItem('heartrateGraphHeight', heartrateGraphHeight);
                 localStorage.setItem('accuracyGraphHeight', accuracyGraphHeight);
+                localStorage.setItem('satellitesGraphHeight', satellitesGraphHeight);
                 localStorage.setItem('distanceGraphHeight', distanceGraphHeight);
                 resizingPanel = null;
             }
@@ -4599,6 +4829,13 @@
             updateGraphPositions();
             if (e.target.checked) {
                 drawAccuracyGraph();
+            }
+        });
+
+        document.getElementById('show-satellites-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawSatellitesGraph();
             }
         });
 
