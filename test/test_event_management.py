@@ -133,6 +133,37 @@ def test_tracker_password_string_migrated_to_list(http_client):
     assert event["tracker_password"] == ["single"]
 
 
+def test_idle_interval_default_zero(http_client):
+    """New event should have idle_interval: 0."""
+    eid = create_event(http_client, name="Idle Default")
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event.get("idle_interval", 0) == 0
+
+
+def test_update_idle_interval(http_client):
+    """PATCH idle_interval should update the event."""
+    eid = create_event(http_client, name="Idle Update")
+    status, body = http_client.patch(
+        f"/api/manage/event/{eid}",
+        data={"idle_interval": 30},
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+
+    # Verify
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event["idle_interval"] == 30
+
+
 def test_event_data_directory_created(http_client, server):
     """Creating an event should create its data directory with logs subdir."""
     eid = create_event(http_client, name="Dir Test")

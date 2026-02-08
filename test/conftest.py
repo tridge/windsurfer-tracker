@@ -303,6 +303,27 @@ def make_packet(eid=1, **overrides):
     return packet
 
 
+def make_idle_packet(eid=1, **overrides):
+    """Generate a valid idle heartbeat packet with auto-incrementing sq and ts."""
+    global _seq_counter, _ts_counter
+    _seq_counter += 1
+    _ts_counter += 1
+
+    packet = {
+        "id": "S01",
+        "sq": _seq_counter,
+        "ts": _ts_counter,
+        "idle": True,
+        "bat": 85,
+        "sig": 3,
+        "role": "sailor",
+        "ver": "test",
+        "eid": eid,
+    }
+    packet.update(overrides)
+    return packet
+
+
 def create_event(http_client, name="Test Event", admin_password="admin123",
                  tracker_password="", **kwargs):
     """Create an event via HTTP API. Returns the event ID."""

@@ -551,7 +551,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun stopTrackerService() {
+        // If service is in idle mode, just exit idle and clean up
+        if (trackerService?.isIdle() == true) {
+            trackerService?.exitIdleMode()
+            finishStopTrackerService()
+            return
+        }
         // Send stop notification to server, then clean up
+        // Note: if idle mode is supported, requestGracefulStop will enter idle instead
+        // of calling the callback, so the UI stays in tracking mode
         trackerService?.requestGracefulStop {
             finishStopTrackerService()
         } ?: finishStopTrackerService()
@@ -1222,6 +1230,24 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         runOnUiThread {
             Toast.makeText(this, "Assist request cancelled by admin", Toast.LENGTH_LONG).show()
             updateAssistButton(false)
+        }
+    }
+
+    override fun onRemoteStart() {
+        runOnUiThread {
+            Toast.makeText(this, "Tracking started by admin", Toast.LENGTH_LONG).show()
+            // Service already called startTracking() directly — just update UI
+            getPrefs().edit().putBoolean("tracking_active", true).apply()
+            binding.btnStartStop.text = "Stop Tracking"
+            binding.statusGroup.visibility = View.VISIBLE
+            binding.configGroup.visibility = View.GONE
+        }
+    }
+
+    override fun onRemoteShutdown() {
+        runOnUiThread {
+            Toast.makeText(this, "Idle mode stopped by admin", Toast.LENGTH_LONG).show()
+            finishStopTrackerService()
         }
     }
 }

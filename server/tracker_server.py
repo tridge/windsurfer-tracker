@@ -157,6 +157,8 @@ def sanitize_tracker_packet(packet: dict) -> dict:
         sanitized['ps'] = sanitize_bool(packet.get('ps'), default=False)
     if 'stopped' in packet:
         sanitized['stopped'] = sanitize_bool(packet.get('stopped'), default=False)
+    if 'idle' in packet:
+        sanitized['idle'] = sanitize_bool(packet.get('idle'), default=False)
 
     # Pass through pos array (1Hz mode) with sanitized values
     # Format: [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
@@ -531,6 +533,7 @@ class EventManager:
                 "home_lon": home_lon,
                 "archived": False,
                 "assist_enabled": True,  # Whether assist button is available to users
+                "idle_interval": 0,  # Idle heartbeat interval in seconds (0=disabled)
                 "created": time.time(),
                 "created_iso": datetime.now().isoformat()
             }
@@ -548,6 +551,7 @@ class EventManager:
             event = self.events[eid]
             # Only allow updating certain fields
             allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
+                              'idle_interval',
                               'admin_password', 'tracker_password', 'timezone',
                               'home_location', 'home_lat', 'home_lon']
             for field in allowed_fields:
@@ -816,14 +820,53 @@ class PositionTracker:
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
                          skip_log: bool = False, stopped: bool = False,
-                         pos_array: list | None = None, user_overrides: dict | None = None) -> bool:
+                         pos_array: list | None = None, user_overrides: dict | None = None,
+                         idle: bool = False) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
         If stopped=True, the user deliberately stopped tracking (vs losing signal).
         If pos_array is provided (1Hz mode), all positions are added to the tail.
+        If idle=True, this is a heartbeat from an idle app (no GPS data).
         """
         recv_time = time.time()
+
+        # Idle packets: update metadata but preserve existing position
+        if idle:
+            with self._lock:
+                self.last_timestamp[sailor_id] = ts
+                existing = self.current_positions.get(sailor_id, {})
+                pos_data = {
+                    "id": sailor_id,
+                    "bat": battery,
+                    "sig": signal,
+                    "role": role,
+                    "ver": version,
+                    "flg": flags,
+                    "ts": ts,
+                    "last_seen": recv_time,
+                    "last_seen_iso": datetime.fromtimestamp(recv_time).isoformat(),
+                    "src_ip": src_ip,
+                    "stopped": True,
+                    "idle": True,
+                }
+                if os_version:
+                    pos_data["os"] = os_version
+                # Preserve existing lat/lon if user previously tracked
+                if "lat" in existing and "lon" in existing:
+                    pos_data["lat"] = existing["lat"]
+                    pos_data["lon"] = existing["lon"]
+                self.current_positions[sailor_id] = pos_data
+
+            bat_str = f"{battery}%" if battery >= 0 else "?"
+            sig_str = f"{signal}/4" if signal >= 0 else "?"
+            log(f"[{sailor_id}] Idle heartbeat bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
+
+            # Write current positions file (no log entry, no tail update)
+            if self.positions_file:
+                write_current_positions(self.current_positions, self.positions_file, _user_overrides, self.position_tails)
+
+            return True
 
         with self._lock:
             # Check for duplicate using timestamp
@@ -995,9 +1038,20 @@ class EventTracker:
                          battery_drain_rate: float | None = None, heart_rate: int | None = None,
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
                          skip_log: bool = False, pos_array: list | None = None,
-                         stopped: bool = False) -> bool:
+                         stopped: bool = False, idle: bool = False) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
+
+        # Idle packets skip batch logging entirely
+        if idle:
+            return self.position_tracker.process_position(
+                sailor_id=sailor_id, lat=lat, lon=lon, speed=speed,
+                heading=heading, ts=ts, assist=assist, battery=battery,
+                signal=signal, role=role, version=version, flags=flags,
+                src_ip=src_ip, source=f"[E{self.eid}]{source}",
+                os_version=os_version, idle=True,
+                user_overrides=self.user_overrides
+            )
 
         # If 1Hz array format, log as single entry with pos array (more compact)
         has_batch = pos_array and isinstance(pos_array, list) and len(pos_array) > 1
@@ -1113,15 +1167,21 @@ _course_file: Path | None = None
 _users_file: Path | None = None
 _user_overrides: dict[str, dict] = {}  # id -> {"name": "...", "role": "..."}
 
-# Pending stop commands: {event_id}:{user_id} -> timestamp when stop was requested
-# Commands expire after 30 seconds and are removed after being sent once
-_pending_stops: dict[str, float] = {}
-_STOP_EXPIRY_SECONDS = 30.0
+# Pending commands: {event_id}:{user_id} -> (cmd, queued_time, expiry_seconds)
+# Only one pending command per client. New commands overwrite previous.
+# Commands: "stop", "cancel_assist", "start", "shutdown"
+_pending_commands: dict[str, tuple[str, float, float]] = {}
+_CMD_EXPIRY = {
+    "stop": 30.0,
+    "cancel_assist": 30.0,
+    "start": 90.0,
+    "shutdown": 90.0,
+}
 
-# Pending cancel assist commands: {event_id}:{user_id} -> timestamp when cancel was requested
-# Commands expire after 30 seconds and are removed after being sent once
-_pending_cancel_assists: dict[str, float] = {}
-_CANCEL_ASSIST_EXPIRY_SECONDS = 30.0
+
+def queue_pending_command(key: str, cmd: str):
+    """Queue a pending command for a client. Overwrites any existing command."""
+    _pending_commands[key] = (cmd, time.time(), _CMD_EXPIRY[cmd])
 
 # Rate limiting for password guessing protection
 # Maps IP address -> timestamp of last failed auth attempt
@@ -2034,13 +2094,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Event {eid} not found"}, 404)
                 return
 
-            global _pending_stops
-            now = time.time()
             stopped_ids = []
             for user_id, pos in tracker.position_tracker.current_positions.items():
                 if not pos.get("stopped", False):
-                    stop_key = f"{eid}:{user_id}"
-                    _pending_stops[stop_key] = now
+                    queue_pending_command(f"{eid}:{user_id}", "stop")
                     stopped_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
@@ -2054,9 +2111,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "User ID required"}, 400)
                 return
 
-            # Store pending stop with timestamp
-            stop_key = f"{eid}:{user_id}"
-            _pending_stops[stop_key] = time.time()
+            queue_pending_command(f"{eid}:{user_id}", "stop")
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2068,11 +2123,64 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "User ID required"}, 400)
                 return
 
-            # Store pending cancel assist with timestamp
-            global _pending_cancel_assists
-            cancel_key = f"{eid}:{user_id}"
-            _pending_cancel_assists[cancel_key] = time.time()
+            queue_pending_command(f"{eid}:{user_id}", "cancel_assist")
             log(f"[EVENT {eid}] Remote cancel assist queued for {user_id}")
+            self._send_json({"success": True, "user_id": user_id, "event_id": eid})
+
+        elif subpath == '/admin/start-all':
+            # Send remote start command to all idle trackers
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+
+            started_ids = []
+            for user_id, pos in tracker.position_tracker.current_positions.items():
+                if pos.get("idle", False):
+                    queue_pending_command(f"{eid}:{user_id}", "start")
+                    started_ids.append(user_id)
+
+            log(f"[EVENT {eid}] Remote start-all queued for {len(started_ids)} idle trackers: {started_ids}")
+            self._send_json({"success": True, "started_count": len(started_ids), "user_ids": started_ids})
+
+        elif subpath == '/admin/shutdown-all':
+            # Send remote shutdown command to all idle trackers
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+
+            shutdown_ids = []
+            for user_id, pos in tracker.position_tracker.current_positions.items():
+                if pos.get("idle", False):
+                    queue_pending_command(f"{eid}:{user_id}", "shutdown")
+                    shutdown_ids.append(user_id)
+
+            log(f"[EVENT {eid}] Remote shutdown-all queued for {len(shutdown_ids)} idle trackers: {shutdown_ids}")
+            self._send_json({"success": True, "shutdown_count": len(shutdown_ids), "user_ids": shutdown_ids})
+
+        elif subpath.startswith('/admin/start/'):
+            # Send remote start command to a single idle user
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/start/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            queue_pending_command(f"{eid}:{user_id}", "start")
+            log(f"[EVENT {eid}] Remote start queued for {user_id}")
+            self._send_json({"success": True, "user_id": user_id, "event_id": eid})
+
+        elif subpath.startswith('/admin/shutdown/'):
+            # Send remote shutdown command to a single user
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/shutdown/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+
+            queue_pending_command(f"{eid}:{user_id}", "shutdown")
+            log(f"[EVENT {eid}] Remote shutdown queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
         elif subpath.startswith('/log/') and '/sublog' in subpath:
@@ -2410,8 +2518,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             query_params = parse_qs(parsed.query)
             event_id = int(query_params.get('event_id', [1])[0])
 
-            global _pending_stops
-            now = time.time()
             stopped_ids = []
 
             # Try event-based tracker first, fall back to legacy
@@ -2420,8 +2526,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             for user_id, pos in positions.items():
                 if not pos.get("stopped", False):
-                    stop_key = f"{event_id}:{user_id}"
-                    _pending_stops[stop_key] = now
+                    queue_pending_command(f"{event_id}:{user_id}", "stop")
                     stopped_ids.append(user_id)
 
             log(f"[ADMIN] Remote stop-all queued for {len(stopped_ids)} trackers (event {event_id}): {stopped_ids}")
@@ -2439,9 +2544,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             query_params = parse_qs(parsed.query)
             event_id = int(query_params.get('event_id', [1])[0])
 
-            # Store pending stop with timestamp
-            stop_key = f"{event_id}:{user_id}"
-            _pending_stops[stop_key] = time.time()
+            queue_pending_command(f"{event_id}:{user_id}", "stop")
             log(f"[ADMIN] Remote stop queued for {user_id} (event {event_id})")
             self._send_json({"success": True, "user_id": user_id, "event_id": event_id})
 
@@ -2483,6 +2586,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             os_version = packet.get("os")  # OS version string (optional)
             horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
             stopped = packet.get("stopped", False)  # User deliberately stopped tracking
+            idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
 
             # Extract event ID (default to 1 for backwards compatibility)
             eid = packet.get("eid", 1)
@@ -2594,7 +2698,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     os_version=os_version,
                     horizontal_accuracy=horizontal_accuracy,
                     pos_array=pos_array,
-                    stopped=stopped
+                    stopped=stopped,
+                    idle=idle
                 )
             else:
                 # Legacy single-event mode
@@ -2651,7 +2756,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     skip_log=has_batch,
                     stopped=stopped,
                     pos_array=pos_array,
-                    user_overrides=_user_overrides
+                    user_overrides=_user_overrides,
+                    idle=idle
                 )
 
             # Send ACK response (same format as UDP)
@@ -2661,25 +2767,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not assist_enabled:
                 ack_response["assist"] = False
 
-            # Check for pending stop command
-            stop_key = f"{eid}:{sailor_id}"
-            if stop_key in _pending_stops:
-                stop_time = _pending_stops[stop_key]
-                if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
-                    ack_response["cmd"] = "stop"
-                    log(f"[POST] Sending stop command to {sailor_id} (event {eid})")
-                # Remove after sending (or if expired)
-                del _pending_stops[stop_key]
+            # Include idle_interval if set for this event
+            if _event_manager:
+                event_data = _event_manager.get_event(eid)
+                idle_interval = event_data.get('idle_interval', 0) if event_data else 0
+                if idle_interval:
+                    ack_response["idle"] = idle_interval
 
-            # Check for pending cancel assist command (only if no stop command)
-            cancel_key = f"{eid}:{sailor_id}"
-            if "cmd" not in ack_response and cancel_key in _pending_cancel_assists:
-                cancel_time = _pending_cancel_assists[cancel_key]
-                if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
-                    ack_response["cmd"] = "cancel_assist"
-                    log(f"[POST] Sending cancel assist command to {sailor_id} (event {eid})")
-                # Remove after sending (or if expired)
-                del _pending_cancel_assists[cancel_key]
+            # Check for pending command
+            cmd_key = f"{eid}:{sailor_id}"
+            if cmd_key in _pending_commands:
+                cmd, queued_time, expiry = _pending_commands[cmd_key]
+                if recv_time - queued_time < expiry:
+                    ack_response["cmd"] = cmd
+                    log(f"[POST] Sending {cmd} command to {sailor_id} (event {eid})")
+                del _pending_commands[cmd_key]
 
             self._send_json(ack_response)
 
@@ -3233,6 +3335,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 os_version = packet.get("os")  # OS version string (optional)
                 horizontal_accuracy = packet.get("hac")  # Horizontal accuracy in meters (optional)
                 stopped = packet.get("stopped", False)  # User deliberately stopped tracking
+                idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
 
                 # Extract event ID (default to 1 for backwards compatibility)
                 eid = packet.get("eid", 1)
@@ -3296,25 +3399,19 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     if not assist_enabled:
                         ack_data["assist"] = False
 
-                    # Check for pending stop command
-                    stop_key = f"{eid}:{sailor_id}"
-                    if stop_key in _pending_stops:
-                        stop_time = _pending_stops[stop_key]
-                        if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
-                            ack_data["cmd"] = "stop"
-                            log(f"[UDP] Sending stop command to {sailor_id} (event {eid})")
-                        # Remove after sending (or if expired)
-                        del _pending_stops[stop_key]
+                    # Include idle_interval if set for this event
+                    idle_interval = event.get('idle_interval', 0)
+                    if idle_interval:
+                        ack_data["idle"] = idle_interval
 
-                    # Check for pending cancel assist command (only if no stop command)
-                    cancel_key = f"{eid}:{sailor_id}"
-                    if "cmd" not in ack_data and cancel_key in _pending_cancel_assists:
-                        cancel_time = _pending_cancel_assists[cancel_key]
-                        if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
-                            ack_data["cmd"] = "cancel_assist"
-                            log(f"[UDP] Sending cancel assist command to {sailor_id} (event {eid})")
-                        # Remove after sending (or if expired)
-                        del _pending_cancel_assists[cancel_key]
+                    # Check for pending command
+                    cmd_key = f"{eid}:{sailor_id}"
+                    if cmd_key in _pending_commands:
+                        cmd, queued_time, expiry = _pending_commands[cmd_key]
+                        if recv_time - queued_time < expiry:
+                            ack_data["cmd"] = cmd
+                            log(f"[UDP] Sending {cmd} command to {sailor_id} (event {eid})")
+                        del _pending_commands[cmd_key]
 
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
@@ -3344,7 +3441,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         os_version=os_version,
                         horizontal_accuracy=horizontal_accuracy,
                         pos_array=pos_array,
-                        stopped=stopped
+                        stopped=stopped,
+                        idle=idle
                     )
 
                 else:
@@ -3365,24 +3463,15 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             sock.sendto(error_ack, addr)
                             continue
 
-                    # Send ACK (check for pending stop command)
+                    # Send ACK (check for pending command)
                     ack_data = {"ack": seq, "ts": int(recv_time)}
-                    stop_key = f"1:{sailor_id}"  # Legacy mode uses event_id=1
-                    if stop_key in _pending_stops:
-                        stop_time = _pending_stops[stop_key]
-                        if recv_time - stop_time < _STOP_EXPIRY_SECONDS:
-                            ack_data["cmd"] = "stop"
-                            log(f"[UDP] Sending stop command to {sailor_id} (legacy mode)")
-                        del _pending_stops[stop_key]
-
-                    # Check for pending cancel assist command (only if no stop command)
-                    cancel_key = f"1:{sailor_id}"  # Legacy mode uses event_id=1
-                    if "cmd" not in ack_data and cancel_key in _pending_cancel_assists:
-                        cancel_time = _pending_cancel_assists[cancel_key]
-                        if recv_time - cancel_time < _CANCEL_ASSIST_EXPIRY_SECONDS:
-                            ack_data["cmd"] = "cancel_assist"
-                            log(f"[UDP] Sending cancel assist command to {sailor_id} (legacy mode)")
-                        del _pending_cancel_assists[cancel_key]
+                    cmd_key = f"1:{sailor_id}"  # Legacy mode uses event_id=1
+                    if cmd_key in _pending_commands:
+                        cmd, queued_time, expiry = _pending_commands[cmd_key]
+                        if recv_time - queued_time < expiry:
+                            ack_data["cmd"] = cmd
+                            log(f"[UDP] Sending {cmd} command to {sailor_id} (legacy mode)")
+                        del _pending_commands[cmd_key]
 
                     ack = json.dumps(ack_data).encode("utf-8")
                     sock.sendto(ack, addr)
@@ -3443,7 +3532,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         skip_log=has_batch,
                         stopped=stopped,
                         pos_array=pos_array,
-                        user_overrides=user_overrides
+                        user_overrides=user_overrides,
+                        idle=idle
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)

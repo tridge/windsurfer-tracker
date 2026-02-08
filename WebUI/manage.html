@@ -469,6 +469,11 @@
                     </label>
                     <small>When disabled, the assist/emergency button is hidden in tracker apps</small>
                 </div>
+                <div class="form-group">
+                    <label for="idleInterval">Idle Interval (seconds)</label>
+                    <input type="number" id="idleInterval" value="0" min="0" max="300" step="1" style="width:120px;">
+                    <small>When a tracker stops, it stays connected sending heartbeats at this interval. 0 = disabled, typical = 30. Admins can then remotely start or shut down idle trackers.</small>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
@@ -648,6 +653,7 @@
                             <span>TZ: ${escapeHtml(event.timezone || 'Australia/Sydney')}</span>
                             <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
                             <span style="${event.assist_enabled === false ? 'color:#c00;font-weight:bold' : ''}">Assist: ${event.assist_enabled === false ? 'Disabled' : 'Enabled'}</span>
+                            <span style="${event.idle_interval ? 'color:#2563eb;font-weight:bold' : ''}">Idle: ${event.idle_interval ? event.idle_interval + 's' : 'Off'}</span>
                         </div>
                         <div class="event-actions">
                             <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
@@ -672,6 +678,7 @@
             document.getElementById('eventTimezone').value = 'Australia/Sydney';  // Reset to default
             setLocationFromTimezone('Australia/Sydney');  // Set default location
             document.getElementById('assistEnabled').checked = true;  // Default to enabled
+            document.getElementById('idleInterval').value = 0;
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
         }
@@ -696,12 +703,13 @@
                 document.getElementById('eventName').value = event.name || '';
                 document.getElementById('eventDescription').value = event.description || '';
                 document.getElementById('adminPassword').value = event.admin_password || '';
-                document.getElementById('trackerPassword').value = event.tracker_password || '';
+                document.getElementById('trackerPassword').value = Array.isArray(event.tracker_password) ? event.tracker_password.join(', ') : (event.tracker_password || '');
                 document.getElementById('eventTimezone').value = event.timezone || 'Australia/Sydney';
                 document.getElementById('homeLocation').value = event.home_location || '';
                 document.getElementById('homeLat').value = event.home_lat || '';
                 document.getElementById('homeLon').value = event.home_lon || '';
                 document.getElementById('assistEnabled').checked = event.assist_enabled !== false;  // Default true
+                document.getElementById('idleInterval').value = event.idle_interval || 0;
                 // If no location set, default from timezone
                 if (!event.home_location && !event.home_lat) {
                     setLocationFromTimezone(event.timezone || 'Australia/Sydney');
@@ -744,12 +752,13 @@
                 name: document.getElementById('eventName').value,
                 description: document.getElementById('eventDescription').value,
                 admin_password: adminPassword,
-                tracker_password: document.getElementById('trackerPassword').value,
+                tracker_password: trackerPassword.split(',').map(p => p.trim()).filter(p => p),
                 timezone: document.getElementById('eventTimezone').value,
                 home_location: document.getElementById('homeLocation').value,
                 home_lat: homeLat ? parseFloat(homeLat) : null,
                 home_lon: homeLon ? parseFloat(homeLon) : null,
-                assist_enabled: document.getElementById('assistEnabled').checked
+                assist_enabled: document.getElementById('assistEnabled').checked,
+                idle_interval: parseInt(document.getElementById('idleInterval').value) || 0
             };
 
             try {

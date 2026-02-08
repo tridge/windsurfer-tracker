@@ -1139,6 +1139,12 @@
                 <button class="admin-action-btn danger" onclick="stopAllUsers()">
                     ⏹ Stop All Trackers
                 </button>
+                <button class="admin-action-btn primary" onclick="startAllIdleUsers()">
+                    ▶ Start All Idle
+                </button>
+                <button class="admin-action-btn danger" onclick="shutdownAllIdleUsers()">
+                    ⏻ Shutdown All Idle
+                </button>
             </div>
         </div>
         
@@ -2525,6 +2531,108 @@
             }
         }
 
+        // Send remote start command to all idle trackers
+        async function startAllIdleUsers() {
+            if (!confirm('Start ALL idle trackers? This will send a remote start command to every idle tracker on this event.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/start-all`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Start command sent to ${result.started_count} idle tracker(s).`);
+                } else {
+                    alert(`Failed to send start-all command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending start-all command:', error);
+                alert(`Error sending start-all command: ${error.message}`);
+            }
+        }
+
+        // Send remote shutdown command to all idle trackers
+        async function shutdownAllIdleUsers() {
+            if (!confirm('Shutdown ALL idle trackers? This will close the tracker app on all idle devices.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/shutdown-all`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Shutdown command sent to ${result.shutdown_count} idle tracker(s).`);
+                } else {
+                    alert(`Failed to send shutdown-all command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending shutdown-all command:', error);
+                alert(`Error sending shutdown-all command: ${error.message}`);
+            }
+        }
+
+        // Send remote start command to a single idle user
+        async function startUser(userId) {
+            if (!confirm(`Send start command to ${userId}? Their tracker will restart within 90 seconds.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/start/${encodeURIComponent(userId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    map.closePopup();
+                    alert(`Start command sent to ${userId}.`);
+                } else {
+                    alert(`Failed to send start command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending start command:', error);
+                alert(`Error sending start command: ${error.message}`);
+            }
+        }
+
+        // Send remote shutdown command to a single user
+        async function shutdownUser(userId) {
+            if (!confirm(`Shutdown idle tracker for ${userId}? Their app will close.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${EVENT_API}/admin/shutdown/${encodeURIComponent(userId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    map.closePopup();
+                    alert(`Shutdown command sent to ${userId}.`);
+                } else {
+                    alert(`Failed to send shutdown command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending shutdown command:', error);
+                alert(`Error sending shutdown command: ${error.message}`);
+            }
+        }
+
         // Send remote cancel assist command to a user
         async function cancelAssistUser(userId) {
             if (!confirm(`Cancel assistance request for ${userId}? Their assist flag will be cleared within 30 seconds.`)) {
@@ -3580,8 +3688,9 @@
                             <div class="sailor-info">
                                 <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
+                                ${sailor.idle ? '<span style="background:#2563eb;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">IDLE</span>' : ''}
                                 <div class="sailor-details">
-                                    ${sailor.spd.toFixed(1)} kn · <span style="${batColor}">${batStr}</span> · ${sigStr} · ${timeAgo(sailor.last_seen)}${sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : ''}
+                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : '')}
                                 </div>
                             </div>
                         </div>
@@ -3643,14 +3752,23 @@
 
             // Update or create markers
             for (const [id, sailor] of Object.entries(visibleSailors)) {
+                // Skip idle users with no valid position (never tracked)
+                if (sailor.idle && (sailor.lat === undefined || sailor.lon === undefined)) {
+                    if (sailorMarkers[id]) {
+                        map.removeLayer(sailorMarkers[id]);
+                        delete sailorMarkers[id];
+                    }
+                    continue;
+                }
+
                 const age = now - sailor.last_seen;
                 const isRecent = age < 120;
                 const role = sailor.role || 'sailor';
                 const displayName = sailor.displayid || sailor.id;
                 const label = showLabels ? displayName : null;
-                const icon = createRoleIcon(role, sailor.hdg, isRecent, sailor.ast, label);
+                const icon = createRoleIcon(role, sailor.hdg || 0, isRecent, sailor.ast, label);
                 const pos = [sailor.lat, sailor.lon];
-                
+
                 if (sailorMarkers[id]) {
                     sailorMarkers[id].setLatLng(pos);
                     sailorMarkers[id].setIcon(icon);
@@ -3708,6 +3826,8 @@
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
                 const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
+                const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="startUser('${id}')">Start</button>` : '';
+                const shutdownBtn = (adminMode && sailor.idle) ? `<button class="popup-stop-btn" onclick="shutdownUser('${id}')">Shutdown</button>` : '';
 
                 const versionStr = sailor.ver || 'Unknown';
                 const osStr = sailor.os || '';
@@ -3738,13 +3858,13 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
-                    Speed: ${sailor.spd.toFixed(1)} kn<br>
-                    Heading: ${sailor.hdg}°<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${startBtn}${shutdownBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
+                    ${sailor.spd !== undefined ? `Speed: ${sailor.spd.toFixed(1)} kn<br>` : ''}
+                    ${sailor.hdg !== undefined ? `Heading: ${sailor.hdg}°<br>` : ''}
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                     Signal: ${sigStr}${heartRateLine}<br>
-                    Updated: ${timeAgo(sailor.last_seen)}${sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : ''}<br>
+                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : '')}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">
                         <label>
@@ -3758,7 +3878,7 @@
             // Auto-fit bounds if we have sailors (only before user interaction)
             // Don't include device position - ISP-based geolocation is often inaccurate
             if (Object.keys(sailors).length > 0 && !map._userPanned) {
-                const bounds = Object.values(sailors).map(s => [s.lat, s.lon]);
+                const bounds = Object.values(sailors).filter(s => s.lat !== undefined && s.lon !== undefined).map(s => [s.lat, s.lon]);
                 if (bounds.length > 0) {
                     map._fitting = true;
                     map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
