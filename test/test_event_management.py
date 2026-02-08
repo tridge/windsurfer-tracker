@@ -109,6 +109,30 @@ def test_archive_event(http_client):
     assert eid not in eids_after
 
 
+def test_tracker_password_stored_as_list(http_client):
+    """Tracker password should be stored and returned as a list."""
+    eid = create_event(http_client, name="List Pwd Test", tracker_password=["a", "b"])
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event["tracker_password"] == ["a", "b"]
+
+
+def test_tracker_password_string_migrated_to_list(http_client):
+    """A single string tracker password should be returned as a one-element list."""
+    eid = create_event(http_client, name="String Pwd Test", tracker_password="single")
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event["tracker_password"] == ["single"]
+
+
 def test_event_data_directory_created(http_client, server):
     """Creating an event should create its data directory with logs subdir."""
     eid = create_event(http_client, name="Dir Test")

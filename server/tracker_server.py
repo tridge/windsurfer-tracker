@@ -439,6 +439,10 @@ class EventManager:
             for eid_str, event in events_data.items():
                 try:
                     eid = int(eid_str)
+                    # Normalize tracker_password to list
+                    tp = event.get('tracker_password', '')
+                    if isinstance(tp, str):
+                        event['tracker_password'] = [tp] if tp else []
                     self.events[eid] = event
                 except ValueError:
                     log(f"[EVENTS] Skipping invalid event ID: {eid_str}")
@@ -505,11 +509,14 @@ class EventManager:
             return result
 
     def create_event(self, name: str, description: str,
-                     admin_password: str, tracker_password: str = "",
+                     admin_password: str, tracker_password="",
                      timezone: str = "Australia/Sydney",
                      home_location: str = "", home_lat: float = None,
                      home_lon: float = None) -> int:
         """Create new event, return event ID."""
+        # Normalize tracker_password to list
+        if isinstance(tracker_password, str):
+            tracker_password = [tracker_password] if tracker_password else []
         with self._lock:
             eid = self.next_eid
             self.next_eid += 1
@@ -546,6 +553,11 @@ class EventManager:
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
+            # Normalize tracker_password to list
+            if 'tracker_password' in updates:
+                tp = event['tracker_password']
+                if isinstance(tp, str):
+                    event['tracker_password'] = [tp] if tp else []
             event['updated'] = time.time()
             event['updated_iso'] = datetime.now().isoformat()
             self._save_events()
@@ -1781,9 +1793,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
 
         # Authenticate with tracker password
-        event_tracker_pwd = event.get('tracker_password', '') if event else ''
-        if event_tracker_pwd:
-            if password != event_tracker_pwd:
+        event_tracker_pwds = event.get('tracker_password', []) if event else []
+        if event_tracker_pwds:
+            if password not in event_tracker_pwds:
                 record_failed_auth(client_ip)
                 log(f"[EVENT {eid}] Upload auth failed from {client_ip}")
                 self._send_json({"error": "Invalid event password"}, 401)
@@ -2488,14 +2500,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     return
 
                 # Check per-event tracker password
-                event_tracker_pwd = event.get('tracker_password', '')
-                if event_tracker_pwd:
+                event_tracker_pwds = event.get('tracker_password', [])
+                if event_tracker_pwds:
                     if is_rate_limited(client_ip):
                         log(f"[AUTH] Rate limited for {sailor_id} from {client_ip} os={os_version} ver={version}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Too many attempts"}, 429)
                         return
                     packet_pwd = packet.get("pwd", "")
-                    if packet_pwd != event_tracker_pwd:
+                    if packet_pwd not in event_tracker_pwds:
                         record_failed_auth(client_ip)
                         log(f"[AUTH] Failed for event {eid} user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
@@ -3254,15 +3266,15 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         continue
 
                     # Check per-event tracker password
-                    event_tracker_pwd = event.get('tracker_password', '')
-                    if event_tracker_pwd:
+                    event_tracker_pwds = event.get('tracker_password', [])
+                    if event_tracker_pwds:
                         if is_rate_limited(client_ip):
                             log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)
                             continue
                         packet_pwd = packet.get("pwd", "")
-                        if packet_pwd != event_tracker_pwd:
+                        if packet_pwd not in event_tracker_pwds:
                             record_failed_auth(client_ip)
                             log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")

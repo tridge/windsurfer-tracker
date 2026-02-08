@@ -110,3 +110,18 @@ def test_upload_unsupported_extension(http_client):
         files={"file": ("track.csv", b"lat,lon\n1,2\n")},
     )
     assert status == 400
+
+
+def test_upload_gpx_dual_password(http_client, server, sample_data_dir):
+    """Upload with second of two tracker passwords should succeed."""
+    eid = create_event(http_client, name="GPX Dual Pwd", tracker_password=["gpxA", "gpxB"])
+
+    gpx_content = (sample_data_dir / "20260131.gpx").read_bytes()
+    status, body = http_client.post_multipart(
+        f"/api/event/{eid}/upload-track",
+        fields={"name": "DualSailor", "password": "gpxB"},
+        files={"file": ("track.gpx", gpx_content)},
+    )
+    assert status == 200, f"Upload failed: {body}"
+    assert body["success"] is True
+    assert body["points"] > 0

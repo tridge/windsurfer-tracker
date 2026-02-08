@@ -92,3 +92,47 @@ def test_cross_event_admin_passwords(http_client):
         headers={"X-Admin-Password": "passA", "X-Forwarded-For": "10.66.1.1"},
     )
     assert status == 401
+
+
+def test_udp_dual_tracker_passwords(udp_client, http_client):
+    """Both tracker passwords should work via UDP."""
+    # Wait for rate limit from prior wrong-password UDP tests (127.0.0.1 can't use X-Forwarded-For)
+    time.sleep(5)
+    eid = create_event(http_client, name="Dual UDP", tracker_password=["pwd1", "pwd2"])
+
+    # First password should work
+    pkt1 = make_packet(eid=eid, id="DUAL01", pwd="pwd1")
+    ack1 = udp_client.send_position(pkt1)
+    assert ack1["ack"] == pkt1["sq"]
+    assert "error" not in ack1
+
+    # Second password should also work
+    pkt2 = make_packet(eid=eid, id="DUAL02", pwd="pwd2")
+    ack2 = udp_client.send_position(pkt2)
+    assert ack2["ack"] == pkt2["sq"]
+    assert "error" not in ack2
+
+
+def test_http_dual_tracker_passwords(http_client):
+    """Both tracker passwords should work via HTTP POST."""
+    eid = create_event(http_client, name="Dual HTTP", tracker_password=["httppwd1", "httppwd2"])
+
+    # First password
+    pkt1 = make_packet(eid=eid, id="DUALH1", pwd="httppwd1")
+    status1, body1 = http_client.post("/api/tracker", data=pkt1)
+    assert status1 == 200
+    assert "error" not in body1
+
+    # Second password
+    pkt2 = make_packet(eid=eid, id="DUALH2", pwd="httppwd2")
+    status2, body2 = http_client.post("/api/tracker", data=pkt2)
+    assert status2 == 200
+    assert "error" not in body2
+
+
+def test_dual_password_wrong_rejected(udp_client, http_client):
+    """Wrong password should still be rejected when dual passwords are set."""
+    eid = create_event(http_client, name="Dual Reject", tracker_password=["right1", "right2"])
+    pkt = make_packet(eid=eid, id="DUALR1", pwd="wrongpwd")
+    ack = udp_client.send_position(pkt)
+    assert ack.get("error") == "auth"
