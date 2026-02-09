@@ -339,17 +339,27 @@ class TrackerService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         
-        // Extract configuration from intent
-        intent?.let {
-            serverHost = it.getStringExtra("server_host") ?: DEFAULT_SERVER_HOST
-            serverPort = it.getIntExtra("server_port", DEFAULT_SERVER_PORT)
-            sailorId = it.getStringExtra("sailor_id") ?: ""
-            role = it.getStringExtra("role") ?: "sailor"
+        // Extract configuration from intent, or fall back to SharedPreferences
+        // when START_STICKY restarts the service with a null intent
+        if (intent != null) {
+            serverHost = intent.getStringExtra("server_host") ?: DEFAULT_SERVER_HOST
+            serverPort = intent.getIntExtra("server_port", DEFAULT_SERVER_PORT)
+            sailorId = intent.getStringExtra("sailor_id") ?: ""
+            role = intent.getStringExtra("role") ?: "sailor"
             // Password is read from SharedPreferences on each send (not cached)
-            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", true)
+            highFrequencyMode = intent.getBooleanExtra("high_frequency_mode", true)
             // Clear position buffer when mode changes
             positionBuffer.clear()
             firstPacketSent = false  // Reset when buffer cleared
+        } else {
+            // Service restarted by system (START_STICKY) - recover config from prefs
+            val prefs = getPrefs()
+            serverHost = prefs.getString("server_host", DEFAULT_SERVER_HOST) ?: DEFAULT_SERVER_HOST
+            serverPort = prefs.getInt("server_port", DEFAULT_SERVER_PORT)
+            sailorId = prefs.getString("sailor_id", "") ?: ""
+            role = prefs.getString("role", "sailor") ?: "sailor"
+            highFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
+            Log.w(TAG, "Service restarted with null intent, recovered config from prefs: id=$sailorId")
         }
         
         startForegroundService()
