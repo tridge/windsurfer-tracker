@@ -181,7 +181,8 @@ class TrackerService : LifecycleService() {
     // Idle mode wake lock - keeps CPU alive for periodic heartbeats in battery saver
     private var idleWakeLock: PowerManager.WakeLock? = null
     private var idleJob: Job? = null
-    private var gpsWaitJob: Job? = null
+    private var keepaliveJob: Job? = null
+    private val lastPositionSendTime = AtomicLong(0)  // Track last real position send
 
     // Receiver to restart location updates when user unlocks the device
     // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
@@ -516,8 +517,6 @@ class TrackerService : LifecycleService() {
 
         // Mark GPS as ready and update status line
         if (!hasGpsFix.getAndSet(true)) {
-            gpsWaitJob?.cancel()
-            gpsWaitJob = null
             updateStatusLine()  // Show "connecting ..."
         }
 
@@ -627,16 +626,9 @@ class TrackerService : LifecycleService() {
                     lastSatelliteCount = usedInFix
                     Log.d(TAG, "GNSS status: ${status.satelliteCount} visible, $usedInFix used in fix")
 
-                    // If GPS fix is lost, restart GPS-wait heartbeat so server knows we're alive
-                    if (usedInFix == 0 && hasGpsFix.getAndSet(false)) {
-                        Log.w(TAG, "GPS fix lost - restarting GPS-wait heartbeat")
-                        gpsWaitJob?.cancel()
-                        gpsWaitJob = serviceScope.launch {
-                            while (isRunning.get() && !hasGpsFix.get()) {
-                                sendGpsWaitPacket()
-                                delay(LOCATION_INTERVAL_MS)
-                            }
-                        }
+                    // Track GPS fix state for status line
+                    if (usedInFix == 0) {
+                        hasGpsFix.set(false)
                     }
                 }
             }
@@ -654,10 +646,16 @@ class TrackerService : LifecycleService() {
 
             updateNotification("Tracking active")
 
-            // Start GPS-wait heartbeat (sends packets with nsats=0 until GPS fix)
-            gpsWaitJob = serviceScope.launch {
-                while (isRunning.get() && !hasGpsFix.get()) {
-                    sendGpsWaitPacket()
+            // Start keepalive loop - ensures a packet is sent every 10s while tracking.
+            // If a position packet was sent recently, this is a no-op.
+            // Otherwise sends a GPS-wait heartbeat so the server knows we're alive.
+            lastPositionSendTime.set(0)
+            keepaliveJob = serviceScope.launch {
+                while (isRunning.get()) {
+                    val elapsed = System.currentTimeMillis() - lastPositionSendTime.get()
+                    if (elapsed >= LOCATION_INTERVAL_MS) {
+                        sendGpsWaitPacket()
+                    }
                     delay(LOCATION_INTERVAL_MS)
                 }
             }
@@ -748,9 +746,9 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Stopping tracking")
 
-        // Stop GPS-wait heartbeat
-        gpsWaitJob?.cancel()
-        gpsWaitJob = null
+        // Stop keepalive heartbeat
+        keepaliveJob?.cancel()
+        keepaliveJob = null
 
         // Stop tracker beep timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -893,9 +891,9 @@ class TrackerService : LifecycleService() {
         isIdleMode.set(true)
         isRunning.set(false)  // Allow startTracking() to work when admin sends start command
 
-        // Stop GPS-wait heartbeat
-        gpsWaitJob?.cancel()
-        gpsWaitJob = null
+        // Stop keepalive heartbeat
+        keepaliveJob?.cancel()
+        keepaliveJob = null
 
         // Stop GPS updates
         try {
@@ -1101,6 +1099,7 @@ class TrackerService : LifecycleService() {
     }
 
     private fun sendPosition(location: Location) {
+        lastPositionSendTime.set(System.currentTimeMillis())
         val seq = sequenceNumber.incrementAndGet()
 
         // Get battery level and charging state
@@ -1254,6 +1253,7 @@ class TrackerService : LifecycleService() {
         if (positionBuffer.isEmpty()) return
 
         val location = lastBufferedLocation ?: return
+        lastPositionSendTime.set(System.currentTimeMillis())
 
         val seq = sequenceNumber.incrementAndGet()
 
