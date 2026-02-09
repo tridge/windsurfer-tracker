@@ -39,8 +39,8 @@ public actor TrackerService {
     private var idleIntervalSeconds: Int = 0  // From server ACK, 0 = disabled
     private var idleTask: Task<Void, Never>?
 
-    // GPS-wait heartbeat (sends packets while waiting for GPS fix)
-    private var gpsWaitTask: Task<Void, Never>?
+    // Keepalive task (sends GPS-wait packets when no position was sent recently)
+    private var keepaliveTask: Task<Void, Never>?
 
     // Status line state
     private var hasGpsFix = false
@@ -156,10 +156,16 @@ public actor TrackerService {
         // Start location updates
         locationManager.startUpdating(highFrequency: preferences.highFrequencyMode)
 
-        // Start GPS-wait heartbeat (sends packets with nsats=0 until GPS fix)
-        gpsWaitTask = Task { [weak self] in
+        // Start keepalive loop (sends GPS-wait packet whenever no position was sent recently)
+        lastSendTime = nil
+        keepaliveTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.sendGpsWaitPacket()
+                if let self = self {
+                    let elapsed = await self.timeSinceLastSend()
+                    if elapsed >= TrackerConfig.locationIntervalSeconds {
+                        await self.sendGpsWaitPacket()
+                    }
+                }
                 try? await Task.sleep(nanoseconds: UInt64(TrackerConfig.locationIntervalSeconds) * 1_000_000_000)
             }
         }
@@ -201,8 +207,8 @@ public actor TrackerService {
         isInIdleMode = false
         idleTask?.cancel()
         idleTask = nil
-        gpsWaitTask?.cancel()
-        gpsWaitTask = nil
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
         assistRequested = false
 
         // Stop location updates
@@ -273,8 +279,8 @@ public actor TrackerService {
         isRunning = false
         isInIdleMode = true
         assistRequested = false
-        gpsWaitTask?.cancel()
-        gpsWaitTask = nil
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
 
         // Stop precise GPS to save battery, but start significant location monitoring
         // to keep the app alive in the background for idle heartbeats
@@ -336,6 +342,12 @@ public actor TrackerService {
         if let response = response {
             await handleACK(response)
         }
+    }
+
+    /// Seconds since last position send (returns large value if never sent)
+    private func timeSinceLastSend() -> Double {
+        guard let lastSend = lastSendTime else { return .greatestFiniteMagnitude }
+        return Date().timeIntervalSince(lastSend)
     }
 
     /// Send a GPS-wait heartbeat packet (tracking active but no GPS fix yet)
@@ -469,8 +481,6 @@ public actor TrackerService {
         // Mark GPS as ready and update status line
         if !hasGpsFix {
             hasGpsFix = true
-            gpsWaitTask?.cancel()
-            gpsWaitTask = nil
             updateStatusLine()  // Show "connecting ..."
         }
 
