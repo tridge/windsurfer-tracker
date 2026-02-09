@@ -1189,10 +1189,41 @@ _CMD_EXPIRY = {
     "shutdown": 90.0,
 }
 
+# Last known UDP address for proactive command sending: "{eid}:{sailor_id}" -> (ip, port)
+_client_addrs: dict[str, tuple[str, int]] = {}
+
+# UDP socket reference so HTTP handler threads can send proactive commands
+_udp_sock: socket.socket | None = None
+
 
 def queue_pending_command(key: str, cmd: str):
     """Queue a pending command for a client. Overwrites any existing command."""
     _pending_commands[key] = (cmd, time.time(), _CMD_EXPIRY[cmd])
+
+
+def send_proactive_command(key: str, cmd: str):
+    """Best-effort proactive send of a command to a client's last known UDP address.
+
+    Sends {"ack": 0, "ts": <now>, "cmd": "<cmd>", "proactive": true} to the client.
+    Uses ack: 0 as a sentinel (no real ACK uses seq 0).
+    Does NOT consume the pending command - it stays in _pending_commands for the normal ACK path.
+    """
+    if _udp_sock is None:
+        return
+    addr = _client_addrs.get(key)
+    if addr is None:
+        return
+    try:
+        proactive_pkt = json.dumps({
+            "ack": 0,
+            "ts": int(time.time()),
+            "cmd": cmd,
+            "proactive": True
+        }).encode("utf-8")
+        _udp_sock.sendto(proactive_pkt, addr)
+        log(f"[UDP] Proactive {cmd} sent to {key} at {addr}")
+    except Exception as e:
+        log(f"[UDP] Proactive send failed for {key}: {e}")
 
 # Rate limiting for password guessing protection
 # Maps IP address -> timestamp of last failed auth attempt
@@ -2109,6 +2140,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for user_id, pos in tracker.position_tracker.current_positions.items():
                 if not pos.get("stopped", False):
                     queue_pending_command(f"{eid}:{user_id}", "stop")
+                    send_proactive_command(f"{eid}:{user_id}", "stop")
                     stopped_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
@@ -2123,6 +2155,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             queue_pending_command(f"{eid}:{user_id}", "stop")
+            send_proactive_command(f"{eid}:{user_id}", "stop")
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2135,6 +2168,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             queue_pending_command(f"{eid}:{user_id}", "cancel_assist")
+            send_proactive_command(f"{eid}:{user_id}", "cancel_assist")
             log(f"[EVENT {eid}] Remote cancel assist queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2149,6 +2183,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for user_id, pos in tracker.position_tracker.current_positions.items():
                 if pos.get("idle", False):
                     queue_pending_command(f"{eid}:{user_id}", "start")
+                    send_proactive_command(f"{eid}:{user_id}", "start")
                     started_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote start-all queued for {len(started_ids)} idle trackers: {started_ids}")
@@ -2165,6 +2200,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for user_id, pos in tracker.position_tracker.current_positions.items():
                 if pos.get("idle", False):
                     queue_pending_command(f"{eid}:{user_id}", "shutdown")
+                    send_proactive_command(f"{eid}:{user_id}", "shutdown")
                     shutdown_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote shutdown-all queued for {len(shutdown_ids)} idle trackers: {shutdown_ids}")
@@ -2179,6 +2215,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             queue_pending_command(f"{eid}:{user_id}", "start")
+            send_proactive_command(f"{eid}:{user_id}", "start")
             log(f"[EVENT {eid}] Remote start queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2191,6 +2228,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             queue_pending_command(f"{eid}:{user_id}", "shutdown")
+            send_proactive_command(f"{eid}:{user_id}", "shutdown")
             log(f"[EVENT {eid}] Remote shutdown queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2538,6 +2576,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for user_id, pos in positions.items():
                 if not pos.get("stopped", False):
                     queue_pending_command(f"{event_id}:{user_id}", "stop")
+                    send_proactive_command(f"{event_id}:{user_id}", "stop")
                     stopped_ids.append(user_id)
 
             log(f"[ADMIN] Remote stop-all queued for {len(stopped_ids)} trackers (event {event_id}): {stopped_ids}")
@@ -2556,6 +2595,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             event_id = int(query_params.get('event_id', [1])[0])
 
             queue_pending_command(f"{event_id}:{user_id}", "stop")
+            send_proactive_command(f"{event_id}:{user_id}", "stop")
             log(f"[ADMIN] Remote stop queued for {user_id} (event {event_id})")
             self._send_json({"success": True, "user_id": user_id, "event_id": event_id})
 
@@ -3177,11 +3217,12 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     """
     global _daily_logger, _position_tracker, _admin_password, _tracker_password
     global _course_file, _static_dir, _positions_file, _users_file, _user_overrides
-    global _event_manager
+    global _event_manager, _udp_sock
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", port))
+    _udp_sock = sock
 
     log(f"Tracker server listening on UDP port {port}")
     log("Waiting for packets...")
@@ -3401,6 +3442,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             sock.sendto(error_ack, addr)
                             continue
 
+                    # Record client address for proactive command sending
+                    _client_addrs[f"{eid}:{sailor_id}"] = addr
+
                     # Get or create the event tracker
                     event_tracker = get_event_tracker(eid)
                     if not event_tracker:
@@ -3480,6 +3524,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)
                             continue
+
+                    # Record client address for proactive command sending
+                    _client_addrs[f"1:{sailor_id}"] = addr
 
                     # Send ACK (check for pending command)
                     ack_data = {"ack": seq, "ts": int(recv_time)}

@@ -159,6 +159,9 @@ public struct AckResponse: Codable {
     /// Idle interval in seconds (0 or nil = idle mode disabled)
     public let idle: Int?
 
+    /// Whether this is an unsolicited proactive command (not a response to a send)
+    public let proactive: Bool?
+
     public var isSuccess: Bool {
         return error == nil
     }

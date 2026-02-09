@@ -53,11 +53,31 @@ class UDPClient:
         self.sock.settimeout(2.0)
 
     def send_position(self, packet_dict):
-        """Send a JSON position packet and return the ACK dict."""
+        """Send a JSON position packet and return the ACK dict.
+
+        Skips any proactive command packets in the socket buffer,
+        keeping only the real ACK response.
+        """
         data = json.dumps(packet_dict).encode("utf-8")
         self.sock.sendto(data, (self.host, self.port))
-        resp_data, _ = self.sock.recvfrom(4096)
-        return json.loads(resp_data.decode("utf-8"))
+        while True:
+            resp_data, _ = self.sock.recvfrom(4096)
+            resp = json.loads(resp_data.decode("utf-8"))
+            if resp.get("proactive"):
+                continue  # Skip proactive command packets
+            return resp
+
+    def receive_proactive(self, timeout=2.0):
+        """Try to receive a proactive command packet. Returns dict or None on timeout."""
+        old_timeout = self.sock.gettimeout()
+        self.sock.settimeout(timeout)
+        try:
+            resp_data, _ = self.sock.recvfrom(4096)
+            return json.loads(resp_data.decode("utf-8"))
+        except socket.timeout:
+            return None
+        finally:
+            self.sock.settimeout(old_timeout)
 
     def send_raw(self, raw_bytes):
         """Send raw bytes and try to receive a response. Returns bytes or None on timeout."""

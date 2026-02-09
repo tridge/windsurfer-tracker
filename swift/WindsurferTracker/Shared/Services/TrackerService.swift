@@ -82,8 +82,15 @@ public actor TrackerService {
             }
             .store(in: &cancellables)
 
-        // Note: ACKs are handled directly from send() return value, not via subscription.
-        // The ackPublisher is for external observers only.
+        // Subscribe to proactive commands (unsolicited UDP packets from server).
+        // Normal ACKs are handled from send() return value; this catches only proactive pushes.
+        networkManager.ackPublisher
+            .filter { $0.proactive == true }
+            .sink { [weak self] response in
+                guard let self = self else { return }
+                Task { await self.handleACK(response) }
+            }
+            .store(in: &cancellables)
 
         // Subscribe to location errors
         locationManager.errorPublisher
