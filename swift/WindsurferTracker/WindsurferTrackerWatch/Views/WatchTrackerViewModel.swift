@@ -11,6 +11,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     // MARK: - Tracking State
 
     @Published public var isTracking = false
+    @Published public var isIdleMode = false
     @Published public var assistRequested = false
     @Published public var lastPosition: TrackerPosition?
     @Published public var connectionStatus = ConnectionStatus()
@@ -172,6 +173,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 self?.isTracking = state.isTracking
+                self?.isIdleMode = state.isIdleMode
             }
             .store(in: &cancellables)
 
@@ -236,6 +238,27 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .sink { [weak self] _ in
                 self?.assistRequested = false
                 self?.errorMessage = "Assist cancelled"
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to remote start commands (resume from idle)
+        TrackerService.shared.remoteStartPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.startBeepTimer()
+                self.startTapDetection()
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to remote shutdown commands (exit idle mode)
+        TrackerService.shared.remoteShutdownPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.stopBeepTimer()
+                self.stopTapDetection()
+                self.errorMessage = "Idle stopped by admin"
             }
             .store(in: &cancellables)
 
@@ -520,6 +543,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             // Stop heart rate monitoring
             HeartRateMonitor.shared.stopMonitoring()
 
+            // stop() will enter idle mode if server configured it
             await TrackerService.shared.stop()
             assistRequested = false
             errorMessage = nil  // Clear any error

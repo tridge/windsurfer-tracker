@@ -12,6 +12,7 @@ public class TrackerViewModel: ObservableObject {
     // MARK: - Tracking State
 
     @Published public var isTracking = false
+    @Published public var isIdleMode = false
     @Published public var assistRequested = false
     @Published public var lastPosition: TrackerPosition?
     @Published public var connectionStatus = ConnectionStatus()
@@ -146,6 +147,7 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 self?.isTracking = state.isTracking
+                self?.isIdleMode = state.isIdleMode
             }
             .store(in: &cancellables)
 
@@ -237,6 +239,30 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Subscribe to remote start commands (resume from idle)
+        TrackerService.shared.remoteStartPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.startBeepTimer()
+                self.startLiveActivity()
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to remote shutdown commands (exit idle mode)
+        TrackerService.shared.remoteShutdownPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.stopBeepTimer()
+                self.endLiveActivity()
+                if !self.showStopConfirmation && !self.showSettings {
+                    self.errorMessage = "Idle mode stopped by admin"
+                    self.showError = true
+                }
+            }
+            .store(in: &cancellables)
+
         // Subscribe to errors
         TrackerService.shared.errorPublisher
             .receive(on: DispatchQueue.main)
@@ -320,6 +346,7 @@ public class TrackerViewModel: ObservableObject {
                 addEnergySampleToWorkout(durationSeconds: duration)
             }
             await endWorkoutSession()
+            // stop() will enter idle mode if server configured it
             await TrackerService.shared.stop()
             assistRequested = false
         }

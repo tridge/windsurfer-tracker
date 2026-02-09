@@ -54,8 +54,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             serviceBound = true
             bindingInProgress = false
             
-            // Check if this is a stale service (bound but not tracking)
-            if (trackerService?.isTracking() != true) {
+            // Check if this is a stale service (bound but not tracking or idle)
+            if (trackerService?.isTracking() != true && trackerService?.isIdle() != true) {
                 Log.d(TAG, "Found stale service, cleaning up")
                 stopService(Intent(this@MainActivity, TrackerService::class.java))
             }
@@ -527,6 +527,17 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
         // Save tracking state
         prefs.edit().putBoolean("tracking_active", true).apply()
+
+        // If service is in idle mode, just tell it to start tracking directly
+        if (trackerService?.isIdle() == true) {
+            trackerService?.let { service ->
+                service.startTrackingFromIdle()
+                binding.btnStartStop.text = "Stop Tracking"
+                binding.statusGroup.visibility = View.VISIBLE
+                binding.configGroup.visibility = View.GONE
+            }
+            return
+        }
 
         // Get server settings from preferences (no longer on main screen)
         val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
@@ -1235,7 +1246,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     override fun onRemoteStart() {
         runOnUiThread {
-            Toast.makeText(this, "Tracking started by admin", Toast.LENGTH_LONG).show()
             // Service already called startTracking() directly — just update UI
             getPrefs().edit().putBoolean("tracking_active", true).apply()
             binding.btnStartStop.text = "Stop Tracking"
@@ -1246,8 +1256,18 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     override fun onRemoteShutdown() {
         runOnUiThread {
-            Toast.makeText(this, "Idle mode stopped by admin", Toast.LENGTH_LONG).show()
             finishStopTrackerService()
+        }
+    }
+
+    override fun onIdleEntered() {
+        runOnUiThread {
+            // Switch UI to config screen but keep service running for idle heartbeats
+            binding.btnStartStop.text = "Start Tracking"
+            binding.statusGroup.visibility = View.GONE
+            binding.configGroup.visibility = View.VISIBLE
+            updateAssistButton(false)
+            updateIdleScreen()
         }
     }
 }

@@ -167,6 +167,35 @@ public final class LocationManager: NSObject, ObservableObject {
         locationTimer = nil
     }
 
+    /// Start low-power location monitoring to keep the app alive in background during idle mode.
+    /// Uses lowest accuracy (3km) so GPS hardware stays off - just uses cell/WiFi positioning.
+    /// The key is keeping the background location session active so iOS doesn't suspend the app.
+    public func startIdleLocationMonitoring() {
+        #if os(iOS)
+        // Ensure background mode is configured
+        if !backgroundModeConfigured {
+            backgroundModeConfigured = true
+            locationManager.pausesLocationUpdatesAutomatically = false
+            if Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") != nil {
+                locationManager.allowsBackgroundLocationUpdates = true
+                locationManager.showsBackgroundLocationIndicator = true
+            }
+        }
+        locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        locationManager.distanceFilter = CLLocationDistanceMax  // Basically never fires
+        locationManager.startUpdatingLocation()
+        print("[LOC] Started idle location monitoring (3km accuracy, keeps app alive)")
+        #endif
+    }
+
+    /// Stop idle location monitoring
+    public func stopIdleLocationMonitoring() {
+        #if os(iOS)
+        locationManager.stopUpdatingLocation()
+        print("[LOC] Stopped idle location monitoring")
+        #endif
+    }
+
     /// Get current location immediately
     public func requestLocation() {
         locationManager.requestLocation()

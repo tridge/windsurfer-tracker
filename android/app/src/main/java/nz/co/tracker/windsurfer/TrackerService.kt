@@ -222,6 +222,7 @@ class TrackerService : LifecycleService() {
         fun onRemoteCancelAssist()  // Server sent remote cancel assist command
         fun onRemoteStart()  // Server sent start command (from idle mode)
         fun onRemoteShutdown()  // Server sent shutdown command (from idle mode)
+        fun onIdleEntered()  // Entered idle mode after user stop (UI should show config screen)
     }
 
     /**
@@ -828,7 +829,9 @@ class TrackerService : LifecycleService() {
                 // If idle mode is supported, enter idle instead of full stop
                 if (idleIntervalMs > 0) {
                     enterIdleMode()
-                    // Don't call callback - service stays running in idle mode
+                    // Notify listener so UI switches to config screen
+                    // (service stays running for idle heartbeats)
+                    statusListener?.onIdleEntered()
                 } else {
                     stopTracking()
                     callback?.invoke()
@@ -874,10 +877,12 @@ class TrackerService : LifecycleService() {
         }
 
         // Start idle heartbeat loop in a coroutine (Handler.postDelayed gets throttled by battery saver)
+        // Send first idle packet immediately so server/WebUI updates right away
         idleJob = serviceScope.launch {
+            sendIdlePacket()
             while (isIdleMode.get() && idleIntervalMs > 0) {
-                sendIdlePacket()
                 delay(idleIntervalMs)
+                sendIdlePacket()
             }
         }
     }
@@ -962,6 +967,13 @@ class TrackerService : LifecycleService() {
     }
 
     fun isIdle(): Boolean = isIdleMode.get()
+
+    /**
+     * Start tracking from idle mode. Called when user presses Start while service is idle.
+     */
+    fun startTrackingFromIdle() {
+        startTracking()
+    }
 
     /**
      * Calculate distance between two points using Haversine formula

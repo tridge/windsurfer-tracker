@@ -22,6 +22,8 @@ public actor TrackerService {
     public nonisolated let assistEnabledPublisher = CurrentValueSubject<Bool, Never>(true)  // Whether assist button should be shown
     public nonisolated let remoteStopPublisher = PassthroughSubject<Void, Never>()  // Signals remote stop command from server
     public nonisolated let remoteCancelAssistPublisher = PassthroughSubject<Void, Never>()  // Signals remote cancel assist command from server
+    public nonisolated let remoteStartPublisher = PassthroughSubject<Void, Never>()  // Signals remote start command (resume from idle)
+    public nonisolated let remoteShutdownPublisher = PassthroughSubject<Void, Never>()  // Signals remote shutdown command (exit idle mode)
 
     // MARK: - State
 
@@ -31,6 +33,11 @@ public actor TrackerService {
     private var lastAckSeq = 0
     private var lastAckTime: Date?  // For tracker beep feature
     private var acknowledgedSeqs: Set<Int> = []
+
+    // Idle mode state
+    private var isInIdleMode = false
+    private var idleIntervalSeconds: Int = 0  // From server ACK, 0 = disabled
+    private var idleTask: Task<Void, Never>?
 
     // Status line state
     private var hasGpsFix = false
@@ -93,6 +100,15 @@ public actor TrackerService {
     public func start() async throws {
         guard !isRunning else { return }
 
+        // Clean up idle mode if starting from idle
+        if isInIdleMode {
+            print("[TrackerService] Starting tracking from idle mode")
+            idleTask?.cancel()
+            idleTask = nil
+            isInIdleMode = false
+            locationManager.stopIdleLocationMonitoring()
+        }
+
         // Check authorization
         guard locationManager.hasTrackingAuthorization else {
             throw TrackerError.locationPermissionDenied
@@ -141,16 +157,37 @@ public actor TrackerService {
 
     /// Stop tracking
     public func stop() async {
-        guard isRunning else { return }
+        guard isRunning || isInIdleMode else { return }
+
+        // If in idle mode, just exit idle
+        if isInIdleMode {
+            await exitIdleMode()
+            return
+        }
 
         // Send stop notification to server before stopping
         await sendStopPacket()
 
+        // If server configured idle mode, enter it instead of fully stopping
+        if idleIntervalSeconds > 0 {
+            await enterIdleMode()
+            return
+        }
+
+        await fullStop()
+    }
+
+    /// Fully stop tracking and idle mode
+    private func fullStop() async {
         isRunning = false
+        isInIdleMode = false
+        idleTask?.cancel()
+        idleTask = nil
         assistRequested = false
 
         // Stop location updates
         locationManager.stopUpdating()
+        locationManager.stopIdleLocationMonitoring()
 
         // Stop battery tracking on main thread (Published properties)
         await MainActor.run {
@@ -207,6 +244,125 @@ public actor TrackerService {
             // Wait 500ms before retry
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
+    }
+
+    // MARK: - Idle Mode
+
+    /// Enter idle mode - stop GPS but keep sending heartbeat packets
+    private func enterIdleMode() async {
+        isRunning = false
+        isInIdleMode = true
+        assistRequested = false
+
+        // Stop precise GPS to save battery, but start significant location monitoring
+        // to keep the app alive in the background for idle heartbeats
+        locationManager.stopUpdating()
+        locationManager.startIdleLocationMonitoring()
+
+        // Clear buffer
+        positionBuffer.removeAll()
+
+        // Update state
+        statePublisher.send(.idleMode)
+        statusLinePublisher.send("Idle - waiting for admin")
+
+        print("[TrackerService] Entering idle mode, interval=\(idleIntervalSeconds)s")
+
+        // Send first idle packet immediately so server/WebUI updates right away
+        await sendIdlePacket()
+
+        // Start heartbeat loop
+        let interval = idleIntervalSeconds
+        idleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
+                guard !Task.isCancelled else { break }
+                await self?.sendIdlePacket()
+            }
+        }
+    }
+
+    /// Send a lightweight idle heartbeat packet
+    private func sendIdlePacket() async {
+        sequenceNumber += 1
+        let seq = sequenceNumber
+
+        let battery = batteryMonitor.status
+        preferences.ensureSailorId()
+
+        let packet = TrackerPacket(
+            id: preferences.sailorId,
+            eid: preferences.eventId,
+            sq: seq,
+            ts: Int(Date().timeIntervalSince1970),
+            lat: nil,
+            lon: nil,
+            spd: 0.0,
+            hdg: 0,
+            ast: false,
+            bat: battery.level,
+            role: preferences.role.rawValue,
+            ver: appVersion,
+            os: osVersion,
+            pwd: preferences.password.isEmpty ? nil : preferences.password,
+            chg: battery.isCharging,
+            ps: battery.isLowPowerMode,
+            idle: true
+        )
+
+        let response = await networkManager.send(packet)
+        if let response = response {
+            await handleACK(response)
+        }
+    }
+
+    /// Resume tracking from idle mode (triggered by admin "start" command)
+    private func resumeFromIdle() async {
+        print("[TrackerService] Resuming from idle mode (remote start)")
+        idleTask?.cancel()
+        idleTask = nil
+        isInIdleMode = false
+        locationManager.stopIdleLocationMonitoring()
+
+        remoteStartPublisher.send()
+
+        // Start tracking again
+        do {
+            try await start()
+        } catch {
+            print("[TrackerService] Failed to resume from idle: \(error)")
+            await fullStop()
+        }
+    }
+
+    /// Exit idle mode completely (triggered by admin "shutdown" command or user stop)
+    public func exitIdleMode() async {
+        print("[TrackerService] Exiting idle mode (shutdown)")
+        idleTask?.cancel()
+        idleTask = nil
+        isInIdleMode = false
+        isRunning = false
+        locationManager.stopIdleLocationMonitoring()
+
+        // Stop battery tracking on main thread (Published properties)
+        await MainActor.run {
+            batteryMonitor.stopDrainTracking()
+        }
+
+        // Update state
+        statePublisher.send(.idle)
+
+        // Save tracking state on main thread (Published property)
+        await MainActor.run {
+            preferences.trackingActive = false
+        }
+
+        remoteShutdownPublisher.send()
+    }
+
+    /// Check if in idle mode
+    public var isIdle: Bool {
+        isInIdleMode
     }
 
     /// Toggle assist request
@@ -451,11 +607,31 @@ public actor TrackerService {
             print("[TrackerService] Assist cleared by server (assist disabled for event)")
         }
 
+        // Parse idle interval from server
+        if let interval = response.idle {
+            idleIntervalSeconds = interval
+        }
+
         // Check for remote stop command
         if response.isStopCommand {
             print("[TrackerService] Received remote STOP command from server")
-            remoteStopPublisher.send()
+            // Only notify UI of remote stop if we won't enter idle mode
+            if idleIntervalSeconds <= 0 {
+                remoteStopPublisher.send()
+            }
             await stop()
+        }
+
+        // Check for remote start command (resume from idle)
+        if response.isStartCommand && isInIdleMode {
+            print("[TrackerService] Received remote START command from server")
+            await resumeFromIdle()
+        }
+
+        // Check for remote shutdown command (exit idle)
+        if response.isShutdownCommand && isInIdleMode {
+            print("[TrackerService] Received remote SHUTDOWN command from server")
+            await exitIdleMode()
         }
 
         // Check for remote cancel assist command

@@ -6,6 +6,27 @@ struct TrackingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            trackingContent
+        }
+        .background(Color.white)
+        .confirmationDialog(
+            "Stop Tracking?",
+            isPresented: $viewModel.showStopConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop", role: .destructive) {
+                viewModel.stopTracking()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to stop tracking? Your position will no longer be reported.")
+        }
+    }
+
+    // MARK: - Active Tracking Content
+
+    private var trackingContent: some View {
+        VStack(spacing: 0) {
             // Status section
             VStack(alignment: .leading, spacing: 8) {
                 // Status line (GPS wait, connecting..., auth failure, or event name)
@@ -188,19 +209,6 @@ struct TrackingView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 16)
-        }
-        .background(Color.white)
-        .confirmationDialog(
-            "Stop Tracking?",
-            isPresented: $viewModel.showStopConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Stop", role: .destructive) {
-                viewModel.stopTracking()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to stop tracking? Your position will no longer be reported.")
         }
     }
 

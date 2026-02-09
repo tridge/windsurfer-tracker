@@ -6,6 +6,7 @@ public enum TrackerState: Equatable, Sendable {
     case starting
     case tracking
     case stopping
+    case idleMode
     case error(TrackerError)
 
     public var isTracking: Bool {
@@ -15,6 +16,11 @@ public enum TrackerState: Equatable, Sendable {
         default:
             return false
         }
+    }
+
+    public var isIdleMode: Bool {
+        if case .idleMode = self { return true }
+        return false
     }
 
     public var displayText: String {
@@ -27,6 +33,8 @@ public enum TrackerState: Equatable, Sendable {
             return "Tracking"
         case .stopping:
             return "Stopping..."
+        case .idleMode:
+            return "Idle - waiting for admin"
         case .error(let error):
             return error.localizedDescription
         }

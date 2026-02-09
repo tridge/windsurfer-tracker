@@ -65,8 +65,14 @@ public struct TrackerPacket: Codable {
     /// Heart rate in BPM (optional, only if enabled and available)
     public let hr: Int?
 
+    /// GPS satellite count (optional, not available on iOS - CLLocation has no satellite API)
+    public let nsats: Int?
+
     /// Stopped flag - true when user deliberately stops tracking
     public let stopped: Bool?
+
+    /// Idle mode flag - true when sending heartbeat packets while waiting for admin start
+    public let idle: Bool?
 
     public init(
         id: String,
@@ -90,7 +96,9 @@ public struct TrackerPacket: Codable {
         pos: [[Double]]? = nil,
         hac: Double? = nil,
         hr: Int? = nil,
-        stopped: Bool? = nil
+        nsats: Int? = nil,
+        stopped: Bool? = nil,
+        idle: Bool? = nil
     ) {
         self.id = id
         self.eid = eid
@@ -113,7 +121,9 @@ public struct TrackerPacket: Codable {
         self.pos = pos
         self.hac = hac
         self.hr = hr
+        self.nsats = nsats
         self.stopped = stopped
+        self.idle = idle
     }
 
     /// Encode to JSON data
@@ -146,6 +156,9 @@ public struct AckResponse: Codable {
     /// Server command (optional, e.g., "stop" for remote stop)
     public let cmd: String?
 
+    /// Idle interval in seconds (0 or nil = idle mode disabled)
+    public let idle: Int?
+
     public var isSuccess: Bool {
         return error == nil
     }
@@ -167,6 +180,16 @@ public struct AckResponse: Codable {
     /// Whether this is a remote cancel assist command
     public var isCancelAssistCommand: Bool {
         return cmd == "cancel_assist"
+    }
+
+    /// Whether this is a remote start command (resume from idle)
+    public var isStartCommand: Bool {
+        return cmd == "start"
+    }
+
+    /// Whether this is a remote shutdown command (exit idle mode)
+    public var isShutdownCommand: Bool {
+        return cmd == "shutdown"
     }
 }
 
