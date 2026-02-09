@@ -280,6 +280,9 @@ class TrackerService : LifecycleService() {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    // GPS-wait heartbeat job (sends packets while waiting for GPS fix)
+    private var gpsWaitJob: Job? = null
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -671,6 +674,8 @@ class TrackerService : LifecycleService() {
 
                     // Mark GPS as ready and update status line
                     if (!hasGpsFix.getAndSet(true)) {
+                        gpsWaitJob?.cancel()
+                        gpsWaitJob = null
                         updateStatusLine()  // Show "connecting ..."
                     }
 
@@ -879,6 +884,14 @@ class TrackerService : LifecycleService() {
             )
             updateNotification(currentStatusText())
 
+            // Start GPS-wait heartbeat (sends packets with nsats=0 until GPS fix)
+            gpsWaitJob = serviceScope.launch {
+                while (isRunning.get() && !hasGpsFix.get()) {
+                    sendGpsWaitPacket()
+                    delay(LOCATION_INTERVAL_MS)
+                }
+            }
+
             // Start tracker beep timer (first beep after 60 seconds)
             beepHandler.postDelayed(beepRunnable, 60000L)
         } catch (e: SecurityException) {
@@ -891,6 +904,10 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Stopping tracking")
         trackingStartRealtimeMs = 0L
+
+        // Stop GPS-wait heartbeat
+        gpsWaitJob?.cancel()
+        gpsWaitJob = null
 
         // Stop tracker beep timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -1027,6 +1044,52 @@ class TrackerService : LifecycleService() {
         var bearing = Math.toDegrees(Math.atan2(y, x))
         if (bearing < 0) bearing += 360.0
         return bearing
+    }
+
+    /**
+     * Send a GPS-wait heartbeat packet (tracking active but no GPS fix yet).
+     * Sends a normal packet with nsats=0 and no lat/lon so the server knows
+     * we're alive and can send commands back via ACK.
+     */
+    private suspend fun sendGpsWaitPacket() {
+        val seq = sequenceNumber.incrementAndGet()
+
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val signalLevel = try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            telephonyManager.signalStrength?.level ?: -1
+        } catch (e: Exception) { -1 }
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("spd", 0)
+            put("hdg", 0)
+            put("ast", assistRequested.get())
+            put("bat", batteryPercent)
+            put("sig", signalLevel)
+            put("nsats", 0)
+            put("role", role)
+            put("ver", BuildConfig.VERSION_STRING)
+            put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
+            if (password.isNotEmpty()) {
+                put("pwd", password)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+        val address = getServerAddress() ?: return
+
+        try {
+            val dgram = DatagramPacket(data, data.size, address, serverPort)
+            socket?.send(dgram)
+            Log.d(TAG, "Sent GPS-wait heartbeat seq=$seq bat=$batteryPercent%")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send GPS-wait heartbeat", e)
+        }
     }
 
     private fun sendPosition(location: Location) {
