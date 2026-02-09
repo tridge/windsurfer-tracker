@@ -626,7 +626,12 @@ class TrackerService : LifecycleService() {
                 }
             }
             try {
-                locationManager.registerGnssStatusCallback(mainExecutor, gnssStatusCallback!!)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    locationManager.registerGnssStatusCallback(mainExecutor, gnssStatusCallback!!)
+                } else {
+                    @Suppress("DEPRECATION")
+                    locationManager.registerGnssStatusCallback(gnssStatusCallback!!, android.os.Handler(mainLooper))
+                }
                 Log.i(TAG, "Registered GNSS status callback for satellite count")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to register GNSS status callback", e)
