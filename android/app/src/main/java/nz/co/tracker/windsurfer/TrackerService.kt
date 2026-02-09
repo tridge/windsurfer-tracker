@@ -181,6 +181,7 @@ class TrackerService : LifecycleService() {
     // Idle mode wake lock - keeps CPU alive for periodic heartbeats in battery saver
     private var idleWakeLock: PowerManager.WakeLock? = null
     private var idleJob: Job? = null
+    private var gpsWaitJob: Job? = null
 
     // Receiver to restart location updates when user unlocks the device
     // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
@@ -515,6 +516,8 @@ class TrackerService : LifecycleService() {
 
         // Mark GPS as ready and update status line
         if (!hasGpsFix.getAndSet(true)) {
+            gpsWaitJob?.cancel()
+            gpsWaitJob = null
             updateStatusLine()  // Show "connecting ..."
         }
 
@@ -623,6 +626,18 @@ class TrackerService : LifecycleService() {
                     }
                     lastSatelliteCount = usedInFix
                     Log.d(TAG, "GNSS status: ${status.satelliteCount} visible, $usedInFix used in fix")
+
+                    // If GPS fix is lost, restart GPS-wait heartbeat so server knows we're alive
+                    if (usedInFix == 0 && hasGpsFix.getAndSet(false)) {
+                        Log.w(TAG, "GPS fix lost - restarting GPS-wait heartbeat")
+                        gpsWaitJob?.cancel()
+                        gpsWaitJob = serviceScope.launch {
+                            while (isRunning.get() && !hasGpsFix.get()) {
+                                sendGpsWaitPacket()
+                                delay(LOCATION_INTERVAL_MS)
+                            }
+                        }
+                    }
                 }
             }
             try {
@@ -638,6 +653,14 @@ class TrackerService : LifecycleService() {
             }
 
             updateNotification("Tracking active")
+
+            // Start GPS-wait heartbeat (sends packets with nsats=0 until GPS fix)
+            gpsWaitJob = serviceScope.launch {
+                while (isRunning.get() && !hasGpsFix.get()) {
+                    sendGpsWaitPacket()
+                    delay(LOCATION_INTERVAL_MS)
+                }
+            }
 
             // Start tracker beep timer (first beep after 60 seconds)
             beepHandler.postDelayed(beepRunnable, 60000L)
@@ -724,6 +747,10 @@ class TrackerService : LifecycleService() {
         if (!isRunning.getAndSet(false)) return
 
         Log.d(TAG, "Stopping tracking")
+
+        // Stop GPS-wait heartbeat
+        gpsWaitJob?.cancel()
+        gpsWaitJob = null
 
         // Stop tracker beep timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -866,6 +893,10 @@ class TrackerService : LifecycleService() {
         isIdleMode.set(true)
         isRunning.set(false)  // Allow startTracking() to work when admin sends start command
 
+        // Stop GPS-wait heartbeat
+        gpsWaitJob?.cancel()
+        gpsWaitJob = null
+
         // Stop GPS updates
         try {
             locationManager.removeUpdates(locationListener)
@@ -978,6 +1009,54 @@ class TrackerService : LifecycleService() {
             Log.d(TAG, "Sent idle heartbeat seq=$seq bat=$batteryPercent%")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send idle heartbeat", e)
+        }
+    }
+
+    /**
+     * Send a GPS-wait heartbeat packet (tracking active but no GPS fix yet).
+     * Sends a normal packet with nsats=0 and no lat/lon so the server knows
+     * we're alive and can send commands back via ACK.
+     */
+    private suspend fun sendGpsWaitPacket() {
+        val seq = sequenceNumber.incrementAndGet()
+        val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
+
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val signalLevel = try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            telephonyManager.signalStrength?.level ?: -1
+        } catch (e: Exception) { -1 }
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("spd", 0)
+            put("hdg", 0)
+            put("ast", assistRequested.get())
+            put("bat", batteryPercent)
+            put("sig", signalLevel)
+            put("nsats", 0)
+            put("role", role)
+            put("ver", BuildConfig.VERSION_STRING)
+            put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+            if (currentPassword.isNotEmpty()) {
+                put("pwd", currentPassword)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+        val address = getServerAddress() ?: return
+
+        try {
+            val dgram = DatagramPacket(data, data.size, address, serverPort)
+            socket?.send(dgram)
+            Log.d(TAG, "Sent GPS-wait heartbeat seq=$seq bat=$batteryPercent%")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send GPS-wait heartbeat", e)
         }
     }
 
