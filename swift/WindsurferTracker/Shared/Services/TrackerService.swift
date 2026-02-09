@@ -39,6 +39,9 @@ public actor TrackerService {
     private var idleIntervalSeconds: Int = 0  // From server ACK, 0 = disabled
     private var idleTask: Task<Void, Never>?
 
+    // GPS-wait heartbeat (sends packets while waiting for GPS fix)
+    private var gpsWaitTask: Task<Void, Never>?
+
     // Status line state
     private var hasGpsFix = false
     private var hasFirstAck = false
@@ -153,6 +156,14 @@ public actor TrackerService {
         // Start location updates
         locationManager.startUpdating(highFrequency: preferences.highFrequencyMode)
 
+        // Start GPS-wait heartbeat (sends packets with nsats=0 until GPS fix)
+        gpsWaitTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.sendGpsWaitPacket()
+                try? await Task.sleep(nanoseconds: UInt64(TrackerConfig.locationIntervalSeconds) * 1_000_000_000)
+            }
+        }
+
         // Update state
         statePublisher.send(.tracking)
 
@@ -190,6 +201,8 @@ public actor TrackerService {
         isInIdleMode = false
         idleTask?.cancel()
         idleTask = nil
+        gpsWaitTask?.cancel()
+        gpsWaitTask = nil
         assistRequested = false
 
         // Stop location updates
@@ -260,6 +273,8 @@ public actor TrackerService {
         isRunning = false
         isInIdleMode = true
         assistRequested = false
+        gpsWaitTask?.cancel()
+        gpsWaitTask = nil
 
         // Stop precise GPS to save battery, but start significant location monitoring
         // to keep the app alive in the background for idle heartbeats
@@ -315,6 +330,40 @@ public actor TrackerService {
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
             idle: true
+        )
+
+        let response = await networkManager.send(packet)
+        if let response = response {
+            await handleACK(response)
+        }
+    }
+
+    /// Send a GPS-wait heartbeat packet (tracking active but no GPS fix yet)
+    private func sendGpsWaitPacket() async {
+        sequenceNumber += 1
+        let seq = sequenceNumber
+
+        let battery = batteryMonitor.status
+        preferences.ensureSailorId()
+
+        let packet = TrackerPacket(
+            id: preferences.sailorId,
+            eid: preferences.eventId,
+            sq: seq,
+            ts: Int(Date().timeIntervalSince1970),
+            lat: nil,
+            lon: nil,
+            spd: 0.0,
+            hdg: 0,
+            ast: false,
+            bat: battery.level,
+            role: preferences.role.rawValue,
+            ver: appVersion,
+            os: osVersion,
+            pwd: preferences.password.isEmpty ? nil : preferences.password,
+            chg: battery.isCharging,
+            ps: battery.isLowPowerMode,
+            nsats: 0
         )
 
         let response = await networkManager.send(packet)
@@ -420,6 +469,8 @@ public actor TrackerService {
         // Mark GPS as ready and update status line
         if !hasGpsFix {
             hasGpsFix = true
+            gpsWaitTask?.cancel()
+            gpsWaitTask = nil
             updateStatusLine()  // Show "connecting ..."
         }
 
@@ -622,10 +673,8 @@ public actor TrackerService {
         // Check for remote stop command
         if response.isStopCommand {
             print("[TrackerService] Received remote STOP command from server")
-            // Only notify UI of remote stop if we won't enter idle mode
-            if idleIntervalSeconds <= 0 {
-                remoteStopPublisher.send()
-            }
+            // Always notify UI so it can stop buzz timer, live activity, etc.
+            remoteStopPublisher.send()
             await stop()
         }
 
