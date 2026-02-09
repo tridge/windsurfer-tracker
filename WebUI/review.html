@@ -886,7 +886,6 @@
         // State
         let allData = [];
         let userData = {};
-        let userOverrides = {};  // Name mappings from users.json
         let trackLayers = {};
         let markerLayers = {};
         let pointLayers = {};
@@ -1174,18 +1173,9 @@
             return { filtered, outliers };
         }
 
-        // Load user overrides (name mappings)
-        async function loadUserOverrides() {
-            try {
-                const response = await fetch(`${DATA_BASE}users.json`, { cache: 'no-cache' });
-                if (response.ok) {
-                    const data = await response.json();
-                    userOverrides = data.users || {};
-                }
-            } catch (e) {
-                console.log('No users.json found');
-            }
-        }
+        // Note: review page does NOT load users.json for name/role mapping.
+        // It relies solely on displayid baked into log entries, so that entries
+        // before/after a mid-session name mapping show as separate track users.
 
         // Get the original tracker ID for a userId key
         // If the key is a displayid, returns the actual tracker ID (entry.id)
@@ -1198,7 +1188,10 @@
         }
 
         // Get display name for a user ID
-        // Priority: displayid from track data > userOverrides name > userId
+        // Priority: displayid from track data > userId
+        // Does NOT use users.json overrides - track review relies solely on
+        // the displayid baked into log entries so that entries before/after
+        // a name mapping show as separate users (which they are in the logs).
         function getDisplayName(userId) {
             // Check track data for displayid (use most recent entry that has it)
             if (userData[userId] && userData[userId].length > 0) {
@@ -1208,55 +1201,28 @@
                     }
                 }
             }
-            // Fall back to user overrides (check by both key and original tracker ID)
-            const originalId = getOriginalTrackerId(userId);
-            if (userOverrides[originalId] && userOverrides[originalId].name) {
-                return userOverrides[originalId].name;
-            }
-            if (userOverrides[userId] && userOverrides[userId].name) {
-                return userOverrides[userId].name;
-            }
             return userId;
         }
 
         // Check if user has a display name mapping (for showing admin suffix)
         // Returns true if the userId key is a displayid (different from original tracker id)
         function hasDisplayMapping(userId) {
-            // Check track data - if entry.id differs from userId key, it's a displayid
             if (userData[userId] && userData[userId].length > 0) {
                 const entry = userData[userId][0];
                 if (entry.id !== userId) {
                     return true;  // Key is displayid, entry.id is original tracker ID
                 }
-                // Also check if entries have displayid field (for backwards compat)
                 for (let i = userData[userId].length - 1; i >= 0; i--) {
                     if (userData[userId][i].displayid) {
                         return true;
                     }
                 }
             }
-            // Check user overrides (check by both key and original tracker ID)
-            const originalId = getOriginalTrackerId(userId);
-            if (userOverrides[originalId] && userOverrides[originalId].name) {
-                return true;
-            }
-            if (userOverrides[userId] && userOverrides[userId].name) {
-                return true;
-            }
             return false;
         }
 
-        // Get role for a user ID (from most recent data point or override)
+        // Get role for a user ID (from most recent data point)
         function getUserRole(userId) {
-            // Try user overrides with both the key and the original tracker ID
-            const originalId = getOriginalTrackerId(userId);
-            if (userOverrides[originalId] && userOverrides[originalId].role) {
-                return userOverrides[originalId].role;
-            }
-            if (userOverrides[userId] && userOverrides[userId].role) {
-                return userOverrides[userId].role;
-            }
-            // Get from user data if available
             if (userData[userId] && userData[userId].length > 0) {
                 const lastEntry = userData[userId][userData[userId].length - 1];
                 return lastEntry.role || 'sailor';
@@ -1320,9 +1286,6 @@
                 });
             }
         }
-
-        // Load user overrides on startup
-        loadUserOverrides();
 
         // User colors
         const userColors = [
@@ -2306,6 +2269,8 @@
                         if (closest.nsats !== undefined && closest.nsats > 0) {
                             content += ` · &#128752;${closest.nsats}`;
                         }
+                    } else if (closest.nsats !== undefined && closest.nsats > 0) {
+                        content += `<br>&#128752; ${closest.nsats} sats`;
                     }
                     if (closest.hr !== undefined && closest.hr > 0) {
                         content += `<br>Heart Rate: <span style="color:#e91e63">${closest.hr} bpm</span>`;
@@ -2371,6 +2336,8 @@
                         if (last.nsats !== undefined && last.nsats > 0) {
                             markerHacText += ` · &#128752;${last.nsats}`;
                         }
+                    } else if (last.nsats !== undefined && last.nsats > 0) {
+                        markerHacText = `<br>&#128752; ${last.nsats} sats`;
                     }
 
                     const role = getUserRole(userId);
@@ -3648,6 +3615,8 @@
                     if (closest.nsats !== undefined && closest.nsats > 0) {
                         tooltipHtml += ` · <span style="color:#16a34a">&#128752;${closest.nsats}</span>`;
                     }
+                } else if (closest.nsats !== undefined && closest.nsats > 0) {
+                    tooltipHtml += `<br><span style="color:#16a34a">&#128752; ${closest.nsats} sats</span>`;
                 }
 
                 // Add signal strength if available
@@ -5042,6 +5011,15 @@
             const name = getDisplayName(userId);
             const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
             let html = `<b>${name}</b>${idSuffix}<br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
+            if (point.hac !== undefined) {
+                const hacColor = point.hac > 50 ? '#e74c3c' : point.hac > 20 ? '#f39c12' : '#2ecc71';
+                html += `<br>Accuracy: <span style="color:${hacColor}">${point.hac.toFixed(1)}m</span>`;
+                if (point.nsats !== undefined && point.nsats > 0) {
+                    html += ` · <span style="color:#16a34a">&#128752;${point.nsats}</span>`;
+                }
+            } else if (point.nsats !== undefined && point.nsats > 0) {
+                html += `<br>&#128752; ${point.nsats} sats`;
+            }
             if (point.hr) {
                 html += `<br>HR: ${point.hr} bpm`;
             }
