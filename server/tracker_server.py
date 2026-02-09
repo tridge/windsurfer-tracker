@@ -871,6 +871,43 @@ class PositionTracker:
 
             return True
 
+        # GPS-wait packets: tracking active but no GPS fix yet (nsats=0 or missing lat/lon)
+        no_gps = (nsats == 0) or (lat == 0.0 and lon == 0.0)
+        if no_gps:
+            with self._lock:
+                self.last_timestamp[sailor_id] = ts
+                existing = self.current_positions.get(sailor_id, {})
+                pos_data = {
+                    "id": sailor_id,
+                    "bat": battery,
+                    "sig": signal,
+                    "role": role,
+                    "ver": version,
+                    "flg": flags,
+                    "ts": ts,
+                    "last_seen": recv_time,
+                    "last_seen_iso": datetime.fromtimestamp(recv_time).isoformat(),
+                    "src_ip": src_ip,
+                    "nsats": 0,
+                }
+                if os_version:
+                    pos_data["os"] = os_version
+                # Preserve existing lat/lon if user previously tracked
+                if "lat" in existing and "lon" in existing:
+                    pos_data["lat"] = existing["lat"]
+                    pos_data["lon"] = existing["lon"]
+                self.current_positions[sailor_id] = pos_data
+
+            bat_str = f"{battery}%" if battery >= 0 else "?"
+            sig_str = f"{signal}/4" if signal >= 0 else "?"
+            log(f"[{sailor_id}] GPS-wait heartbeat bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
+
+            # Write current positions file (no log entry, no tail update)
+            if self.positions_file:
+                write_current_positions(self.current_positions, self.positions_file, user_overrides or _user_overrides, self.position_tails)
+
+            return True
+
         with self._lock:
             # Check for duplicate using timestamp
             is_dup = False
