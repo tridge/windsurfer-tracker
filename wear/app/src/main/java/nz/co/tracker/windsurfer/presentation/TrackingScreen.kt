@@ -33,7 +33,6 @@ fun TrackingScreen(
     sailorId: String,
     eventName: String,
     errorMessage: String?,
-    highFrequencyMode: Boolean,
     countdownSeconds: Int?,  // Race countdown timer (null = not active)
     raceTimerEnabled: Boolean,  // Whether to show timer display
     raceTimerMinutes: Int,  // Configured countdown duration
@@ -138,15 +137,13 @@ fun TrackingScreen(
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center
                     )
-                    if (highFrequencyMode) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "1Hz",
-                            color = Color.Cyan,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "1Hz",
+                        color = Color.Cyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))

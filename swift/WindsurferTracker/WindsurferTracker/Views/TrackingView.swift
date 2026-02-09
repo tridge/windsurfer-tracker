@@ -41,7 +41,7 @@ struct TrackingView: View {
                         .font(.caption)
                         .foregroundColor(Color(white: 0.53))
 
-                    Text(viewModel.highFrequencyMode ? "1Hz" : "0.1Hz")
+                    Text("1Hz")
                         .font(.caption)
                         .fontWeight(.bold)
                         .foregroundColor(Color(red: 0, green: 0.67, blue: 0.67))

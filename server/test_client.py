@@ -83,9 +83,8 @@ class SimulatedEntity:
     patrol_forward: bool = True    # Direction of patrol (true = toward finish)
 
     # 1Hz mode (batched position updates)
-    is_1hz: bool = False
     pos_buffer: List[Tuple[int, float, float, float]] = field(default_factory=list)  # [(ts, lat, lon, spd), ...]
-    heart_rate: int = 0  # Only used in 1Hz mode
+    heart_rate: int = 0
 
     # Race state tracking (for multi-race simulation)
     race_state: RaceState = RaceState.PRE_RACE
@@ -100,8 +99,7 @@ class SimulatedEntity:
         self.target_lon = self.lon
         self.gust_factor = random.uniform(0.9, 1.1)  # Start with slight variation
         self.gust_trend = random.uniform(-0.05, 0.05)
-        if self.is_1hz:
-            self.heart_rate = random.randint(60, 90)  # Initial heart rate
+        self.heart_rate = random.randint(60, 90)  # Initial heart rate
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -840,9 +838,6 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
 
             target_lat, target_lon = course_waypoints[next_idx]
 
-            # Odd-numbered sailors use 1Hz mode (batched position updates)
-            use_1hz = (i % 2) == 0  # Test01, Test03, Test05, ... (0-indexed: 0, 2, 4, ...)
-
             entity = SimulatedEntity(
                 id=f"Test{i+1:02d}",
                 role="sailor",
@@ -856,8 +851,7 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 battery=random.randint(70, 100),
                 signal=random.randint(2, 4),
                 on_starboard=random.choice([True, False]),
-                tack_timer=random.uniform(30, 60),
-                is_1hz=use_1hz
+                tack_timer=random.uniform(30, 60)
             )
             entities.append(entity)
 
@@ -909,9 +903,6 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 target_lat, target_lon = end_loc[0], end_loc[1]
             else:
                 target_lat, target_lon = start_loc[0], start_loc[1]
-            # Odd-numbered sailors use 1Hz mode (batched position updates)
-            use_1hz = (i % 2) == 0  # Test01, Test03, Test05, ...
-
             entity = SimulatedEntity(
                 id=f"Test{i+1:02d}",
                 role="sailor",
@@ -923,8 +914,7 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 battery=random.randint(70, 100),
                 signal=random.randint(2, 4),
                 on_starboard=random.choice([True, False]),
-                tack_timer=random.uniform(30, 60),
-                is_1hz=use_1hz
+                tack_timer=random.uniform(30, 60)
             )
             entities.append(entity)
 
@@ -1084,7 +1074,7 @@ def update_gathering_sailor(entity: SimulatedEntity, gathering_center: Tuple[flo
 def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'SailingSimulator',
                            course_waypoints: Optional[List[Tuple[float, float]]],
                            mark_colors: Dict[int, str], wind_direction: float,
-                           start_loc: Tuple[float, float], one_hz: bool = False):
+                           start_loc: Tuple[float, float]):
     """Run offline simulation and write to log file."""
 
     # Parse start date
@@ -1125,7 +1115,7 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
     PRE_RACE_DURATION = 120    # 2 minutes
     POST_RACE_DURATION = 300   # 5 minutes
     REPORT_INTERVAL = 10       # 10 seconds between log entries
-    SIM_INTERVAL = 1 if one_hz else 10  # 1Hz mode simulates every second
+    SIM_INTERVAL = 1           # 1Hz simulation
 
     print(f"\nOffline simulation:")
     print(f"  Output file: {output_file}")
@@ -1133,7 +1123,6 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
     print(f"  Num races: {args.num_races}")
     print(f"  Mark order: {mark_order}")
     print(f"  Time scale: {args.time_scale}x")
-    print(f"  Mode: {'1Hz (pos arrays)' if one_hz else '10s intervals'}")
     print()
 
     # Initialize all sailors in gathering area
@@ -1155,22 +1144,17 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
     pos_buffers: Dict[str, List[Tuple[int, float, float, float]]] = {e.id: [] for e in entities}
 
     def write_positions(f, entities, current_ts, force=False):
-        """Write positions - either immediately or buffered for 1Hz mode."""
+        """Write positions buffered for 1Hz mode."""
         nonlocal total_entries
-        if one_hz:
-            for entity in entities:
-                # Add current position to buffer
-                pos_buffers[entity.id].append((current_ts, entity.lat, entity.lon, entity.spd))
-                # Write when buffer has 10 positions or forced
-                if len(pos_buffers[entity.id]) >= 10 or force:
-                    if pos_buffers[entity.id]:
-                        write_log_entry_1hz(f, entity, pos_buffers[entity.id])
-                        total_entries += 1
-                        pos_buffers[entity.id] = []
-        else:
-            for entity in entities:
-                write_log_entry(f, entity, current_ts)
-                total_entries += 1
+        for entity in entities:
+            # Add current position to buffer
+            pos_buffers[entity.id].append((current_ts, entity.lat, entity.lon, entity.spd))
+            # Write when buffer has 10 positions or forced
+            if len(pos_buffers[entity.id]) >= 10 or force:
+                if pos_buffers[entity.id]:
+                    write_log_entry_1hz(f, entity, pos_buffers[entity.id])
+                    total_entries += 1
+                    pos_buffers[entity.id] = []
 
     with open(output_file, 'w') as f:
         for race_num in range(1, args.num_races + 1):
@@ -1207,8 +1191,7 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
                 current_ts += SIM_INTERVAL
 
             # Flush remaining buffered positions at end of phase
-            if one_hz:
-                write_positions(f, entities, current_ts, force=True)
+            write_positions(f, entities, current_ts, force=True)
             print(" done")
 
             # === RACING PHASE ===
@@ -1278,8 +1261,7 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
                     break
 
             # Flush remaining buffered positions at end of phase
-            if one_hz:
-                write_positions(f, entities, current_ts, force=True)
+            write_positions(f, entities, current_ts, force=True)
 
             race_duration = current_ts - race_start_ts
             print(f" done ({race_duration}s)")
@@ -1311,8 +1293,7 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
                     current_ts += SIM_INTERVAL
 
                 # Flush remaining buffered positions at end of phase
-                if one_hz:
-                    write_positions(f, entities, current_ts, force=True)
+                write_positions(f, entities, current_ts, force=True)
                 print(" done")
 
     # Calculate total simulated time
@@ -1444,8 +1425,6 @@ def main():
                         help="Mark rounding order, e.g., '1,2,3,1,2,1' (default: all marks in sequence)")
     parser.add_argument("--time-scale", type=float, default=100.0,
                         help="Speed multiplier for offline mode (default: 100)")
-    parser.add_argument("--one-hz", action="store_true",
-                        help="Generate 1Hz data with pos arrays (10 positions per entry)")
     parser.add_argument("--speed", type=float, default=12.0,
                         help="Average sailor speed in knots (default: 12, std dev: 20%%)")
 
@@ -1530,7 +1509,7 @@ def main():
     # Handle offline mode
     if args.offline:
         run_offline_simulation(args, entities, simulator, course_waypoints, mark_colors,
-                               wind_direction, start_loc, one_hz=args.one_hz)
+                               wind_direction, start_loc)
         return
 
     # Create socket
@@ -1543,31 +1522,23 @@ def main():
     last_update = start_time
     update_count = 0
 
-    # Separate 1Hz and regular entities
-    entities_1hz = [e for e in entities if e.is_1hz]
-    entities_regular = [e for e in entities if not e.is_1hz]
-
-    hz1_count = len(entities_1hz)
-    regular_count = len(entities_regular)
-    print(f"  1Hz entities: {hz1_count}")
-    print(f"  Regular entities: {regular_count}")
+    print(f"  Entities: {len(entities)} (all 1Hz)")
     print()
 
     try:
         while True:
             current_time = time.time()
-            dt = current_time - last_update
 
             # Check duration limit
             if args.duration > 0 and (current_time - start_time) >= args.duration:
                 print(f"\nDuration limit reached ({args.duration}s)")
                 break
 
-            # Update and accumulate positions for 1Hz entities (10 sub-updates)
+            # Update and accumulate positions for all entities (1Hz sub-updates)
             batch_size = int(args.delay)  # Number of 1Hz samples to collect
             for step in range(batch_size):
                 ts = int(current_time - args.delay + step + 1)  # Timestamps spread over interval
-                for entity in entities_1hz:
+                for entity in entities:
                     # Update position with 1-second dt
                     if entity.role == "sailor":
                         simulator.update_sailor(entity, 1.0)
@@ -1583,15 +1554,6 @@ def main():
                     if random.random() < 0.1:
                         entity.heart_rate = max(50, min(180, entity.heart_rate + random.randint(-3, 5)))
 
-            # Update regular entities with full dt
-            for entity in entities_regular:
-                if entity.role == "sailor":
-                    simulator.update_sailor(entity, dt)
-                elif entity.role == "support":
-                    simulator.update_support(entity, dt, sailors)
-                else:
-                    simulator.update_spectator(entity, dt)
-
             # Common updates for all entities
             for entity in entities:
                 # Simulate battery drain (very slow)
@@ -1603,19 +1565,12 @@ def main():
 
             last_update = current_time
 
-            # Send packets
-            acked = 0
-
             # Send 1Hz batch packets
-            for entity in entities_1hz:
+            acked = 0
+            for entity in entities:
                 if entity.pos_buffer:  # Only send if we have positions
                     if send_packet_1hz(sock, args.host, args.port, entity, args.password, args.eid):
                         acked += 1
-
-            # Send regular packets
-            for entity in entities_regular:
-                if send_packet(sock, args.host, args.port, entity, args.password, args.eid):
-                    acked += 1
 
             update_count += 1
 
@@ -1623,17 +1578,15 @@ def main():
                 print(f"[{update_count}] Sent {len(entities)} packets, {acked} ACKed")
                 for e in entities:
                     status = "⚠ ASSIST" if e.assist else ""
-                    mode = " [1Hz]" if e.is_1hz else ""
-                    hr_str = f" hr={e.heart_rate}" if e.is_1hz else ""
+                    hr_str = f" hr={e.heart_rate}"
                     lap_info = f" lap={e.current_lap} wp={e.current_waypoint_idx}" if e.course_waypoints else ""
-                    print(f"  {e.id} ({e.role}{mode}): {e.lat:.5f}, {e.lon:.5f} "
+                    print(f"  {e.id} ({e.role}): {e.lat:.5f}, {e.lon:.5f} "
                           f"spd={e.spd:.1f}kn hdg={e.hdg:.0f}° bat={e.battery}%{hr_str}{lap_info} {status}")
             else:
                 elapsed = int(current_time - start_time)
                 assist_count = sum(1 for e in entities if e.assist)
                 assist_str = f" [{assist_count} ASSIST]" if assist_count else ""
-                print(f"[{elapsed:4d}s] Update {update_count}: {acked}/{len(entities)} ACKed "
-                      f"({hz1_count} 1Hz, {regular_count} reg){assist_str}", end="\r")
+                print(f"[{elapsed:4d}s] Update {update_count}: {acked}/{len(entities)} ACKed{assist_str}", end="\r")
 
             time.sleep(args.delay)
 

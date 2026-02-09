@@ -75,12 +75,10 @@ struct WatchConfigView: View {
                     Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
                         .font(.caption2)
                         .foregroundColor(.white)
-                    if viewModel.highFrequencyMode {
-                        Text("1Hz")
-                            .font(.system(size: 10))
-                            .bold()
-                            .foregroundColor(.cyan)
-                    }
+                    Text("1Hz")
+                        .font(.system(size: 10))
+                        .bold()
+                        .foregroundColor(.cyan)
                 }
 
                 // Speed (always 0 when not tracking)
@@ -312,17 +310,6 @@ struct WatchSettingsView: View {
                         .cornerRadius(8)
                     }
                     .buttonStyle(.plain)
-                }
-
-                // 1Hz mode
-                Toggle(isOn: $viewModel.highFrequencyMode) {
-                    VStack(alignment: .leading) {
-                        Text("1Hz Mode")
-                            .font(.caption)
-                        Text("High frequency updates")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
                 }
 
                 // Heart rate

@@ -154,7 +154,7 @@ public actor TrackerService {
         }
 
         // Start location updates
-        locationManager.startUpdating(highFrequency: preferences.highFrequencyMode)
+        locationManager.startUpdating()
 
         // Start keepalive loop (sends GPS-wait packet whenever no position was sent recently)
         lastSendTime = nil
@@ -484,25 +484,20 @@ public actor TrackerService {
             updateStatusLine()  // Show "connecting ..."
         }
 
-        if preferences.highFrequencyMode {
-            // 1Hz mode - buffer positions and send every 10 seconds
-            positionBuffer.append(position)
+        // 1Hz mode - buffer positions and send every 10 seconds
+        positionBuffer.append(position)
 
-            // Send when we have accumulated enough time (10 seconds)
-            let shouldSend: Bool
-            if let lastSend = lastSendTime {
-                shouldSend = Date().timeIntervalSince(lastSend) >= 10.0
-            } else {
-                // First packet - send immediately for quick ACK
-                shouldSend = true
-            }
-
-            if shouldSend && !positionBuffer.isEmpty {
-                await sendPositionBatch()
-            }
+        // Send when we have accumulated enough time (10 seconds)
+        let shouldSend: Bool
+        if let lastSend = lastSendTime {
+            shouldSend = Date().timeIntervalSince(lastSend) >= 10.0
         } else {
-            // Standard mode - throttle to 10 seconds
-            await sendPosition(position, forceImmediate: false)
+            // First packet - send immediately for quick ACK
+            shouldSend = true
+        }
+
+        if shouldSend && !positionBuffer.isEmpty {
+            await sendPositionBatch()
         }
     }
 

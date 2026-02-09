@@ -31,7 +31,6 @@ public class TrackerViewModel: ObservableObject {
     @Published public var role: TrackerRole
     @Published public var password: String
     @Published public var eventId: Int
-    @Published public var highFrequencyMode: Bool
     @Published public var trackerBeep: Bool
 
     // MARK: - HealthKit
@@ -71,7 +70,6 @@ public class TrackerViewModel: ObservableObject {
         self.role = preferences.role
         self.password = preferences.password
         self.eventId = preferences.eventId
-        self.highFrequencyMode = preferences.highFrequencyMode
         self.trackerBeep = preferences.trackerBeep
 
         setupBindings()
@@ -125,13 +123,6 @@ public class TrackerViewModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] value in
                 self?.preferences.eventId = value
-            }
-            .store(in: &cancellables)
-
-        $highFrequencyMode
-            .dropFirst()
-            .sink { [weak self] value in
-                self?.preferences.highFrequencyMode = value
             }
             .store(in: &cancellables)
 

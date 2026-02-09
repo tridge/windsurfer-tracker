@@ -64,12 +64,10 @@ struct WatchTrackingView: View {
                     Text(viewModel.sailorId)
                         .font(.caption2)
                         .foregroundColor(.white)
-                    if viewModel.highFrequencyMode {
-                        Text("1Hz")
-                            .font(.system(size: 10))
-                            .bold()
-                            .foregroundColor(.cyan)
-                    }
+                    Text("1Hz")
+                        .font(.system(size: 10))
+                        .bold()
+                        .foregroundColor(.cyan)
                 }
 
                 // Show countdown when active, otherwise show speed or stopwatch

@@ -40,7 +40,6 @@ fun SettingsScreen(
     var serverHost by remember { mutableStateOf(settings.serverHost) }
     var sailorId by remember { mutableStateOf(settings.sailorId) }
     var password by remember { mutableStateOf(settings.password) }
-    var highFrequencyMode by remember { mutableStateOf(settings.highFrequencyMode) }
     var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
     var trackerBeep by remember { mutableStateOf(settings.trackerBeep) }
     var raceTimerEnabled by remember { mutableStateOf(settings.raceTimerEnabled) }
@@ -262,22 +261,6 @@ fun SettingsScreen(
                         colors = ChipDefaults.secondaryChipColors()
                     )
                 }
-            }
-
-            // 1Hz Mode Toggle
-            item {
-                ToggleChip(
-                    checked = highFrequencyMode,
-                    onCheckedChange = { highFrequencyMode = it },
-                    label = { Text("1Hz Race Mode") },
-                    secondaryLabel = { Text(if (highFrequencyMode) "On" else "Off", fontSize = 10.sp) },
-                    toggleControl = {
-                        Switch(checked = highFrequencyMode)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .padding(top = 8.dp)
-                )
             }
 
             // Heart Rate Toggle
@@ -502,7 +485,6 @@ fun SettingsScreen(
                                     role = roles[selectedRoleIndex],
                                     password = password,
                                     eventId = selectedEventId,
-                                    highFrequencyMode = highFrequencyMode,
                                     heartRateEnabled = heartRateEnabled,
                                     trackerBeep = trackerBeep,
                                     raceTimerEnabled = raceTimerEnabled,

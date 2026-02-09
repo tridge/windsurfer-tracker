@@ -549,7 +549,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             putExtra("server_port", serverPort)
             putExtra("role", prefs.getString("role", "sailor"))
             putExtra("password", prefs.getString("password", ""))
-            putExtra("high_frequency_mode", prefs.getBoolean("high_frequency_mode", true))
         }
 
         ContextCompat.startForegroundService(this, intent)
@@ -609,10 +608,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             // Show sailor ID and frequency mode indicator
             val prefs = getPrefs()
             val sailorId = prefs.getString("sailor_id", "S01") ?: "S01"
-            val highFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
             binding.tvSailorId.text = sailorId
             binding.tvSailorId.visibility = View.VISIBLE
-            binding.tv1HzIndicator.text = if (highFrequencyMode) "1Hz" else "0.1Hz"
+            binding.tv1HzIndicator.text = "1Hz"
             binding.tv1HzIndicator.visibility = View.VISIBLE
 
             // Update live tracking link for active screen
@@ -922,21 +920,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         // Initial fetch
         fetchEvents()
 
-        // 1Hz mode checkbox
-        val highFrequencyCheckbox = android.widget.CheckBox(this).apply {
-            text = "1Hz Mode"
-            isChecked = prefs.getBoolean("high_frequency_mode", true)
-            setTextColor(0xFF000000.toInt())
-            textSize = 14f
-            setPadding(0, 24, 0, 0)
-        }
-        val highFrequencyHint = android.widget.TextView(this).apply {
-            text = "Send positions at 1Hz as batched arrays. Higher battery usage."
-            setTextColor(0xFF666666.toInt())
-            textSize = 12f
-            setPadding(48, 0, 0, 16)
-        }
-
         // Tracking buzz checkbox
         val trackerBeepCheckbox = android.widget.CheckBox(this).apply {
             text = "Tracking Buzz"
@@ -995,8 +978,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(eventLabel)
         layout.addView(eventSpinner)
         layout.addView(eventLoadingText)
-        layout.addView(highFrequencyCheckbox)
-        layout.addView(highFrequencyHint)
         layout.addView(trackerBeepCheckbox)
         layout.addView(trackerBeepHint)
         layout.addView(autoStartCheckbox)
@@ -1024,7 +1005,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val oldServerPort = prefs.getInt("server_port", TrackerService.DEFAULT_SERVER_PORT)
         val oldEventId = prefs.getInt("event_id", 2)
         val oldPassword = prefs.getString("password", "") ?: ""
-        val oldHighFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
 
         // Wrap layout in ScrollView to make it scrollable
         val scrollView = android.widget.ScrollView(this).apply {
@@ -1070,7 +1050,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     // Function to save settings (called directly or after password check)
                     fun saveSettings() {
                         // Validation passed, save settings
-                        val newHighFrequencyMode = highFrequencyCheckbox.isChecked
                         val newTrackerBeep = trackerBeepCheckbox.isChecked
                         val newAutoStartOnBoot = autoStartCheckbox.isChecked
                         val newRole = roleValues[selectedRoleIndex]
@@ -1084,7 +1063,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putInt("server_port", newServerPort)
                             putInt("event_id", selectedEventId)
                             putString("password", password)
-                            putBoolean("high_frequency_mode", newHighFrequencyMode)
                             putBoolean("tracker_beep", newTrackerBeep)
                             putBoolean("auto_start_on_boot", newAutoStartOnBoot)
                             // Save password per event for quick switching
@@ -1102,7 +1080,6 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putString("role", newRole)
                             putString("server_host", newServerHost)
                             putInt("server_port", newServerPort)
-                            putBoolean("high_frequency_mode", newHighFrequencyMode)
                             commit()
                         }
                         // Update the idle screen display to keep it in sync
@@ -1116,8 +1093,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             newServerHost != oldServerHost ||
                             newServerPort != oldServerPort ||
                             selectedEventId != oldEventId ||
-                            password != oldPassword ||
-                            newHighFrequencyMode != oldHighFrequencyMode
+                            password != oldPassword
 
                         if (isTracking && settingsChanged) {
                             Toast.makeText(this@MainActivity, "Restarting tracking with new settings...", Toast.LENGTH_SHORT).show()

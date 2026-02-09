@@ -99,16 +99,8 @@ struct SettingsView: View {
                     }
                 }
 
-                // Advanced Section - 1Hz mode option
+                // Advanced Section
                 Section("Advanced") {
-                    Toggle("1Hz Mode", isOn: $viewModel.highFrequencyMode)
-
-                    if viewModel.highFrequencyMode {
-                        Text("Sends 10 positions per packet for higher precision")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-
                     Toggle("Tracking Buzz", isOn: $viewModel.trackerBeep)
 
                     Text("Vibrates each minute to remind you the tracker is running")

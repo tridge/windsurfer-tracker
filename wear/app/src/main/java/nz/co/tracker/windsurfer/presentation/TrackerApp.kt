@@ -58,7 +58,6 @@ fun TrackerApp(
                     sailorId = settings.sailorId,
                     eventName = eventName,
                     errorMessage = errorMessage,
-                    highFrequencyMode = settings.highFrequencyMode,
                     countdownSeconds = countdownSeconds,
                     raceTimerEnabled = settings.raceTimerEnabled,
                     raceTimerMinutes = settings.raceTimerMinutes,

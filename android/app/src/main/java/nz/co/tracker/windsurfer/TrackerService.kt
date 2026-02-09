@@ -76,9 +76,8 @@ class TrackerService : LifecycleService() {
     private var sailorId: String = ""
     private var role: String = "sailor"  // sailor, support, spectator
     // Note: password is read from SharedPreferences on each send to pick up changes immediately
-    private var highFrequencyMode: Boolean = true  // 1Hz mode - send positions as array
 
-    // 1Hz mode position buffer: [[ts, lat, lon, spd], ...]
+    // 1Hz position buffer: [[ts, lat, lon, spd], ...]
     private data class BufferedPosition(val ts: Long, val lat: Double, val lon: Double, val spd: Double)
     private val positionBuffer = mutableListOf<BufferedPosition>()
     private var lastBufferedLocation: Location? = null
@@ -349,8 +348,6 @@ class TrackerService : LifecycleService() {
             sailorId = intent.getStringExtra("sailor_id") ?: ""
             role = intent.getStringExtra("role") ?: "sailor"
             // Password is read from SharedPreferences on each send (not cached)
-            highFrequencyMode = intent.getBooleanExtra("high_frequency_mode", true)
-            // Clear position buffer when mode changes
             positionBuffer.clear()
             firstPacketSent = false  // Reset when buffer cleared
         } else {
@@ -360,7 +357,6 @@ class TrackerService : LifecycleService() {
             serverPort = prefs.getInt("server_port", DEFAULT_SERVER_PORT)
             sailorId = prefs.getString("sailor_id", "") ?: ""
             role = prefs.getString("role", "sailor") ?: "sailor"
-            highFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
             Log.w(TAG, "Service restarted with null intent, recovered config from prefs: id=$sailorId")
         }
         
@@ -520,26 +516,22 @@ class TrackerService : LifecycleService() {
             updateStatusLine()  // Show "connecting ..."
         }
 
-        if (highFrequencyMode) {
-            // Buffer position for batched sending
-            val ts = System.currentTimeMillis() / 1000
-            val speedKnots = if (location.hasSpeed() && location.speed > 0) {
-                (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
-            } else 0.0
-            positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
-            lastBufferedLocation = location
+        // Buffer position for batched sending (1Hz mode)
+        val ts = System.currentTimeMillis() / 1000
+        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+            (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
+        } else 0.0
+        positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
+        lastBufferedLocation = location
 
-            // Send first packet immediately to get quick ACK, then batch every 10 positions
-            if (!firstPacketSent && positionBuffer.size >= 1) {
-                // First GPS lock - send immediately (even if only 1 position)
-                sendPositionArray()
-                firstPacketSent = true
-            } else if (positionBuffer.size >= 10) {
-                // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
-                sendPositionArray()
-            }
-        } else {
-            sendPosition(location)
+        // Send first packet immediately to get quick ACK, then batch every 10 positions
+        if (!firstPacketSent && positionBuffer.size >= 1) {
+            // First GPS lock - send immediately (even if only 1 position)
+            sendPositionArray()
+            firstPacketSent = true
+        } else if (positionBuffer.size >= 10) {
+            // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
+            sendPositionArray()
         }
     }
     
@@ -574,7 +566,7 @@ class TrackerService : LifecycleService() {
         firstPacketSent = false  // Reset for new session to send first packet immediately
         updateStatusLine()  // Show "GPS wait"
 
-        Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
+        Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId")
 
         // Record starting battery for drain rate calculation
         trackingStartTime = System.currentTimeMillis()
@@ -603,7 +595,7 @@ class TrackerService : LifecycleService() {
         }
 
         // Start location updates using native LocationManager (works during Direct Boot)
-        val intervalMs = if (highFrequencyMode) 1000L else LOCATION_INTERVAL_MS
+        val intervalMs = 1000L
 
         try {
             // Use GPS_PROVIDER directly - doesn't require Google Play Services

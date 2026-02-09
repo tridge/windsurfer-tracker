@@ -47,7 +47,6 @@ class BootReceiver : BroadcastReceiver() {
                 val sailorId = prefs.getString("sailor_id", "") ?: ""
                 val role = prefs.getString("role", "sailor")
                 val password = prefs.getString("password", "") ?: ""
-                val highFrequencyMode = prefs.getBoolean("high_frequency_mode", true)
 
                 // Don't start if sailorId or password is empty
                 if (sailorId.isEmpty() || password.isEmpty()) {
@@ -67,7 +66,6 @@ class BootReceiver : BroadcastReceiver() {
                     putExtra("sailor_id", sailorId)
                     putExtra("role", role)
                     putExtra("password", password)
-                    putExtra("high_frequency_mode", highFrequencyMode)
                 }
 
                 try {

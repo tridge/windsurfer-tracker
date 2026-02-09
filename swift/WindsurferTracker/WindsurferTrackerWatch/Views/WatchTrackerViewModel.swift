@@ -54,10 +54,6 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         didSet { preferences.role = role }
     }
 
-    @Published public var highFrequencyMode: Bool {
-        didSet { preferences.highFrequencyMode = highFrequencyMode }
-    }
-
     @Published public var heartRateEnabled: Bool {
         didSet { preferences.heartRateEnabled = heartRateEnabled }
     }
@@ -134,7 +130,6 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         self.sailorId = prefs.sailorId
         self.serverHost = prefs.serverHost
         self.role = prefs.role
-        self.highFrequencyMode = prefs.highFrequencyMode
         self.heartRateEnabled = prefs.heartRateEnabled
         self.password = prefs.password
         self.eventId = prefs.eventId

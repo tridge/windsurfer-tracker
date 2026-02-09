@@ -443,7 +443,6 @@ class MainActivity : ComponentActivity() {
             putExtra("role", currentSettings.role)
             putExtra("password", currentSettings.password)
             putExtra("event_id", currentSettings.eventId)
-            putExtra("high_frequency_mode", currentSettings.highFrequencyMode)
             putExtra("heart_rate_enabled", currentSettings.heartRateEnabled)
             putExtra("tracker_beep", currentSettings.trackerBeep)
             putExtra("race_timer_enabled", currentSettings.raceTimerEnabled)

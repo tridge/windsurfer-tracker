@@ -89,7 +89,6 @@ class TrackerService : LifecycleService() {
     private var role: String = "sailor"
     private var password: String = ""
     private var eventId: Int = 2  // Event ID for multi-event support
-    private var highFrequencyMode: Boolean = true
     private var heartRateEnabled: Boolean = false
     private var raceTimerEnabled: Boolean = false
     private var raceTimerMinutes: Int = 5
@@ -412,7 +411,6 @@ class TrackerService : LifecycleService() {
             role = it.getStringExtra("role") ?: "sailor"
             password = it.getStringExtra("password") ?: ""
             eventId = it.getIntExtra("event_id", 2)
-            highFrequencyMode = it.getBooleanExtra("high_frequency_mode", true)
             heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
             trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
             raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)
@@ -679,21 +677,17 @@ class TrackerService : LifecycleService() {
                         updateStatusLine()  // Show "connecting ..."
                     }
 
-                    if (highFrequencyMode) {
-                        // Buffer position for batched sending
-                        val ts = System.currentTimeMillis() / 1000
-                        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
-                            (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
-                        } else 0.0
-                        positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
-                        lastBufferedLocation = location
+                    // Buffer position for batched sending (1Hz mode)
+                    val ts = System.currentTimeMillis() / 1000
+                    val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+                        (location.speed * 1.94384 * 10).toInt() / 10.0  // Round to 1 decimal
+                    } else 0.0
+                    positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
+                    lastBufferedLocation = location
 
-                        // Send every 10 positions (10 seconds at 1Hz)
-                        if (positionBuffer.size >= 10) {
-                            sendPositionArray()
-                        }
-                    } else {
-                        sendPosition(location)
+                    // Send every 10 positions (10 seconds at 1Hz)
+                    if (positionBuffer.size >= 10) {
+                        sendPositionArray()
                     }
 
                     // Refresh ongoing activity text with elapsed tracking time
@@ -844,7 +838,7 @@ class TrackerService : LifecycleService() {
             }
         }
 
-        Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId (1Hz mode: $highFrequencyMode)")
+        Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId")
 
         // Request standalone network (LTE/WiFi) before creating socket
         requestStandaloneNetwork()
@@ -870,8 +864,7 @@ class TrackerService : LifecycleService() {
             }
         }
 
-        // Use 1 second interval for 1Hz mode, 10 seconds otherwise
-        val intervalMs = if (highFrequencyMode) 1000L else LOCATION_INTERVAL_MS
+        val intervalMs = 1000L
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
             .setMinUpdateIntervalMillis(intervalMs / 2)
             .build()

@@ -101,9 +101,8 @@ public final class LocationManager: NSObject, ObservableObject {
 
     // MARK: - Location Updates
 
-    /// Start location updates
-    /// - Parameter highFrequency: If true, updates come at 1Hz; otherwise throttled to 10 seconds
-    public func startUpdating(highFrequency: Bool = true) {
+    /// Start location updates at 1Hz
+    public func startUpdating() {
         guard hasTrackingAuthorization else {
             errorPublisher.send(TrackerError.locationPermissionDenied)
             return
@@ -131,15 +130,8 @@ public final class LocationManager: NSObject, ObservableObject {
         }
         #endif
 
-        if highFrequency {
-            // 1Hz mode - get updates as fast as possible
-            locationManager.desiredAccuracy = kCLLocationAccuracyBest
-            locationManager.distanceFilter = kCLDistanceFilterNone
-        } else {
-            // Standard mode - still get fast updates but we'll throttle sending
-            locationManager.desiredAccuracy = kCLLocationAccuracyBest
-            locationManager.distanceFilter = kCLDistanceFilterNone
-        }
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = kCLDistanceFilterNone
 
         locationManager.startUpdatingLocation()
 
@@ -149,8 +141,7 @@ public final class LocationManager: NSObject, ObservableObject {
         // and simctl location set only provides a one-time location
         DispatchQueue.main.async { [weak self] in
             self?.locationTimer?.invalidate()
-            let interval = highFrequency ? 1.0 : 10.0
-            self?.locationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.locationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
                 // Stop and restart to force new location delivery
                 self?.locationManager.stopUpdatingLocation()
                 self?.locationManager.startUpdatingLocation()
