@@ -867,7 +867,7 @@ class PositionTracker:
 
             # Write current positions file (no log entry, no tail update)
             if self.positions_file:
-                write_current_positions(self.current_positions, self.positions_file, _user_overrides, self.position_tails)
+                write_current_positions(self.current_positions, self.positions_file, user_overrides or _user_overrides, self.position_tails)
 
             return True
 
@@ -969,7 +969,7 @@ class PositionTracker:
 
             # Write current positions file
             if self.positions_file:
-                write_current_positions(self.current_positions, self.positions_file, _user_overrides, self.position_tails)
+                write_current_positions(self.current_positions, self.positions_file, user_overrides or _user_overrides, self.position_tails)
 
             # Write to daily track log (unless skip_log is True, e.g., for batch entries)
             if self.daily_logger and not skip_log:

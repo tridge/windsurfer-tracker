@@ -3,7 +3,7 @@
 import json
 import time
 
-from conftest import create_event, make_packet
+from conftest import create_event, make_packet, make_idle_packet
 
 
 def test_set_user_override(http_client):
@@ -82,6 +82,28 @@ def test_override_applies_to_positions(udp_client, http_client, server):
     data = json.loads(pos_file.read_text())
     assert data["sailors"]["OVR01"]["name"] == "Override Name"
     assert data["sailors"]["OVR01"]["displayid"] == "Override Name"
+
+
+def test_override_applies_to_idle_positions(udp_client, http_client, server):
+    """Override should appear in current_positions.json for idle trackers too."""
+    eid = create_event(http_client, name="Override Idle", admin_password="overrideidle")
+
+    # Set override
+    http_client.post(
+        f"/api/event/{eid}/admin/user/IDLE01",
+        data={"name": "Idle Name"},
+        headers={"X-Admin-Password": "overrideidle"},
+    )
+
+    # Send an idle packet
+    pkt = make_idle_packet(eid=eid, id="IDLE01")
+    udp_client.send_position(pkt)
+    time.sleep(0.3)
+
+    pos_file = server.data_dir / "html" / str(eid) / "current_positions.json"
+    data = json.loads(pos_file.read_text())
+    assert data["sailors"]["IDLE01"]["name"] == "Idle Name"
+    assert data["sailors"]["IDLE01"]["displayid"] == "Idle Name"
 
 
 def test_override_requires_admin_auth(http_client):
