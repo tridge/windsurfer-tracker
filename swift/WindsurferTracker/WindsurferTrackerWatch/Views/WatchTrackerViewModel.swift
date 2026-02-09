@@ -226,8 +226,14 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                // Use full stopTracking to clean up workout, timers, etc.
-                self.stopTracking()
+                // Clean up UI without calling TrackerService.stop() again
+                // (TrackerService already handled the stop/idle transition)
+                self.stopBeepTimer()
+                self.stopTapDetection()
+                Task {
+                    await self.stopWorkoutSession()
+                    HeartRateMonitor.shared.stopMonitoring()
+                }
                 self.errorMessage = "Stopped by admin"
             }
             .store(in: &cancellables)

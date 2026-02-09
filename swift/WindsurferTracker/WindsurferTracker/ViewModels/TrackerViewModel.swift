@@ -415,9 +415,12 @@ public class TrackerViewModel: ObservableObject {
         // Cancel any existing timer
         beepTimer?.invalidate()
 
+        NSLog("BEEP: startBeepTimer called")
+
         // Schedule beep every 60 seconds (first beep after 60 seconds)
         beepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
+                NSLog("BEEP: timer fired")
                 self?.playTrackerBeep()
             }
         }
@@ -426,15 +429,20 @@ public class TrackerViewModel: ObservableObject {
     }
 
     private func stopBeepTimer() {
+        NSLog("BEEP: stopBeepTimer called")
         beepTimer?.invalidate()
         beepTimer = nil
     }
 
     private func playTrackerBeep() {
-        guard preferences.trackerBeep else { return }
+        guard preferences.trackerBeep else {
+            NSLog("BEEP: trackerBeep pref is OFF, skipping")
+            return
+        }
 
         Task {
             let hasRecentAck = await TrackerService.shared.hasRecentAck
+            NSLog("BEEP: vibrating, hasRecentAck=%d", hasRecentAck ? 1 : 0)
 
             if hasRecentAck {
                 // One vibration - connection OK
