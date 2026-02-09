@@ -1344,6 +1344,17 @@ class TrackerService : LifecycleService() {
                     val ack = JSONObject(response)
                     val ackSeq = ack.optInt("ack", -1)
                     
+                    // Handle proactive commands (ack==0, sent proactively by server)
+                    val isProactive = ack.optBoolean("proactive", false)
+                    if (isProactive) {
+                        val cmd = ack.optString("cmd", "")
+                        if (cmd.isNotEmpty()) {
+                            Log.w(TAG, "Received proactive $cmd command from server")
+                            handleRemoteCommand(cmd)
+                        }
+                        continue
+                    }
+
                     if (ackSeq > 0) {
                         // Check for auth error
                         val error = ack.optString("error", "")
@@ -1408,44 +1419,10 @@ class TrackerService : LifecycleService() {
                             idleIntervalMs = interval * 1000L
                         }
 
-                        // Check for remote commands
+                        // Check for remote commands in normal ACK
                         val cmd = ack.optString("cmd", "")
-                        if (cmd == "stop") {
-                            Log.w(TAG, "Received remote STOP command from server")
-                            // Send stop packet to server, then notify UI and stop
-                            requestGracefulStop {
-                                Handler(Looper.getMainLooper()).post {
-                                    statusListener?.onRemoteStop()
-                                }
-                            }
-                        } else if (cmd == "cancel_assist") {
-                            Log.w(TAG, "Received remote CANCEL ASSIST command from server")
-                            // Cancel assist as if user cancelled it
-                            assistRequested.set(false)
-                            Handler(Looper.getMainLooper()).post {
-                                statusListener?.onRemoteCancelAssist()
-                            }
-                        } else if (cmd == "start") {
-                            if (isIdleMode.get()) {
-                                Log.w(TAG, "Received remote START command from server")
-                                // Start tracking directly from the service (don't go through Activity intent flow)
-                                Handler(Looper.getMainLooper()).post {
-                                    startTracking()
-                                    statusListener?.onRemoteStart()
-                                }
-                            } else {
-                                Log.d(TAG, "Ignoring start command - already actively tracking")
-                            }
-                        } else if (cmd == "shutdown") {
-                            if (isIdleMode.get()) {
-                                Log.w(TAG, "Received remote SHUTDOWN command from server")
-                                Handler(Looper.getMainLooper()).post {
-                                    exitIdleMode()
-                                    statusListener?.onRemoteShutdown()
-                                }
-                            } else {
-                                Log.d(TAG, "Ignoring shutdown command - actively tracking")
-                            }
+                        if (cmd.isNotEmpty()) {
+                            handleRemoteCommand(cmd)
                         }
 
                         Log.d(TAG, "Received ACK for seq=$ackSeq")
@@ -1475,6 +1452,46 @@ class TrackerService : LifecycleService() {
     
     fun getLastLocation(): Location? = lastLocation
     
+    /**
+     * Handle a remote command from the server (from normal ACK or proactive push).
+     */
+    private fun handleRemoteCommand(cmd: String) {
+        if (cmd == "stop") {
+            Log.w(TAG, "Received remote STOP command from server")
+            requestGracefulStop {
+                Handler(Looper.getMainLooper()).post {
+                    statusListener?.onRemoteStop()
+                }
+            }
+        } else if (cmd == "cancel_assist") {
+            Log.w(TAG, "Received remote CANCEL ASSIST command from server")
+            assistRequested.set(false)
+            Handler(Looper.getMainLooper()).post {
+                statusListener?.onRemoteCancelAssist()
+            }
+        } else if (cmd == "start") {
+            if (isIdleMode.get()) {
+                Log.w(TAG, "Received remote START command from server")
+                Handler(Looper.getMainLooper()).post {
+                    startTracking()
+                    statusListener?.onRemoteStart()
+                }
+            } else {
+                Log.d(TAG, "Ignoring start command - already actively tracking")
+            }
+        } else if (cmd == "shutdown") {
+            if (isIdleMode.get()) {
+                Log.w(TAG, "Received remote SHUTDOWN command from server")
+                Handler(Looper.getMainLooper()).post {
+                    exitIdleMode()
+                    statusListener?.onRemoteShutdown()
+                }
+            } else {
+                Log.d(TAG, "Ignoring shutdown command - actively tracking")
+            }
+        }
+    }
+
     fun getAckRate(): Float {
         val window = ackWindow.toList()
         if (window.isEmpty()) return 0f
