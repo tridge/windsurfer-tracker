@@ -53,6 +53,12 @@ public actor DNSResolver {
                 return (cached.host, cached.isIPv6)
             }
 
+            // Hardcoded fallback for wstracker.org when DNS is unavailable
+            if hostname == "wstracker.org" {
+                print("[DNS] DNS failed, using hardcoded fallback \(TrackerConfig.wstrackerOrgIPv4) for wstracker.org")
+                return (NWEndpoint.Host(TrackerConfig.wstrackerOrgIPv4), false)
+            }
+
             // Fall back to using hostname directly
             return (NWEndpoint.Host(hostname), false)
         }

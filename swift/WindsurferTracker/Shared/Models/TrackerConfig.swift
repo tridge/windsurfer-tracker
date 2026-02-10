@@ -5,6 +5,7 @@ public enum TrackerConfig {
     // MARK: - Server Defaults
     public static let defaultServerHost = "wstracker.org"
     public static let defaultServerPort: UInt16 = 41234
+    public static let wstrackerOrgIPv4 = "103.230.158.49"
 
     // MARK: - Timing
     public static let locationIntervalSeconds: TimeInterval = 10
