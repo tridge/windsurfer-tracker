@@ -23,7 +23,6 @@ This document describes the UI design for the Windsurfer Tracker mobile apps. Us
 - Connection Fair: Dark orange (`#CC6600` / rgb 204,102,0)
 - Connection Poor: Dark red (`#CC0000` / rgb 204,0,0)
 - Event name: Teal blue (`#0066AA` / rgb 0,102,170)
-- Frequency mode: Cyan (`#00AAAA` / rgb 0,170,170)
 
 ### Assist Button
 - Inactive: Green (`#00FF00`), black text
@@ -35,7 +34,7 @@ This document describes the UI design for the Windsurfer Tracker mobile apps. Us
 
 ## Screen: Configuration (Pre-Tracking)
 
-Shown when tracking is not active. Simple form to enter basic settings.
+Shown when tracking is not active (and not in idle mode). Simple form to enter basic settings.
 
 ### Layout (top to bottom)
 
@@ -54,16 +53,20 @@ Shown when tracking is not active. Simple form to enter basic settings.
    - Font: body size
    - No autocapitalization, no autocorrect
 
-3. **Location Permission Warning** (conditional)
+3. **Live Tracking Link**
+   - Tappable URL: `https://{server}/event.html?eid={eventId}`
+   - Opens in system browser
+
+4. **Location Permission Warning** (conditional)
    - Shown only when location permission not granted
    - Orange warning icon + text
    - "Location permission required"
    - "Tap 'Start Tracking' to grant permission"
    - Light orange background
 
-4. **Spacer**
+5. **Spacer**
 
-5. **Start Tracking Button**
+6. **Start Tracking Button**
    - Full width
    - Text: "Start Tracking"
    - Font: title3, bold
@@ -71,7 +74,7 @@ Shown when tracking is not active. Simple form to enter basic settings.
    - Background: light gray (#DEDEDE)
    - Corner radius: 4px
 
-6. **Settings Button**
+7. **Settings Button**
    - Full width
    - Text: "Settings"
    - Font: body
@@ -97,30 +100,29 @@ Shown when tracking is active. Displays current position and status.
    - Font: headline, bold
    - Color: Red for "auth failure", Teal blue (#0066AA) otherwise
 
-2. **Frequency Mode**
-   - Text: "1Hz MODE" or "0.1Hz MODE"
-   - Font: caption, bold
-   - Color: Cyan (#00AAAA)
-
-3. **Position Section**
+2. **Position Section**
    - Label: "Position" (caption, bold, dark gray)
    - Value: Formatted lat/lon (e.g., "-36.84850 174.76330")
    - Font: 18pt monospaced
    - Placeholder when no position: "---.----- ----.-----"
 
-4. **Speed and Course Row** (two columns)
+3. **Speed, Distance, and Course Row** (three columns)
    - **Speed Column**
      - Label: "Speed" (caption, bold, dark gray)
      - Value: Speed in knots with "kn" suffix (e.g., "12.5 kn")
      - Font: 26pt monospaced
      - Placeholder: "-- kn"
+   - **Distance Column**
+     - Label: "Distance" (caption, bold, dark gray)
+     - Value: Distance in km or m (e.g., "2.3 km" or "450 m")
+     - Font: 26pt monospaced
    - **Course Column**
      - Label: "Course" (caption, bold, dark gray)
-     - Value: Heading in degrees (e.g., "275°")
+     - Value: Heading in degrees (e.g., "275")
      - Font: 26pt monospaced
-     - Placeholder: "---°"
+     - Placeholder: "---"
 
-5. **Connection Status Row** (three columns)
+4. **Connection Status Row** (three columns)
    - **Connection Column**
      - Label: "Connection" (caption, bold, dark gray)
      - Value: ACK rate percentage (e.g., "85%")
@@ -136,20 +138,43 @@ Shown when tracking is active. Displays current position and status.
      - Font: 16pt monospaced
      - Placeholder: "--:--:--"
 
-6. **Spacer**
+5. **Spacer**
 
-7. **Assist Button**
+6. **Assist Button**
    - Large, prominent button (min 80px, max 120px height)
    - See Assist Button section below
+   - Can be hidden per-event (server sends `assist: false`)
 
-8. **Spacer**
+7. **Spacer**
 
-9. **Stop Tracking Button**
+8. **Stop Tracking Button**
    - Same style as Start button
    - Shows confirmation dialog before stopping
 
-10. **Settings Button**
-    - Same style as config screen
+9. **Settings Button**
+   - Same style as config screen
+
+---
+
+## Screen: Idle Mode
+
+Shown after user stops tracking when server has idle mode enabled. The service stays running in the background sending periodic heartbeats.
+
+### Layout
+- **Status**: "Idle - waiting for admin start"
+- **Notification**: Foreground service notification showing idle state
+- **Behavior**: No GPS active, periodic heartbeat packets sent at server-configured interval
+- **Exit conditions**:
+  - User taps "Start Tracking" to resume tracking
+  - Admin sends `start` command via WebUI
+  - Admin sends `shutdown` command via WebUI
+  - Server sends `idle=0` in ACK
+
+### Android Boot-to-Idle
+- Android supports auto-start on boot via `BootReceiver`
+- On boot, service starts in idle mode (no GPS, sends heartbeats)
+- Admin can remotely start tracking via WebUI
+- Uses Direct Boot for device-encrypted storage access before unlock
 
 ---
 
@@ -234,6 +259,7 @@ Full settings configuration, presented as a modal sheet.
 - If loading: Show "Loading events..." with spinner
 - If no events: Show manual Event ID field + Refresh button
 - Default event ID: **2**
+- Passwords are cached per-event for quick switching
 
 #### Authentication Section
 - **Password**
@@ -244,12 +270,12 @@ Full settings configuration, presented as a modal sheet.
 - **Show Password** toggle
 
 #### Advanced Section
-- **1Hz Mode** toggle
-- When enabled, show helper text: "Sends 10 positions per packet for higher precision"
+- **Tracker Beep** toggle (default: ON)
+  - Vibrates once per minute when tracking (one buzz = connected, two buzzes = no connection)
 
 #### Version Section
 - Display: "X.Y.Z (build) githash"
-- Example: "1.9.3 (33) abc1234"
+- Example: "1.10.21 (97) abc1234"
 - Gray text, right-aligned
 - **iOS/Swift**: Uses `CFBundleShortVersionString`, `CFBundleVersion`, and `GIT_HASH` from Info.plist
 - **Android/Kotlin**: Uses `versionName`, `versionCode`, and `BuildConfig.GIT_HASH`
@@ -274,15 +300,45 @@ Simplified interface for Apple Watch / Wear OS.
 - Status indicator: colored dot + "TRACKING" or "ASSIST"
 - **Speed display** (very large, 42pt monospaced)
 - Unit label: "kts"
+- **Distance display** (below speed)
 - Status pills row: battery + connection indicators
 - Assist button (compact)
 - Stop button
+
+### Race Countdown Timer (watchOS/WearOS)
+- 5-minute countdown with audio announcements
+- Tap detection for start trigger
+- watchOS: Action button support
 
 ### Watch Settings
 - Your ID field
 - Server field
 - Role picker
-- 1Hz Mode toggle
+
+---
+
+## Notification & Lock Screen
+
+### Android
+- Foreground service notification with custom icon
+- Icon changes based on connection status (OK vs error)
+- Shows "Tracking active", "Tracking - no connection", or "Idle - waiting for admin start"
+
+### iOS
+- Live Activities (iOS 16.1+) showing tracking status on lock screen
+- Widget extension for Dynamic Island and lock screen
+
+---
+
+## WebUI Sidebar
+
+The sidebar shows all tracked devices with:
+- Name and ID
+- Speed, battery, signal strength, satellite count
+- Time since last update
+- Status badges: IDLE (blue), NOGPS (orange), STOP (red)
+- Green lightning bolt when charging
+- Power saver/battery optimization warnings
 
 ---
 
@@ -291,7 +347,7 @@ Simplified interface for Apple Watch / Wear OS.
 | Element | Size | Weight | Design |
 |---------|------|--------|--------|
 | Position value | 18pt | Regular | Monospaced |
-| Speed/Course value | 26pt | Regular | Monospaced |
+| Speed/Course/Distance value | 26pt | Regular | Monospaced |
 | Connection % | 20pt | Regular | Default |
 | ACK/Updated values | 16pt | Regular | Monospaced (Updated) |
 | Field labels | Caption | Bold | Default |
@@ -340,9 +396,10 @@ Simplified interface for Apple Watch / Wear OS.
 When user stops tracking:
 1. Client sends final position packet with `stopped: true` flag
 2. Server clears any active assist request for this tracker
-3. Server marks position as stopped (shown as "STOPPED" in WebUI)
+3. Server marks position as stopped (shown as "STOP" in WebUI)
 4. Retry up to 5 times with 500ms delays to ensure delivery
-5. Clean up local state after stop packet sent (or after retries exhausted)
+5. If server has idle mode enabled (idle interval > 0), client enters idle mode
+6. If idle mode disabled, clean up and stop service
 
 ---
 
