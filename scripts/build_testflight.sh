@@ -46,18 +46,23 @@ echo "=== Getting provisioning profile UUIDs ==="
 # Get profile names from the mobileprovision files
 IOS_PP_NAME=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print Name' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTracker2.mobileprovision)")
 WATCH_PP_NAME=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print Name' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTrackerWatch.mobileprovision)")
+WIDGET_PP_NAME=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print Name' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTrackerWidget.mobileprovision)")
 echo "iOS Profile Name: $IOS_PP_NAME"
 echo "watchOS Profile Name: $WATCH_PP_NAME"
+echo "Widget Profile Name: $WIDGET_PP_NAME"
 IOS_PP_UUID=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTracker2.mobileprovision)")
 WATCH_PP_UUID=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTrackerWatch.mobileprovision)")
+WIDGET_PP_UUID=$(ssh "$MAC_HOST" "/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< \$(/usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/WindsurferTrackerWidget.mobileprovision)")
 echo "iOS Profile UUID: $IOS_PP_UUID"
 echo "watchOS Profile UUID: $WATCH_PP_UUID"
+echo "Widget Profile UUID: $WIDGET_PP_UUID"
 
 echo "=== Configuring project for manual signing ==="
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = \"Apple Distribution\";/g' WindsurferTracker.xcodeproj/project.pbxproj && \
     sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer; PROVISIONING_PROFILE_SPECIFIER = \"$IOS_PP_NAME\";/g' WindsurferTracker.xcodeproj/project.pbxproj && \
-    sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp; PROVISIONING_PROFILE_SPECIFIER = \"$WATCH_PP_NAME\";/g' WindsurferTracker.xcodeproj/project.pbxproj"
+    sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.watchkitapp; PROVISIONING_PROFILE_SPECIFIER = \"$WATCH_PP_NAME\";/g' WindsurferTracker.xcodeproj/project.pbxproj && \
+    sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.widget;/PRODUCT_BUNDLE_IDENTIFIER = nz.co.tracker.windsurfer.widget; PROVISIONING_PROFILE_SPECIFIER = \"$WIDGET_PP_NAME\";/g' WindsurferTracker.xcodeproj/project.pbxproj"
 
 echo "=== Creating ExportOptions.plist ==="
 ssh "$MAC_HOST" "cat > $REMOTE_PROJECT_DIR/WindsurferTracker/ExportOptions.plist << 'PLISTEOF'
@@ -79,6 +84,8 @@ ssh "$MAC_HOST" "cat > $REMOTE_PROJECT_DIR/WindsurferTracker/ExportOptions.plist
         <string>$IOS_PP_UUID</string>
         <key>nz.co.tracker.windsurfer.watchkitapp</key>
         <string>$WATCH_PP_UUID</string>
+        <key>nz.co.tracker.windsurfer.widget</key>
+        <string>$WIDGET_PP_UUID</string>
     </dict>
 </dict>
 </plist>

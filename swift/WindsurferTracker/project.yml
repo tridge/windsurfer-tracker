@@ -164,7 +164,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution: Andrew Tridgell (76AR6DVKBC)"
-          PROVISIONING_PROFILE_SPECIFIER: ""
+          PROVISIONING_PROFILE_SPECIFIER: "WindsurferTrackerWidget"
 
 schemes:
   WindsurferTracker:
