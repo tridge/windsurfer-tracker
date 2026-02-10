@@ -54,6 +54,7 @@ class TrackerService : LifecycleService() {
         // Accuracy filtering: reject locations with accuracy worse than this (meters)
         // 0 = disabled. OwnTracks uses similar filtering.
         const val MAX_ACCURACY_METERS = 100.0f
+        const val WSTRACKER_ORG_IPV4 = "103.230.158.49"
     }
     
     // Binder for activity communication
@@ -120,8 +121,14 @@ class TrackerService : LifecycleService() {
                     // DNS failed but we have a cached address - use it
                     Log.w(TAG, "DNS lookup failed for $serverHost, using cached ${cached.hostAddress}")
                     return cached
+                } else if (serverHost == "wstracker.org") {
+                    // Hardcoded fallback for wstracker.org when DNS is unavailable
+                    val fallback = InetAddress.getByName(WSTRACKER_ORG_IPV4)
+                    cachedServerAddress = fallback
+                    lastDnsLookupTime = 0  // Retry DNS on next call
+                    Log.w(TAG, "DNS failed, using hardcoded fallback $WSTRACKER_ORG_IPV4 for wstracker.org")
+                    return fallback
                 } else {
-                    // No cached address and DNS failed - can't proceed
                     Log.e(TAG, "DNS lookup failed for $serverHost with no cached address", e)
                     return null
                 }
@@ -623,6 +630,13 @@ class TrackerService : LifecycleService() {
      */
     private fun startInIdleMode() {
         Log.i(TAG, "Starting in idle mode")
+
+        // Use a default idle interval if server hasn't told us one yet (e.g. fresh boot).
+        // The real interval will be learned from the first server ACK.
+        if (idleIntervalMs <= 0) {
+            idleIntervalMs = 15000L  // 15 seconds default until server ACK overrides
+            Log.i(TAG, "No idle interval from server yet, using default ${idleIntervalMs}ms")
+        }
 
         // Register for shutdown events and network changes
         registerShutdownReceiver()
