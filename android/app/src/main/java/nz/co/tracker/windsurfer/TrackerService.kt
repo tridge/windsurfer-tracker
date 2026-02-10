@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
@@ -26,6 +28,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -182,6 +185,15 @@ class TrackerService : LifecycleService() {
     private var idleJob: Job? = null
     private var keepaliveJob: Job? = null
     private val lastPositionSendTime = AtomicLong(0)  // Track last real position send
+
+    // ACK listener job - tracked to prevent duplicate listeners
+    private var ackListenerJob: Job? = null
+
+    // Network change callback - detects WiFi/cellular transitions to invalidate stale sockets
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    // Mutex for socket creation to prevent races
+    private val socketMutex = kotlinx.coroutines.sync.Mutex()
 
     // Receiver to restart location updates when user unlocks the device
     // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
@@ -392,6 +404,10 @@ class TrackerService : LifecycleService() {
             idleWakeLock = null
             isIdleMode.set(false)
         }
+        // Clean up network callback and ACK listener
+        unregisterNetworkCallback()
+        ackListenerJob?.cancel()
+        ackListenerJob = null
         stopTracking()
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed")
@@ -541,27 +557,79 @@ class TrackerService : LifecycleService() {
     }
     
     /**
+     * Ensure a healthy UDP socket exists. Creates a new one if null or closed,
+     * and starts the ACK listener. Thread-safe via coroutine Mutex.
+     */
+    private suspend fun ensureSocket(): DatagramSocket? {
+        val s = socket
+        if (s != null && !s.isClosed) return s
+        return socketMutex.withLock {
+            // Re-check inside lock
+            val s2 = socket
+            if (s2 != null && !s2.isClosed) return@withLock s2
+            try {
+                val newSocket = DatagramSocket()
+                newSocket.soTimeout = ACK_TIMEOUT_MS.toInt()
+                socket = newSocket
+                startAckListener()
+                Log.i(TAG, "Created new UDP socket")
+                newSocket
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create socket", e)
+                null
+            }
+        }
+    }
+
+    /**
+     * Register a ConnectivityManager callback to detect network changes.
+     * On network loss, the current socket is closed so ensureSocket() recreates on next send.
+     */
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return  // Already registered
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) {
+                Log.w(TAG, "Network lost, closing socket for reconnection")
+                socket?.close()
+                socket = null
+            }
+            override fun onAvailable(network: Network) {
+                Log.i(TAG, "Network available, will reconnect on next send")
+            }
+        }
+        cm.registerDefaultNetworkCallback(cb)
+        networkCallback = cb
+    }
+
+    /**
+     * Unregister the network change callback.
+     */
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let {
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(it)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unregistering network callback: ${e.message}")
+            }
+        }
+        networkCallback = null
+    }
+
+    /**
      * Start in idle mode: create socket, listen for ACKs, send heartbeats.
      * No GPS, no tracking. Used when auto-starting on boot.
      */
     private fun startInIdleMode() {
         Log.i(TAG, "Starting in idle mode")
 
-        // Initialize socket and ACK listener
-        serviceScope.launch {
-            try {
-                socket = DatagramSocket()
-                socket?.soTimeout = ACK_TIMEOUT_MS.toInt()
-                startAckListener()
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to create socket for idle mode", e)
-            }
-        }
-
-        // Register for shutdown events
+        // Register for shutdown events and network changes
         registerShutdownReceiver()
+        registerNetworkCallback()
 
         // Enter idle mode (handles wake lock, notification, heartbeat loop)
+        // Socket is created lazily by ensureSocket() on first send
         enterIdleMode()
     }
 
@@ -612,20 +680,11 @@ class TrackerService : LifecycleService() {
             trackingStartBattery = -1
         }
 
-        // Initialize socket (skip if already open from idle mode transition)
-        if (socket == null || socket?.isClosed == true) {
-            serviceScope.launch {
-                try {
-                    socket = DatagramSocket()
-                    socket?.soTimeout = ACK_TIMEOUT_MS.toInt()
-                    startAckListener()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create socket", e)
-                }
-            }
-        } else {
-            Log.d(TAG, "Reusing existing socket from idle mode")
-        }
+        // Ensure socket exists (creates if needed, reuses if healthy from idle mode)
+        serviceScope.launch { ensureSocket() }
+
+        // Register for network changes so socket is recreated on WiFi/cellular transitions
+        registerNetworkCallback()
 
         // Start location updates using native LocationManager (works during Direct Boot)
         val intervalMs = 1000L
@@ -783,7 +842,8 @@ class TrackerService : LifecycleService() {
         // Stop notification update timer
         notificationHandler.removeCallbacks(notificationUpdateRunnable)
 
-        // Unregister shutdown receiver
+        // Unregister network callback and shutdown receiver
+        unregisterNetworkCallback()
         shutdownReceiver?.let {
             try {
                 unregisterReceiver(it)
@@ -805,6 +865,9 @@ class TrackerService : LifecycleService() {
         }
         lastSatelliteCount = 0
 
+        // Cancel ACK listener and close socket
+        ackListenerJob?.cancel()
+        ackListenerJob = null
         socket?.close()
         socket = null
 
@@ -972,12 +1035,17 @@ class TrackerService : LifecycleService() {
         }
         idleWakeLock = null
 
+        // Cancel ACK listener
+        ackListenerJob?.cancel()
+        ackListenerJob = null
+
         // Close socket and stop service
         isRunning.set(false)
         socket?.close()
         socket = null
 
-        // Unregister shutdown receiver
+        // Unregister network callback and shutdown receiver
+        unregisterNetworkCallback()
         shutdownReceiver?.let {
             try {
                 unregisterReceiver(it)
@@ -1027,12 +1095,19 @@ class TrackerService : LifecycleService() {
         val data = packet.toString().toByteArray(Charsets.UTF_8)
         val address = getServerAddress() ?: return
 
+        val sock = ensureSocket()
+        if (sock == null) {
+            Log.w(TAG, "No socket available for idle heartbeat, will retry next interval")
+            return
+        }
         try {
             val dgram = DatagramPacket(data, data.size, address, serverPort)
-            socket?.send(dgram)
+            sock.send(dgram)
             Log.d(TAG, "Sent idle heartbeat seq=$seq bat=$batteryPercent%")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send idle heartbeat", e)
+            Log.e(TAG, "Failed to send idle heartbeat, closing socket for reconnection", e)
+            socket?.close()
+            socket = null
         }
     }
 
@@ -1076,12 +1151,19 @@ class TrackerService : LifecycleService() {
         val data = packet.toString().toByteArray(Charsets.UTF_8)
         val address = getServerAddress() ?: return
 
+        val sock = ensureSocket()
+        if (sock == null) {
+            Log.w(TAG, "No socket available for GPS-wait heartbeat, will retry next interval")
+            return
+        }
         try {
             val dgram = DatagramPacket(data, data.size, address, serverPort)
-            socket?.send(dgram)
+            sock.send(dgram)
             Log.d(TAG, "Sent GPS-wait heartbeat seq=$seq bat=$batteryPercent%")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send GPS-wait heartbeat", e)
+            Log.e(TAG, "Failed to send GPS-wait heartbeat, closing socket for reconnection", e)
+            socket?.close()
+            socket = null
         }
     }
 
@@ -1438,18 +1520,21 @@ class TrackerService : LifecycleService() {
     }
 
     private fun startAckListener() {
-        serviceScope.launch {
+        // Don't start if already running
+        if (ackListenerJob?.isActive == true) return
+
+        ackListenerJob = serviceScope.launch {
             val buffer = ByteArray(256)
 
             while (isRunning.get() || isIdleMode.get()) {
                 try {
                     val dgram = DatagramPacket(buffer, buffer.size)
                     socket?.receive(dgram)
-                    
+
                     val response = String(dgram.data, 0, dgram.length, Charsets.UTF_8)
                     val ack = JSONObject(response)
                     val ackSeq = ack.optInt("ack", -1)
-                    
+
                     // Handle proactive commands (ack==0, sent proactively by server)
                     val isProactive = ack.optBoolean("proactive", false)
                     if (isProactive) {
@@ -1544,8 +1629,14 @@ class TrackerService : LifecycleService() {
                 } catch (e: java.net.SocketTimeoutException) {
                     // Normal timeout, continue
                 } catch (e: Exception) {
-                    if (isRunning.get()) {
+                    if (isRunning.get() || isIdleMode.get()) {
                         Log.e(TAG, "ACK listener error", e)
+                    }
+                    // Socket error — close so ensureSocket() recreates on next send
+                    if (e is java.net.SocketException) {
+                        socket?.close()
+                        socket = null
+                        break  // Exit loop; ensureSocket() will restart listener on next send
                     }
                 }
             }
