@@ -3665,7 +3665,7 @@
                     const isRecent = age < 120;
                     const statusClass = sailor.ast ? 'status-red' : (isRecent ? 'status-green' : 'status-orange');
 
-                    const batStr = sailor.bat >= 0 ? `${sailor.bat}%` : '?';
+                    const batStr = sailor.bat >= 0 ? `${sailor.bat}%${sailor.chg ? '🔌' : ''}` : '?';
                     const sigStr = sailor.sig >= 0 ? `${'▂▄▆█'.slice(0, sailor.sig + 1)}` : '?';
                     const batColor = sailor.bat < 20 ? 'color:#CC0000;font-weight:bold' : '';
 

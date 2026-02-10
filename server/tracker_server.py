@@ -801,6 +801,8 @@ class PositionTracker:
                         "last_seen_iso": pos.get("last_seen_iso", ""),
                         "src_ip": pos.get("src_ip", "")
                     }
+                    if "chg" in pos:
+                        self.current_positions[sailor_id]["chg"] = pos["chg"]
                     # Restore timestamp tracking for duplicate detection
                     if pos.get("ts"):
                         self.last_timestamp[sailor_id] = pos["ts"]
@@ -824,7 +826,7 @@ class PositionTracker:
                          nsats: int | None = None,
                          skip_log: bool = False, stopped: bool = False,
                          pos_array: list | None = None, user_overrides: dict | None = None,
-                         idle: bool = False) -> bool:
+                         idle: bool = False, charging: bool | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -853,6 +855,8 @@ class PositionTracker:
                     "stopped": True,
                     "idle": True,
                 }
+                if charging is not None:
+                    pos_data["chg"] = charging
                 if os_version:
                     pos_data["os"] = os_version
                 # Preserve existing lat/lon if user previously tracked
@@ -890,6 +894,8 @@ class PositionTracker:
                     "src_ip": src_ip,
                     "nsats": 0,
                 }
+                if charging is not None:
+                    pos_data["chg"] = charging
                 if os_version:
                     pos_data["os"] = os_version
                 # Preserve existing lat/lon if user previously tracked
@@ -973,6 +979,8 @@ class PositionTracker:
                     "last_seen_iso": datetime.fromtimestamp(recv_time).isoformat(),
                     "src_ip": src_ip
                 }
+                if charging is not None:
+                    pos_data["chg"] = charging
                 if battery_drain_rate is not None:
                     pos_data["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
@@ -1025,6 +1033,8 @@ class PositionTracker:
                     "ver": version,
                     "flg": flags
                 }
+                if charging is not None:
+                    track_entry["chg"] = charging
                 if battery_drain_rate is not None:
                     track_entry["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
@@ -1083,7 +1093,8 @@ class EventTracker:
                          os_version: str | None = None, horizontal_accuracy: float | None = None,
                          nsats: int | None = None,
                          skip_log: bool = False, pos_array: list | None = None,
-                         stopped: bool = False, idle: bool = False) -> bool:
+                         stopped: bool = False, idle: bool = False,
+                         charging: bool | None = None) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -1095,7 +1106,8 @@ class EventTracker:
                 signal=signal, role=role, version=version, flags=flags,
                 src_ip=src_ip, source=f"[E{self.eid}]{source}",
                 os_version=os_version, idle=True,
-                user_overrides=self.user_overrides
+                user_overrides=self.user_overrides,
+                charging=charging
             )
 
         # If 1Hz array format, log as single entry with pos array (more compact)
@@ -1115,6 +1127,8 @@ class EventTracker:
                 "ver": version,
                 "flg": flags
             }
+            if charging is not None:
+                track_entry["chg"] = charging
             if battery_drain_rate is not None:
                 track_entry["bdr"] = battery_drain_rate
             if heart_rate is not None and heart_rate > 0:
@@ -1156,7 +1170,8 @@ class EventTracker:
             skip_log=has_batch or skip_log,
             stopped=stopped,
             pos_array=pos_array,
-            user_overrides=self.user_overrides
+            user_overrides=self.user_overrides,
+            charging=charging
         )
 
         # Write positions with event-specific user overrides
@@ -2665,6 +2680,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             heading = packet.get("hdg", 0)
             assist = packet.get("ast", False)
             battery = packet.get("bat", -1)
+            charging = packet.get("chg")  # Charging status (optional boolean)
             signal = packet.get("sig", -1)
             heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
             role = packet.get("role", "sailor")
@@ -2789,7 +2805,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     nsats=nsats,
                     pos_array=pos_array,
                     stopped=stopped,
-                    idle=idle
+                    idle=idle,
+                    charging=charging
                 )
             else:
                 # Legacy single-event mode
@@ -2809,6 +2826,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         "ver": version,
                         "flg": flags
                     }
+                    if charging is not None:
+                        track_entry["chg"] = charging
                     if battery_drain_rate is not None:
                         track_entry["bdr"] = battery_drain_rate
                     if heart_rate is not None and heart_rate > 0:
@@ -2850,7 +2869,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     stopped=stopped,
                     pos_array=pos_array,
                     user_overrides=_user_overrides,
-                    idle=idle
+                    idle=idle,
+                    charging=charging
                 )
 
             # Send ACK response (same format as UDP)
@@ -3419,6 +3439,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 heading = packet.get("hdg", 0)
                 assist = packet.get("ast", False)
                 battery = packet.get("bat", -1)
+                charging = packet.get("chg")  # Charging status (optional boolean)
                 signal = packet.get("sig", -1)
                 heart_rate = packet.get("hr")  # Heart rate in bpm (optional, from Wear OS)
                 role = packet.get("role", "sailor")
@@ -3539,7 +3560,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         nsats=nsats,
                         pos_array=pos_array,
                         stopped=stopped,
-                        idle=idle
+                        idle=idle,
+                        charging=charging
                     )
 
                 else:
@@ -3593,6 +3615,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             "ver": version,
                             "flg": flags
                         }
+                        if charging is not None:
+                            track_entry["chg"] = charging
                         if battery_drain_rate is not None:
                             track_entry["bdr"] = battery_drain_rate
                         if heart_rate is not None and heart_rate > 0:
@@ -3636,7 +3660,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         stopped=stopped,
                         pos_array=pos_array,
                         user_overrides=user_overrides,
-                        idle=idle
+                        idle=idle,
+                        charging=charging
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)
