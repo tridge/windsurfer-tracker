@@ -361,8 +361,13 @@ class TrackerService : LifecycleService() {
         }
         
         startForegroundService()
-        startTracking()
-        
+
+        if (intent?.getBooleanExtra("start_in_idle", false) == true) {
+            startInIdleMode()
+        } else {
+            startTracking()
+        }
+
         return START_STICKY
     }
     
@@ -535,6 +540,31 @@ class TrackerService : LifecycleService() {
         }
     }
     
+    /**
+     * Start in idle mode: create socket, listen for ACKs, send heartbeats.
+     * No GPS, no tracking. Used when auto-starting on boot.
+     */
+    private fun startInIdleMode() {
+        Log.i(TAG, "Starting in idle mode")
+
+        // Initialize socket and ACK listener
+        serviceScope.launch {
+            try {
+                socket = DatagramSocket()
+                socket?.soTimeout = ACK_TIMEOUT_MS.toInt()
+                startAckListener()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create socket for idle mode", e)
+            }
+        }
+
+        // Register for shutdown events
+        registerShutdownReceiver()
+
+        // Enter idle mode (handles wake lock, notification, heartbeat loop)
+        enterIdleMode()
+    }
+
     @Suppress("MissingPermission")  // Permission checked in MainActivity
     private fun startTracking() {
         // Exit idle mode if currently idle
@@ -552,6 +582,9 @@ class TrackerService : LifecycleService() {
             Log.d(TAG, "Already tracking")
             return
         }
+
+        // Mark tracking as active so shutdown handler sends stop packet
+        getPrefs().edit().putBoolean("tracking_active", true).apply()
 
         // Clear acknowledged sequences from previous session
         acknowledgedSeqs.clear()
@@ -1488,6 +1521,14 @@ class TrackerService : LifecycleService() {
                         if (ack.has("idle")) {
                             val interval = ack.optInt("idle", 0)
                             idleIntervalMs = interval * 1000L
+                            // If idle mode is active and server sends idle=0, shut down
+                            if (isIdleMode.get() && interval == 0) {
+                                Log.w(TAG, "Server sent idle=0 while in idle mode, shutting down")
+                                Handler(Looper.getMainLooper()).post {
+                                    exitIdleMode()
+                                    statusListener?.onRemoteShutdown()
+                                }
+                            }
                         }
 
                         // Check for remote commands in normal ACK

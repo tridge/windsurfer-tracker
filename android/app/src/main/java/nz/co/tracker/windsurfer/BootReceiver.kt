@@ -54,18 +54,17 @@ class BootReceiver : BroadcastReceiver() {
                     return
                 }
 
-                Log.i(TAG, "Auto-starting tracking after ${intent.action}")
+                Log.i(TAG, "Auto-starting in idle mode after ${intent.action}")
 
-                // Mark tracking as active so UI shows correct state when opened
-                prefs.edit().putBoolean("tracking_active", true).apply()
-
-                // Start the tracking service
+                // Start the tracking service in idle mode (no GPS, heartbeats only)
+                // tracking_active is NOT set here - idle is not tracking
                 val serviceIntent = Intent(context, TrackerService::class.java).apply {
                     putExtra("server_host", serverHost)
                     putExtra("server_port", serverPort)
                     putExtra("sailor_id", sailorId)
                     putExtra("role", role)
                     putExtra("password", password)
+                    putExtra("start_in_idle", true)
                 }
 
                 try {

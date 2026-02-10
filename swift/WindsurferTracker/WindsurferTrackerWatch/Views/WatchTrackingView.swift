@@ -59,16 +59,10 @@ struct WatchTrackingView: View {
                     .foregroundColor(viewModel.statusLine == "auth failure" ? .red : .blue)
                     .lineLimit(1)
 
-                // Sailor ID with 1Hz indicator
-                HStack(spacing: 4) {
-                    Text(viewModel.sailorId)
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                    Text("1Hz")
-                        .font(.system(size: 10))
-                        .bold()
-                        .foregroundColor(.cyan)
-                }
+                // Sailor ID
+                Text(viewModel.sailorId)
+                    .font(.caption2)
+                    .foregroundColor(.white)
 
                 // Show countdown when active, otherwise show speed or stopwatch
                 // Race timer feature is disabled for this release

@@ -35,17 +35,10 @@ struct TrackingView: View {
                     .fontWeight(.bold)
                     .foregroundColor(viewModel.statusLine == "auth failure" ? .red : Color(red: 0, green: 0.4, blue: 0.67))
 
-                // Sailor ID and Frequency mode indicator
-                HStack(spacing: 6) {
-                    Text(viewModel.sailorId)
-                        .font(.caption)
-                        .foregroundColor(Color(white: 0.53))
-
-                    Text("1Hz")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(Color(red: 0, green: 0.67, blue: 0.67))
-                }
+                // Sailor ID
+                Text(viewModel.sailorId)
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.53))
 
                 // Position
                 VStack(alignment: .leading, spacing: 2) {

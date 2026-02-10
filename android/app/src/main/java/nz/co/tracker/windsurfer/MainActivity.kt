@@ -605,13 +605,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.configGroup.visibility = View.GONE
             updateAssistButton(service.isAssistActive())
 
-            // Show sailor ID and frequency mode indicator
+            // Show sailor ID
             val prefs = getPrefs()
-            val sailorId = prefs.getString("sailor_id", "S01") ?: "S01"
+            val sailorId = prefs.getString("sailor_id", "") ?: ""
             binding.tvSailorId.text = sailorId
             binding.tvSailorId.visibility = View.VISIBLE
-            binding.tv1HzIndicator.text = "1Hz"
-            binding.tv1HzIndicator.visibility = View.VISIBLE
 
             // Update live tracking link for active screen
             val serverHost = prefs.getString("server_host", TrackerService.DEFAULT_SERVER_HOST) ?: TrackerService.DEFAULT_SERVER_HOST
@@ -944,7 +942,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(0, 8, 0, 0)
         }
         val autoStartHint = android.widget.TextView(this).apply {
-            text = "Automatically start tracking when phone boots. Requires name and password to be set."
+            text = "Automatically start in idle mode when phone boots. Admin will start tracking remotely. Requires name and password to be set."
             setTextColor(0xFF666666.toInt())
             textSize = 12f
             setPadding(48, 0, 0, 16)

@@ -70,16 +70,10 @@ struct WatchConfigView: View {
                     .foregroundColor(.blue)
                     .lineLimit(1)
 
-                // Sailor ID with 1Hz indicator
-                HStack(spacing: 4) {
-                    Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                    Text("1Hz")
-                        .font(.system(size: 10))
-                        .bold()
-                        .foregroundColor(.cyan)
-                }
+                // Sailor ID
+                Text(viewModel.sailorId.isEmpty ? "Not Set" : viewModel.sailorId)
+                    .font(.caption2)
+                    .foregroundColor(.white)
 
                 // Speed (always 0 when not tracking)
                 HStack(alignment: .lastTextBaseline, spacing: 2) {

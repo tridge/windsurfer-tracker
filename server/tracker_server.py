@@ -2860,12 +2860,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not assist_enabled:
                 ack_response["assist"] = False
 
-            # Include idle_interval if set for this event
+            # Always include idle_interval so idle clients receive idle=0 when disabled
             if _event_manager:
                 event_data = _event_manager.get_event(eid)
                 idle_interval = event_data.get('idle_interval', 0) if event_data else 0
-                if idle_interval:
-                    ack_response["idle"] = idle_interval
+                ack_response["idle"] = idle_interval
 
             # Check for pending command
             cmd_key = f"{eid}:{sailor_id}"
@@ -3497,10 +3496,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     if not assist_enabled:
                         ack_data["assist"] = False
 
-                    # Include idle_interval if set for this event
+                    # Always include idle_interval so idle clients receive idle=0 when disabled
                     idle_interval = event.get('idle_interval', 0)
-                    if idle_interval:
-                        ack_data["idle"] = idle_interval
+                    ack_data["idle"] = idle_interval
 
                     # Check for pending command
                     cmd_key = f"{eid}:{sailor_id}"

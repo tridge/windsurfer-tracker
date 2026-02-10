@@ -253,12 +253,12 @@ def test_idle_interval_in_ack(http_client, udp_client, server):
 
 
 def test_idle_disabled_by_default(http_client, udp_client, server):
-    """New event ACK should not have 'idle' field."""
+    """New event ACK should have idle=0 by default."""
     eid = create_event(http_client, name="Idle Default Test")
 
     pkt = make_packet(eid=eid, id="IDEF01")
     ack = udp_client.send_position(pkt)
-    assert "idle" not in ack
+    assert ack.get("idle") == 0
 
 
 def test_command_overwrite(http_client, udp_client, server):
