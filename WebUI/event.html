@@ -1199,6 +1199,16 @@
         </div>
     </div>
 
+    <!-- Tracker info overlay (for trackers without map position) -->
+    <div class="edit-user-overlay" id="trackerInfoOverlay" onclick="if(event.target===this)closeTrackerInfo()">
+        <div class="edit-user-dialog" style="max-width:320px;">
+            <div id="trackerInfoContent"></div>
+            <div class="btn-row" style="margin-top:12px;">
+                <button class="btn-cancel" onclick="closeTrackerInfo()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Mark edit overlay -->
     <div class="edit-user-overlay" id="editMarkOverlay" onclick="if(event.target===this)closeEditMark()">
         <div class="edit-user-dialog">
@@ -3709,14 +3719,73 @@
         function centerOnSailor(sailorId) {
             if (currentPositions && currentPositions.sailors && currentPositions.sailors[sailorId]) {
                 const sailor = currentPositions.sailors[sailorId];
-                map.setView([sailor.lat, sailor.lon], 16);
-                map._userPanned = true;  // Prevent auto-fit from overriding
-                
-                // Open the popup for this sailor
+
+                // If tracker has a map marker, center on it and open popup
                 if (sailorMarkers[sailorId]) {
+                    map.setView([sailor.lat, sailor.lon], 16);
+                    map._userPanned = true;
                     sailorMarkers[sailorId].openPopup();
+                } else {
+                    // No map marker (e.g. idle with no position) - show info overlay
+                    showTrackerInfo(sailorId, sailor);
                 }
             }
+        }
+
+        function showTrackerInfo(id, sailor) {
+            const displayName = sailor.displayid || id;
+            const role = sailor.role || 'sailor';
+            const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
+            const nameExtra = (adminMode && sailor.displayid) ? ` <span style="color:#999;font-size:10px">[${id}]</span>` : '';
+            const batStr = sailor.bat >= 0 ? `${sailor.bat}%` : 'Unknown';
+            const sigStr = sailor.sig >= 0 ? `${sailor.sig}/4` : 'Unknown';
+            const batStyle = sailor.bat >= 0 && sailor.bat < 20 ? 'color:red;font-weight:bold' : '';
+            const userInfo = (sailor.info || '').replace(/\n+$/, '').replace(/\n/g, '<br>');
+            const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
+
+            const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser('${id}')">Edit</button>` : '';
+            const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser('${id}')">Stop</button>` : '';
+            const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser('${id}')">Start</button>` : '';
+            const shutdownBtn = (adminMode && sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();shutdownUser('${id}')">Shutdown</button>` : '';
+            const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser('${id}')">Cancel Assist</button>` : '';
+
+            const flg = sailor.flg || {};
+            const powerSaveWarning = flg.ps ? '<br><span style="color:#f97316;font-weight:bold">⚡ Power Saver ON</span>' : '';
+            const batOptWarning = flg.bo === false ? '<br><span style="color:#f97316;font-weight:bold">⚡ Battery Optimization Enabled</span>' : '';
+            const versionStr = sailor.ver || 'Unknown';
+            const osStr = sailor.os || '';
+            const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
+            const heartRateLine = (sailor.hr && sailor.hr > 0) ? `<br>Heart Rate: <span style="color:#e91e63">${sailor.hr} bpm</span>` : '';
+            const nsatsLine = (sailor.nsats !== undefined) ? `<br>&#128752; Satellites: <span style="color:#16a34a">${sailor.nsats}</span>` : '';
+
+            let drainStr = '';
+            if (sailor.chg === true) {
+                drainStr = ` <span style="color:#666;font-size:11px">(charging)</span>`;
+            } else if (sailor.bdr !== undefined && sailor.bdr !== null && sailor.bat >= 0) {
+                const drainRate = sailor.bdr;
+                if (drainRate > 0) {
+                    const hoursRemaining = sailor.bat / drainRate;
+                    drainStr = ` <span style="color:#666;font-size:11px">(${drainRate.toFixed(1)}%/hr, ~${hoursRemaining.toFixed(1)}h left)</span>`;
+                }
+            }
+
+            const content = `
+                <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>
+                ${editBtn}${stopBtn}${startBtn}${shutdownBtn}
+                ${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}
+                ${infoLine}<br>
+                Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
+                Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
+                Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.nsats === 0 && !sailor.idle) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : '')}<br>
+                Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${powerSaveWarning}${batOptWarning}
+            `;
+
+            document.getElementById('trackerInfoContent').innerHTML = content;
+            document.getElementById('trackerInfoOverlay').classList.add('visible');
+        }
+
+        function closeTrackerInfo() {
+            document.getElementById('trackerInfoOverlay').classList.remove('visible');
         }
         
         // Update markers on map
