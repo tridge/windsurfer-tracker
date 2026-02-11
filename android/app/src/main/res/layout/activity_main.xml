@@ -22,6 +22,18 @@
             android:layout_width="match_parent"
             android:layout_height="40dp" />
 
+        <!-- Idle mode indicator (shown when service is in idle mode) -->
+        <TextView
+            android:id="@+id/tvIdleStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="IDLE"
+            android:textStyle="bold"
+            android:textSize="28sp"
+            android:textColor="#FF8800"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone" />
+
         <!-- Your Name (label) -->
         <TextView
             android:layout_width="wrap_content"

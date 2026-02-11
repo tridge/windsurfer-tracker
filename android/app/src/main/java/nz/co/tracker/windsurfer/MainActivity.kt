@@ -535,6 +535,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                 binding.btnStartStop.text = "Stop Tracking"
                 binding.statusGroup.visibility = View.VISIBLE
                 binding.configGroup.visibility = View.GONE
+                binding.tvIdleStatus.visibility = View.GONE
             }
             return
         }
@@ -593,9 +594,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         binding.btnStartStop.text = "Start Tracking"
         binding.statusGroup.visibility = View.GONE
         binding.configGroup.visibility = View.VISIBLE
+        binding.tvIdleStatus.visibility = View.GONE
         updateAssistButton(false)
     }
-    
+
     private fun updateUI() {
         val service = trackerService
         if (service != null && service.isTracking()) {
@@ -621,11 +623,19 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             }
 
             updateConnectionStatus(service.getAckRate())
+        } else if (service != null && service.isIdle()) {
+            // Service is in idle mode - show config screen with idle indicator
+            binding.btnStartStop.text = "Start Tracking"
+            binding.statusGroup.visibility = View.GONE
+            binding.configGroup.visibility = View.VISIBLE
+            binding.tvIdleStatus.visibility = View.VISIBLE
+            updateAssistButton(false)
         } else {
             // Service is not tracking - show config screen
             binding.btnStartStop.text = "Start Tracking"
             binding.statusGroup.visibility = View.GONE
             binding.configGroup.visibility = View.VISIBLE
+            binding.tvIdleStatus.visibility = View.GONE
             updateAssistButton(false)
         }
     }
@@ -1225,6 +1235,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.btnStartStop.text = "Stop Tracking"
             binding.statusGroup.visibility = View.VISIBLE
             binding.configGroup.visibility = View.GONE
+            binding.tvIdleStatus.visibility = View.GONE
         }
     }
 
@@ -1240,6 +1251,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             binding.btnStartStop.text = "Start Tracking"
             binding.statusGroup.visibility = View.GONE
             binding.configGroup.visibility = View.VISIBLE
+            binding.tvIdleStatus.visibility = View.VISIBLE
             updateAssistButton(false)
             updateIdleScreen()
         }
