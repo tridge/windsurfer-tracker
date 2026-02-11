@@ -40,7 +40,10 @@ class UpdateChecker {
                 return .error("Cannot determine current build number")
             }
 
-            if buildNumber > localBuild {
+            let serverHash = ios["gitHash"] as? String ?? ""
+            let localHash = (Bundle.main.infoDictionary?["GIT_HASH"] as? String) ?? ""
+
+            if buildNumber > localBuild || (buildNumber == localBuild && !serverHash.isEmpty && serverHash != localHash) {
                 return .updateAvailable(iOSVersionInfo(
                     version: version,
                     buildNumber: buildNumber,

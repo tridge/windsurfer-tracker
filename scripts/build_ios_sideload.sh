@@ -173,6 +173,7 @@ with open('$VERSION_JSON_PATH', 'r') as f:
 data['ios'] = {
     'version': '$APP_VERSION',
     'buildNumber': $BUILD_NUMBER,
+    'gitHash': '$GIT_HASH',
     'url': 'itms-services://?action=download-manifest&url=https://wstracker.org/app/ios/manifest.plist'
 }
 with open('$VERSION_JSON_PATH', 'w') as f:
