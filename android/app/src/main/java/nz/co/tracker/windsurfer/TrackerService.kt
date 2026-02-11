@@ -1097,17 +1097,18 @@ class TrackerService : LifecycleService() {
         }
 
         serviceScope.launch {
-            sendStopPacket()
-            // Clear saved position since we sent the stop packet successfully
-            clearLastPosition()
-            withContext(Dispatchers.Main) {
-                // If idle mode is supported, enter idle instead of full stop
-                if (idleIntervalMs > 0) {
+            // If idle mode is supported, skip the stop packet — enterIdleMode() will
+            // send an idle heartbeat immediately, avoiding a brief STOPPED flash in the UI
+            if (idleIntervalMs > 0) {
+                clearLastPosition()
+                withContext(Dispatchers.Main) {
                     enterIdleMode()
-                    // Notify listener so UI switches to config screen
-                    // (service stays running for idle heartbeats)
                     statusListener?.onIdleEntered()
-                } else {
+                }
+            } else {
+                sendStopPacket()
+                clearLastPosition()
+                withContext(Dispatchers.Main) {
                     stopTracking()
                     callback?.invoke()
                 }
