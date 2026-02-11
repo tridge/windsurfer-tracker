@@ -7,8 +7,10 @@ disables WiFi/BT/NFC, enables data saver, sets the Hologram APN, etc.
 
 Usage:
     python3 scripts/setup_tracker_phone.py
+    python3 scripts/setup_tracker_phone.py --tracker Tracker11/1/xyz123
 """
 
+import argparse
 import subprocess
 import sys
 import os
@@ -368,11 +370,62 @@ def step_set_hologram_apn():
     return True
 
 
+def step_configure_tracker(user_id, event_id, password):
+    """Configure tracker app settings via broadcast receiver."""
+    rc, out, err = adb_shell(
+        "am", "broadcast",
+        "-a", "nz.co.tracker.windsurfer.CONFIGURE",
+        "--es", "sailor_id", user_id,
+        "--ei", "event_id", str(event_id),
+        "--es", "password", password,
+        "--ez", "auto_start_on_boot", "true",
+        "nz.co.tracker.windsurfer/.ConfigReceiver",
+    )
+    if rc != 0 or "result=-1" not in out:
+        # result=0 means no receiver handled it, -1 means success
+        # On some devices result code isn't set, check for errors instead
+        if rc != 0:
+            print_fail(err.strip() or out.strip())
+            return False
+
+    print_ok(f"{user_id}, event {event_id}")
+    return True
+
+
+def parse_tracker_arg(value):
+    """Parse --tracker UserID/EventID/Password format."""
+    parts = value.split("/", 2)
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(
+            f"expected UserID/EventID/Password format (e.g. Tracker11/1/xyz123), got '{value}'"
+        )
+    user_id, event_id_str, password = parts
+    try:
+        event_id = int(event_id_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"event ID must be a number, got '{event_id_str}'")
+    return user_id, event_id, password
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Setup Android phone as a dedicated GPS tracker")
+    parser.add_argument(
+        "--tracker", type=parse_tracker_arg, metavar="ID/EVENT/PASS",
+        help="Configure tracker settings: UserID/EventID/Password (e.g. Tracker11/1/xyz123)"
+    )
+    args = parser.parse_args()
+
     steps = [
         ("Checking device", step_check_device, True),
         ("Installing APK", step_install_apk, True),
         ("Granting permissions", step_grant_permissions, False),
+    ]
+
+    if args.tracker:
+        user_id, event_id, password = args.tracker
+        steps.append(("Configuring tracker", lambda: step_configure_tracker(user_id, event_id, password), False))
+
+    steps.extend([
         ("Disabling WiFi", step_disable_wifi, False),
         ("Disabling Bluetooth", step_disable_bluetooth, False),
         ("Disabling NFC", step_disable_nfc, False),
@@ -380,7 +433,7 @@ def main():
         ("Enabling data saver", step_enable_data_saver, False),
         ("Disabling auto-updates", step_disable_auto_updates, False),
         ("Setting Hologram APN", step_set_hologram_apn, False),
-    ]
+    ])
 
     total = len(steps)
     ok_count = 0

@@ -63,6 +63,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- ADB configuration receiver for setup script -->
+        <receiver
+            android:name=".ConfigReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="nz.co.tracker.windsurfer.CONFIGURE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
