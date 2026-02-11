@@ -208,11 +208,6 @@ public class TrackerViewModel: ObservableObject {
                 self.isTracking = false
                 self.stopBeepTimer()
                 self.endLiveActivity()
-                // Only show alert if no other dialog is showing
-                if !self.showStopConfirmation && !self.showSettings {
-                    self.errorMessage = "Tracking stopped by admin"
-                    self.showError = true
-                }
             }
             .store(in: &cancellables)
 
@@ -247,10 +242,6 @@ public class TrackerViewModel: ObservableObject {
                 guard let self = self else { return }
                 self.stopBeepTimer()
                 self.endLiveActivity()
-                if !self.showStopConfirmation && !self.showSettings {
-                    self.errorMessage = "Idle mode stopped by admin"
-                    self.showError = true
-                }
             }
             .store(in: &cancellables)
 
