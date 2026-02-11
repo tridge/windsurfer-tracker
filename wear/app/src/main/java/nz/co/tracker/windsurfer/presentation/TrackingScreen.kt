@@ -22,6 +22,7 @@ import nz.co.tracker.windsurfer.presentation.theme.TrackingGreen
 @Composable
 fun TrackingScreen(
     isTracking: Boolean,
+    isIdleMode: Boolean,
     isAssistActive: Boolean,
     assistEnabled: Boolean,
     speedKnots: Float,
@@ -65,6 +66,7 @@ fun TrackingScreen(
     // ACK-based color coding for TRACKING status
     val statusColor = when {
         isAssistActive -> StoppedRed
+        isIdleMode -> Color(0xFF4488FF)  // Blue for idle
         !isTracking -> StoppedRed
         lastAckTime == 0L -> StoppedRed  // No ACK received yet
         else -> {
@@ -78,6 +80,7 @@ fun TrackingScreen(
     }
     val statusText = when {
         isAssistActive -> "⚠ ASSIST ⚠"
+        isIdleMode -> "IDLE"
         isTracking -> "TRACKING"
         else -> "STOPPED"
     }
@@ -136,8 +139,19 @@ fun TrackingScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Race timer display or speed
-                if (raceTimerEnabled && isTracking) {
+                // Idle mode: show waiting message instead of speed/distance
+                if (isIdleMode) {
+                    Text(
+                        text = "Waiting for\nadmin start",
+                        color = Color(0xFF4488FF),
+                        fontSize = 16.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+
+                // Race timer display or speed (only when actively tracking)
+                else if (raceTimerEnabled && isTracking) {
                     if (countdownSeconds != null) {
                         if (countdownSeconds > 0) {
                             // Countdown running - show remaining time
@@ -272,8 +286,8 @@ fun TrackingScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // ASSIST button at bottom (only show if assist is enabled for this event)
-                if (assistEnabled) {
+                // ASSIST button at bottom (only show if assist is enabled and not in idle mode)
+                if (assistEnabled && !isIdleMode) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.75f)

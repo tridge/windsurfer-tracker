@@ -46,6 +46,11 @@ struct WatchTrackingView: View {
                             .foregroundColor(.red)
                     }
                     .font(.caption)
+                } else if viewModel.isIdleMode {
+                    Text("IDLE")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.blue)
                 } else {
                     Text(WKInterfaceDevice.current().isWaterLockEnabled ? "TRACKING(LOCKED)" : "TRACKING")
                         .font(.caption)
@@ -64,9 +69,17 @@ struct WatchTrackingView: View {
                     .font(.caption2)
                     .foregroundColor(.white)
 
+                // Idle mode: show waiting message instead of speed/distance
+                if viewModel.isIdleMode {
+                    Text("Waiting for\nadmin start")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 8)
+                }
                 // Show countdown when active, otherwise show speed or stopwatch
                 // Race timer feature is disabled for this release
-                if RACE_TIMER_FEATURE_ENABLED, let countdown = viewModel.countdownSeconds {
+                else if RACE_TIMER_FEATURE_ENABLED, let countdown = viewModel.countdownSeconds {
                     // Race countdown timer display
                     VStack(spacing: 4) {
                         if countdown > 0 {
@@ -121,29 +134,31 @@ struct WatchTrackingView: View {
 
                 // Fitness metrics row: heart rate, distance, and battery
                 HStack(spacing: 12) {
-                    // Heart rate (if enabled and available) - throttled to 1Hz
-                    if viewModel.heartRateEnabled && displayedHeartRate > 0 {
+                    if !viewModel.isIdleMode {
+                        // Heart rate (if enabled and available) - throttled to 1Hz
+                        if viewModel.heartRateEnabled && displayedHeartRate > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.red)
+                                Text("\(displayedHeartRate)")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                        }
+
+                        // Distance traveled - always show during tracking
                         HStack(spacing: 2) {
-                            Image(systemName: "heart.fill")
+                            Image(systemName: "arrow.triangle.swap")
                                 .font(.system(size: 10))
-                                .foregroundColor(.red)
-                            Text("\(displayedHeartRate)")
+                                .foregroundColor(.cyan)
+                            Text(distanceText)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
                         }
                     }
 
-                    // Distance traveled - always show during tracking
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.triangle.swap")
-                            .font(.system(size: 10))
-                            .foregroundColor(.cyan)
-                        Text(distanceText)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-
-                    // Battery percentage
+                    // Battery percentage - show in both tracking and idle
                     HStack(spacing: 2) {
                         Image(systemName: batteryIconName)
                             .font(.system(size: 10))
@@ -168,8 +183,8 @@ struct WatchTrackingView: View {
                 Spacer()
                     .frame(height: 4)
 
-                // Assist / Cancel Assist button (only show if assist is enabled for this event)
-                if viewModel.assistEnabled {
+                // Assist / Cancel Assist button (only show if assist is enabled and not in idle mode)
+                if viewModel.assistEnabled && !viewModel.isIdleMode {
                     Button {
                         viewModel.toggleAssist()
                     } label: {

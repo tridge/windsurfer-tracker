@@ -16,7 +16,7 @@ struct WatchContentView: View {
             WatchEULAView(eulaAccepted: $preferences.eulaAccepted)
         } else {
             NavigationView {
-                if viewModel.isTracking {
+                if viewModel.isTracking || viewModel.isIdleMode {
                     WatchTrackingView()
                         .environmentObject(viewModel)
                 } else {

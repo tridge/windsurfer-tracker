@@ -133,6 +133,12 @@ class TrackerService : LifecycleService() {
     private val hasFirstAck = AtomicBoolean(false)
     private val hasAuthFailure = AtomicBoolean(false)
     private var currentEventName: String = ""
+
+    // Idle mode state
+    private val isIdleMode = AtomicBoolean(false)
+    private var idleIntervalMs: Long = 0
+    private var idleJob: Job? = null
+    private var idleWakeLock: PowerManager.WakeLock? = null
     // Sliding window for ACK rate calculation (last 20 messages)
     private val ackWindow = java.util.concurrent.ConcurrentLinkedDeque<Boolean>()
     private val ACK_WINDOW_SIZE = 20
@@ -302,6 +308,9 @@ class TrackerService : LifecycleService() {
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
         fun onRemoteStop()  // Server sent remote stop command
         fun onRemoteCancelAssist()  // Server sent remote cancel assist command
+        fun onIdleEntered()  // Entered idle mode after user stop
+        fun onRemoteStart()  // Server sent start command (from idle mode)
+        fun onRemoteShutdown()  // Server sent shutdown command (from idle mode)
         fun onCountdownTick(secondsRemaining: Int)  // Race timer countdown
         fun onCountdownFinished()  // Race timer reached zero naturally
         fun onCountdownReset()  // Race timer manually reset by user
@@ -422,8 +431,11 @@ class TrackerService : LifecycleService() {
             previousLocation = null
         }
 
-        startForegroundService()
-        startTracking()
+        // Don't restart tracking if in idle mode (service is alive for heartbeats)
+        if (!isIdleMode.get()) {
+            startForegroundService()
+            startTracking()
+        }
 
         return START_STICKY
     }
@@ -435,7 +447,17 @@ class TrackerService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.i(TAG, "onDestroy called, isRunning=${isRunning.get()}, isIdle=${isIdleMode.get()}")
         stopTracking()
+
+        // Clean up idle mode if active
+        if (isIdleMode.get()) {
+            idleJob?.cancel()
+            idleJob = null
+            idleWakeLock?.let { if (it.isHeld) it.release() }
+            idleWakeLock = null
+            isIdleMode.set(false)
+        }
 
         // Unregister broadcast receiver
         try {
@@ -633,6 +655,10 @@ class TrackerService : LifecycleService() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
+                    // Skip GPS updates if in idle mode (GPS should be stopped but
+                    // fused location provider may deliver queued updates)
+                    if (isIdleMode.get()) return
+
                     // Filter out invalid 0,0 locations (can happen before GPS is ready)
                     if (location.latitude == 0.0 && location.longitude == 0.0) {
                         Log.d(TAG, "Skipping invalid 0,0 location - GPS not ready")
@@ -786,6 +812,15 @@ class TrackerService : LifecycleService() {
         if (isRunning.getAndSet(true)) {
             Log.d(TAG, "Already tracking")
             return
+        }
+
+        // Clean up idle mode state if resuming from idle
+        if (isIdleMode.getAndSet(false)) {
+            Log.i(TAG, "Cleaning up idle state before starting tracking")
+            idleJob?.cancel()
+            idleJob = null
+            idleWakeLock?.let { if (it.isHeld) it.release() }
+            idleWakeLock = null
         }
 
         // Clear acknowledged sequences from previous session
@@ -1000,6 +1035,7 @@ class TrackerService : LifecycleService() {
     /**
      * Request a graceful stop - sends stop notification to server before stopping.
      * This should be called when user deliberately stops tracking.
+     * If idle mode is supported (idleIntervalMs > 0), enters idle mode instead of full stop.
      */
     fun requestGracefulStop(callback: (() -> Unit)? = null) {
         if (!isRunning.get()) {
@@ -1010,10 +1046,140 @@ class TrackerService : LifecycleService() {
         serviceScope.launch {
             sendStopPacket()
             withContext(Dispatchers.Main) {
-                stopTracking()
-                callback?.invoke()
+                if (idleIntervalMs > 0) {
+                    enterIdleMode()
+                    statusListener?.onIdleEntered()
+                } else {
+                    stopTracking()
+                    callback?.invoke()
+                }
             }
         }
+    }
+
+    /**
+     * Send an idle heartbeat packet (no GPS data).
+     */
+    private suspend fun sendIdlePacket() {
+        val seq = sequenceNumber.incrementAndGet()
+
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val signalLevel = try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            telephonyManager.signalStrength?.level ?: -1
+        } catch (e: Exception) { -1 }
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("idle", true)
+            put("bat", batteryPercent)
+            put("chg", batteryManager.isCharging)
+            put("sig", signalLevel)
+            put("role", role)
+            put("ver", BuildConfig.VERSION_STRING)
+            put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
+            if (password.isNotEmpty()) {
+                put("pwd", password)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+        val address = getServerAddress() ?: return
+
+        try {
+            val dgram = DatagramPacket(data, data.size, address, serverPort)
+            socket?.send(dgram)
+            Log.d(TAG, "Sent idle heartbeat seq=$seq bat=$batteryPercent%")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send idle heartbeat", e)
+        }
+    }
+
+    /**
+     * Enter idle mode: stop GPS, keep socket, send heartbeats at server-configured interval.
+     * Called when user stops tracking and server has idle support enabled.
+     */
+    private fun enterIdleMode() {
+        if (isIdleMode.get()) return
+
+        Log.i(TAG, "Entering idle mode (interval=${idleIntervalMs}ms)")
+        isIdleMode.set(true)
+        isRunning.set(false)
+
+        // Stop GPS-wait heartbeat
+        gpsWaitJob?.cancel()
+        gpsWaitJob = null
+
+        // Stop GPS updates and clear position buffer
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        positionBuffer.clear()
+
+        // Stop beep timer
+        beepHandler.removeCallbacks(beepRunnable)
+        toneGenerator?.release()
+        toneGenerator = null
+
+        // Unregister sensors
+        sensorManager?.unregisterListener(heartRateListener)
+        sensorManager?.unregisterListener(tapListener)
+        lastHeartRate = -1
+
+        // Release tracking wake lock
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+
+        // Keep socket and network request alive for ACK listener
+
+        // Acquire idle wake lock
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        idleWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WindsurferTracker::IdleHeartbeat").apply {
+            acquire()
+        }
+
+        // Update notification
+        updateNotification("Idle - waiting for admin start")
+
+        // Start idle heartbeat loop
+        idleJob = serviceScope.launch {
+            sendIdlePacket()
+            while (isIdleMode.get() && idleIntervalMs > 0) {
+                delay(idleIntervalMs)
+                sendIdlePacket()
+            }
+        }
+    }
+
+    /**
+     * Exit idle mode: stop heartbeats, close socket, stop service.
+     */
+    fun exitIdleMode() {
+        if (!isIdleMode.getAndSet(false)) return
+
+        Log.i(TAG, "Exiting idle mode")
+
+        // Cancel idle heartbeat and release wake lock
+        idleJob?.cancel()
+        idleJob = null
+        idleWakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        idleWakeLock = null
+
+        // Release network request and close socket
+        releaseNetworkRequest()
+        socket?.close()
+        socket = null
+
+        // Clear ongoing activity and stop service
+        clearOngoingActivity()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -1349,7 +1515,7 @@ class TrackerService : LifecycleService() {
         serviceScope.launch {
             val buffer = ByteArray(256)
 
-            while (isRunning.get()) {
+            while (isRunning.get() || isIdleMode.get()) {
                 try {
                     val dgram = DatagramPacket(buffer, buffer.size)
                     socket?.receive(dgram)
@@ -1391,7 +1557,9 @@ class TrackerService : LifecycleService() {
                         val ackRate = getAckRate()
                         statusListener?.onAckReceived(ackSeq)
                         statusListener?.onConnectionStatus(ackRate)
-                        updateNotification(currentStatusText())
+                        if (isRunning.get()) {
+                            updateNotification(currentStatusText())
+                        }
 
                         // Extract event name from ACK if present and update status
                         val eventName = ack.optString("event", "")
@@ -1421,11 +1589,24 @@ class TrackerService : LifecycleService() {
                             statusListener?.onAssistEnabled(true)
                         }
 
-                        // Check for remote stop command
+                        // Cache idle interval from server ACK
+                        if (ack.has("idle")) {
+                            val interval = ack.optInt("idle", 0)
+                            idleIntervalMs = interval * 1000L
+                            // If idle mode is active and server sends idle=0, shut down
+                            if (isIdleMode.get() && interval == 0) {
+                                Log.w(TAG, "Server sent idle=0 while in idle mode, shutting down")
+                                Handler(Looper.getMainLooper()).post {
+                                    exitIdleMode()
+                                    statusListener?.onRemoteShutdown()
+                                }
+                            }
+                        }
+
+                        // Check for remote commands
                         val cmd = ack.optString("cmd", "")
                         if (cmd == "stop") {
                             Log.w(TAG, "Received remote STOP command from server")
-                            // Send stop packet to server, then notify UI and stop
                             requestGracefulStop {
                                 Handler(Looper.getMainLooper()).post {
                                     statusListener?.onRemoteStop()
@@ -1433,10 +1614,25 @@ class TrackerService : LifecycleService() {
                             }
                         } else if (cmd == "cancel_assist") {
                             Log.w(TAG, "Received remote CANCEL ASSIST command from server")
-                            // Cancel assist as if user cancelled it
                             assistRequested.set(false)
                             Handler(Looper.getMainLooper()).post {
                                 statusListener?.onRemoteCancelAssist()
+                            }
+                        } else if (cmd == "start") {
+                            if (isIdleMode.get()) {
+                                Log.w(TAG, "Received remote START command from server")
+                                Handler(Looper.getMainLooper()).post {
+                                    startTracking()
+                                    statusListener?.onRemoteStart()
+                                }
+                            }
+                        } else if (cmd == "shutdown") {
+                            if (isIdleMode.get()) {
+                                Log.w(TAG, "Received remote SHUTDOWN command from server")
+                                Handler(Looper.getMainLooper()).post {
+                                    exitIdleMode()
+                                    statusListener?.onRemoteShutdown()
+                                }
                             }
                         }
 
@@ -1445,7 +1641,7 @@ class TrackerService : LifecycleService() {
                 } catch (e: java.net.SocketTimeoutException) {
                     // Normal timeout, continue
                 } catch (e: Exception) {
-                    if (isRunning.get()) {
+                    if (isRunning.get() || isIdleMode.get()) {
                         Log.e(TAG, "ACK listener error", e)
                     }
                 }
@@ -1487,6 +1683,8 @@ class TrackerService : LifecycleService() {
     fun getLastAckTime(): Long = lastAckTime.get()
 
     fun isTracking(): Boolean = isRunning.get()
+
+    fun isInIdleMode(): Boolean = isIdleMode.get()
 
     fun isAssistActive(): Boolean = assistRequested.get()
 

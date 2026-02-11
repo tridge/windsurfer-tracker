@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
     private val assistEnabled = mutableStateOf(true)  // Whether assist button should be shown
     private val settings = mutableStateOf(TrackerSettings())
 
+    // Idle mode state
+    private val isIdleMode = mutableStateOf(false)
+
     // Race countdown timer state
     private val countdownSeconds = mutableStateOf<Int?>(null)
     private var lastCrownPressTime = 0L
@@ -138,9 +141,29 @@ class MainActivity : ComponentActivity() {
                     Log.w(TAG, "Assist cancelled by admin")
                 }
 
+                override fun onIdleEntered() {
+                    isIdleMode.value = true
+                    isTracking.value = false
+                    Log.d(TAG, "Entered idle mode")
+                }
+
+                override fun onRemoteStart() {
+                    // Service already called startTracking() - just update UI
+                    isIdleMode.value = false
+                    isTracking.value = true
+                    Log.d(TAG, "Remote start from idle mode")
+                }
+
+                override fun onRemoteShutdown() {
+                    isIdleMode.value = false
+                    finishStopTracking()
+                    Log.d(TAG, "Remote shutdown from idle mode")
+                }
+
             }
 
             isTracking.value = trackerService?.isTracking() == true
+            isIdleMode.value = trackerService?.isInIdleMode() == true
 
             // Sync assist state - push local state to service (for case when assist activated before service started)
             if (isAssistActive.value) {
@@ -243,6 +266,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TrackerApp(
                 isTracking = isTracking.value,
+                isIdleMode = isIdleMode.value,
                 isAssistActive = isAssistActive.value,
                 assistEnabled = assistEnabled.value,
                 speedKnots = speedKnots.floatValue,
@@ -286,6 +310,7 @@ class MainActivity : ComponentActivity() {
         // Re-sync state from service when activity resumes (e.g., from ongoing activity tap)
         if (serviceBound) {
             isTracking.value = trackerService?.isTracking() == true
+            isIdleMode.value = trackerService?.isInIdleMode() == true
             isAssistActive.value = trackerService?.isAssistActive() == true
             trackerService?.replayStatusForUi()
         }
@@ -459,7 +484,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopTracking() {
+        if (isIdleMode.value) {
+            // Already in idle mode - exit idle and fully stop
+            trackerService?.exitIdleMode()
+            isIdleMode.value = false
+            finishStopTracking()
+            return
+        }
         // Send stop notification to server, then clean up
+        // If service enters idle mode, onIdleEntered callback will handle UI update
+        // and we won't get the callback, so service stays bound
         trackerService?.requestGracefulStop {
             finishStopTracking()
         } ?: finishStopTracking()
@@ -474,6 +508,7 @@ class MainActivity : ComponentActivity() {
         }
 
         isTracking.value = false
+        isIdleMode.value = false
         isAssistActive.value = false
         speedKnots.floatValue = 0f
         distanceMeters.floatValue = 0f

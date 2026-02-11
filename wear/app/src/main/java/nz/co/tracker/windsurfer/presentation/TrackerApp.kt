@@ -15,6 +15,7 @@ sealed class Screen(val route: String) {
 @Composable
 fun TrackerApp(
     isTracking: Boolean,
+    isIdleMode: Boolean,
     isAssistActive: Boolean,
     assistEnabled: Boolean,
     speedKnots: Float,
@@ -47,6 +48,7 @@ fun TrackerApp(
             composable(Screen.Tracking.route) {
                 TrackingScreen(
                     isTracking = isTracking,
+                    isIdleMode = isIdleMode,
                     isAssistActive = isAssistActive,
                     assistEnabled = assistEnabled,
                     speedKnots = speedKnots,
