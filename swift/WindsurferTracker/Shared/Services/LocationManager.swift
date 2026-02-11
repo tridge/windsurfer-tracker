@@ -203,6 +203,11 @@ public final class LocationManager: NSObject, ObservableObject {
             return
         }
 
+        // Require GPS-derived position (WiFi/cell fixes have speed < 0)
+        guard location.speed >= 0 else {
+            return
+        }
+
         let position = TrackerPosition(from: location)
         lastPosition = position
 
