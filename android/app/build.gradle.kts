@@ -101,4 +101,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.lifecycle:lifecycle-service:2.6.2")
     implementation("org.json:json:20231013")
+    implementation("androidx.media:media:1.7.0")
 }

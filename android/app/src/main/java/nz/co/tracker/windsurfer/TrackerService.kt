@@ -13,6 +13,9 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import androidx.media.VolumeProviderCompat
 import android.os.BatteryManager
 import android.os.Binder
 import android.os.Build
@@ -202,6 +205,23 @@ class TrackerService : LifecycleService() {
     // Mutex for socket creation to prevent races
     private val socketMutex = kotlinx.coroutines.sync.Mutex()
 
+    // Volume button assist: MediaSession intercepts volume keys even on lock screen
+    private var mediaSession: MediaSessionCompat? = null
+    private var lastVolumeDirection: Int = 0       // +1 or -1
+    private var lastVolumeTime: Long = 0           // System.currentTimeMillis()
+    private val BOTH_BUTTONS_WINDOW_MS = 500L      // Window to detect simultaneous press
+
+    // Assist active alarm: plays triple ascending tones every 5 seconds while assist is active
+    private val assistAlarmHandler = Handler(Looper.getMainLooper())
+    private val assistAlarmRunnable = object : Runnable {
+        override fun run() {
+            if (assistRequested.get() && isRunning.get()) {
+                playAssistTones(ascending = true)
+                assistAlarmHandler.postDelayed(this, 5000L)
+            }
+        }
+    }
+
     // Receiver to restart location updates when user unlocks the device
     // This is needed because Google Play Services (FusedLocationProvider) isn't available during Direct Boot
     private var userUnlockedReceiver: BroadcastReceiver? = null
@@ -346,6 +366,102 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    /**
+     * Play triple ascending or descending tones at max volume for assist feedback.
+     * Ascending (low→mid→high) = assist activated, descending = deactivated.
+     */
+    private fun playAssistTones(ascending: Boolean) {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            val tones = if (ascending) {
+                intArrayOf(ToneGenerator.TONE_DTMF_1, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_9)
+            } else {
+                intArrayOf(ToneGenerator.TONE_DTMF_9, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_1)
+            }
+            val h = Handler(Looper.getMainLooper())
+            tg.startTone(tones[0], 150)
+            h.postDelayed({ tg.startTone(tones[1], 150) }, 200)
+            h.postDelayed({ tg.startTone(tones[2], 150) }, 400)
+            h.postDelayed({ tg.release() }, 600)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to play assist tones: ${e.message}")
+        }
+    }
+
+    /**
+     * Set up MediaSession to intercept volume button presses for assist toggle.
+     * Pressing both volume up and down within 500ms toggles assist.
+     * Volume changes are forwarded to the system so normal volume control still works.
+     */
+    private fun setupMediaSession() {
+        val session = MediaSessionCompat(this, "WindsurferTracker")
+
+        val volumeProvider = object : VolumeProviderCompat(
+            VOLUME_CONTROL_RELATIVE, 15, 7
+        ) {
+            override fun onAdjustVolume(direction: Int) {
+                // Forward volume change to system
+                if (direction != 0) {
+                    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    audioManager.adjustStreamVolume(
+                        AudioManager.STREAM_MUSIC, direction, 0
+                    )
+                }
+
+                // Only detect assist toggle while actively tracking
+                if (!isRunning.get()) return
+                if (direction == 0) return
+
+                val now = System.currentTimeMillis()
+
+                if (lastVolumeDirection != 0 &&
+                    direction != lastVolumeDirection &&
+                    (now - lastVolumeTime) <= BOTH_BUTTONS_WINDOW_MS
+                ) {
+                    // Both buttons pressed within window - toggle assist
+                    val newAssist = !assistRequested.get()
+                    requestAssist(newAssist)
+
+                    // Audio + vibration feedback
+                    try {
+                        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                        val duration = if (newAssist) 500L else 150L
+                        vibrator.vibrate(
+                            VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE)
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to vibrate for assist toggle: ${e.message}")
+                    }
+                    playAssistTones(ascending = newAssist)
+
+                    // Start/stop repeating alarm
+                    if (newAssist) {
+                        assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
+                    } else {
+                        assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+                    }
+
+                    Log.i(TAG, "Volume button assist toggled: assist=$newAssist")
+                    // Reset to prevent re-triggering
+                    lastVolumeDirection = 0
+                } else {
+                    lastVolumeDirection = direction
+                    lastVolumeTime = now
+                }
+            }
+        }
+
+        session.setPlaybackToRemote(volumeProvider)
+        // Set an active playback state so the system routes volume keys to this session
+        val playbackState = PlaybackStateCompat.Builder()
+            .setState(PlaybackStateCompat.STATE_PLAYING, 0, 0f)
+            .build()
+        session.setPlaybackState(playbackState)
+        session.isActive = true
+        mediaSession = session
+        Log.i(TAG, "MediaSession set up for volume button assist")
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
@@ -354,6 +470,7 @@ class TrackerService : LifecycleService() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
         setupLocationListener()
+        setupMediaSession()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -411,6 +528,9 @@ class TrackerService : LifecycleService() {
             idleWakeLock = null
             isIdleMode.set(false)
         }
+        // Clean up MediaSession
+        mediaSession?.release()
+        mediaSession = null
         // Clean up network callback and ACK listener
         unregisterNetworkCallback()
         ackListenerJob?.cancel()
@@ -852,6 +972,9 @@ class TrackerService : LifecycleService() {
         beepHandler.removeCallbacks(beepRunnable)
         toneGenerator?.release()
         toneGenerator = null
+
+        // Stop assist alarm
+        assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
 
         // Stop notification update timer
         notificationHandler.removeCallbacks(notificationUpdateRunnable)
@@ -1662,11 +1785,14 @@ class TrackerService : LifecycleService() {
     fun requestAssist(enabled: Boolean) {
         assistRequested.set(enabled)
         Log.d(TAG, "Assist ${if (enabled) "ENABLED" else "disabled"}")
-        
-        // Send immediate position update if requesting assist
-        if (enabled) {
-            lastLocation?.let { sendPosition(it) }
+
+        // Stop assist alarm when assist is disabled
+        if (!enabled) {
+            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
         }
+
+        // Send immediate position update so server/live view updates quickly
+        lastLocation?.let { sendPosition(it) }
     }
     
     fun getLastLocation(): Location? = lastLocation
@@ -1685,6 +1811,7 @@ class TrackerService : LifecycleService() {
         } else if (cmd == "cancel_assist") {
             Log.w(TAG, "Received remote CANCEL ASSIST command from server")
             assistRequested.set(false)
+            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
             Handler(Looper.getMainLooper()).post {
                 statusListener?.onRemoteCancelAssist()
             }
