@@ -69,9 +69,12 @@ public actor NetworkManager {
 
         print("[NET] Path update: status=\(path.status), constrained=\(isPathConstrained), interface=\(currentInterfaceType), expensive=\(path.isExpensive)")
 
-        // If path changed from constrained to unconstrained, try UDP again
-        if wasConstrained && !isPathConstrained {
-            print("[NET] Path no longer constrained, will retry UDP")
+        // On any network change (WiFi<->cellular, carrier switch, etc),
+        // tear down the old UDP connection. It's bound to the old interface
+        // and will silently fail. The next send() creates a fresh one cheaply.
+        if path.status == .satisfied && udpConnection != nil {
+            print("[NET] Network path changed, resetting UDP connection")
+            closeUDPConnection()
             useHttpFallback = false
             consecutiveUdpFailures = 0
         }
