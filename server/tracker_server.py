@@ -894,6 +894,8 @@ class PositionTracker:
                     "src_ip": src_ip,
                     "nsats": 0,
                 }
+                if stopped:
+                    pos_data["stopped"] = True
                 if charging is not None:
                     pos_data["chg"] = charging
                 if os_version:
@@ -906,7 +908,8 @@ class PositionTracker:
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
-            log(f"[{sailor_id}] GPS-wait heartbeat bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
+            label = "Stopped" if stopped else "GPS-wait heartbeat"
+            log(f"[{sailor_id}] {label} bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
 
             # Write current positions file (no log entry, no tail update)
             if self.positions_file:
@@ -1679,6 +1682,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     '.jpeg': 'image/jpeg',
                     '.svg': 'image/svg+xml',
                     '.ico': 'image/x-icon',
+                    '.plist': 'text/xml',
+                    '.ipa': 'application/octet-stream',
                 }
                 content_type = content_types.get(ext, 'application/octet-stream')
                 self._send_file(filepath, content_type)

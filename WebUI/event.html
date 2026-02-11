@@ -1137,13 +1137,13 @@
                     🗑 Clear Today's Tracks
                 </button>
                 <button class="admin-action-btn danger" onclick="stopAllUsers()">
-                    ⏹ Stop All Trackers
+                    ⏹ All IDLE
                 </button>
                 <button class="admin-action-btn primary" onclick="startAllIdleUsers()">
-                    ▶ Start All Idle
+                    ▶ All START
                 </button>
                 <button class="admin-action-btn danger" onclick="shutdownAllIdleUsers()">
-                    ⏻ Shutdown All Idle
+                    ⏻ All SHUTDOWN
                 </button>
             </div>
         </div>
@@ -2518,7 +2518,7 @@
 
         // Send remote stop command to all active trackers
         async function stopAllUsers() {
-            if (!confirm('Stop ALL active trackers? This will send a remote stop command to every tracker on this event.')) {
+            if (!confirm('Send ALL active trackers to IDLE mode? They will stop GPS tracking but remain connected.')) {
                 return;
             }
 
@@ -2543,7 +2543,7 @@
 
         // Send remote start command to all idle trackers
         async function startAllIdleUsers() {
-            if (!confirm('Start ALL idle trackers? This will send a remote start command to every idle tracker on this event.')) {
+            if (!confirm('START all idle trackers? They will begin GPS tracking.')) {
                 return;
             }
 
@@ -2568,7 +2568,9 @@
 
         // Send remote shutdown command to all idle trackers
         async function shutdownAllIdleUsers() {
-            if (!confirm('Shutdown ALL idle trackers? This will close the tracker app on all idle devices.')) {
+            const confirmation = prompt('This will SHUTDOWN the tracker app on all idle devices.\n\nType "shutdown" to confirm:');
+            if (confirmation !== 'shutdown') {
+                if (confirmation !== null) alert('Shutdown cancelled. You must type "shutdown" exactly.');
                 return;
             }
 
@@ -2619,7 +2621,9 @@
 
         // Send remote shutdown command to a single user
         async function shutdownUser(userId) {
-            if (!confirm(`Shutdown idle tracker for ${userId}? Their app will close.`)) {
+            const confirmation = prompt(`Shutdown tracker for ${userId}? Their app will close.\n\nType "yes" to confirm:`);
+            if (confirmation !== 'yes') {
+                if (confirmation !== null) alert('Shutdown cancelled. You must type "yes" exactly.');
                 return;
             }
 
@@ -3699,9 +3703,9 @@
                                 <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
                                 ${sailor.idle ? '<span style="background:#2563eb;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">IDLE</span>' : ''}
-                                ${(sailor.nsats === 0 && !sailor.idle) ? '<span style="background:#d97706;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">NOGPS</span>' : ''}
+                                ${(sailor.nsats === 0 && !sailor.idle && !sailor.stopped) ? '<span style="background:#d97706;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">NOGPS</span>' : ''}
                                 <div class="sailor-details">
-                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr}${sailor.nsats !== undefined ? ' · <span style="color:#16a34a" title="GPS satellites">&#128752;' + sailor.nsats + '</span>' : ''} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.nsats === 0 && !sailor.idle) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOP</span>' : '')}
+                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr}${sailor.nsats !== undefined ? ' · <span style="color:#16a34a" title="GPS satellites">&#128752;' + sailor.nsats + '</span>' : ''} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}
                                 </div>
                             </div>
                         </div>
@@ -3776,7 +3780,7 @@
                 ${infoLine}<br>
                 Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                 Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
-                Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.nsats === 0 && !sailor.idle) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : '')}<br>
+                Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}<br>
                 Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${powerSaveWarning}${batOptWarning}
             `;
 
@@ -3935,7 +3939,7 @@
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                     Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
-                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : (sailor.nsats === 0 && !sailor.idle) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : '')}<br>
+                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">
                         <label>

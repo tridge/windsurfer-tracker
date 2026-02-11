@@ -931,6 +931,12 @@ class TrackerService : LifecycleService() {
         val currentPassword = getCurrentPassword()
         val eventId = getCurrentEventId()
 
+        // Include last known position so server processes via the normal path
+        // (packets with lat=0/lon=0 hit a no-GPS branch that may skip stopped flag)
+        val prefs = getPrefs()
+        val lastLat = prefs.getFloat("last_lat", 0f)
+        val lastLon = prefs.getFloat("last_lon", 0f)
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("eid", eventId)
@@ -938,6 +944,10 @@ class TrackerService : LifecycleService() {
             put("ts", System.currentTimeMillis() / 1000)
             put("stopped", true)  // Deliberate stop
             put("ver", BuildConfig.VERSION_STRING)
+            if (lastLat != 0f && lastLon != 0f) {
+                put("lat", lastLat.toDouble())
+                put("lon", lastLon.toDouble())
+            }
             if (currentPassword.isNotEmpty()) {
                 put("pwd", currentPassword)
             }
@@ -1176,24 +1186,32 @@ class TrackerService : LifecycleService() {
         ackListenerJob?.cancel()
         ackListenerJob = null
 
-        // Close socket and stop service
-        isRunning.set(false)
-        socket?.close()
-        socket = null
+        // Send stop packet on a background thread (network I/O not allowed on main thread),
+        // then close socket and stop service
+        Thread {
+            sendStopPacketSync()
 
-        // Unregister network callback and shutdown receiver
-        unregisterNetworkCallback()
-        shutdownReceiver?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error unregistering shutdown receiver: ${e.message}")
+            // Close socket and stop service
+            isRunning.set(false)
+            socket?.close()
+            socket = null
+
+            Handler(Looper.getMainLooper()).post {
+                // Unregister network callback and shutdown receiver
+                unregisterNetworkCallback()
+                shutdownReceiver?.let {
+                    try {
+                        unregisterReceiver(it)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error unregistering shutdown receiver: ${e.message}")
+                    }
+                    shutdownReceiver = null
+                }
+
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
-            shutdownReceiver = null
-        }
-
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        }.start()
     }
 
     /**
