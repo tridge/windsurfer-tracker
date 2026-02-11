@@ -20,6 +20,13 @@ struct SettingsView: View {
     @State private var originalPassword: String = ""
     @State private var originalEventId: Int = 0
 
+    #if SIDELOAD
+    @State private var isCheckingUpdate = false
+    @State private var updateMessage: String? = nil
+    @State private var updateURL: String? = nil
+    @State private var showUpdateAlert = false
+    #endif
+
     var body: some View {
         NavigationView {
             Form {
@@ -151,6 +158,47 @@ struct SettingsView: View {
                             .foregroundColor(.gray)
                     }
                 }
+
+                #if SIDELOAD
+                Section {
+                    Button(action: {
+                        isCheckingUpdate = true
+                        Task {
+                            let result = await UpdateChecker.checkForUpdate()
+                            await MainActor.run {
+                                isCheckingUpdate = false
+                                switch result {
+                                case .updateAvailable(let info):
+                                    var msg = "Version \(info.version) (build \(info.buildNumber)) is available."
+                                    if !info.changelog.isEmpty {
+                                        msg += "\n\n\(info.changelog)"
+                                    }
+                                    updateMessage = msg
+                                    updateURL = info.url
+                                    showUpdateAlert = true
+                                case .noUpdate:
+                                    updateMessage = "You have the latest version."
+                                    updateURL = nil
+                                    showUpdateAlert = true
+                                case .error(let msg):
+                                    updateMessage = msg
+                                    updateURL = nil
+                                    showUpdateAlert = true
+                                }
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Text("Check for Updates")
+                            Spacer()
+                            if isCheckingUpdate {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isCheckingUpdate)
+                }
+                #endif
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -231,6 +279,20 @@ struct SettingsView: View {
             } message: {
                 Text(validationError ?? "")
             }
+            #if SIDELOAD
+            .alert(updateURL != nil ? "Update Available" : "Updates", isPresented: $showUpdateAlert) {
+                if let urlStr = updateURL, let url = URL(string: urlStr) {
+                    Button("Update") {
+                        UIApplication.shared.open(url)
+                    }
+                    Button("Later", role: .cancel) { }
+                } else {
+                    Button("OK", role: .cancel) { }
+                }
+            } message: {
+                Text(updateMessage ?? "")
+            }
+            #endif
             .onAppear {
                 // Load current values into temp state
                 tempSailorId = viewModel.sailorId
