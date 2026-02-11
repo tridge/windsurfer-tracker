@@ -179,6 +179,35 @@ public actor TrackerService {
         }
     }
 
+    /// Start in idle mode (for auto-start on app launch)
+    /// Sends idle heartbeats so the server knows the device is available.
+    /// If the server responds with idle=0, exits idle and shuts down.
+    public func startInIdleMode() async {
+        guard !isRunning && !isInIdleMode else { return }
+
+        // Configure network
+        await networkManager.configure(
+            host: preferences.serverHost,
+            port: UInt16(preferences.serverPort)
+        )
+
+        // Use cached idle interval, default to 15s if none known
+        if idleIntervalSeconds <= 0 {
+            idleIntervalSeconds = 15
+        }
+
+        // Start battery monitoring
+        await MainActor.run {
+            batteryMonitor.startDrainTracking()
+        }
+
+        // Start significant location monitoring to keep app alive in background
+        locationManager.startIdleLocationMonitoring()
+
+        // Enter idle mode
+        await enterIdleMode()
+    }
+
     /// Stop tracking
     public func stop() async {
         guard isRunning || isInIdleMode else { return }
@@ -673,6 +702,12 @@ public actor TrackerService {
         // Parse idle interval from server
         if let interval = response.idle {
             idleIntervalSeconds = interval
+            // If server sent idle=0 while we're in idle mode, shut down
+            if interval == 0 && isInIdleMode {
+                print("[TrackerService] Server sent idle=0 while in idle mode, shutting down")
+                await exitIdleMode()
+                return
+            }
         }
 
         // Check for remote stop command

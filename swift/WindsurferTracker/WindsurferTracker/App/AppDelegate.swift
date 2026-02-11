@@ -9,21 +9,25 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Enable battery monitoring for accurate drain tracking
         UIDevice.current.isBatteryMonitoringEnabled = true
 
-        // Check if launched due to location update
-        if launchOptions?[.location] != nil {
-            // App was launched in background due to location update
-            // TrackerService will handle auto-resume
-        }
+        // Only auto-resume tracking if the OS relaunched us in the background
+        // for a location event (keeps tracking alive across OS-initiated restarts).
+        // For user-initiated launches (reboot, force-quit, tap icon), start in idle.
+        let backgroundLocationRelaunch = launchOptions?[.location] != nil
 
-        // Auto-resume tracking if it was active
-        if PreferencesManager.shared.trackingActive {
+        if backgroundLocationRelaunch && PreferencesManager.shared.trackingActive {
             Task {
                 do {
                     try await TrackerService.shared.start()
                 } catch {
-                    // Failed to auto-resume, reset state
                     PreferencesManager.shared.trackingActive = false
                 }
+            }
+        } else if !PreferencesManager.shared.sailorId.isEmpty &&
+                  !PreferencesManager.shared.password.isEmpty {
+            // Clear stale tracking state and start in idle mode
+            PreferencesManager.shared.trackingActive = false
+            Task {
+                await TrackerService.shared.startInIdleMode()
             }
         }
 

@@ -13,6 +13,14 @@ struct ConfigView: View {
                     Spacer()
                         .frame(height: 40)
 
+                    // IDLE mode indicator
+                    if viewModel.isIdleMode {
+                        Text("IDLE")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Color(red: 1.0, green: 0.53, blue: 0.0))  // #FF8800
+                            .padding(.bottom, 8)
+                    }
+
                     // Your Name (label)
                     Text("Your Name")
                         .font(.subheadline)
