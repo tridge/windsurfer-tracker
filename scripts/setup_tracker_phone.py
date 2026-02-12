@@ -392,6 +392,28 @@ def step_configure_tracker(user_id, event_id, password):
     return True
 
 
+def step_disable_screen_wake():
+    """Disable raise-to-wake, tap-to-wake, and ambient display to save battery."""
+    settings = [
+        ("secure", "doze_pulse_on_pick_up", "0"),
+        ("secure", "doze_pulse_on_double_tap", "0"),
+        ("secure", "doze_enabled", "0"),
+        ("secure", "wake_gesture_enabled", "0"),
+    ]
+    errors = []
+    for ns, key, val in settings:
+        rc, _, _ = adb_shell("settings", "put", ns, key, val)
+        if rc != 0:
+            errors.append(key)
+
+    if errors:
+        print_fail(", ".join(errors))
+        return False
+
+    print_ok()
+    return True
+
+
 def parse_tracker_arg(value):
     """Parse --tracker UserID/EventID/Password format."""
     parts = value.split("/", 2)
@@ -431,6 +453,7 @@ def main():
         ("Disabling NFC", step_disable_nfc, False),
         ("Disabling other notifications", step_disable_other_notifications, False),
         ("Enabling data saver", step_enable_data_saver, False),
+        ("Disabling screen wake", step_disable_screen_wake, False),
         ("Disabling auto-updates", step_disable_auto_updates, False),
         ("Setting Hologram APN", step_set_hologram_apn, False),
     ])
