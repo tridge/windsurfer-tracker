@@ -165,6 +165,17 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    // Assist active alarm: plays triple ascending tones every 5 seconds while assist is active
+    private val assistAlarmHandler = Handler(Looper.getMainLooper())
+    private val assistAlarmRunnable = object : Runnable {
+        override fun run() {
+            if (assistRequested.get() && isRunning.get()) {
+                playAssistTones(ascending = true)
+                assistAlarmHandler.postDelayed(this, 5000L)
+            }
+        }
+    }
+
     // Race countdown timer
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -358,6 +369,49 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    /**
+     * Play assist tones: triple ascending (low→mid→high) or descending (high→mid→low).
+     * Uses STREAM_ALARM at MAX_VOLUME so tones are audible even with media muted.
+     */
+    private fun playAssistTones(ascending: Boolean) {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            val tones = if (ascending) {
+                intArrayOf(ToneGenerator.TONE_DTMF_1, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_9)
+            } else {
+                intArrayOf(ToneGenerator.TONE_DTMF_9, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_1)
+            }
+            val h = Handler(Looper.getMainLooper())
+            tg.startTone(tones[0], 150)
+            h.postDelayed({ tg.startTone(tones[1], 150) }, 200)
+            h.postDelayed({ tg.startTone(tones[2], 150) }, 400)
+            h.postDelayed({ tg.release() }, 600)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to play assist tones: ${e.message}")
+        }
+    }
+
+    /**
+     * Play tracking start/stop tones: double ascending (low→high) or descending (high→low).
+     * Uses STREAM_ALARM at MAX_VOLUME.
+     */
+    private fun playTrackingTones(ascending: Boolean) {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            val tones = if (ascending) {
+                intArrayOf(ToneGenerator.TONE_DTMF_1, ToneGenerator.TONE_DTMF_9)
+            } else {
+                intArrayOf(ToneGenerator.TONE_DTMF_9, ToneGenerator.TONE_DTMF_1)
+            }
+            val h = Handler(Looper.getMainLooper())
+            tg.startTone(tones[0], 150)
+            h.postDelayed({ tg.startTone(tones[1], 150) }, 200)
+            h.postDelayed({ tg.release() }, 400)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to play tracking tones: ${e.message}")
+        }
+    }
+
     private fun getServerAddress(): InetAddress? {
         val now = System.currentTimeMillis()
         val cached = cachedServerAddress
@@ -413,19 +467,36 @@ class TrackerService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
-        intent?.let {
-            serverHost = it.getStringExtra("server_host") ?: DEFAULT_SERVER_HOST
-            serverPort = it.getIntExtra("server_port", DEFAULT_SERVER_PORT)
-            sailorId = it.getStringExtra("sailor_id") ?: ""
-            role = it.getStringExtra("role") ?: "sailor"
-            password = it.getStringExtra("password") ?: ""
-            eventId = it.getIntExtra("event_id", 2)
-            heartRateEnabled = it.getBooleanExtra("heart_rate_enabled", false)
-            trackerBeepEnabled = it.getBooleanExtra("tracker_beep", true)
-            raceTimerEnabled = it.getBooleanExtra("race_timer_enabled", false)
-            raceTimerMinutes = it.getIntExtra("race_timer_minutes", 5)
-            raceTimerTapGForce = it.getIntExtra("race_timer_tap_g_force", 3).coerceIn(2, 9)
+        if (intent != null) {
+            // Normal start from MainActivity - read config from intent extras
+            serverHost = intent.getStringExtra("server_host") ?: DEFAULT_SERVER_HOST
+            serverPort = intent.getIntExtra("server_port", DEFAULT_SERVER_PORT)
+            sailorId = intent.getStringExtra("sailor_id") ?: ""
+            role = intent.getStringExtra("role") ?: "sailor"
+            password = intent.getStringExtra("password") ?: ""
+            eventId = intent.getIntExtra("event_id", 2)
+            heartRateEnabled = intent.getBooleanExtra("heart_rate_enabled", false)
+            trackerBeepEnabled = intent.getBooleanExtra("tracker_beep", true)
+            raceTimerEnabled = intent.getBooleanExtra("race_timer_enabled", false)
+            raceTimerMinutes = intent.getIntExtra("race_timer_minutes", 5)
+            raceTimerTapGForce = intent.getIntExtra("race_timer_tap_g_force", 3).coerceIn(2, 9)
             Log.d(TAG, "Race timer settings: enabled=$raceTimerEnabled, minutes=$raceTimerMinutes, tapGForce=${raceTimerTapGForce}g (threshold=${TAP_THRESHOLD}m/s²)")
+            positionBuffer.clear()
+            totalDistance = 0f
+            previousLocation = null
+
+            // Persist config for START_STICKY restarts (system may kill and restart service
+            // with null intent, so we need saved config to avoid sending bad packets)
+            saveServiceConfig()
+        } else {
+            // START_STICKY restart - system killed and restarted service with null intent.
+            // Reload config from SharedPreferences.
+            if (!loadServiceConfig()) {
+                Log.w(TAG, "No saved config for START_STICKY restart, stopping service")
+                stopSelf()
+                return START_STICKY
+            }
+            Log.i(TAG, "Restored config from SharedPreferences: id=$sailorId event=$eventId")
             positionBuffer.clear()
             totalDistance = 0f
             previousLocation = null
@@ -438,6 +509,55 @@ class TrackerService : LifecycleService() {
         }
 
         return START_STICKY
+    }
+
+    /**
+     * Save service config to device-protected SharedPreferences for START_STICKY restarts.
+     */
+    private fun saveServiceConfig() {
+        val prefs = createDeviceProtectedStorageContext()
+            .getSharedPreferences("tracker_service_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("server_host", serverHost)
+            putInt("server_port", serverPort)
+            putString("sailor_id", sailorId)
+            putString("role", role)
+            putString("password", password)
+            putInt("event_id", eventId)
+            putBoolean("heart_rate_enabled", heartRateEnabled)
+            putBoolean("tracker_beep", trackerBeepEnabled)
+            putBoolean("race_timer_enabled", raceTimerEnabled)
+            putInt("race_timer_minutes", raceTimerMinutes)
+            putInt("race_timer_tap_g_force", raceTimerTapGForce)
+            apply()
+        }
+        Log.d(TAG, "Saved service config to SharedPreferences")
+    }
+
+    /**
+     * Load service config from device-protected SharedPreferences.
+     * Returns true if valid config was loaded, false if no saved config exists.
+     */
+    private fun loadServiceConfig(): Boolean {
+        val prefs = createDeviceProtectedStorageContext()
+            .getSharedPreferences("tracker_service_prefs", Context.MODE_PRIVATE)
+        val savedId = prefs.getString("sailor_id", "") ?: ""
+        val savedPwd = prefs.getString("password", "") ?: ""
+        if (savedId.isEmpty() || savedPwd.isEmpty()) {
+            return false
+        }
+        serverHost = prefs.getString("server_host", DEFAULT_SERVER_HOST) ?: DEFAULT_SERVER_HOST
+        serverPort = prefs.getInt("server_port", DEFAULT_SERVER_PORT)
+        sailorId = savedId
+        role = prefs.getString("role", "sailor") ?: "sailor"
+        password = savedPwd
+        eventId = prefs.getInt("event_id", 2)
+        heartRateEnabled = prefs.getBoolean("heart_rate_enabled", false)
+        trackerBeepEnabled = prefs.getBoolean("tracker_beep", true)
+        raceTimerEnabled = prefs.getBoolean("race_timer_enabled", false)
+        raceTimerMinutes = prefs.getInt("race_timer_minutes", 5)
+        raceTimerTapGForce = prefs.getInt("race_timer_tap_g_force", 3).coerceIn(2, 9)
+        return true
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -875,6 +995,9 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId")
 
+        // Play double ascending tone to indicate tracking started
+        playTrackingTones(ascending = true)
+
         // Request standalone network (LTE/WiFi) before creating socket
         requestStandaloneNetwork()
 
@@ -932,6 +1055,9 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Stopping tracking")
         trackingStartRealtimeMs = 0L
+
+        // Stop assist alarm if running
+        assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
 
         // Stop GPS-wait heartbeat
         gpsWaitJob?.cancel()
@@ -1042,6 +1168,9 @@ class TrackerService : LifecycleService() {
             callback?.invoke()
             return
         }
+
+        // Play double descending tone immediately for any deliberate stop
+        playTrackingTones(ascending = false)
 
         serviceScope.launch {
             sendStopPacket()
@@ -1156,12 +1285,39 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Resume tracking from idle mode without creating a new Intent.
+     * Clears idle state and starts GPS tracking using already-set fields.
+     * Called when user taps screen while idle or via remote start command.
+     */
+    fun resumeFromIdle() {
+        if (!isIdleMode.get()) return
+
+        Log.i(TAG, "Resuming from idle mode")
+
+        // Cancel idle heartbeat and release idle wake lock
+        idleJob?.cancel()
+        idleJob = null
+        idleWakeLock?.let { if (it.isHeld) it.release() }
+        idleWakeLock = null
+        isIdleMode.set(false)
+
+        // Update notification for tracking mode
+        startForegroundService()
+
+        // Start GPS tracking (startTracking checks isRunning, which is false in idle)
+        startTracking()
+    }
+
+    /**
      * Exit idle mode: stop heartbeats, close socket, stop service.
      */
     fun exitIdleMode() {
         if (!isIdleMode.getAndSet(false)) return
 
         Log.i(TAG, "Exiting idle mode")
+
+        // Clear saved config so START_STICKY doesn't restart after deliberate exit
+        clearServiceConfig()
 
         // Cancel idle heartbeat and release wake lock
         idleJob?.cancel()
@@ -1582,6 +1738,8 @@ class TrackerService : LifecycleService() {
                             // Clear local assist flag if server says assist is disabled
                             if (!assistEnabled && assistRequested.getAndSet(false)) {
                                 Log.d(TAG, "Assist cleared by server (assist disabled for event)")
+                                assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+                                playAssistTones(ascending = false)
                             }
                         } else {
                             // Default to enabled if not specified
@@ -1615,6 +1773,8 @@ class TrackerService : LifecycleService() {
                         } else if (cmd == "cancel_assist") {
                             Log.w(TAG, "Received remote CANCEL ASSIST command from server")
                             assistRequested.set(false)
+                            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+                            playAssistTones(ascending = false)
                             Handler(Looper.getMainLooper()).post {
                                 statusListener?.onRemoteCancelAssist()
                             }
@@ -1622,7 +1782,7 @@ class TrackerService : LifecycleService() {
                             if (isIdleMode.get()) {
                                 Log.w(TAG, "Received remote START command from server")
                                 Handler(Looper.getMainLooper()).post {
-                                    startTracking()
+                                    resumeFromIdle()
                                     statusListener?.onRemoteStart()
                                 }
                             }
@@ -1705,6 +1865,14 @@ class TrackerService : LifecycleService() {
         assistRequested.set(enabled)
         Log.d(TAG, "Assist ${if (enabled) "ENABLED" else "disabled"}")
 
+        // Play assist tones and manage repeating alarm
+        playAssistTones(ascending = enabled)
+        if (enabled) {
+            assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
+        } else {
+            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+        }
+
         // Send immediate position update when requesting assist
         if (enabled) {
             lastLocation?.let { sendPosition(it) }
@@ -1712,10 +1880,22 @@ class TrackerService : LifecycleService() {
     }
 
     fun stopService() {
+        // Clear saved config so START_STICKY doesn't restart with stale settings
+        clearServiceConfig()
         stopTracking()
         clearOngoingActivity()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /**
+     * Clear saved service config so START_STICKY doesn't restart after deliberate stop.
+     */
+    private fun clearServiceConfig() {
+        createDeviceProtectedStorageContext()
+            .getSharedPreferences("tracker_service_prefs", Context.MODE_PRIVATE)
+            .edit().clear().apply()
+        Log.d(TAG, "Cleared saved service config")
     }
 
     // Race countdown timer methods

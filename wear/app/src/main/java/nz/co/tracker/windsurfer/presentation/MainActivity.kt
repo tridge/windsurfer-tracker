@@ -359,6 +359,14 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleTracking() {
         errorMessage.value = null  // Clear any previous error
+        if (isIdleMode.value) {
+            // Resume from idle mode using already-set service config
+            trackerService?.resumeFromIdle()
+            isIdleMode.value = false
+            isTracking.value = true
+            updateScreenWakeState()
+            return
+        }
         if (isTracking.value) {
             stopTracking()
         } else {
