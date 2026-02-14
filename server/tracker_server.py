@@ -1281,23 +1281,26 @@ def send_proactive_command(key: str, cmd: str):
         log(f"[UDP] Proactive send failed for {key}: {e}")
 
 # Rate limiting for password guessing protection
-# Maps IP address -> timestamp of last failed auth attempt
-_failed_auth_times: dict[str, float] = {}
+# Maps (IP, sailor_id) -> timestamp of last failed auth attempt
+# Using (IP, sailor_id) tuple so one misconfigured tracker doesn't block
+# all trackers sharing the same public IP (e.g. behind cellular NAT)
+_failed_auth_times: dict[tuple[str, str], float] = {}
 _RATE_LIMIT_SECONDS = 5.0
 
 
-def is_rate_limited(ip: str) -> bool:
-    """Check if an IP is rate limited due to recent failed auth."""
-    if ip in _failed_auth_times:
-        elapsed = time.time() - _failed_auth_times[ip]
+def is_rate_limited(ip: str, sailor_id: str = "__admin__") -> bool:
+    """Check if an (IP, sailor_id) pair is rate limited due to recent failed auth."""
+    key = (ip, sailor_id)
+    if key in _failed_auth_times:
+        elapsed = time.time() - _failed_auth_times[key]
         if elapsed < _RATE_LIMIT_SECONDS:
             return True
     return False
 
 
-def record_failed_auth(ip: str):
+def record_failed_auth(ip: str, sailor_id: str = "__admin__"):
     """Record a failed authentication attempt for rate limiting."""
-    _failed_auth_times[ip] = time.time()
+    _failed_auth_times[(ip, sailor_id)] = time.time()
 
 
 def get_event_tracker(eid: int) -> EventTracker | None:
@@ -2716,13 +2719,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 # Check per-event tracker password
                 event_tracker_pwds = event.get('tracker_password', [])
                 if event_tracker_pwds:
-                    if is_rate_limited(client_ip):
+                    if is_rate_limited(client_ip, sailor_id):
                         log(f"[AUTH] Rate limited for {sailor_id} from {client_ip} os={os_version} ver={version}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Too many attempts"}, 429)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd not in event_tracker_pwds:
-                        record_failed_auth(client_ip)
+                        record_failed_auth(client_ip, sailor_id)
                         log(f"[AUTH] Failed for event {eid} user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
@@ -2748,13 +2751,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 # Legacy single-event mode
                 # Check rate limiting and password if required
                 if _tracker_password:
-                    if is_rate_limited(client_ip):
+                    if is_rate_limited(client_ip, sailor_id):
                         log(f"[AUTH] Rate limited for {sailor_id} from {client_ip} os={os_version} ver={version}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Too many attempts"}, 429)
                         return
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd != _tracker_password:
-                        record_failed_auth(client_ip)
+                        record_failed_auth(client_ip, sailor_id)
                         log(f"[AUTH] Failed (legacy) user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
                         self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                         return
@@ -3491,14 +3494,14 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     # Check per-event tracker password
                     event_tracker_pwds = event.get('tracker_password', [])
                     if event_tracker_pwds:
-                        if is_rate_limited(client_ip):
+                        if is_rate_limited(client_ip, sailor_id):
                             log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)
                             continue
                         packet_pwd = packet.get("pwd", "")
                         if packet_pwd not in event_tracker_pwds:
-                            record_failed_auth(client_ip)
+                            record_failed_auth(client_ip, sailor_id)
                             log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)
@@ -3573,7 +3576,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                     # Legacy single-event mode
                     # Check rate limiting and password if required
                     if tracker_password:
-                        if is_rate_limited(client_ip):
+                        if is_rate_limited(client_ip, sailor_id):
                             log(f"[UDP] Auth rate-limited for {sailor_id} from {client_ip}")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)
@@ -3581,7 +3584,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
 
                         packet_pwd = packet.get("pwd", "")
                         if packet_pwd != tracker_password:
-                            record_failed_auth(client_ip)
+                            record_failed_auth(client_ip, sailor_id)
                             log(f"[UDP] Auth failed for {sailor_id} from {client_ip} pwd='{packet_pwd}'")
                             error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                             sock.sendto(error_ack, addr)

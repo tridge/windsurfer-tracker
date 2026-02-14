@@ -136,3 +136,27 @@ def test_dual_password_wrong_rejected(udp_client, http_client):
     pkt = make_packet(eid=eid, id="DUALR1", pwd="wrongpwd")
     ack = udp_client.send_position(pkt)
     assert ack.get("error") == "auth"
+
+
+def test_rate_limit_per_user_isolation(http_client):
+    """Failed auth for user A should not block user B from the same IP."""
+    eid = create_event(http_client, name="Rate Isolation", tracker_password=["secret123"])
+    shared_ip = "10.99.1.1"
+
+    # User A sends wrong password — triggers rate limit for (shared_ip, "BAD01")
+    pkt_bad = make_packet(eid=eid, id="BAD01", pwd="wrongpwd")
+    status_bad, body_bad = http_client.post(
+        "/api/tracker", data=pkt_bad,
+        headers={"X-Forwarded-For": shared_ip},
+    )
+    assert status_bad == 401
+    assert body_bad.get("error") == "auth"
+
+    # User B from same IP with correct password should NOT be rate limited
+    pkt_good = make_packet(eid=eid, id="GOOD01", pwd="secret123")
+    status_good, body_good = http_client.post(
+        "/api/tracker", data=pkt_good,
+        headers={"X-Forwarded-For": shared_ip},
+    )
+    assert status_good == 200
+    assert "error" not in body_good
