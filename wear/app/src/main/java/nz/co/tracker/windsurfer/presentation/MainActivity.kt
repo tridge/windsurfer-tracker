@@ -529,9 +529,18 @@ class MainActivity : ComponentActivity() {
         val newState = !isAssistActive.value
         isAssistActive.value = newState
 
-        // If activating assist and not already tracking, start tracking first
+        // If activating assist, ensure tracking is running
         if (newState && !isTracking.value) {
-            checkPermissionsAndStart()
+            if (isIdleMode.value) {
+                // Resume from idle mode
+                trackerService?.resumeFromIdle()
+                isIdleMode.value = false
+                isTracking.value = true
+                updateScreenWakeState()
+            } else {
+                // Not tracking at all - start fresh
+                checkPermissionsAndStart()
+            }
         }
 
         trackerService?.requestAssist(newState)

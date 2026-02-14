@@ -408,8 +408,8 @@ class TrackerService : LifecycleService() {
                     )
                 }
 
-                // Only detect assist toggle while actively tracking
-                if (!isRunning.get()) return
+                // Only detect assist toggle while actively tracking or in idle mode
+                if (!isRunning.get() && !isIdleMode.get()) return
                 if (direction == 0) return
 
                 val now = System.currentTimeMillis()
@@ -420,6 +420,15 @@ class TrackerService : LifecycleService() {
                 ) {
                     // Both buttons pressed within window - toggle assist
                     val newAssist = !assistRequested.get()
+
+                    // If activating assist from idle mode, resume tracking first
+                    if (newAssist && isIdleMode.get()) {
+                        Handler(Looper.getMainLooper()).post {
+                            startTrackingFromIdle()
+                            statusListener?.onRemoteStart()
+                        }
+                    }
+
                     requestAssist(newAssist)
 
                     // Audio + vibration feedback

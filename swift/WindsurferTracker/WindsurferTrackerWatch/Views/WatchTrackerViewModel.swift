@@ -561,6 +561,11 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     }
 
     public func toggleAssist() {
+        let activating = !assistRequested
+        // If activating assist and not currently tracking, start tracking first
+        if activating && !isTracking {
+            startTracking()
+        }
         Task {
             await TrackerService.shared.toggleAssist()
             assistRequested = await TrackerService.shared.isAssistRequested

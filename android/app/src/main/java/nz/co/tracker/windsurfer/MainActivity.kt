@@ -45,7 +45,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private var bindingInProgress = false
     private lateinit var updateChecker: UpdateChecker
     private var currentEventName: String = ""
-    
+    private var pendingAssistOnConnect = false
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as TrackerService.LocalBinder
@@ -53,13 +54,20 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             trackerService?.statusListener = this@MainActivity
             serviceBound = true
             bindingInProgress = false
-            
+
             // Check if this is a stale service (bound but not tracking or idle)
             if (trackerService?.isTracking() != true && trackerService?.isIdle() != true) {
                 Log.d(TAG, "Found stale service, cleaning up")
                 stopService(Intent(this@MainActivity, TrackerService::class.java))
             }
-            
+
+            // If assist was requested before service was connected, activate it now
+            if (pendingAssistOnConnect) {
+                pendingAssistOnConnect = false
+                trackerService?.requestAssist(true)
+                updateAssistButton(true)
+            }
+
             updateUI()
             Log.d(TAG, "Service connected, tracking=${trackerService?.isTracking()}")
         }
@@ -295,7 +303,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                 val newState = !service.isAssistActive()
                 service.requestAssist(newState)
                 updateAssistButton(newState)
-                
+
                 // Vibrate to confirm
                 @Suppress("DEPRECATION")
                 val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
@@ -308,16 +316,38 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     vibrator.vibrate(100)
                     Toast.makeText(this, "Assist request cancelled", Toast.LENGTH_SHORT).show()
                 }
+            } else if (service != null && service.isIdle()) {
+                // Idle mode: resume tracking and activate assist
+                service.startTrackingFromIdle()
+                service.requestAssist(true)
+                updateAssistButton(true)
+                binding.btnStartStop.text = "Stop Tracking"
+                binding.statusGroup.visibility = View.VISIBLE
+                binding.configGroup.visibility = View.GONE
+                binding.tvIdleStatus.visibility = View.GONE
+                getPrefs().edit().putBoolean("tracking_active", true).apply()
+
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
+                vibrator.vibrate(longArrayOf(0, 300, 100, 300), -1)
+                Toast.makeText(this, "ASSIST REQUEST ACTIVATED", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this, "Start tracking first", Toast.LENGTH_SHORT).show()
+                // Not tracking and not idle: start tracking with pending assist
+                pendingAssistOnConnect = true
+                checkPermissionsAndStart()
+
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
+                vibrator.vibrate(longArrayOf(0, 300, 100, 300), -1)
+                Toast.makeText(this, "Starting tracking with ASSIST", Toast.LENGTH_LONG).show()
             }
             true  // Consume the long press
         }
-        
+
         // Regular tap on assist button shows hint
         binding.btnAssist.setOnClickListener {
-            if (trackerService?.isTracking() != true) {
-                Toast.makeText(this, "Start tracking first", Toast.LENGTH_SHORT).show()
+            if (trackerService?.isTracking() != true && trackerService?.isIdle() != true) {
+                Toast.makeText(this, "Long press to request assistance (will start tracking)", Toast.LENGTH_SHORT).show()
             } else if (trackerService?.isAssistActive() == true) {
                 Toast.makeText(this, "Long press to CANCEL assist request", Toast.LENGTH_SHORT).show()
             } else {
