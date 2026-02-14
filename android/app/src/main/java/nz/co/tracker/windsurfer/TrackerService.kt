@@ -11,10 +11,7 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.media.AudioAttributes
-import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Binder
@@ -205,14 +202,9 @@ class TrackerService : LifecycleService() {
     // Mutex for socket creation to prevent races
     private val socketMutex = kotlinx.coroutines.sync.Mutex()
 
-    // Volume button assist: detect both volume up+down within a window to toggle assist.
-    // Uses near-inaudible AudioTrack so Samsung processes volume keys (otherwise it skips them),
-    // plus a BroadcastReceiver for VOLUME_CHANGED_ACTION to detect direction changes.
-    private var silentAudioTrack: AudioTrack? = null
-    private var volumeChangeReceiver: BroadcastReceiver? = null
-    private var lastVolumeDirection: Int = 0       // +1 or -1
-    private var lastVolumeTime: Long = 0           // System.currentTimeMillis()
-    private val BOTH_BUTTONS_WINDOW_MS = 500L      // Window to detect simultaneous press
+    // Volume button assist: uses AccessibilityService (VolumeKeyService) to detect
+    // simultaneous volume up+down press. This works reliably on all devices including
+    // Android 14+ Pixel where BroadcastReceiver-based detection fails due to broadcast coalescing.
 
     // Assist active alarm: plays triple ascending tones every 5 seconds while assist is active
     private val assistAlarmHandler = Handler(Looper.getMainLooper())
@@ -392,151 +384,51 @@ class TrackerService : LifecycleService() {
     }
 
     /**
-     * Register a BroadcastReceiver for VOLUME_CHANGED_ACTION to detect assist toggle.
-     * Pressing both volume up and down within 500ms toggles assist.
-     * Requires near-inaudible audio to be playing (startSilentAudio) so that Samsung
-     * actually processes volume key presses instead of swallowing them.
+     * Handle volume combo detected by VolumeKeyService (AccessibilityService).
+     * Toggles assist state, vibrates, and plays tones.
      */
-    private fun registerVolumeReceiver() {
-        if (volumeChangeReceiver != null) return
+    private fun handleVolumeCombo() {
+        if (!isRunning.get() && !isIdleMode.get()) return
 
-        volumeChangeReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action != "android.media.VOLUME_CHANGED_ACTION") return
+        val newAssist = !assistRequested.get()
 
-                // Only detect assist toggle while actively tracking or in idle mode
-                if (!isRunning.get() && !isIdleMode.get()) return
-
-                val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
-                val prevVol = intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1)
-
-                if (newVol == prevVol || newVol < 0 || prevVol < 0) return
-
-                val direction = if (newVol > prevVol) 1 else -1
-                val now = System.currentTimeMillis()
-
-                Log.d(TAG, "Volume change: $prevVol->$newVol, dir=$direction")
-
-                if (lastVolumeDirection != 0 &&
-                    direction != lastVolumeDirection &&
-                    (now - lastVolumeTime) <= BOTH_BUTTONS_WINDOW_MS
-                ) {
-                    // Both buttons pressed within window - toggle assist
-                    val newAssist = !assistRequested.get()
-
-                    // If activating assist from idle mode, resume tracking first
-                    if (newAssist && isIdleMode.get()) {
-                        startTrackingFromIdle()
-                        statusListener?.onRemoteStart()
-                    }
-
-                    requestAssist(newAssist)
-
-                    // Audio + vibration feedback
-                    try {
-                        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-                        val duration = if (newAssist) 500L else 150L
-                        vibrator.vibrate(
-                            VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE)
-                        )
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to vibrate for assist toggle: ${e.message}")
-                    }
-                    playAssistTones(ascending = newAssist)
-
-                    // Start/stop repeating alarm
-                    if (newAssist) {
-                        assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
-                    } else {
-                        assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
-                    }
-
-                    Log.i(TAG, "Volume button assist toggled: assist=$newAssist")
-                    // Reset to prevent re-triggering
-                    lastVolumeDirection = 0
-                } else {
-                    lastVolumeDirection = direction
-                    lastVolumeTime = now
-                }
-            }
+        if (newAssist && isIdleMode.get()) {
+            startTrackingFromIdle()
+            statusListener?.onRemoteStart()
         }
 
-        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
-        registerReceiver(volumeChangeReceiver, filter, Context.RECEIVER_EXPORTED)
-        Log.i(TAG, "Registered volume change receiver for assist toggle")
-    }
+        requestAssist(newAssist)
 
-    private fun unregisterVolumeReceiver() {
-        volumeChangeReceiver?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error unregistering volume receiver: ${e.message}")
-            }
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            val duration = if (newAssist) 500L else 150L
+            vibrator.vibrate(
+                VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to vibrate for assist toggle: ${e.message}")
         }
-        volumeChangeReceiver = null
+        playAssistTones(ascending = newAssist)
+
+        if (newAssist) {
+            assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
+        } else {
+            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+        }
+
+        Log.i(TAG, "Volume button assist toggled: assist=$newAssist")
     }
 
     /**
-     * Start playing near-inaudible audio on STREAM_MUSIC. Samsung's MediaSessionService
-     * only routes volume keys to a MediaSession when audio is actually playing on the
-     * music stream (it checks at the audio HAL level, ignoring MediaSession playback state).
-     * We play minimal-amplitude samples (1/32767) which are below audible threshold but
-     * satisfy Samsung's "music is playing" check.
-     * Only runs while actively tracking to save battery.
+     * Register callback with VolumeKeyService for volume combo detection.
      */
-    private fun startSilentAudio() {
-        if (silentAudioTrack != null) return
-
-        val sampleRate = 8000
-        val bufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-
-        val audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .build()
-
-        // Write near-inaudible samples (amplitude 1 out of 32767) — not silence,
-        // so Samsung's audio HAL registers actual audio output
-        val buffer = ShortArray(bufferSize / 2)
-        for (i in buffer.indices) {
-            buffer[i] = 1  // Minimal non-zero amplitude
-        }
-        audioTrack.write(buffer, 0, buffer.size)
-        audioTrack.setLoopPoints(0, buffer.size, -1)  // Loop forever
-        audioTrack.play()
-
-        silentAudioTrack = audioTrack
-        Log.d(TAG, "Started near-inaudible audio for volume key routing")
+    private fun setupVolumeAssist() {
+        VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
+        Log.i(TAG, "Registered VolumeKeyService callback for assist toggle")
     }
 
-    private fun stopSilentAudio() {
-        silentAudioTrack?.let {
-            try {
-                it.stop()
-                it.release()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping silent audio: ${e.message}")
-            }
-        }
-        silentAudioTrack = null
+    private fun teardownVolumeAssist() {
+        VolumeKeyService.onVolumeComboDetected = null
     }
 
     override fun onCreate() {
@@ -547,7 +439,7 @@ class TrackerService : LifecycleService() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
         setupLocationListener()
-        registerVolumeReceiver()
+        setupVolumeAssist()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -605,9 +497,8 @@ class TrackerService : LifecycleService() {
             idleWakeLock = null
             isIdleMode.set(false)
         }
-        // Clean up volume receiver and silent audio
-        stopSilentAudio()
-        unregisterVolumeReceiver()
+        // Clean up volume assist
+        teardownVolumeAssist()
         // Clean up network callback and ACK listener
         unregisterNetworkCallback()
         ackListenerJob?.cancel()
@@ -880,9 +771,6 @@ class TrackerService : LifecycleService() {
 
         Log.d(TAG, "Starting tracking to $serverHost:$serverPort as $sailorId")
 
-        // Start near-inaudible audio so Samsung routes volume keys to our MediaSession
-        startSilentAudio()
-
         // Record starting battery for drain rate calculation
         trackingStartTime = System.currentTimeMillis()
         try {
@@ -1053,9 +941,6 @@ class TrackerService : LifecycleService() {
         if (!isRunning.getAndSet(false)) return
 
         Log.d(TAG, "Stopping tracking")
-
-        // Stop near-inaudible audio (no longer need volume key routing)
-        stopSilentAudio()
 
         // Stop keepalive heartbeat
         keepaliveJob?.cancel()

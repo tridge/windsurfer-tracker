@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Windsurfer Tracker</string>
     <string name="your_name_label">Your Name</string>
+    <string name="volume_key_service_description">Detects simultaneous volume button press for emergency assist toggle. No screen content is read or accessed.</string>
 </resources>

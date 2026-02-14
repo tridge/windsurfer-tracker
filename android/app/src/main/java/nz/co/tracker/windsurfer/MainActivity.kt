@@ -124,6 +124,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
             Toast.makeText(this, "Battery optimization still enabled - tracking may be unreliable", Toast.LENGTH_LONG).show()
         }
+        checkAccessibilityService()
+    }
+
+    private val accessibilitySettingsRequest = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (VolumeKeyService.isEnabled(this)) {
+            Toast.makeText(this, "Volume button assist enabled", Toast.LENGTH_SHORT).show()
+        }
         startTrackerService()
     }
     
@@ -506,12 +515,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to open battery optimization settings", e)
                         Toast.makeText(this, "Please manually disable battery optimization in Settings", Toast.LENGTH_LONG).show()
-                        startTrackerService()
+                        checkAccessibilityService()
                     }
                 }
                 .setNegativeButton("SKIP") { _, _ ->
                     Toast.makeText(this, "Tracking may be unreliable with battery optimization enabled", Toast.LENGTH_LONG).show()
-                    startTrackerService()
+                    checkAccessibilityService()
                 }
                 .setCancelable(false)
                 .create()
@@ -531,8 +540,62 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                 }
                 .show()
         } else {
-            startTrackerService()
+            checkAccessibilityService()
         }
+    }
+
+    private fun checkAccessibilityService() {
+        if (VolumeKeyService.isEnabled(this)) {
+            startTrackerService()
+            return
+        }
+
+        // Only prompt once - don't nag on every start
+        val prefs = getPrefs()
+        if (prefs.getBoolean("accessibility_prompted", false)) {
+            startTrackerService()
+            return
+        }
+
+        prefs.edit().putBoolean("accessibility_prompted", true).apply()
+
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
+            .setTitle("Volume Button Assist")
+            .setMessage("To enable emergency assist via volume buttons (press both together), " +
+                "please enable the Windsurfer Tracker accessibility service.\n\n" +
+                "Find \"Windsurfer Tracker\" in the list and enable it.\n\n" +
+                "This only detects volume button presses - no screen content is accessed.")
+            .setPositiveButton("ENABLE") { _, _ ->
+                try {
+                    accessibilitySettingsRequest.launch(
+                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open accessibility settings", e)
+                    Toast.makeText(this, "Please enable in Settings > Accessibility", Toast.LENGTH_LONG).show()
+                    startTrackerService()
+                }
+            }
+            .setNegativeButton("SKIP") { _, _ ->
+                startTrackerService()
+            }
+            .setCancelable(false)
+            .create()
+            .apply {
+                setOnShowListener {
+                    getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+                        setTextColor(0xFFFFFFFF.toInt())
+                        setBackgroundColor(0xFF00AA00.toInt())
+                        textSize = 18f
+                    }
+                    getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+                        setTextColor(0xFF000000.toInt())
+                        setBackgroundColor(0xFFCCCCCC.toInt())
+                        textSize = 18f
+                    }
+                }
+            }
+            .show()
     }
     
     private fun startTrackerService() {
