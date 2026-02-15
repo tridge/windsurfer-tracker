@@ -392,6 +392,52 @@ def step_configure_tracker(user_id, event_id, password):
     return True
 
 
+def step_enable_accessibility_service():
+    """Enable the VolumeKeyService accessibility service for volume combo assist."""
+    component = f"{PKG}/{PKG}.VolumeKeyService"
+
+    # Get API level to determine if we need restricted settings workaround
+    rc, api_str, _ = adb_shell("getprop", "ro.build.version.sdk")
+    api_level = int(api_str.strip()) if rc == 0 and api_str.strip().isdigit() else 0
+
+    # Android 13+ (API 33) blocks sideloaded apps from enabling accessibility services
+    if api_level >= 33:
+        rc, _, err = adb_shell("appops", "set", PKG, "android:access_restricted_settings", "allow")
+        if rc != 0:
+            print_fail(f"couldn't allow restricted settings: {err.strip()}")
+            return False
+
+    # Read existing enabled services to preserve them
+    rc, existing, _ = adb_shell("settings", "get", "secure", "enabled_accessibility_services")
+    existing = existing.strip()
+    if existing == "null" or not existing:
+        new_value = component
+    elif component.lower() in existing.lower():
+        # Already enabled
+        print_ok("already enabled")
+        return True
+    else:
+        new_value = f"{existing}:{component}"
+
+    # Set the enabled services
+    rc, _, err = adb_shell("settings", "put", "secure", "enabled_accessibility_services", new_value)
+    if rc != 0:
+        print_fail(f"couldn't set accessibility services: {err.strip()}")
+        return False
+
+    # Enable accessibility globally
+    adb_shell("settings", "put", "secure", "accessibility_enabled", "1")
+
+    # Verify it was set
+    rc, check, _ = adb_shell("settings", "get", "secure", "enabled_accessibility_services")
+    if component.lower() not in check.strip().lower():
+        print_fail("setting didn't persist")
+        return False
+
+    print_ok()
+    return True
+
+
 def step_disable_screen_wake():
     """Disable raise-to-wake, tap-to-wake, and ambient display to save battery."""
     settings = [
@@ -448,6 +494,7 @@ def main():
         steps.append(("Configuring tracker", lambda: step_configure_tracker(user_id, event_id, password), False))
 
     steps.extend([
+        ("Enabling accessibility service", step_enable_accessibility_service, False),
         ("Disabling WiFi", step_disable_wifi, False),
         ("Disabling Bluetooth", step_disable_bluetooth, False),
         ("Disabling NFC", step_disable_nfc, False),

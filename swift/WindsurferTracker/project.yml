@@ -36,6 +36,7 @@ targets:
         UIBackgroundModes:
           - location
           - fetch
+          - audio
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

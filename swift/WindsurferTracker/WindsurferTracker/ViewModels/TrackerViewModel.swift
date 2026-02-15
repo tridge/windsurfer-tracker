@@ -5,6 +5,7 @@ import UIKit
 import HealthKit
 import ActivityKit
 import AudioToolbox
+import AVFoundation
 
 /// View model bridging TrackerService to SwiftUI
 @MainActor
@@ -59,6 +60,9 @@ public class TrackerViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var beepTimer: Timer?
     private var previousPositionForDistance: TrackerPosition?
+    private let volumeButtonAssist = VolumeButtonAssist()
+    private let assistTonePlayer = AssistTonePlayer()
+    private var assistAlarmTimer: Timer?
 
     // MARK: - Initialization
 
@@ -73,6 +77,7 @@ public class TrackerViewModel: ObservableObject {
         self.trackerBeep = preferences.trackerBeep
 
         setupBindings()
+        setupVolumeAssist()
 
         // Auto-show settings if ID or password is missing
         if sailorId.isEmpty || password.isEmpty {
@@ -137,8 +142,16 @@ public class TrackerViewModel: ObservableObject {
         TrackerService.shared.statePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                self?.isTracking = state.isTracking
-                self?.isIdleMode = state.isIdleMode
+                guard let self = self else { return }
+                self.isTracking = state.isTracking
+                self.isIdleMode = state.isIdleMode
+
+                // Start/stop volume button assist with tracking
+                if state.isTracking || state.isIdleMode {
+                    self.volumeButtonAssist.start()
+                } else {
+                    self.volumeButtonAssist.stop()
+                }
             }
             .store(in: &cancellables)
 
@@ -207,6 +220,7 @@ public class TrackerViewModel: ObservableObject {
                 guard let self = self else { return }
                 self.isTracking = false
                 self.stopBeepTimer()
+                self.stopAssistAlarm()
                 self.endLiveActivity()
             }
             .store(in: &cancellables)
@@ -217,6 +231,8 @@ public class TrackerViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 self.assistRequested = false
+                self.stopAssistAlarm()
+                self.playAssistTones(ascending: false)
                 // Only show alert if no other dialog is showing
                 if !self.showStopConfirmation && !self.showSettings {
                     self.errorMessage = "Assist cancelled by admin"
@@ -269,6 +285,52 @@ public class TrackerViewModel: ObservableObject {
         locationAuthStatus = locationManager.authorizationStatus
     }
 
+    // MARK: - Volume Button Assist
+
+    private func setupVolumeAssist() {
+        volumeButtonAssist.onComboDetected = { [weak self] in
+            guard let self = self else { return }
+            NSLog("[VolumeAssist] Combo detected, toggling assist")
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+            self.toggleAssist()
+        }
+    }
+
+    // MARK: - Assist Tones
+
+    /// Play ascending (activate) or descending (deactivate) assist tones at max volume
+    private func playAssistTones(ascending: Bool) {
+        // Save current volume, crank to max, play, then restore
+        let savedVolume = AVAudioSession.sharedInstance().outputVolume
+        volumeButtonAssist.setSystemVolume(1.0)
+
+        assistTonePlayer.play(ascending: ascending)
+
+        // Restore volume after tones finish (~600ms)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            self?.volumeButtonAssist.setSystemVolume(savedVolume)
+        }
+    }
+
+    /// Start 5-second repeating alarm while assist is active
+    private func startAssistAlarm() {
+        stopAssistAlarm()
+        assistAlarmTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.assistRequested else {
+                self?.stopAssistAlarm()
+                return
+            }
+            self.playAssistTones(ascending: true)
+        }
+        RunLoop.main.add(assistAlarmTimer!, forMode: .common)
+    }
+
+    /// Stop the assist alarm timer
+    private func stopAssistAlarm() {
+        assistAlarmTimer?.invalidate()
+        assistAlarmTimer = nil
+    }
+
     // MARK: - Actions
 
     public func startTracking() {
@@ -317,6 +379,9 @@ public class TrackerViewModel: ObservableObject {
         // Stop tracker beep timer
         stopBeepTimer()
 
+        // Stop assist alarm
+        stopAssistAlarm()
+
         // End Live Activity
         endLiveActivity()
 
@@ -343,6 +408,14 @@ public class TrackerViewModel: ObservableObject {
         Task {
             await TrackerService.shared.toggleAssist()
             assistRequested = await TrackerService.shared.isAssistRequested
+        }
+
+        // Play tones and manage alarm
+        playAssistTones(ascending: activating)
+        if activating {
+            startAssistAlarm()
+        } else {
+            stopAssistAlarm()
         }
     }
 

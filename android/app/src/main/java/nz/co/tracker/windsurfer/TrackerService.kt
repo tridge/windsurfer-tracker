@@ -1799,6 +1799,7 @@ class TrackerService : LifecycleService() {
             Log.w(TAG, "Received remote CANCEL ASSIST command from server")
             assistRequested.set(false)
             assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+            playAssistTones(ascending = false)
             Handler(Looper.getMainLooper()).post {
                 statusListener?.onRemoteCancelAssist()
             }
