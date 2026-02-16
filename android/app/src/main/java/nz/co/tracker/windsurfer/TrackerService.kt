@@ -202,9 +202,14 @@ class TrackerService : LifecycleService() {
     // Mutex for socket creation to prevent races
     private val socketMutex = kotlinx.coroutines.sync.Mutex()
 
-    // Volume button assist: uses AccessibilityService (VolumeKeyService) to detect
-    // simultaneous volume up+down press. This works reliably on all devices including
-    // Android 14+ Pixel where BroadcastReceiver-based detection fails due to broadcast coalescing.
+    // Volume button assist: AccessibilityService (VolumeKeyService) detects combo when
+    // screen is on; MediaSession VolumeProvider detects it when screen is off (since
+    // PhoneWindowManager routes locked-screen volume keys to MediaSessionService, bypassing
+    // the accessibility input pipeline entirely).
+    private var lastComboTriggerTime = 0L
+    private var lastVolumeUpChangeTime = 0L
+    private var lastVolumeDownChangeTime = 0L
+    private var mediaSession: android.media.session.MediaSession? = null
 
     // Assist active alarm: plays triple ascending tones every 5 seconds while assist is active
     private val assistAlarmHandler = Handler(Looper.getMainLooper())
@@ -384,10 +389,16 @@ class TrackerService : LifecycleService() {
     }
 
     /**
-     * Handle volume combo detected by VolumeKeyService (AccessibilityService).
+     * Handle volume combo detected by VolumeKeyService or volume observer.
      * Toggles assist state, vibrates, and plays tones.
      */
     private fun handleVolumeCombo() {
+        // Debounce: ignore if triggered recently (prevents double-trigger from
+        // AccessibilityService + ContentObserver both detecting the same combo)
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastComboTriggerTime < 1000L) return
+        lastComboTriggerTime = now
+
         if (!isRunning.get() && !isIdleMode.get()) return
 
         val newAssist = !assistRequested.get()
@@ -408,27 +419,79 @@ class TrackerService : LifecycleService() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to vibrate for assist toggle: ${e.message}")
         }
-        playAssistTones(ascending = newAssist)
-
-        if (newAssist) {
-            assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
-        } else {
-            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
-        }
 
         Log.i(TAG, "Volume button assist toggled: assist=$newAssist")
     }
 
     /**
-     * Register callback with VolumeKeyService for volume combo detection.
+     * Register volume combo detection:
+     * 1. AccessibilityService callback (works when screen is on)
+     * 2. MediaSession VolumeProvider (works when screen is off — activated/deactivated
+     *    via screen state broadcast so it doesn't interfere with normal volume when screen is on)
      */
     private fun setupVolumeAssist() {
+        // Primary: AccessibilityService callback (screen on)
         VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
-        Log.i(TAG, "Registered VolumeKeyService callback for assist toggle")
+
+        // Secondary: MediaSession with VolumeProvider for lock screen detection.
+        // When active, MediaSessionService routes volume keys to our onAdjustVolume()
+        // callback instead of the default handler. We forward the volume change to
+        // AudioManager so volume still works normally.
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val session = android.media.session.MediaSession(this, "WindsurferAssist")
+        session.setPlaybackToRemote(object : android.media.VolumeProvider(
+            VOLUME_CONTROL_RELATIVE,
+            am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+            am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        ) {
+            override fun onAdjustVolume(direction: Int) {
+                // Forward volume change so keys still work normally
+                if (direction != 0) {
+                    am.adjustStreamVolume(
+                        AudioManager.STREAM_MUSIC,
+                        if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                        0
+                    )
+                }
+                // Combo detection
+                val now = android.os.SystemClock.uptimeMillis()
+                if (direction > 0) {
+                    lastVolumeUpChangeTime = now
+                    if (lastVolumeDownChangeTime > 0 && (now - lastVolumeDownChangeTime) <= 800) {
+                        Log.i(TAG, "Volume combo detected via MediaSession (up after down)")
+                        handleVolumeCombo()
+                    }
+                } else if (direction < 0) {
+                    lastVolumeDownChangeTime = now
+                    if (lastVolumeUpChangeTime > 0 && (now - lastVolumeUpChangeTime) <= 800) {
+                        Log.i(TAG, "Volume combo detected via MediaSession (down after up)")
+                        handleVolumeCombo()
+                    }
+                }
+            }
+        })
+        // A Callback is required for the internal CallbackMessageHandler to exist —
+        // without it, dispatchAdjustVolume() silently drops events.
+        session.setCallback(object : android.media.session.MediaSession.Callback() {},
+            Handler(Looper.getMainLooper()))
+        // A PlaybackState is required for MediaSessionService to consider this session
+        // when routing volume key events (sessions without state are skipped).
+        session.setPlaybackState(
+            android.media.session.PlaybackState.Builder()
+                .setState(android.media.session.PlaybackState.STATE_PLAYING, 0, 0f)
+                .build()
+        )
+        session.isActive = true
+        mediaSession = session
+
+        Log.i(TAG, "Registered VolumeKeyService callback and MediaSession for assist toggle")
     }
 
     private fun teardownVolumeAssist() {
         VolumeKeyService.onVolumeComboDetected = null
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
     }
 
     override fun onCreate() {
@@ -1773,8 +1836,13 @@ class TrackerService : LifecycleService() {
         assistRequested.set(enabled)
         Log.d(TAG, "Assist ${if (enabled) "ENABLED" else "disabled"}")
 
-        // Stop assist alarm when assist is disabled
-        if (!enabled) {
+        // Play feedback tones
+        playAssistTones(ascending = enabled)
+
+        // Manage the repeating alarm (tones every 5s while assist is active)
+        if (enabled) {
+            assistAlarmHandler.postDelayed(assistAlarmRunnable, 5000L)
+        } else {
             assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
         }
 
@@ -1797,9 +1865,7 @@ class TrackerService : LifecycleService() {
             }
         } else if (cmd == "cancel_assist") {
             Log.w(TAG, "Received remote CANCEL ASSIST command from server")
-            assistRequested.set(false)
-            assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
-            playAssistTones(ascending = false)
+            requestAssist(false)
             Handler(Looper.getMainLooper()).post {
                 statusListener?.onRemoteCancelAssist()
             }
