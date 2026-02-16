@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private val accessibilitySettingsRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        if (VolumeKeyService.isEnabled(this)) {
+        if (BuildConfig.ENABLE_SELF_UPDATE && VolumeKeyService.isEnabled(this)) {
             Toast.makeText(this, "Volume button assist enabled", Toast.LENGTH_SHORT).show()
         }
         startTrackerService()
@@ -545,6 +545,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
 
     private fun checkAccessibilityService() {
+        // AccessibilityService only available in sideload build
+        if (!BuildConfig.ENABLE_SELF_UPDATE) {
+            startTrackerService()
+            return
+        }
+
         if (VolumeKeyService.isEnabled(this)) {
             startTrackerService()
             return

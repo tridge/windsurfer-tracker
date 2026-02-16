@@ -543,8 +543,10 @@ class TrackerService : LifecycleService() {
      * multiple mechanisms fire for the same combo.
      */
     private fun setupVolumeAssist() {
-        // 1. AccessibilityService callback
-        VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
+        // 1. AccessibilityService callback (sideload only — not available in Play Store build)
+        if (BuildConfig.ENABLE_SELF_UPDATE) {
+            VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
+        }
 
         // 2. MediaSession with VolumeProvider (works on Android 10, skipped on 12+)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -650,11 +652,17 @@ class TrackerService : LifecycleService() {
         }
         registerReceiver(volumeChangeReceiver, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
 
-        Log.i(TAG, "Registered volume combo: AccessibilityService + MediaSession + broadcast")
+        if (BuildConfig.ENABLE_SELF_UPDATE) {
+            Log.i(TAG, "Registered volume combo: AccessibilityService + MediaSession + broadcast")
+        } else {
+            Log.i(TAG, "Registered volume combo: MediaSession + broadcast")
+        }
     }
 
     private fun teardownVolumeAssist() {
-        VolumeKeyService.onVolumeComboDetected = null
+        if (BuildConfig.ENABLE_SELF_UPDATE) {
+            VolumeKeyService.onVolumeComboDetected = null
+        }
         mediaSession?.isActive = false
         mediaSession?.release()
         mediaSession = null

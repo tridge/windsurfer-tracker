@@ -3,4 +3,5 @@
     android:description="@string/volume_key_service_description"
     android:accessibilityFlags="flagRequestFilterKeyEvents"
     android:canRequestFilterKeyEvents="true"
+    android:isAccessibilityTool="true"
     android:settingsActivity="nz.co.tracker.windsurfer.MainActivity" />

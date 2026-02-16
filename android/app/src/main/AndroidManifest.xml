@@ -74,17 +74,8 @@
             </intent-filter>
         </receiver>
 
-        <service
-            android:name=".VolumeKeyService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/volume_key_service_config" />
-        </service>
+        <!-- VolumeKeyService declared in sideload manifest only (Play Store
+             rejects BIND_ACCESSIBILITY_SERVICE for non-accessibility tools) -->
 
         <provider
             android:name="androidx.core.content.FileProvider"
