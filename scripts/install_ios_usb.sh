@@ -129,19 +129,9 @@ LOCAL_IPA="/tmp/WindsurferTracker.ipa"
 scp "$MAC_HOST:$IPA_FILE" "$LOCAL_IPA"
 
 echo "=== Installing on $DEVICE_NAME ==="
-# Try devicectl via mac2 first (most reliable), fall back to local ideviceinstaller
-REMOTE_IPA="$EXPORT_PATH/$(ssh "$MAC_HOST" "ls $EXPORT_PATH/*.ipa | head -1 | xargs basename")"
-DEVICE_ID=$(ssh "$MAC_HOST" "xcrun devicectl list devices 2>/dev/null | grep 'iPhone' | awk '{print \$3}'" 2>/dev/null)
-if [ -n "$DEVICE_ID" ]; then
-    echo "Using devicectl via $MAC_HOST (device $DEVICE_ID)"
-    ssh "$MAC_HOST" "xcrun devicectl device install app --device $DEVICE_ID '$REMOTE_IPA' 2>&1"
-else
-    echo "Using local ideviceinstaller"
-    scp "$MAC_HOST:$REMOTE_IPA" "$LOCAL_IPA"
-    # ideviceinstaller sometimes hangs after install completes; use timeout
-    timeout 60 ideviceinstaller install "$LOCAL_IPA" || true
-    rm -f "$LOCAL_IPA"
-fi
+# ideviceinstaller sometimes hangs after install completes; use timeout
+timeout 60 ideviceinstaller install "$LOCAL_IPA" || true
+rm -f "$LOCAL_IPA"
 
 echo ""
 echo "=== Done! ==="
