@@ -40,7 +40,7 @@ def format_position(lat: float, lon: float) -> str:
 
 def log(msg: str) -> None:
     """Print a message with local timestamp prefix."""
-    ts = datetime.now().strftime("%H:%M:%S")
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{ts} {msg}")
 
 
@@ -954,7 +954,7 @@ class PositionTracker:
         bat_str = f"{battery}%" if battery >= 0 else "?"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
         hac_str = f" hac={horizontal_accuracy:.0f}m" if horizontal_accuracy is not None else ""
-        local_time = datetime.fromtimestamp(recv_time).strftime("%H:%M:%S")
+        local_time = datetime.fromtimestamp(recv_time).strftime("%Y-%m-%d %H:%M:%S")
 
         log_line = (
             f"{local_time} [{sailor_id}] "
