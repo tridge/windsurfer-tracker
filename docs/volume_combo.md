@@ -87,6 +87,7 @@ with screen off).
 | Tracker3 | Pixel 3a | 12 (API 31) | AccessibilityService | Broadcast + silent AudioTrack | MediaSession skipped on Android 12 (`No routing session for nz.co.tracker.windsurfer`, `session=null`). Without silent AudioTrack, screen-off volume events dropped (`Nothing is playing on the music stream. Skipping volume event`). With silent AudioTrack, volume keys pass through to AudioService and VOLUME_CHANGED_ACTION fires. |
 | Tracker4 | Samsung Galaxy S10e | 12 (API 31) | Works | Works | All states working. |
 | Tracker6 | Pixel 8a | 16 (API 36) | Works | Works | All states working. |
+| Tracker7 | Pixel 5 | 14 (API 34) | Works | Works (needs slight pause) | Screen-blanked combo requires a brief pause between vol-up and vol-down, likely due to Android 14 broadcast coalescing merging rapid VOLUME_CHANGED_ACTION broadcasts. |
 
 ## Adding a New Phone
 
