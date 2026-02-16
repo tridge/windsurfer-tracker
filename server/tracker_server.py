@@ -762,6 +762,7 @@ class PositionTracker:
         self.daily_logger = daily_logger
         self.current_positions: dict[str, dict] = {}
         self.last_timestamp: dict[str, int] = {}
+        self.last_sq: dict[str, int] = {}
         # Position tails: sailor_id -> list of [ts, lat, lon] for last 20 seconds
         self.position_tails: dict[str, list] = {}
         self._lock = threading.Lock()
@@ -803,9 +804,11 @@ class PositionTracker:
                     }
                     if "chg" in pos:
                         self.current_positions[sailor_id]["chg"] = pos["chg"]
-                    # Restore timestamp tracking for duplicate detection
+                    # Restore timestamp and sq tracking for duplicate detection
                     if pos.get("ts"):
                         self.last_timestamp[sailor_id] = pos["ts"]
+                    if pos.get("sq"):
+                        self.last_sq[sailor_id] = pos["sq"]
             log(f"[STARTUP] Loaded {len(sailors)} positions from {positions_path}")
         except Exception as e:
             log(f"[STARTUP] Could not load positions file: {e}")
@@ -815,6 +818,7 @@ class PositionTracker:
         with self._lock:
             self.current_positions.clear()
             self.last_timestamp.clear()
+            self.last_sq.clear()
             self.position_tails.clear()
         log("[ADMIN] Cleared internal position state")
 
@@ -826,7 +830,8 @@ class PositionTracker:
                          nsats: int | None = None,
                          skip_log: bool = False, stopped: bool = False,
                          pos_array: list | None = None, user_overrides: dict | None = None,
-                         idle: bool = False, charging: bool | None = None) -> bool:
+                         idle: bool = False, charging: bool | None = None,
+                         sq: int = 0) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -840,6 +845,8 @@ class PositionTracker:
         if idle:
             with self._lock:
                 self.last_timestamp[sailor_id] = ts
+                if sq > 0:
+                    self.last_sq[sailor_id] = sq
                 existing = self.current_positions.get(sailor_id, {})
                 pos_data = {
                     "id": sailor_id,
@@ -880,6 +887,8 @@ class PositionTracker:
         if no_gps:
             with self._lock:
                 self.last_timestamp[sailor_id] = ts
+                if sq > 0:
+                    self.last_sq[sailor_id] = sq
                 existing = self.current_positions.get(sailor_id, {})
                 pos_data = {
                     "id": sailor_id,
@@ -918,14 +927,21 @@ class PositionTracker:
             return True
 
         with self._lock:
-            # Check for duplicate using timestamp
+            # Check for duplicate using sequence number (preferred) or timestamp (fallback)
             is_dup = False
-            if sailor_id in self.last_timestamp:
+            if sailor_id in self.last_sq and sq > 0:
+                # Use sequence number: same sq = retransmission, different sq = new packet
+                if sq == self.last_sq[sailor_id]:
+                    is_dup = True
+            elif sailor_id in self.last_timestamp:
+                # Fallback for clients that don't send sq (or sq=0)
                 if ts <= self.last_timestamp[sailor_id]:
                     is_dup = True
 
             if not is_dup:
                 self.last_timestamp[sailor_id] = ts
+                if sq > 0:
+                    self.last_sq[sailor_id] = sq
 
         # If stopped=True, clear any assist request
         if stopped:
@@ -982,6 +998,8 @@ class PositionTracker:
                     "last_seen_iso": datetime.fromtimestamp(recv_time).isoformat(),
                     "src_ip": src_ip
                 }
+                if sq > 0:
+                    pos_data["sq"] = sq
                 if charging is not None:
                     pos_data["chg"] = charging
                 if battery_drain_rate is not None:
@@ -1097,7 +1115,7 @@ class EventTracker:
                          nsats: int | None = None,
                          skip_log: bool = False, pos_array: list | None = None,
                          stopped: bool = False, idle: bool = False,
-                         charging: bool | None = None) -> bool:
+                         charging: bool | None = None, sq: int = 0) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -1110,7 +1128,7 @@ class EventTracker:
                 src_ip=src_ip, source=f"[E{self.eid}]{source}",
                 os_version=os_version, idle=True,
                 user_overrides=self.user_overrides,
-                charging=charging
+                charging=charging, sq=sq
             )
 
         # If 1Hz array format, log as single entry with pos array (more compact)
@@ -1174,7 +1192,8 @@ class EventTracker:
             stopped=stopped,
             pos_array=pos_array,
             user_overrides=self.user_overrides,
-            charging=charging
+            charging=charging,
+            sq=sq
         )
 
         # Write positions with event-specific user overrides
@@ -2814,7 +2833,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     pos_array=pos_array,
                     stopped=stopped,
                     idle=idle,
-                    charging=charging
+                    charging=charging,
+                    sq=seq
                 )
             else:
                 # Legacy single-event mode
@@ -2878,7 +2898,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     pos_array=pos_array,
                     user_overrides=_user_overrides,
                     idle=idle,
-                    charging=charging
+                    charging=charging,
+                    sq=seq
                 )
 
             # Send ACK response (same format as UDP)
@@ -3569,7 +3590,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         pos_array=pos_array,
                         stopped=stopped,
                         idle=idle,
-                        charging=charging
+                        charging=charging,
+                        sq=seq
                     )
 
                 else:
@@ -3669,7 +3691,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         pos_array=pos_array,
                         user_overrides=user_overrides,
                         idle=idle,
-                        charging=charging
+                        charging=charging,
+                        sq=seq
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)
