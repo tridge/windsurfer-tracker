@@ -116,6 +116,68 @@
             margin-top: 12px;
         }
 
+        .tutorials-section {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            padding: 20px;
+            margin-top: 20px;
+            width: 320px;
+        }
+
+        .tutorials-section h2 {
+            color: #1e40af;
+            font-size: 1.2em;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .video-thumbnail {
+            display: block;
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .video-thumbnail img {
+            width: 100%;
+            display: block;
+        }
+
+        .play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .video-thumbnail:hover .play-overlay {
+            background: rgba(255,0,0,0.8);
+        }
+
+        .view-all-link {
+            display: block;
+            text-align: center;
+            margin-top: 12px;
+            color: #1e40af;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .view-all-link:hover {
+            text-decoration: underline;
+        }
+
         .loading {
             color: white;
             font-size: 1.2em;
@@ -181,6 +243,15 @@
 
     <div id="eventsContainer" class="events-container">
         <div class="loading">Loading events...</div>
+    </div>
+
+    <div class="tutorials-section">
+        <h2>Tutorials</h2>
+        <a href="https://www.youtube.com/watch?v=QZPMm17K8f4&list=PL1CVrS7MUzzfsY8tC-mUOwW93bo8-q1js" class="video-thumbnail" target="_blank" rel="noopener">
+            <img src="https://img.youtube.com/vi/QZPMm17K8f4/maxresdefault.jpg" alt="Windsurfer Tracker Tutorials">
+            <div class="play-overlay">&#9654;</div>
+        </a>
+        <a href="https://www.youtube.com/watch?v=QZPMm17K8f4&list=PL1CVrS7MUzzfsY8tC-mUOwW93bo8-q1js" class="view-all-link" target="_blank" rel="noopener">View all tutorials &rarr;</a>
     </div>
 
     <div class="footer">
