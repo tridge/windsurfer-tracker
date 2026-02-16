@@ -73,7 +73,7 @@ ssh "$MAC_HOST" "cat > $REMOTE_PROJECT_DIR/WindsurferTracker/ExportOptions.plist
     <key>method</key>
     <string>app-store-connect</string>
     <key>destination</key>
-    <string>export</string>
+    <string>upload</string>
     <key>signingStyle</key>
     <string>manual</string>
     <key>teamID</key>
@@ -104,24 +104,18 @@ ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     GIT_HASH=$GIT_HASH \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
 
-echo "=== Exporting IPA ==="
+echo "=== Exporting and uploading to TestFlight ==="
+API_KEY_PATH="\$HOME/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8"
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     security unlock-keychain -p '$KEYCHAIN_PASSWORD' ~/Library/Keychains/build.keychain-db && \
     xcodebuild -exportArchive \
     -archivePath build/WindsurferTracker.xcarchive \
-    -exportPath build/export \
     -exportOptionsPlist ExportOptions.plist \
+    -authenticationKeyPath $API_KEY_PATH \
+    -authenticationKeyID $API_KEY_ID \
+    -authenticationKeyIssuerID $API_KEY_ISSUER \
+    -allowProvisioningUpdates \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
-
-echo "=== Uploading to TestFlight ==="
-IPA_FILE=$(ssh "$MAC_HOST" "ls $REMOTE_PROJECT_DIR/WindsurferTracker/build/export/*.ipa")
-echo "Uploading: $IPA_FILE"
-ssh "$MAC_HOST" "export API_PRIVATE_KEYS_DIR=~/.appstoreconnect/private_keys && \
-    xcrun altool --upload-app \
-    --type ios \
-    --file '$IPA_FILE' \
-    --apiKey $API_KEY_ID \
-    --apiIssuer $API_KEY_ISSUER"
 
 echo ""
 echo "=== Done! ==="
