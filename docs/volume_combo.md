@@ -89,6 +89,7 @@ with screen off).
 | Tracker6 | Pixel 8a | 16 (API 36) | Works | Works | All states working. |
 | Tracker7 | Pixel 5 | 14 (API 34) | Works | Works (needs slight pause) | Screen-blanked combo requires a brief pause between vol-up and vol-down, likely due to Android 14 broadcast coalescing merging rapid VOLUME_CHANGED_ACTION broadcasts. |
 | Tracker8 | Pixel 5 | 14 (API 34) | Works | Works (needs slight pause) | Same as Tracker7 — Android 14 broadcast coalescing. |
+| Tracker12 | Oppo CPH2069 | 11 (API 30) | Works | Works | ColorOS restricts ADB (`pm grant`, `settings put`) — setup needs manual steps. Auto-start on boot blocked by ColorOS Startup Manager (enable in Settings > App Management > Startup Manager). |
 
 ## Adding a New Phone
 

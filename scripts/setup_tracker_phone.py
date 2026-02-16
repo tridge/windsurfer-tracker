@@ -125,6 +125,7 @@ def step_grant_permissions():
     ]
 
     failed = []
+    is_perm_denied = False
     for perm in permissions:
         rc, out, err = adb_shell("pm", "grant", PKG, perm)
         if rc != 0:
@@ -132,6 +133,9 @@ def step_grant_permissions():
             # some permissions may not exist on older Android
             if "Unknown permission" in err or "not a changeable" in err:
                 pass  # silently skip inapplicable permissions
+            elif "GRANT_RUNTIME_PERMISSIONS" in err:
+                is_perm_denied = True
+                failed.append(short)
             else:
                 failed.append(short)
 
@@ -141,7 +145,10 @@ def step_grant_permissions():
         failed.append("battery-whitelist")
 
     if failed:
-        print_fail(", ".join(failed))
+        if is_perm_denied:
+            print_fail("needs manual grant in app (OEM restriction)")
+        else:
+            print_fail(", ".join(failed))
         return False
 
     print_ok()
@@ -284,7 +291,7 @@ def step_enable_data_saver():
 
 
 def step_disable_auto_updates():
-    """Disable automatic system and app updates."""
+    """Disable automatic system and app updates, restrict GMS background data."""
     errors = []
 
     settings = [
@@ -296,17 +303,38 @@ def step_disable_auto_updates():
         if rc != 0:
             errors.append(key)
 
-    # Disable Play Store auto-update by disabling its update component
-    rc, _, _ = adb_shell(
-        "pm", "clear", "--cache-only", "com.android.vending"
-    )
-    # Not critical if this fails
+    # Disable Play Store auto-update by clearing its cache (can hang on some devices)
+    try:
+        adb_shell("pm", "clear", "--cache-only", "com.android.vending", timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+    # Restrict background data for Google Play Services to prevent OTA
+    # downloads over cellular.  Data saver alone isn't enough because GMS
+    # has system-level exemptions that can bypass it.
+    gms_pkg = "com.google.android.gms"
+    rc, out, _ = adb_shell("cmd", "package", "list", "packages", "-U", gms_pkg)
+    gms_uid = None
+    for line in out.strip().splitlines():
+        # "package:com.google.android.gms uid:10180"
+        if line.startswith(f"package:{gms_pkg} "):
+            uid_part = line.split("uid:")[-1].strip()
+            if uid_part.isdigit():
+                gms_uid = uid_part
+            break
+
+    if gms_uid:
+        # Add GMS to the metered data denylist so it can't download on cellular
+        adb_shell("cmd", "netpolicy", "add", "restrict-background-blacklist", gms_uid)
+        # Also remove from any whitelist
+        adb_shell("cmd", "netpolicy", "remove", "restrict-background-whitelist", gms_uid)
 
     if errors:
         print_fail(", ".join(errors))
         return False
 
-    print_ok()
+    detail = f"GMS UID {gms_uid}" if gms_uid else "GMS UID not found"
+    print_ok(detail)
     return True
 
 
@@ -422,7 +450,10 @@ def step_enable_accessibility_service():
     # Set the enabled services
     rc, _, err = adb_shell("settings", "put", "secure", "enabled_accessibility_services", new_value)
     if rc != 0:
-        print_fail(f"couldn't set accessibility services: {err.strip()}")
+        if "WRITE_SECURE_SETTINGS" in err:
+            print_fail("needs manual enable: Settings > Accessibility")
+        else:
+            print_fail(err.strip().splitlines()[-1] if err.strip() else "unknown error")
         return False
 
     # Enable accessibility globally
@@ -432,6 +463,20 @@ def step_enable_accessibility_service():
     rc, check, _ = adb_shell("settings", "get", "secure", "enabled_accessibility_services")
     if component.lower() not in check.strip().lower():
         print_fail("setting didn't persist")
+        return False
+
+    print_ok()
+    return True
+
+
+def step_enable_data_roaming():
+    """Enable data roaming (required for Hologram IoT SIMs)."""
+    rc, _, err = adb_shell("settings", "put", "global", "data_roaming", "1")
+    if rc != 0:
+        if "WRITE_SECURE_SETTINGS" in err:
+            print_fail("needs manual enable: Settings > SIM > Data roaming")
+        else:
+            print_fail(err.strip().splitlines()[-1] if err.strip() else "unknown error")
         return False
 
     print_ok()
@@ -495,6 +540,7 @@ def main():
 
     steps.extend([
         ("Enabling accessibility service", step_enable_accessibility_service, False),
+        ("Enabling data roaming", step_enable_data_roaming, False),
         ("Disabling WiFi", step_disable_wifi, False),
         ("Disabling Bluetooth", step_disable_bluetooth, False),
         ("Disabling NFC", step_disable_nfc, False),
@@ -505,12 +551,22 @@ def main():
         ("Setting Hologram APN", step_set_hologram_apn, False),
     ])
 
+    # Detect restricted OEMs (Oppo/ColorOS, Realme, OnePlus) that block ADB shell settings
+    _, brand, _ = adb_shell("getprop", "ro.product.brand")
+    _, oem_name, _ = adb_shell("getprop", "ro.oem.name")
+    is_restricted = any(x in (brand.strip().lower() + oem_name.strip().lower())
+                        for x in ("oppo", "realme", "oneplus", "coloros"))
+
     total = len(steps)
     ok_count = 0
     fail_count = 0
     skip_count = 0
 
     print(f"\n{BOLD}Windsurfer Tracker - Phone Setup{RESET}\n")
+
+    if is_restricted:
+        print(f"  {YELLOW}NOTE: Oppo/ColorOS detected — many ADB commands are restricted.{RESET}")
+        print(f"  {YELLOW}Steps that fail will need manual configuration on the phone.{RESET}\n")
 
     for i, (desc, func, critical) in enumerate(steps, 1):
         print_step(i, total, desc)
@@ -542,7 +598,17 @@ def main():
     print(f"  {BOLD}Setup complete:{RESET} {', '.join(parts)}")
     print()
 
-    if fail_count:
+    if fail_count and is_restricted:
+        print(f"  {BOLD}Manual steps needed on this phone:{RESET}")
+        print(f"    1. Open app and grant Location (allow all the time)")
+        print(f"    2. Settings > Accessibility > Windsurfer Tracker > enable")
+        print(f"    3. Settings > SIM card & mobile data > SIM > enable Data roaming")
+        print(f"    4. Settings > WiFi > disable, also disable auto-connect/scanning")
+        print(f"    5. Settings > Display > disable Raise to wake, Ambient display")
+        print(f"    6. Settings > Software updates > disable Auto-download")
+        print(f"    7. Settings > App Management > Startup Manager > Windsurfer Tracker > enable (for boot start)")
+        print()
+    elif fail_count:
         sys.exit(1)
 
 
