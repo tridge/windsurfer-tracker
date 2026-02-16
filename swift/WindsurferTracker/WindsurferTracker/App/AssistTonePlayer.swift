@@ -1,8 +1,9 @@
 import Foundation
 import AVFoundation
 
-/// Generates and plays ascending/descending 3-tone sequences for assist feedback.
-/// Ascending (low-mid-high) = assist activated. Descending (high-mid-low) = deactivated.
+/// Generates and plays ascending/descending tone sequences for audio feedback.
+/// 3-tone (low-mid-high) for assist activation/deactivation.
+/// 2-tone (low-high) for tracking start/stop.
 /// Matches the Android ToneGenerator DTMF 1/5/9 pattern.
 class AssistTonePlayer {
     private var player: AVAudioPlayer?
@@ -17,8 +18,19 @@ class AssistTonePlayer {
     private static let gapDuration = 0.05   // 50ms gap between tones
     private static let sampleRate = 44100.0
 
-    /// Play ascending (activate) or descending (deactivate) tone sequence
+    /// Ensure audio session is configured for playback before playing tones.
+    /// VolumeButtonAssist may not have started yet (e.g. on start tracking).
+    private func ensureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playback {
+            try? session.setCategory(.playback, options: .mixWithOthers)
+        }
+        try? session.setActive(true)
+    }
+
+    /// Play ascending (activate) or descending (deactivate) 3-tone assist sequence
     func play(ascending: Bool) {
+        ensureAudioSession()
         let freqs: [Double]
         if ascending {
             freqs = [Self.lowFreq, Self.midFreq, Self.highFreq]
@@ -36,12 +48,32 @@ class AssistTonePlayer {
         }
     }
 
+    /// Play ascending or descending 2-tone sequence for tracking start/stop
+    func playDouble(ascending: Bool) {
+        ensureAudioSession()
+        let freqs: [Double]
+        if ascending {
+            freqs = [Self.lowFreq, Self.highFreq]
+        } else {
+            freqs = [Self.highFreq, Self.lowFreq]
+        }
+
+        let data = generateWAV(frequencies: freqs)
+        do {
+            player = try AVAudioPlayer(data: data)
+            player?.volume = 1.0
+            player?.play()
+        } catch {
+            NSLog("[AssistTone] Failed to play double tone: \(error)")
+        }
+    }
+
     func stop() {
         player?.stop()
         player = nil
     }
 
-    /// Generate a WAV file in memory containing a 3-tone sequence
+    /// Generate a WAV file in memory containing a multi-tone sequence
     private func generateWAV(frequencies: [Double]) -> Data {
         let sr = Self.sampleRate
         let toneSamples = Int(sr * Self.toneDuration)

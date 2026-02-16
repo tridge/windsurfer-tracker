@@ -219,6 +219,7 @@ public class TrackerViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 self.isTracking = false
+                self.playTrackingTone(ascending: false)
                 self.stopBeepTimer()
                 self.stopAssistAlarm()
                 self.endLiveActivity()
@@ -246,6 +247,7 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                self.playTrackingTone(ascending: true)
                 self.startBeepTimer()
                 self.startLiveActivity()
             }
@@ -256,6 +258,7 @@ public class TrackerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                self.playTrackingTone(ascending: false)
                 self.stopBeepTimer()
                 self.endLiveActivity()
             }
@@ -297,6 +300,17 @@ public class TrackerViewModel: ObservableObject {
     }
 
     // MARK: - Assist Tones
+
+    /// Play 2-tone ascending (start) or descending (stop) tracking feedback at max volume
+    private func playTrackingTone(ascending: Bool) {
+        let savedVolume = AVAudioSession.sharedInstance().outputVolume
+        volumeButtonAssist.setSystemVolume(1.0)
+        assistTonePlayer.playDouble(ascending: ascending)
+        // Restore volume after tones finish (~400ms for 2 tones)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.volumeButtonAssist.setSystemVolume(savedVolume)
+        }
+    }
 
     /// Play ascending (activate) or descending (deactivate) assist tones at max volume
     private func playAssistTones(ascending: Bool) {
@@ -353,6 +367,9 @@ public class TrackerViewModel: ObservableObject {
         totalDistanceMeters = 0
         previousPositionForDistance = nil
 
+        // Play ascending 2-tone to confirm start
+        playTrackingTone(ascending: true)
+
         Task {
             do {
                 try await TrackerService.shared.start()
@@ -373,6 +390,9 @@ public class TrackerViewModel: ObservableObject {
     }
 
     public func stopTracking() {
+        // Play descending 2-tone to confirm stop
+        playTrackingTone(ascending: false)
+
         // Clear event name on stop
         eventName = ""
 
