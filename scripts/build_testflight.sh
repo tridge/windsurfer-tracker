@@ -73,7 +73,7 @@ ssh "$MAC_HOST" "cat > $REMOTE_PROJECT_DIR/WindsurferTracker/ExportOptions.plist
     <key>method</key>
     <string>app-store-connect</string>
     <key>destination</key>
-    <string>upload</string>
+    <string>export</string>
     <key>signingStyle</key>
     <string>manual</string>
     <key>teamID</key>
@@ -104,18 +104,27 @@ ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     GIT_HASH=$GIT_HASH \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
 
-echo "=== Exporting and uploading to TestFlight ==="
-API_KEY_PATH="\$HOME/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8"
+echo "=== Exporting IPA ==="
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
+    rm -rf build/export && \
     security unlock-keychain -p '$KEYCHAIN_PASSWORD' ~/Library/Keychains/build.keychain-db && \
     xcodebuild -exportArchive \
     -archivePath build/WindsurferTracker.xcarchive \
     -exportOptionsPlist ExportOptions.plist \
-    -authenticationKeyPath $API_KEY_PATH \
-    -authenticationKeyID $API_KEY_ID \
-    -authenticationKeyIssuerID $API_KEY_ISSUER \
-    -allowProvisioningUpdates \
+    -exportPath build/export \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
+
+echo "=== Uploading to TestFlight ==="
+# Workaround for macOS 26.2: altool's NSURLSession times out fetching
+# Defaults.properties from Apple's servers. Setting ITunesTransporterDefaultsURL
+# to a non-existent file:// URL makes it fail fast instead of hanging, and
+# altool continues uploading successfully despite the errors.
+ssh "$MAC_HOST" "defaults write com.apple.itunes.altool ITunesTransporterDefaultsURL 'file:///dev/null/Defaults.properties' && \
+    xcrun altool --upload-app \
+    -f $REMOTE_PROJECT_DIR/WindsurferTracker/build/export/Windsurfer\ Tracker.ipa \
+    -t ios \
+    --apiKey $API_KEY_ID \
+    --apiIssuer $API_KEY_ISSUER"
 
 echo ""
 echo "=== Done! ==="
