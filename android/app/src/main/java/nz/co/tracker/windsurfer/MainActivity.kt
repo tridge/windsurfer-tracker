@@ -735,7 +735,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     
     private fun updateAssistButton(active: Boolean) {
         if (active) {
-            binding.btnAssist.text = "⚠ ASSISTANCE REQUESTED ⚠\n\nLong press to cancel"
+            binding.btnAssist.text = "ASSISTANCE REQUESTED\n\nLong press to cancel"
             binding.btnAssist.setBackgroundColor(0xFFFF0000.toInt())  // Bright red
             binding.btnAssist.setTextColor(0xFFFFFFFF.toInt())        // White text
             
