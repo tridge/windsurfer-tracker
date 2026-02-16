@@ -11,7 +11,10 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Binder
@@ -210,6 +213,8 @@ class TrackerService : LifecycleService() {
     private var lastVolumeUpChangeTime = 0L
     private var lastVolumeDownChangeTime = 0L
     private var mediaSession: android.media.session.MediaSession? = null
+    private var volumeChangeReceiver: BroadcastReceiver? = null
+    private var silentAudioTrack: AudioTrack? = null
 
     // Assist active alarm: plays triple ascending tones every 5 seconds while assist is active
     private val assistAlarmHandler = Handler(Looper.getMainLooper())
@@ -371,21 +376,58 @@ class TrackerService : LifecycleService() {
      * Ascending (low→mid→high) = assist activated, descending = deactivated.
      */
     private fun playAssistTones(ascending: Boolean) {
-        try {
-            val tg = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
-            val tones = if (ascending) {
-                intArrayOf(ToneGenerator.TONE_DTMF_1, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_9)
-            } else {
-                intArrayOf(ToneGenerator.TONE_DTMF_9, ToneGenerator.TONE_DTMF_5, ToneGenerator.TONE_DTMF_1)
+        // Generate all three tones as a single PCM buffer played through one AudioTrack.
+        // This eliminates gaps caused by ToneGenerator.startTone() latency.
+        Thread {
+            try {
+                val sampleRate = 44100
+                val toneSamples = sampleRate * 150 / 1000   // 150ms per tone
+                val gapSamples = sampleRate * 50 / 1000     // 50ms gap
+                val totalSamples = toneSamples * 3 + gapSamples * 2
+
+                // DTMF dual-tone frequencies: 1=(697+1209), 5=(770+1336), 9=(852+1477)
+                val freqs = if (ascending) {
+                    arrayOf(697.0 to 1209.0, 770.0 to 1336.0, 852.0 to 1477.0)
+                } else {
+                    arrayOf(852.0 to 1477.0, 770.0 to 1336.0, 697.0 to 1209.0)
+                }
+
+                val buffer = ShortArray(totalSamples)
+                var offset = 0
+                for ((i, freq) in freqs.withIndex()) {
+                    for (s in 0 until toneSamples) {
+                        val t = s.toDouble() / sampleRate
+                        val sample = (Math.sin(2 * Math.PI * freq.first * t) +
+                                Math.sin(2 * Math.PI * freq.second * t)) * 0.4 * Short.MAX_VALUE
+                        buffer[offset + s] = sample.toInt().toShort()
+                    }
+                    offset += toneSamples
+                    if (i < 2) offset += gapSamples  // gap is zeros = silence
+                }
+
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                    .setBufferSizeInBytes(totalSamples * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+
+                track.write(buffer, 0, buffer.size)
+                track.play()
+                Thread.sleep((150 * 3 + 50 * 2 + 50).toLong())
+                track.stop()
+                track.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to play assist tones: ${e.message}")
             }
-            val h = Handler(Looper.getMainLooper())
-            tg.startTone(tones[0], 150)
-            h.postDelayed({ tg.startTone(tones[1], 150) }, 200)
-            h.postDelayed({ tg.startTone(tones[2], 150) }, 400)
-            h.postDelayed({ tg.release() }, 600)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to play assist tones: ${e.message}")
-        }
+        }.start()
     }
 
     /**
@@ -424,19 +466,22 @@ class TrackerService : LifecycleService() {
     }
 
     /**
-     * Register volume combo detection:
-     * 1. AccessibilityService callback (works when screen is on)
-     * 2. MediaSession VolumeProvider (works when screen is off — activated/deactivated
-     *    via screen state broadcast so it doesn't interfere with normal volume when screen is on)
+     * Register volume combo detection via three complementary mechanisms:
+     * 1. AccessibilityService onKeyEvent() — works when screen is on (all devices)
+     * 2. MediaSession VolumeProvider — works on Android 10 where MediaSessionService
+     *    routes volume keys to our session when screen is off
+     * 3. VOLUME_CHANGED_ACTION broadcast — works on Android 12+ where the MediaSession
+     *    is skipped (requires MediaRouter2 routing session) and volume keys fall through
+     *    to AudioService which sends the broadcast
+     *
+     * The 1-second debounce in handleVolumeCombo() prevents double-triggers when
+     * multiple mechanisms fire for the same combo.
      */
     private fun setupVolumeAssist() {
-        // Primary: AccessibilityService callback (screen on)
+        // 1. AccessibilityService callback
         VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
 
-        // Secondary: MediaSession with VolumeProvider for lock screen detection.
-        // When active, MediaSessionService routes volume keys to our onAdjustVolume()
-        // callback instead of the default handler. We forward the volume change to
-        // AudioManager so volume still works normally.
+        // 2. MediaSession with VolumeProvider (works on Android 10, skipped on 12+)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val session = android.media.session.MediaSession(this, "WindsurferAssist")
         session.setPlaybackToRemote(object : android.media.VolumeProvider(
@@ -484,7 +529,63 @@ class TrackerService : LifecycleService() {
         session.isActive = true
         mediaSession = session
 
-        Log.i(TAG, "Registered VolumeKeyService callback and MediaSession for assist toggle")
+        // 3a. Silent AudioTrack on STREAM_MUSIC — makes system see "music is playing"
+        // so screen-off volume events (musicOnly=true) aren't skipped.
+        // Without this, Android 12+ says "Nothing is playing on the music stream"
+        // and drops volume key events entirely when screen is blanked.
+        try {
+            val sampleRate = 8000
+            val bufSize = AudioTrack.getMinBufferSize(
+                sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build())
+                .setAudioFormat(AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build())
+                .setBufferSizeInBytes(bufSize)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            val silence = ShortArray(bufSize / 2)  // All zeros = silence
+            track.write(silence, 0, silence.size)
+            track.setLoopPoints(0, silence.size, -1)  // Loop forever
+            track.play()
+            silentAudioTrack = track
+            Log.i(TAG, "Started silent AudioTrack for volume key detection")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start silent AudioTrack: ${e.message}")
+        }
+
+        // 3b. VOLUME_CHANGED_ACTION broadcast (works on Android 12+ where MediaSession
+        // is skipped and volume keys fall through to AudioService)
+        volumeChangeReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
+                val prevVol = intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1)
+                if (newVol < 0 || prevVol < 0 || newVol == prevVol) return
+                val now = android.os.SystemClock.uptimeMillis()
+                if (newVol > prevVol) {
+                    lastVolumeUpChangeTime = now
+                    if (lastVolumeDownChangeTime > 0 && (now - lastVolumeDownChangeTime) <= 800) {
+                        Log.i(TAG, "Volume combo detected via broadcast (up after down)")
+                        handleVolumeCombo()
+                    }
+                } else {
+                    lastVolumeDownChangeTime = now
+                    if (lastVolumeUpChangeTime > 0 && (now - lastVolumeUpChangeTime) <= 800) {
+                        Log.i(TAG, "Volume combo detected via broadcast (down after up)")
+                        handleVolumeCombo()
+                    }
+                }
+            }
+        }
+        registerReceiver(volumeChangeReceiver, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
+
+        Log.i(TAG, "Registered volume combo: AccessibilityService + MediaSession + broadcast")
     }
 
     private fun teardownVolumeAssist() {
@@ -492,6 +593,14 @@ class TrackerService : LifecycleService() {
         mediaSession?.isActive = false
         mediaSession?.release()
         mediaSession = null
+        silentAudioTrack?.let {
+            try { it.stop(); it.release() } catch (_: Exception) {}
+        }
+        silentAudioTrack = null
+        volumeChangeReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+        }
+        volumeChangeReceiver = null
     }
 
     override fun onCreate() {
