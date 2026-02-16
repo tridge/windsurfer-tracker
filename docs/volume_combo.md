@@ -88,6 +88,7 @@ with screen off).
 | Tracker4 | Samsung Galaxy S10e | 12 (API 31) | Works | Works | All states working. |
 | Tracker6 | Pixel 8a | 16 (API 36) | Works | Works | All states working. |
 | Tracker7 | Pixel 5 | 14 (API 34) | Works | Works (needs slight pause) | Screen-blanked combo requires a brief pause between vol-up and vol-down, likely due to Android 14 broadcast coalescing merging rapid VOLUME_CHANGED_ACTION broadcasts. |
+| Tracker8 | Pixel 5 | 14 (API 34) | Works | Works (needs slight pause) | Same as Tracker7 — Android 14 broadcast coalescing. |
 
 ## Adding a New Phone
 
