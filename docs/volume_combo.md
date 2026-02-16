@@ -95,6 +95,7 @@ with screen off).
 | Tracker10 | Samsung Galaxy Z Flip3 | 13 (API 33) | Works | Works | All states working. |
 | Tracker11 | Samsung Galaxy A53 | 13 (API 33) | Works | Works | All states working. |
 | Tracker12 | Oppo CPH2069 | 11 (API 30) | Works | Works | ColorOS restricts ADB (`pm grant`, `settings put`) — setup needs manual steps. Auto-start on boot blocked by ColorOS Startup Manager (enable in Settings > App Management > Startup Manager). |
+| Tracker13 | Samsung Galaxy A30 | 11 (API 30) | Works | Works | All states working. |
 | Tracker14 | Samsung Galaxy A30 | 11 (API 30) | Works | Works | All states working. |
 
 ## Adding a New Phone
