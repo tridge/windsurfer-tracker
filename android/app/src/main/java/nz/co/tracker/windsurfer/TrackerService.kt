@@ -302,6 +302,14 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Get the current role from SharedPreferences.
+     * This is read on each send so settings changes take effect immediately.
+     */
+    private fun getCurrentRole(): String {
+        return getPrefs().getString("role", "sailor") ?: "sailor"
+    }
+
+    /**
      * Get the current event ID from SharedPreferences.
      * This is read on each send so settings changes take effect immediately.
      * Defaults to 1 for backwards compatibility.
@@ -1246,7 +1254,7 @@ class TrackerService : LifecycleService() {
             put("hdg", 0)
             put("ast", false)  // Clear assist on stop
             put("stopped", true)  // This is a deliberate stop
-            put("role", role)
+            put("role", getCurrentRole())
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {
@@ -1441,7 +1449,7 @@ class TrackerService : LifecycleService() {
             put("bat", batteryPercent)
             put("chg", batteryManager.isCharging)
             put("sig", signalLevel)
-            put("role", role)
+            put("role", getCurrentRole())
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {
@@ -1497,7 +1505,7 @@ class TrackerService : LifecycleService() {
             put("chg", batteryManager.isCharging)
             put("sig", signalLevel)
             put("nsats", 0)
-            put("role", role)
+            put("role", getCurrentRole())
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {
@@ -1661,7 +1669,7 @@ class TrackerService : LifecycleService() {
             put("chg", isCharging)
             drainRate?.let { put("bdr", String.format("%.1f", it).toDouble()) }
             put("sig", signalLevel)
-            put("role", role)
+            put("role", getCurrentRole())
             put("flg", flags)  // Status flags
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
@@ -1825,7 +1833,7 @@ class TrackerService : LifecycleService() {
             put("chg", isCharging)
             drainRate?.let { put("bdr", String.format("%.1f", it).toDouble()) }
             put("sig", signalLevel)
-            put("role", role)
+            put("role", getCurrentRole())
             put("flg", flags)
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
