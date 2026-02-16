@@ -85,6 +85,8 @@ with screen off).
 |-------|-------|---------|-----------|-------------------|-------|
 | Tracker2 | Pixel (1st gen) | 10 (API 29) | MediaSession | MediaSession | AccessibilityService `onKeyEvent()` works when screen on but `MediaSessionService` intercepts volume keys before accessibility when screen off. MediaSession always-active approach works in both states. |
 | Tracker3 | Pixel 3a | 12 (API 31) | AccessibilityService | Broadcast + silent AudioTrack | MediaSession skipped on Android 12 (`No routing session for nz.co.tracker.windsurfer`, `session=null`). Without silent AudioTrack, screen-off volume events dropped (`Nothing is playing on the music stream. Skipping volume event`). With silent AudioTrack, volume keys pass through to AudioService and VOLUME_CHANGED_ACTION fires. |
+| Tracker4 | Samsung Galaxy S10e | 12 (API 31) | Works | Works | All states working. |
+| Tracker6 | Pixel 8a | 16 (API 36) | Works | Works | All states working. |
 
 ## Adding a New Phone
 

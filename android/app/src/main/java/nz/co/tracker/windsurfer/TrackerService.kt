@@ -431,6 +431,63 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Play rising (start) or falling (stop) dual tone for tracking state changes.
+     * Uses the same PCM AudioTrack approach as assist tones for reliable playback.
+     */
+    private fun playTrackingTones(ascending: Boolean) {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val toneSamples = sampleRate * 150 / 1000   // 150ms per tone
+                val gapSamples = sampleRate * 50 / 1000     // 50ms gap
+                val totalSamples = toneSamples * 2 + gapSamples
+
+                // DTMF dual-tone frequencies: 1=(697+1209), 9=(852+1477)
+                val freqs = if (ascending) {
+                    arrayOf(697.0 to 1209.0, 852.0 to 1477.0)
+                } else {
+                    arrayOf(852.0 to 1477.0, 697.0 to 1209.0)
+                }
+
+                val buffer = ShortArray(totalSamples)
+                var offset = 0
+                for ((i, freq) in freqs.withIndex()) {
+                    for (s in 0 until toneSamples) {
+                        val t = s.toDouble() / sampleRate
+                        val sample = (Math.sin(2 * Math.PI * freq.first * t) +
+                                Math.sin(2 * Math.PI * freq.second * t)) * 0.4 * Short.MAX_VALUE
+                        buffer[offset + s] = sample.toInt().toShort()
+                    }
+                    offset += toneSamples
+                    if (i < 1) offset += gapSamples
+                }
+
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                    .setBufferSizeInBytes(totalSamples * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+
+                track.write(buffer, 0, buffer.size)
+                track.play()
+                Thread.sleep((150 * 2 + 50 + 50).toLong())
+                track.stop()
+                track.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to play tracking tones: ${e.message}")
+            }
+        }.start()
+    }
+
+    /**
      * Handle volume combo detected by VolumeKeyService or volume observer.
      * Toggles assist state, vibrates, and plays tones.
      */
@@ -925,6 +982,8 @@ class TrackerService : LifecycleService() {
             return
         }
 
+        playTrackingTones(ascending = true)
+
         // Mark tracking as active so shutdown handler sends stop packet
         getPrefs().edit().putBoolean("tracking_active", true).apply()
 
@@ -1235,6 +1294,8 @@ class TrackerService : LifecycleService() {
             callback?.invoke()
             return
         }
+
+        playTrackingTones(ascending = false)
 
         serviceScope.launch {
             // If idle mode is supported, skip the stop packet — enterIdleMode() will
