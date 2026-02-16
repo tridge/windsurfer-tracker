@@ -2027,6 +2027,15 @@ class TrackerService : LifecycleService() {
      */
     private fun handleRemoteCommand(cmd: String) {
         if (cmd == "stop") {
+            // Ignore if already idle — the server may include cmd:"stop" in the
+            // ACK for our idle heartbeat after a proactive stop was already handled.
+            // Without this check, requestGracefulStop sees isRunning=false and
+            // immediately calls the callback, which calls finishStopTrackerService()
+            // and hides the IDLE banner.
+            if (isIdleMode.get()) {
+                Log.d(TAG, "Ignoring stop command - already in idle mode")
+                return
+            }
             Log.w(TAG, "Received remote STOP command from server")
             requestGracefulStop {
                 Handler(Looper.getMainLooper()).post {
