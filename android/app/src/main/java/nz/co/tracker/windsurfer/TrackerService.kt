@@ -190,7 +190,8 @@ class TrackerService : LifecycleService() {
         }
     }
 
-    // Idle mode wake lock - keeps CPU alive for periodic heartbeats in battery saver
+    // Wake locks - keep CPU alive to prevent GPS throttling
+    private var trackingWakeLock: PowerManager.WakeLock? = null
     private var idleWakeLock: PowerManager.WakeLock? = null
     private var idleJob: Job? = null
     private var keepaliveJob: Job? = null
@@ -224,6 +225,38 @@ class TrackerService : LifecycleService() {
                 playAssistTones(ascending = true)
                 assistAlarmHandler.postDelayed(this, 5000L)
             }
+        }
+    }
+
+    // GPS watchdog - detects when OEM power management throttles GPS callbacks
+    // and re-registers requestLocationUpdates() to restore them
+    private val gpsWatchdogHandler = Handler(Looper.getMainLooper())
+    private var lastLocationCallbackTime = 0L
+    private var gpsReregistrationCount = 0
+    @Suppress("MissingPermission")
+    private val gpsWatchdogRunnable = object : Runnable {
+        override fun run() {
+            if (!isRunning.get()) return
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastLocationCallbackTime
+            if (lastLocationCallbackTime > 0 && elapsed > 30_000) {
+                gpsReregistrationCount++
+                Log.w(TAG, "GPS watchdog: no location callback for ${elapsed/1000}s, " +
+                        "re-registering GPS (sats=$lastSatelliteCount, count=$gpsReregistrationCount)")
+                try {
+                    locationManager.removeUpdates(locationListener)
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000L,
+                        0f,
+                        locationListener,
+                        Looper.getMainLooper()
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "GPS watchdog: failed to re-register: ${e.message}")
+                }
+            }
+            gpsWatchdogHandler.postDelayed(this, 15_000)
         }
     }
 
@@ -831,6 +864,9 @@ class TrackerService : LifecycleService() {
     }
 
     private fun handleLocationUpdate(location: Location) {
+        // Record that GPS radio is alive (before any filtering) for watchdog
+        lastLocationCallbackTime = System.currentTimeMillis()
+
         // Filter out invalid 0,0 locations (can happen before GPS is ready)
         if (location.latitude == 0.0 && location.longitude == 0.0) {
             Log.d(TAG, "Skipping invalid 0,0 location - GPS not ready")
@@ -1029,6 +1065,12 @@ class TrackerService : LifecycleService() {
             trackingStartBattery = -1
         }
 
+        // Acquire wake lock to prevent GPS throttling on battery
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        trackingWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WindsurferTracker::Tracking").apply {
+            acquire()
+        }
+
         // Ensure socket exists (creates if needed, reuses if healthy from idle mode)
         serviceScope.launch { ensureSocket() }
 
@@ -1098,6 +1140,11 @@ class TrackerService : LifecycleService() {
 
             // Start notification icon update timer (first check after 5 seconds)
             notificationHandler.postDelayed(notificationUpdateRunnable, 5000L)
+
+            // Start GPS watchdog to detect OEM power management throttling
+            lastLocationCallbackTime = 0
+            gpsReregistrationCount = 0
+            gpsWatchdogHandler.postDelayed(gpsWatchdogRunnable, 30_000)
 
             // Register for shutdown to send stop packet before power off
             registerShutdownReceiver()
@@ -1201,6 +1248,9 @@ class TrackerService : LifecycleService() {
         // Stop assist alarm
         assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
 
+        // Stop GPS watchdog
+        gpsWatchdogHandler.removeCallbacks(gpsWatchdogRunnable)
+
         // Stop notification update timer
         notificationHandler.removeCallbacks(notificationUpdateRunnable)
 
@@ -1214,6 +1264,10 @@ class TrackerService : LifecycleService() {
             }
             shutdownReceiver = null
         }
+
+        // Release tracking wake lock
+        trackingWakeLock?.let { if (it.isHeld) it.release() }
+        trackingWakeLock = null
 
         // Stop location updates
         try {
@@ -1360,8 +1414,9 @@ class TrackerService : LifecycleService() {
         }
         lastSatelliteCount = 0
 
-        // Stop beep timer and notification timer
+        // Stop beep timer, GPS watchdog, and notification timer
         beepHandler.removeCallbacks(beepRunnable)
+        gpsWatchdogHandler.removeCallbacks(gpsWatchdogRunnable)
         notificationHandler.removeCallbacks(notificationUpdateRunnable)
 
         // Update notification
@@ -1703,8 +1758,9 @@ class TrackerService : LifecycleService() {
                 }
 
                 try {
+                    val sock = ensureSocket()
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
-                    socket?.send(dgram)
+                    sock?.send(dgram)
 
                     if (attempt == 0) {
                         statusListener?.onPacketSent(seq)
@@ -1867,8 +1923,9 @@ class TrackerService : LifecycleService() {
                 }
 
                 try {
+                    val sock = ensureSocket()
                     val dgram = DatagramPacket(data, data.size, address, serverPort)
-                    socket?.send(dgram)
+                    sock?.send(dgram)
 
                     if (attempt == 0) {
                         statusListener?.onPacketSent(seq)
