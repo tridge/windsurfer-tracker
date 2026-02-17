@@ -876,7 +876,13 @@ class PositionTracker:
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
-            log(f"[{sailor_id}] Idle heartbeat bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
+            flg_parts = []
+            if flags.get("ps"):
+                flg_parts.append("PS")
+            if not flags.get("bo"):
+                flg_parts.append("!BO")
+            flg_str = f" [{','.join(flg_parts)}]" if flg_parts else ""
+            log(f"[{sailor_id}] Idle heartbeat bat={bat_str} sig={sig_str}{flg_str} [{source}] ip={src_ip}")
 
             # Write current positions file (no log entry, no tail update)
             if self.positions_file:
@@ -921,8 +927,14 @@ class PositionTracker:
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
+            flg_parts = []
+            if flags.get("ps"):
+                flg_parts.append("PS")
+            if not flags.get("bo"):
+                flg_parts.append("!BO")
+            flg_str = f" [{','.join(flg_parts)}]" if flg_parts else ""
             label = "Stopped" if stopped else "GPS-wait heartbeat"
-            log(f"[{sailor_id}] {label} bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
+            log(f"[{sailor_id}] {label} bat={bat_str} sig={sig_str}{flg_str} [{source}] ip={src_ip}")
 
             # Write current positions file (no log entry, no tail update)
             if self.positions_file:
@@ -959,6 +971,12 @@ class PositionTracker:
         if charging:
             bat_str += "+"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
+        flg_parts = []
+        if flags.get("ps"):
+            flg_parts.append("PS")
+        if not flags.get("bo"):
+            flg_parts.append("!BO")
+        flg_str = f" [{','.join(flg_parts)}]" if flg_parts else ""
         hac_str = f" hac={horizontal_accuracy:.0f}m" if horizontal_accuracy is not None else ""
         local_time = datetime.fromtimestamp(recv_time).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -966,7 +984,7 @@ class PositionTracker:
             f"{local_time} [{sailor_id}] "
             f"pos={format_position(lat, lon)}{hac_str} "
             f"spd={speed:.1f}kn hdg={heading:03d}° "
-            f"bat={bat_str} sig={sig_str} "
+            f"bat={bat_str} sig={sig_str}{flg_str} "
             f"ver={version} "
             f"time={format_timestamp(ts)} "
             f"[{source}] "
