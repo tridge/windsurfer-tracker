@@ -390,6 +390,14 @@ class TrackerService : LifecycleService() {
      */
     private fun playTrackerBeep() {
         try {
+            // Suppress buzz in Do Not Disturb / Bedtime mode
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val filter = nm.currentInterruptionFilter
+            if (filter != NotificationManager.INTERRUPTION_FILTER_ALL) {
+                Log.d(TAG, "Skipping tracker beep - DND active (filter=$filter)")
+                return
+            }
+
             Log.d(TAG, "Playing tracker beep via vibration...")
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
