@@ -155,6 +155,35 @@ def step_grant_permissions():
     return True
 
 
+def step_add_wifi_network():
+    """Add a saved WiFi network for emergency/debug access (does not enable WiFi)."""
+    ssid = "TridgeM"
+    password = "samba123"
+
+    # Use cmd wifi to add a network (Android 11+)
+    rc, out, err = adb_shell(
+        "cmd", "wifi", "add-network", ssid, "wpa2", password,
+    )
+    if rc == 0 and "error" not in out.lower():
+        print_ok(ssid)
+        return True
+
+    # Fallback: use wpa_cli if available
+    rc2, out2, _ = adb_shell("wpa_cli", "-i", "wlan0", "add_network")
+    if rc2 == 0 and out2.strip().isdigit():
+        net_id = out2.strip()
+        adb_shell("wpa_cli", "-i", "wlan0", "set_network", net_id, "ssid", f'"{ssid}"')
+        adb_shell("wpa_cli", "-i", "wlan0", "set_network", net_id, "psk", f'"{password}"')
+        adb_shell("wpa_cli", "-i", "wlan0", "enable_network", net_id)
+        adb_shell("wpa_cli", "-i", "wlan0", "save_config")
+        adb_shell("wpa_cli", "-i", "wlan0", "disable_network", net_id)
+        print_ok(f"{ssid} (wpa_cli)")
+        return True
+
+    print_fail(f"cmd wifi: {(out + err).strip()}")
+    return False
+
+
 def step_disable_wifi():
     """Disable WiFi and related scanning."""
     errors = []
@@ -541,6 +570,7 @@ def main():
     steps.extend([
         ("Enabling accessibility service", step_enable_accessibility_service, False),
         ("Enabling data roaming", step_enable_data_roaming, False),
+        ("Adding WiFi network", step_add_wifi_network, False),
         ("Disabling WiFi", step_disable_wifi, False),
         ("Disabling Bluetooth", step_disable_bluetooth, False),
         ("Disabling NFC", step_disable_nfc, False),
