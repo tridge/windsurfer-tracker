@@ -3673,7 +3673,7 @@
                     // Sort by display name if available, otherwise ID
                     const nameA = a.name || a.id;
                     const nameB = b.name || b.id;
-                    return nameA.localeCompare(nameB);
+                    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
                 }).map(sailor => {
                     const age = now - sailor.last_seen;
                     const isRecent = age < 120;
