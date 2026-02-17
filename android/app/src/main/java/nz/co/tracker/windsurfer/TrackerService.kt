@@ -241,8 +241,10 @@ class TrackerService : LifecycleService() {
             val elapsed = now - lastLocationCallbackTime
             if (lastLocationCallbackTime > 0 && elapsed > 30_000) {
                 gpsReregistrationCount++
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val doze = pm.isDeviceIdleMode
                 Log.w(TAG, "GPS watchdog: no location callback for ${elapsed/1000}s, " +
-                        "re-registering GPS (sats=$lastSatelliteCount, count=$gpsReregistrationCount)")
+                        "re-registering GPS (sats=$lastSatelliteCount, count=$gpsReregistrationCount, doze=$doze)")
                 try {
                     locationManager.removeUpdates(locationListener)
                     locationManager.requestLocationUpdates(
@@ -254,6 +256,24 @@ class TrackerService : LifecycleService() {
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "GPS watchdog: failed to re-register: ${e.message}")
+                }
+
+                // After 5 failed re-registrations and device is in Doze, briefly wake
+                // the screen to force the device out of Doze. On Samsung devices, Doze
+                // throttles GNSS hardware even with a foreground location service and
+                // PARTIAL_WAKE_LOCK held.
+                if (gpsReregistrationCount >= 5 && doze) {
+                    Log.w(TAG, "GPS watchdog: device in Doze after $gpsReregistrationCount failures, waking screen")
+                    try {
+                        @Suppress("DEPRECATION")
+                        val screenLock = pm.newWakeLock(
+                            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                            "WindsurferTracker::DozeEscape"
+                        )
+                        screenLock.acquire(3000L)  // hold for 3 seconds then auto-release
+                    } catch (e: Exception) {
+                        Log.e(TAG, "GPS watchdog: failed to wake screen: ${e.message}")
+                    }
                 }
             }
             gpsWatchdogHandler.postDelayed(this, 15_000)
@@ -755,6 +775,17 @@ class TrackerService : LifecycleService() {
 
         if (intent?.getBooleanExtra("start_in_idle", false) == true) {
             startInIdleMode()
+        } else if (intent == null) {
+            // START_STICKY restart after Android killed the service.
+            // Check what mode we were in before being killed.
+            val wasTracking = getPrefs().getBoolean("tracking_active", false)
+            if (wasTracking) {
+                Log.w(TAG, "START_STICKY restart: resuming tracking (was active)")
+                startTracking()
+            } else {
+                Log.w(TAG, "START_STICKY restart: resuming idle mode (was not tracking)")
+                startInIdleMode()
+            }
         } else {
             startTracking()
         }
