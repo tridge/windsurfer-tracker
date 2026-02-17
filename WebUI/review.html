@@ -1905,44 +1905,35 @@
 
         // Set up rubber-band selection on a graph canvas
         function setupGraphRubberBand(canvas) {
-            const getX = (e) => {
+            const getX = (e, clamp) => {
                 const rect = canvas.getBoundingClientRect();
+                let x;
                 if (e.touches) {
-                    return e.touches[0].clientX - rect.left;
+                    x = e.touches[0].clientX - rect.left;
+                } else {
+                    x = e.clientX - rect.left;
                 }
-                return e.clientX - rect.left;
+                // Clamp to canvas bounds so dragging beyond the edge selects to the edge
+                if (clamp) {
+                    x = Math.max(0, Math.min(x, canvas.offsetWidth));
+                }
+                return x;
             };
 
-            const startSelection = (e) => {
-                e.preventDefault();
-                const x = getX(e);
-                rubberBandState = {
-                    canvas: canvas,
-                    startX: x,
-                    currentX: x
-                };
-            };
-
-            const updateSelection = (e) => {
-                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
-                e.preventDefault();
-                rubberBandState.currentX = getX(e);
-                drawRubberBand();
-            };
-
-            const endSelection = (e) => {
-                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
-                e.preventDefault();
-
+            const applySelection = () => {
                 const startX = Math.min(rubberBandState.startX, rubberBandState.currentX);
                 const endX = Math.max(rubberBandState.startX, rubberBandState.currentX);
                 const width = canvas.offsetWidth;
 
                 // Only apply if selection is meaningful (> 5px)
                 if (endX - startX > 5) {
-                    // Convert pixel positions to slider percentages
-                    const startPercent = Math.max(0, Math.min(100, (startX / width) * 100));
-                    const endPercent = Math.max(0, Math.min(100, (endX / width) * 100));
+                    // Convert pixel positions to slider percentages, mapping into
+                    // the current zoom range so sub-selecting a zoomed view works
+                    const currentStart = parseFloat(document.getElementById('start-slider').value);
+                    const currentEnd = parseFloat(document.getElementById('end-slider').value);
+                    const currentRange = currentEnd - currentStart;
+                    const startPercent = Math.max(0, Math.min(100, currentStart + (startX / width) * currentRange));
+                    const endPercent = Math.max(0, Math.min(100, currentStart + (endX / width) * currentRange));
 
                     // Update sliders
                     document.getElementById('start-slider').value = startPercent;
@@ -1959,16 +1950,35 @@
                 clearRubberBand();
             };
 
-            // Mouse events
+            const startSelection = (e) => {
+                e.preventDefault();
+                const x = getX(e, false);
+                rubberBandState = {
+                    canvas: canvas,
+                    startX: x,
+                    currentX: x
+                };
+            };
+
+            const updateSelection = (e) => {
+                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
+                e.preventDefault();
+                rubberBandState.currentX = getX(e, true);
+                drawRubberBand();
+            };
+
+            const endSelection = (e) => {
+                if (!rubberBandState || rubberBandState.canvas !== canvas) return;
+                e.preventDefault();
+                rubberBandState.currentX = getX(e, true);
+                applySelection();
+            };
+
+            // Mouse: mousedown on canvas, but track mousemove/mouseup on document
+            // so dragging beyond the canvas edge still works
             canvas.addEventListener('mousedown', startSelection);
-            canvas.addEventListener('mousemove', updateSelection);
-            canvas.addEventListener('mouseup', endSelection);
-            canvas.addEventListener('mouseleave', () => {
-                if (rubberBandState && rubberBandState.canvas === canvas) {
-                    rubberBandState = null;
-                    clearRubberBand();
-                }
-            });
+            document.addEventListener('mousemove', updateSelection);
+            document.addEventListener('mouseup', endSelection);
 
             // Touch events for mobile
             canvas.addEventListener('touchstart', startSelection, { passive: false });
