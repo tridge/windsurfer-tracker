@@ -873,6 +873,8 @@ class PositionTracker:
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
+            if charging:
+                bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
             log(f"[{sailor_id}] Idle heartbeat bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
 
@@ -916,6 +918,8 @@ class PositionTracker:
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
+            if charging:
+                bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
             label = "Stopped" if stopped else "GPS-wait heartbeat"
             log(f"[{sailor_id}] {label} bat={bat_str} sig={sig_str} [{source}] ip={src_ip}")
@@ -952,6 +956,8 @@ class PositionTracker:
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
         stopped_marker = " [STOPPED]" if stopped else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
+        if charging:
+            bat_str += "+"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
         hac_str = f" hac={horizontal_accuracy:.0f}m" if horizontal_accuracy is not None else ""
         local_time = datetime.fromtimestamp(recv_time).strftime("%Y-%m-%d %H:%M:%S")
