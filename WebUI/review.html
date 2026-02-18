@@ -4660,10 +4660,11 @@
         }
 
         function formatDurationSecs(secs) {
-            if (!secs || secs <= 0) return '0:00';
-            const mins = Math.floor(secs / 60);
-            const remSecs = Math.floor(secs % 60);
-            return `${mins}:${String(remSecs).padStart(2, '0')}`;
+            if (!secs || secs <= 0) return '0 mins';
+            const hours = Math.floor(secs / 3600);
+            const mins = Math.floor((secs % 3600) / 60);
+            if (hours > 0) return `${hours} hours ${mins} mins`;
+            return `${mins} mins`;
         }
 
         async function selectSearchResult(date, logFile, sailorId) {
