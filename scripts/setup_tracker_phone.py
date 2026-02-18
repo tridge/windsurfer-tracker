@@ -144,6 +144,14 @@ def step_grant_permissions():
     if rc != 0:
         failed.append("battery-whitelist")
 
+    # Samsung Doze throttles GNSS hardware even with battery whitelist and
+    # foreground location service. Disable Doze entirely on Samsung devices.
+    _, brand, _ = adb_shell("getprop", "ro.product.brand")
+    if "samsung" in brand.strip().lower():
+        rc, _, _ = adb_shell("dumpsys", "deviceidle", "disable")
+        if rc != 0:
+            failed.append("doze-disable")
+
     if failed:
         if is_perm_denied:
             print_fail("needs manual grant in app (OEM restriction)")
