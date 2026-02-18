@@ -233,6 +233,7 @@ class TrackerService : LifecycleService() {
     private val gpsWatchdogHandler = Handler(Looper.getMainLooper())
     private var lastLocationCallbackTime = 0L
     private var gpsReregistrationCount = 0
+    private var dozeEscapeLock: PowerManager.WakeLock? = null
     @Suppress("MissingPermission")
     private val gpsWatchdogRunnable = object : Runnable {
         override fun run() {
@@ -258,19 +259,21 @@ class TrackerService : LifecycleService() {
                     Log.e(TAG, "GPS watchdog: failed to re-register: ${e.message}")
                 }
 
-                // After 5 failed re-registrations and device is in Doze, briefly wake
-                // the screen to force the device out of Doze. On Samsung devices, Doze
+                // After 5 failed re-registrations and device is in Doze, wake the
+                // screen and hold it until GPS recovers. On Samsung devices, Doze
                 // throttles GNSS hardware even with a foreground location service and
-                // PARTIAL_WAKE_LOCK held.
-                if (gpsReregistrationCount >= 5 && doze) {
-                    Log.w(TAG, "GPS watchdog: device in Doze after $gpsReregistrationCount failures, waking screen")
+                // PARTIAL_WAKE_LOCK held. A brief 3s wake wasn't enough — the device
+                // stayed in Doze. Hold the screen on so GPS hardware fully restarts.
+                if (gpsReregistrationCount >= 5 && doze && dozeEscapeLock?.isHeld != true) {
+                    Log.w(TAG, "GPS watchdog: device in Doze after $gpsReregistrationCount failures, waking screen until GPS recovers")
                     try {
                         @Suppress("DEPRECATION")
-                        val screenLock = pm.newWakeLock(
+                        dozeEscapeLock = pm.newWakeLock(
                             PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
                             "WindsurferTracker::DozeEscape"
-                        )
-                        screenLock.acquire(3000L)  // hold for 3 seconds then auto-release
+                        ).apply {
+                            acquire(2 * 60 * 1000L)  // 2 min safety timeout, released earlier on GPS fix
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "GPS watchdog: failed to wake screen: ${e.message}")
                     }
@@ -905,6 +908,16 @@ class TrackerService : LifecycleService() {
     private fun handleLocationUpdate(location: Location) {
         // Record that GPS radio is alive (before any filtering) for watchdog
         lastLocationCallbackTime = System.currentTimeMillis()
+
+        // Release Doze escape wake lock now that GPS is delivering fixes
+        dozeEscapeLock?.let {
+            if (it.isHeld) {
+                Log.i(TAG, "GPS recovered after $gpsReregistrationCount watchdog cycles, releasing screen wake lock")
+                it.release()
+            }
+            dozeEscapeLock = null
+            gpsReregistrationCount = 0
+        }
 
         // Filter out invalid 0,0 locations (can happen before GPS is ready)
         if (location.latitude == 0.0 && location.longitude == 0.0) {
