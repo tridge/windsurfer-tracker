@@ -11,7 +11,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.net.ConnectivityManager
 import android.net.Network
@@ -396,20 +399,61 @@ class TrackerService : LifecycleService() {
      * Uses STREAM_ALARM at MAX_VOLUME.
      */
     private fun playTrackingTones(ascending: Boolean) {
-        try {
-            val tg = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
-            val tones = if (ascending) {
-                intArrayOf(ToneGenerator.TONE_DTMF_1, ToneGenerator.TONE_DTMF_9)
-            } else {
-                intArrayOf(ToneGenerator.TONE_DTMF_9, ToneGenerator.TONE_DTMF_1)
+        Thread {
+            try {
+                val sampleRate = 44100
+                val toneSamples = sampleRate * 250 / 1000   // 250ms per tone
+                val gapSamples = sampleRate * 80 / 1000     // 80ms gap
+                val totalSamples = toneSamples * 2 + gapSamples
+
+                // DTMF dual-tone frequencies: 1=(697+1209), 9=(852+1477)
+                val freqs = if (ascending) {
+                    arrayOf(697.0 to 1209.0, 852.0 to 1477.0)
+                } else {
+                    arrayOf(852.0 to 1477.0, 697.0 to 1209.0)
+                }
+
+                val buffer = ShortArray(totalSamples)
+                var offset = 0
+                for ((i, freq) in freqs.withIndex()) {
+                    for (s in 0 until toneSamples) {
+                        val t = s.toDouble() / sampleRate
+                        val sample = (Math.sin(2 * Math.PI * freq.first * t) +
+                                Math.sin(2 * Math.PI * freq.second * t)) * 0.49 * Short.MAX_VALUE
+                        buffer[offset + s] = sample.toInt().toShort()
+                    }
+                    offset += toneSamples
+                    if (i < 1) offset += gapSamples
+                }
+
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                    .setBufferSizeInBytes(totalSamples * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+
+                // Force alarm stream to max volume
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                am.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
+
+                track.write(buffer, 0, buffer.size)
+                track.play()
+                Thread.sleep((250 * 2 + 80 + 50).toLong())
+                track.stop()
+                track.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to play tracking tones: ${e.message}")
             }
-            val h = Handler(Looper.getMainLooper())
-            tg.startTone(tones[0], 150)
-            h.postDelayed({ tg.startTone(tones[1], 150) }, 200)
-            h.postDelayed({ tg.release() }, 400)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to play tracking tones: ${e.message}")
-        }
+        }.start()
     }
 
     private fun getServerAddress(): InetAddress? {
@@ -568,6 +612,10 @@ class TrackerService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "onDestroy called, isRunning=${isRunning.get()}, isIdle=${isIdleMode.get()}")
+        if (isRunning.get() || isIdleMode.get()) {
+            // Service being killed while tracking/idle — alert the user
+            playTrackingTones(ascending = false)
+        }
         stopTracking()
 
         // Clean up idle mode if active
@@ -1235,6 +1283,7 @@ class TrackerService : LifecycleService() {
     private fun enterIdleMode() {
         if (isIdleMode.get()) return
 
+        playTrackingTones(ascending = false)
         Log.i(TAG, "Entering idle mode (interval=${idleIntervalMs}ms)")
         isIdleMode.set(true)
         isRunning.set(false)
