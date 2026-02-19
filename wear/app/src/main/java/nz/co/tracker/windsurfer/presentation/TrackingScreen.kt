@@ -57,6 +57,8 @@ fun TrackingScreen(
 ) {
     // Slide-to-stop confirmation state
     var showStopConfirmation by remember { mutableStateOf(false) }
+    // Slide-to-assist confirmation state
+    var showAssistConfirmation by remember { mutableStateOf(false) }
 
     // Auto-dismiss after 4 seconds
     LaunchedEffect(showStopConfirmation) {
@@ -65,11 +67,18 @@ fun TrackingScreen(
             showStopConfirmation = false
         }
     }
+    LaunchedEffect(showAssistConfirmation) {
+        if (showAssistConfirmation) {
+            delay(4000)
+            showAssistConfirmation = false
+        }
+    }
 
     // Dismiss if tracking stops externally (remote admin stop)
     LaunchedEffect(isTracking) {
         if (!isTracking) {
             showStopConfirmation = false
+            showAssistConfirmation = false
         }
     }
 
@@ -329,9 +338,15 @@ fun TrackingScreen(
                             .height(36.dp)
                             .clip(MaterialTheme.shapes.small)
                             .background(if (isAssistActive) Color.Red else Color.DarkGray)
-                            .pointerInput(Unit) {
+                            .pointerInput(isAssistActive) {
                                 detectTapGestures(
-                                    onTap = { onAssistLongPress() }
+                                    onTap = {
+                                        if (isAssistActive) {
+                                            onAssistLongPress() // Cancel immediately
+                                        } else {
+                                            showAssistConfirmation = true
+                                        }
+                                    }
                                 )
                             },
                         contentAlignment = Alignment.Center
@@ -376,9 +391,38 @@ fun TrackingScreen(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                SlideToStopOverlay(
-                    onConfirmStop = { showStopConfirmation = false; onToggleTracking() },
+                SlideToConfirmOverlay(
+                    title = "Slide to Stop",
+                    fillColor = StoppedRed,
+                    thumbContent = {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .background(StoppedRed, RoundedCornerShape(2.dp))
+                        )
+                    },
+                    onConfirm = { showStopConfirmation = false; onToggleTracking() },
                     onDismiss = { showStopConfirmation = false }
+                )
+            }
+
+            // Slide-to-assist confirmation overlay
+            AnimatedVisibility(
+                visible = showAssistConfirmation,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                SlideToConfirmOverlay(
+                    title = "Slide for Assist",
+                    fillColor = Color(0xFFFF8800),
+                    thumbContent = {
+                        Text(
+                            text = "⚠",
+                            fontSize = 18.sp
+                        )
+                    },
+                    onConfirm = { showAssistConfirmation = false; onAssistLongPress() },
+                    onDismiss = { showAssistConfirmation = false }
                 )
             }
         }
@@ -386,8 +430,11 @@ fun TrackingScreen(
 }
 
 @Composable
-private fun SlideToStopOverlay(
-    onConfirmStop: () -> Unit,
+private fun SlideToConfirmOverlay(
+    title: String,
+    fillColor: Color,
+    thumbContent: @Composable () -> Unit,
+    onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
@@ -429,8 +476,8 @@ private fun SlideToStopOverlay(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "Slide to Stop",
-                color = StoppedRed,
+                text = title,
+                color = fillColor,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -445,15 +492,15 @@ private fun SlideToStopOverlay(
                     .clip(RoundedCornerShape(thumbSizeDp / 2))
                     .background(Color(0xFF333333))
             ) {
-                // Red fill following thumb
+                // Color fill following thumb
                 Box(
                     modifier = Modifier
                         .width(with(density) { (displayOffset + thumbSizePx).toDp() })
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(thumbSizeDp / 2))
                         .background(
-                            if (progress >= threshold) StoppedRed.copy(alpha = 0.8f)
-                            else StoppedRed.copy(alpha = 0.4f)
+                            if (progress >= threshold) fillColor.copy(alpha = 0.8f)
+                            else fillColor.copy(alpha = 0.4f)
                         )
                 )
 
@@ -473,7 +520,7 @@ private fun SlideToStopOverlay(
                                 onDragEnd = {
                                     isDragging = false
                                     if (dragOffsetPx / maxDragPx >= threshold) {
-                                        onConfirmStop()
+                                        onConfirm()
                                     }
                                     dragOffsetPx = 0f
                                     hasReachedThreshold = false
@@ -497,12 +544,7 @@ private fun SlideToStopOverlay(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Red stop square icon
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .background(StoppedRed, RoundedCornerShape(2.dp))
-                    )
+                    thumbContent()
                 }
             }
         }
