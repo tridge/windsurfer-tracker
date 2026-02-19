@@ -316,6 +316,25 @@ def generate_log_summaries(log_dir: Path) -> int:
                             if ts is None or sailor_id is None:
                                 continue
 
+                            # Count no-GPS entries separately
+                            if entry.get('nogps'):
+                                key = displayid if displayid else sailor_id
+                                if key not in sailors:
+                                    sailors[key] = {
+                                        'points': 0,
+                                        'first_ts': ts,
+                                        'last_ts': ts,
+                                        'id': sailor_id
+                                    }
+                                    if displayid:
+                                        sailors[key]['displayid'] = displayid
+                                sailors[key]['nogps_points'] = sailors[key].get('nogps_points', 0) + 1
+                                if ts < sailors[key]['first_ts']:
+                                    sailors[key]['first_ts'] = ts
+                                if ts > sailors[key]['last_ts']:
+                                    sailors[key]['last_ts'] = ts
+                                continue
+
                             point_count += 1
 
                             if start_ts is None or ts < start_ts:
@@ -936,7 +955,28 @@ class PositionTracker:
             label = "Stopped" if stopped else "GPS-wait heartbeat"
             log(f"[{sailor_id}] {label} bat={bat_str} sig={sig_str}{flg_str} [{source}] ip={src_ip}")
 
-            # Write current positions file (no log entry, no tail update)
+            # Log GPS-wait entry (no lat/lon — WebUI skips entries without coordinates)
+            if self.daily_logger:
+                track_entry = {
+                    "id": sailor_id,
+                    "ts": ts,
+                    "recv_ts": recv_time,
+                    "nogps": True,
+                    "bat": battery,
+                    "sig": signal,
+                    "role": role,
+                    "ver": version,
+                    "flg": flags
+                }
+                if charging is not None:
+                    track_entry["chg"] = charging
+                if battery_drain_rate is not None:
+                    track_entry["bdr"] = battery_drain_rate
+                if os_version:
+                    track_entry["os"] = os_version
+                self.daily_logger.write(track_entry)
+
+            # Write current positions file (no tail update for GPS-wait)
             if self.positions_file:
                 write_current_positions(self.current_positions, self.positions_file, user_overrides or _user_overrides, self.position_tails)
 
