@@ -125,10 +125,10 @@ echo "Version: $APP_VERSION ($BUILD_NUMBER)"
 
 echo "=== Deploying IPA to server ==="
 # Copy IPA from mac2 to local, then to server
-scp "$MAC_HOST:$IPA_FILE" /tmp/WindsurferTracker.ipa
+LOCAL_IPA="$SCRIPT_DIR/../app/WindsurferTracker.ipa"
+scp "$MAC_HOST:$IPA_FILE" "$LOCAL_IPA"
 ssh "$DEPLOY_HOST" "mkdir -p $DEPLOY_PATH"
-scp /tmp/WindsurferTracker.ipa "$DEPLOY_HOST:$DEPLOY_PATH/WindsurferTracker.ipa"
-rm /tmp/WindsurferTracker.ipa
+scp "$LOCAL_IPA" "$DEPLOY_HOST:$DEPLOY_PATH/WindsurferTracker.ipa"
 
 echo "=== Updating manifest.plist on server ==="
 ssh "$DEPLOY_HOST" "cat > $DEPLOY_PATH/manifest.plist << 'MANIFESTEOF'
