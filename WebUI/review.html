@@ -886,6 +886,11 @@
         // State
         let allData = [];
         let userData = {};
+        function sortedUserData() {
+            return Object.entries(userData).sort((a, b) =>
+                a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' })
+            );
+        }
         let trackLayers = {};
         let markerLayers = {};
         let pointLayers = {};
@@ -1757,7 +1762,7 @@
             container.innerHTML = '';
 
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const speeds = entries.map(e => e.spd || 0);
                 // Use reduce instead of spread to avoid stack overflow with large arrays
                 const maxSpeed = speeds.reduce((max, s) => s > max ? s : max, 0);
@@ -2101,7 +2106,7 @@
             const showOutliersMarkers = document.getElementById('show-outliers').checked;
 
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 if (!selectedUsers.has(userId)) {
                     colorIdx++;
                     continue;
@@ -2469,7 +2474,7 @@
 
             // Draw speed line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -2613,7 +2618,7 @@
 
             // Draw battery line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -2704,7 +2709,7 @@
 
             // Draw signal line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -2865,7 +2870,7 @@
 
             // Draw latency line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3030,7 +3035,7 @@
 
             // Draw heart rate line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3158,7 +3163,7 @@
 
             // Draw accuracy line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3285,7 +3290,7 @@
 
             // Draw satellites line for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3454,7 +3459,10 @@
 
             // Draw distance line for each selected user
             let colorIdx = 0;
-            for (const [userId, distances] of Object.entries(userDistances)) {
+            const sortedDistances = Object.entries(userDistances).sort((a, b) =>
+                a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' })
+            );
+            for (const [userId, distances] of sortedDistances) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3579,7 +3587,7 @@
 
             // Find and highlight position for each selected user
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3885,7 +3893,7 @@
 
             // Draw dots at intersection points
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -3944,7 +3952,7 @@
 
             // Draw dots at intersection points
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 const userColor = userColors[colorIdx % userColors.length];
                 colorIdx++;
 
@@ -5256,7 +5264,7 @@
             const trackStartTime = showFullTrack ? rangeStartTime : Math.max(rangeStartTime, upToTime - PLAYBACK_TAIL_SECONDS);
 
             let colorIdx = 0;
-            for (const [userId, entries] of Object.entries(userData)) {
+            for (const [userId, entries] of sortedUserData()) {
                 if (!selectedUsers.has(userId)) {
                     colorIdx++;
                     continue;
