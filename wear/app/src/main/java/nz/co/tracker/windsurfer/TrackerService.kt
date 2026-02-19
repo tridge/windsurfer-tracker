@@ -684,6 +684,9 @@ class TrackerService : LifecycleService() {
     }
 
     private fun getStateIconRes(): Int {
+        if (isIdleMode.get()) {
+            return R.drawable.ic_notification_idle
+        }
         val diff = System.currentTimeMillis() - lastAckTime.get()
         return if (diff in 1..30_000) {
             R.drawable.ic_notification_ok
