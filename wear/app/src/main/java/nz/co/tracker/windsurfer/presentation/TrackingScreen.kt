@@ -59,6 +59,8 @@ fun TrackingScreen(
     var showStopConfirmation by remember { mutableStateOf(false) }
     // Slide-to-assist confirmation state
     var showAssistConfirmation by remember { mutableStateOf(false) }
+    // Brief "stop for settings" message
+    var showSettingsBlocked by remember { mutableStateOf(false) }
 
     // Auto-dismiss after 4 seconds
     LaunchedEffect(showStopConfirmation) {
@@ -71,6 +73,12 @@ fun TrackingScreen(
         if (showAssistConfirmation) {
             delay(4000)
             showAssistConfirmation = false
+        }
+    }
+    LaunchedEffect(showSettingsBlocked) {
+        if (showSettingsBlocked) {
+            delay(2000)
+            showSettingsBlocked = false
         }
     }
 
@@ -371,9 +379,15 @@ fun TrackingScreen(
                     .offset(x = 45.dp)  // Offset right from center
                     .size(40.dp)
                     .clip(CircleShape)
-                    .pointerInput(Unit) {
+                    .pointerInput(isTracking) {
                         detectTapGestures(
-                            onTap = { onSettingsLongPress() }
+                            onTap = {
+                                if (isTracking) {
+                                    showSettingsBlocked = true
+                                } else {
+                                    onSettingsLongPress()
+                                }
+                            }
                         )
                     },
                 contentAlignment = Alignment.Center
@@ -383,6 +397,27 @@ fun TrackingScreen(
                     fontSize = 24.sp,
                     color = Color.Gray
                 )
+            }
+
+            // "Stop for settings" brief message
+            AnimatedVisibility(
+                visible = showSettingsBlocked,
+                modifier = Modifier.align(Alignment.Center),
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xCC000000), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "Stop for settings",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
             // Slide-to-stop confirmation overlay
