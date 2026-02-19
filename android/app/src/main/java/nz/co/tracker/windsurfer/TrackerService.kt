@@ -213,6 +213,8 @@ class TrackerService : LifecycleService() {
     private var lastComboTriggerTime = 0L
     private var lastVolumeUpChangeTime = 0L
     private var lastVolumeDownChangeTime = 0L
+    private var lastVolumeUpStream = -1
+    private var lastVolumeDownStream = -1
     private var mediaSession: android.media.session.MediaSession? = null
     private var volumeChangeReceiver: BroadcastReceiver? = null
     private var silentAudioTrack: AudioTrack? = null
@@ -594,6 +596,13 @@ class TrackerService : LifecycleService() {
         Log.i(TAG, "Volume button assist toggled: assist=$newAssist")
     }
 
+    /** Check if a phone call is ringing or active (no permissions needed) */
+    private fun isPhoneCallActive(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return am.mode == AudioManager.MODE_RINGTONE || am.mode == AudioManager.MODE_IN_CALL
+            || am.mode == AudioManager.MODE_IN_COMMUNICATION
+    }
+
     /**
      * Register volume combo detection via three complementary mechanisms:
      * 1. AccessibilityService onKeyEvent() — works when screen is on (all devices)
@@ -621,6 +630,8 @@ class TrackerService : LifecycleService() {
             am.getStreamVolume(AudioManager.STREAM_MUSIC)
         ) {
             override fun onAdjustVolume(direction: Int) {
+                // Ignore volume changes during phone calls (ringer/in-call adjustments)
+                if (isPhoneCallActive()) return
                 // Forward volume change so keys still work normally
                 if (direction != 0) {
                     am.adjustStreamVolume(
@@ -695,20 +706,31 @@ class TrackerService : LifecycleService() {
         // is skipped and volume keys fall through to AudioService)
         volumeChangeReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                // Ignore volume changes during phone calls (ringer/in-call adjustments)
+                if (isPhoneCallActive()) return
                 val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
                 val prevVol = intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1)
                 if (newVol < 0 || prevVol < 0 || newVol == prevVol) return
+                val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                 val now = android.os.SystemClock.uptimeMillis()
                 if (newVol > prevVol) {
                     lastVolumeUpChangeTime = now
-                    if (lastVolumeDownChangeTime > 0 && (now - lastVolumeDownChangeTime) <= 800) {
-                        Log.i(TAG, "Volume combo detected via broadcast (up after down)")
+                    lastVolumeUpStream = streamType
+                    if (lastVolumeDownChangeTime > 0 && (now - lastVolumeDownChangeTime) <= 800
+                        && lastVolumeDownStream == streamType) {
+                        Log.i(TAG, "Volume combo detected via broadcast (up after down, stream=$streamType)")
+                        lastVolumeUpStream = -1
+                        lastVolumeDownStream = -1
                         handleVolumeCombo()
                     }
                 } else {
                     lastVolumeDownChangeTime = now
-                    if (lastVolumeUpChangeTime > 0 && (now - lastVolumeUpChangeTime) <= 800) {
-                        Log.i(TAG, "Volume combo detected via broadcast (down after up)")
+                    lastVolumeDownStream = streamType
+                    if (lastVolumeUpChangeTime > 0 && (now - lastVolumeUpChangeTime) <= 800
+                        && lastVolumeUpStream == streamType) {
+                        Log.i(TAG, "Volume combo detected via broadcast (down after up, stream=$streamType)")
+                        lastVolumeUpStream = -1
+                        lastVolumeDownStream = -1
                         handleVolumeCombo()
                     }
                 }
