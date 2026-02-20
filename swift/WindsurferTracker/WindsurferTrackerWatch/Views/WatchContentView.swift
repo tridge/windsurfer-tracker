@@ -600,6 +600,7 @@ struct WatchTextInputView: View {
     let title: String
     @Binding var text: String
     @Environment(\.dismiss) private var dismiss
+    @State private var localText: String = ""
 
     /// Series 7+ has a system QWERTY keyboard (watchOS 9+, aspect ratio < 0.82).
     /// Series 6 and earlier only offer scribble input which is unusable for names/passwords.
@@ -615,20 +616,24 @@ struct WatchTextInputView: View {
     }
 
     var body: some View {
-        if Self.hasSystemKeyboard {
-            // Series 7+: use native TextField (shows QWERTY keyboard)
-            VStack(spacing: 12) {
-                TextField(title, text: $text)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .submitLabel(.done)
-                    .onSubmit { dismiss() }
+        Group {
+            if Self.hasSystemKeyboard {
+                // Series 7+: use native TextField (shows QWERTY keyboard)
+                VStack(spacing: 12) {
+                    TextField(title, text: $localText)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .submitLabel(.done)
+                        .onSubmit { dismiss() }
+                }
+                .navigationTitle(title)
+            } else {
+                // Series 6 and earlier: use custom tap keyboard
+                WatchCustomKeyboard(title: title, text: $localText, onDone: { dismiss() })
             }
-            .navigationTitle(title)
-        } else {
-            // Series 6 and earlier: use custom tap keyboard
-            WatchCustomKeyboard(title: title, text: $text, onDone: { dismiss() })
         }
+        .onAppear { localText = text }
+        .onDisappear { text = localText }
     }
 }
 
