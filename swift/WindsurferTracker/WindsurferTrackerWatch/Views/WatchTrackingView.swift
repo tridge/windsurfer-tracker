@@ -9,6 +9,12 @@ struct WatchTrackingView: View {
     @State private var displayedHeartRate: Int = 0
     @State private var lastHeartRateUpdate: Date = .distantPast
 
+    // Slide-to-confirm overlay state
+    @State private var showStopConfirmation = false
+    @State private var showAssistConfirmation = false
+    @State private var showSettingsBlocked = false
+    @State private var navigateToSettings = false
+
     var body: some View {
         ZStack {
             // Red background when assist is active
@@ -20,9 +26,22 @@ struct WatchTrackingView: View {
             VStack(spacing: 4) {
                 // Header with settings gear - top left to avoid clock
                 HStack {
-                    NavigationLink {
+                    // Hidden NavigationLink for programmatic navigation
+                    NavigationLink(isActive: $navigateToSettings) {
                         WatchSettingsView()
                             .environmentObject(viewModel)
+                    } label: {
+                        EmptyView()
+                    }
+                    .hidden()
+                    .frame(width: 0, height: 0)
+
+                    Button {
+                        if viewModel.isTracking {
+                            showSettingsBlocked = true
+                        } else {
+                            navigateToSettings = true
+                        }
                     } label: {
                         Image(systemName: "gearshape")
                             .font(.body)
@@ -69,13 +88,28 @@ struct WatchTrackingView: View {
                     .font(.caption2)
                     .foregroundColor(.white)
 
-                // Idle mode: show waiting message instead of speed/distance
+                // Idle mode: show waiting message and Start button
                 if viewModel.isIdleMode {
                     Text("Waiting for\nadmin start")
                         .font(.caption)
                         .foregroundColor(.blue)
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 8)
+
+                    Button { viewModel.startTracking() } label: {
+                        HStack {
+                            Image(systemName: "play.fill")
+                            Text("Start").bold()
+                        }
+                        .font(.body)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.green)
+                        .foregroundColor(.black)
+                        .cornerRadius(24)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
                 }
                 // Show countdown when active, otherwise show speed or stopwatch
                 // Race timer feature is disabled for this release
@@ -186,7 +220,11 @@ struct WatchTrackingView: View {
                 // Assist / Cancel Assist button (only show if assist is enabled and not in idle mode)
                 if viewModel.assistEnabled && !viewModel.isIdleMode {
                     Button {
-                        viewModel.toggleAssist()
+                        if viewModel.assistRequested {
+                            viewModel.toggleAssist() // Cancel immediately
+                        } else {
+                            showAssistConfirmation = true
+                        }
                     } label: {
                         Text(viewModel.assistRequested ? "CANCEL ASSIST" : "ASSIST")
                             .font(.caption)
@@ -202,10 +240,86 @@ struct WatchTrackingView: View {
                 }
             }
             .padding(.bottom, 4)
+
+            // "Stop for settings" brief message
+            if showSettingsBlocked {
+                VStack {
+                    Spacer()
+                    Text("Stop tracking\nto change settings")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(12)
+                        .background(Color.black.opacity(0.85))
+                        .cornerRadius(12)
+                    Spacer()
+                }
+            }
+
+            // Slide-to-stop confirmation overlay
+            if showStopConfirmation {
+                SlideToConfirmOverlay(
+                    title: "Slide to Stop",
+                    fillColor: .red,
+                    thumbLabel: "■",
+                    onConfirm: {
+                        showStopConfirmation = false
+                        viewModel.stopTracking()
+                    },
+                    onDismiss: {
+                        showStopConfirmation = false
+                    }
+                )
+            }
+
+            // Slide-to-assist confirmation overlay
+            if showAssistConfirmation {
+                SlideToConfirmOverlay(
+                    title: "Slide for Assist",
+                    fillColor: Color(red: 1, green: 0.53, blue: 0),
+                    thumbLabel: "⚠",
+                    onConfirm: {
+                        showAssistConfirmation = false
+                        viewModel.toggleAssist()
+                    },
+                    onDismiss: {
+                        showAssistConfirmation = false
+                    }
+                )
+            }
         }
         .navigationBarBackButtonHidden(true)
         .onTapGesture {
-            viewModel.stopTracking()
+            if viewModel.isTracking {
+                showStopConfirmation = true
+            }
+        }
+        // Auto-dismiss overlays
+        .task(id: showStopConfirmation) {
+            if showStopConfirmation {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                showStopConfirmation = false
+            }
+        }
+        .task(id: showAssistConfirmation) {
+            if showAssistConfirmation {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                showAssistConfirmation = false
+            }
+        }
+        .task(id: showSettingsBlocked) {
+            if showSettingsBlocked {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                showSettingsBlocked = false
+            }
+        }
+        // Dismiss overlays if tracking stops externally
+        .onChange(of: viewModel.isTracking) { isTracking in
+            if !isTracking {
+                showStopConfirmation = false
+                showAssistConfirmation = false
+            }
         }
         .onChange(of: viewModel.currentHeartRate) { newValue in
             // Throttle heart rate updates to at most once per second
@@ -320,6 +434,92 @@ struct WatchTrackingView: View {
             return .orange  // ACK between 30-60s ago
         } else {
             return .red  // ACK more than 60s ago
+        }
+    }
+}
+
+// MARK: - Slide to Confirm Overlay
+
+/// Reusable slide-to-confirm overlay matching WearOS design
+private struct SlideToConfirmOverlay: View {
+    let title: String
+    let fillColor: Color
+    let thumbLabel: String
+    let onConfirm: () -> Void
+    let onDismiss: () -> Void
+
+    private let trackWidth: CGFloat = 140
+    private let thumbSize: CGFloat = 40
+    private let threshold: CGFloat = 0.85
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDragging = false
+    @State private var hasReachedThreshold = false
+
+    private var maxDrag: CGFloat { trackWidth - thumbSize }
+    private var progress: CGFloat { maxDrag > 0 ? min(max(dragOffset / maxDrag, 0), 1) : 0 }
+
+    var body: some View {
+        // Full-screen dark overlay - tap to dismiss
+        ZStack {
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+
+            VStack(spacing: 12) {
+                Text(title)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(fillColor)
+
+                // Slider track
+                ZStack(alignment: .leading) {
+                    // Track background
+                    RoundedRectangle(cornerRadius: thumbSize / 2)
+                        .fill(Color(white: 0.2))
+                        .frame(width: trackWidth, height: thumbSize)
+
+                    // Color fill following thumb
+                    RoundedRectangle(cornerRadius: thumbSize / 2)
+                        .fill(fillColor.opacity(progress >= threshold ? 0.8 : 0.4))
+                        .frame(width: dragOffset + thumbSize, height: thumbSize)
+
+                    // Draggable thumb
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .overlay(
+                            Text(thumbLabel)
+                                .font(.system(size: 16))
+                                .foregroundColor(fillColor)
+                        )
+                        .offset(x: dragOffset)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    isDragging = true
+                                    dragOffset = min(max(value.translation.width, 0), maxDrag)
+                                    let currentProgress = dragOffset / maxDrag
+                                    if currentProgress >= threshold && !hasReachedThreshold {
+                                        hasReachedThreshold = true
+                                        WKInterfaceDevice.current().play(.click)
+                                    } else if currentProgress < threshold {
+                                        hasReachedThreshold = false
+                                    }
+                                }
+                                .onEnded { _ in
+                                    isDragging = false
+                                    if dragOffset / maxDrag >= threshold {
+                                        onConfirm()
+                                    }
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                        dragOffset = 0
+                                    }
+                                    hasReachedThreshold = false
+                                }
+                        )
+                }
+                .frame(width: trackWidth, height: thumbSize)
+            }
         }
     }
 }

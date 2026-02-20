@@ -206,8 +206,9 @@ The assist button can be disabled per-event by the event manager:
 - Pulsing animation: opacity oscillates between 0.7 and 1.0
 
 ### Behavior
-- Requires **long press** (0.5 seconds minimum) to toggle
-- Single tap does nothing (safety feature)
+- **Phone apps**: Requires **long press** (0.5 seconds minimum) to toggle
+- **Watch apps**: Tap shows slide-to-confirm overlay (see Watch UI section); cancel is immediate tap
+- Single tap does nothing on phone (safety feature)
 - Haptic feedback on activation:
   - Heavy impact on toggle
   - Warning notification pattern when activating
@@ -303,7 +304,20 @@ Simplified interface for Apple Watch / Wear OS.
 - **Distance display** (below speed)
 - Status pills row: battery + connection indicators
 - Assist button (compact)
-- Stop button
+- Tap anywhere on tracking screen to stop (shows slide-to-confirm)
+- Settings gear icon (top right on WearOS) — blocked during tracking with "Stop for settings" message
+
+### Slide-to-Confirm Overlays (Watch)
+Reusable full-screen overlay with a draggable slider thumb. Used for both stop and assist actions to prevent accidental activation during exercise.
+
+- **Slide to Stop**: Red fill, square stop icon in thumb. Shown when tapping the tracking screen while active.
+- **Slide for Assist**: Orange fill (`#FF8800`), ⚠ icon in thumb. Shown when tapping ASSIST button.
+- **Cancel Assist**: Single tap (no slider) — cancelling is safe to do immediately.
+- Slider track: 140dp wide, 40dp tall, dark gray (`#333333`) background
+- Threshold: 85% drag to confirm
+- Haptic feedback at threshold
+- Auto-dismiss after 4 seconds if no action
+- Tap outside the slider to dismiss
 
 ### Race Countdown Timer (watchOS/WearOS)
 - 5-minute countdown with audio announcements
@@ -314,6 +328,7 @@ Simplified interface for Apple Watch / Wear OS.
 - Your ID field
 - Server field
 - Role picker
+- Settings access blocked during tracking (must stop first)
 
 ---
 
@@ -384,10 +399,13 @@ The sidebar shows all tracked devices with:
 
 ## Confirmation Dialogs
 
-### Stop Tracking
+### Stop Tracking (Phone)
 - Title: "Stop Tracking?"
 - Message: "Are you sure you want to stop tracking? Your position will no longer be reported."
 - Actions: "Stop" (destructive), "Cancel"
+
+### Stop Tracking (Watch)
+- Slide-to-confirm overlay (see Watch UI section above)
 
 ---
 

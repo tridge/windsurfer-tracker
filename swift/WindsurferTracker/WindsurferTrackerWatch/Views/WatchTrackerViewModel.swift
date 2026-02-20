@@ -96,6 +96,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     // Audio playback
     private var audioPlayer: AVAudioPlayer?
+    private let tonePlayer = AssistTonePlayer()
 
     // Tap detection (accelerometer)
     private let motionManager = CMMotionManager()
@@ -121,6 +122,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     private let preferences = PreferencesManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var beepTimer: Timer?
+    private var assistToneTimer: Timer?
 
     // MARK: - Initialization
 
@@ -225,6 +227,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 // (TrackerService already handled the stop/idle transition)
                 self.stopBeepTimer()
                 self.stopTapDetection()
+                self.stopAssistToneTimer()
+                self.tonePlayer.playDouble(ascending: false)
                 Task {
                     await self.stopWorkoutSession()
                     HeartRateMonitor.shared.stopMonitoring()
@@ -237,6 +241,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         TrackerService.shared.remoteCancelAssistPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.stopAssistToneTimer()
+                self?.tonePlayer.play(ascending: false)
                 self?.assistRequested = false
                 self?.errorMessage = "Assist cancelled"
             }
@@ -247,6 +253,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                self.tonePlayer.playDouble(ascending: true)
                 self.startBeepTimer()
                 self.startTapDetection()
             }
@@ -324,9 +331,10 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 print("[START] Inside Task, calling TrackerService.start()...")
                 try await TrackerService.shared.start()
                 print("[START] TrackerService started successfully!")
-                // Clear error and haptic for success
+                // Clear error and haptic/tone for success
                 errorMessage = nil
                 WKInterfaceDevice.current().play(.success)
+                self.tonePlayer.playDouble(ascending: true)
 
                 // Start tracker beep timer (first beep after 60 seconds)
                 startBeepTimer()
@@ -527,6 +535,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     public func stopTracking() {
         // Stop tracker beep timer
         stopBeepTimer()
+        stopAssistToneTimer()
 
         // Stop tap detection and reset countdown
         stopTapDetection()
@@ -557,11 +566,18 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             lastDistanceUpdate = nil
             workoutStartTime = nil
             WKInterfaceDevice.current().play(.stop)
+            self.tonePlayer.playDouble(ascending: false)
         }
     }
 
     public func toggleAssist() {
         let activating = !assistRequested
+        tonePlayer.play(ascending: activating)
+        if activating {
+            startAssistToneTimer()
+        } else {
+            stopAssistToneTimer()
+        }
         // If activating assist and not currently tracking, start tracking first
         if activating && !isTracking {
             startTracking()
@@ -629,6 +645,23 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     private func stopBeepTimer() {
         beepTimer?.invalidate()
         beepTimer = nil
+    }
+
+    // MARK: - Assist Tone Timer
+
+    private func startAssistToneTimer() {
+        assistToneTimer?.invalidate()
+        // Play ascending triple tone every 5 seconds while assist is active
+        assistToneTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.tonePlayer.play(ascending: true)
+            }
+        }
+    }
+
+    private func stopAssistToneTimer() {
+        assistToneTimer?.invalidate()
+        assistToneTimer = nil
     }
 
     private func playTrackerBeep() {

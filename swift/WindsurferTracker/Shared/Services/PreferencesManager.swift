@@ -127,12 +127,8 @@ public final class PreferencesManager: ObservableObject {
         } else {
             self.trackerBeep = defaults.bool(forKey: Keys.trackerBeep)
         }
-        // waterLock defaults to true - need to check if key exists
-        if defaults.object(forKey: Keys.waterLock) == nil {
-            self.waterLock = true
-        } else {
-            self.waterLock = defaults.bool(forKey: Keys.waterLock)
-        }
+        // waterLock defaults to false
+        self.waterLock = defaults.bool(forKey: Keys.waterLock)
         self.trackingActive = defaults.bool(forKey: Keys.trackingActive)
         self.batteryOptAsked = defaults.bool(forKey: Keys.batteryOptAsked)
         self.raceTimerEnabled = defaults.bool(forKey: Keys.raceTimerEnabled)  // Default false
@@ -169,7 +165,7 @@ public final class PreferencesManager: ObservableObject {
         eventId = 2
         heartRateEnabled = false
         trackerBeep = true
-        waterLock = true
+        waterLock = false
         trackingActive = false
         batteryOptAsked = false
         raceTimerEnabled = false
