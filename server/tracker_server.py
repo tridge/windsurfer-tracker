@@ -6,8 +6,10 @@ Provides HTTP endpoints for admin functions, course management, and event manage
 Supports multiple concurrent events, each with its own data directory and passwords.
 """
 
+import selectors
 import socket
 import json
+import struct
 import time
 import argparse
 import os
@@ -432,6 +434,436 @@ def generate_log_summaries(log_dir: Path) -> int:
             log(f"[SUMMARY] Error writing {summary_file}: {e}")
 
     return updated_count
+
+
+# --- GT06 GPS Tracker Protocol ---
+
+# Battery level mapping: GT06 reports 0-6, server expects 0-100
+_GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
+
+
+def gt06_crc_itu(data):
+    """CRC-ITU (CRC-16/X.25): polynomial 0x8408 reflected, init 0xFFFF."""
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0x8408
+            else:
+                crc >>= 1
+    return crc ^ 0xFFFF
+
+
+def gt06_make_response(protocol, serial):
+    """Build a GT06 response frame: 78 78 05 [protocol] [serial] [crc] 0d 0a."""
+    payload = struct.pack(">BBH", 0x05, protocol, serial)
+    crc = gt06_crc_itu(payload)
+    return b"\x78\x78" + payload + struct.pack(">H", crc) + b"\x0d\x0a"
+
+
+def gt06_make_command(cmd_str, cmd_serial):
+    """Build a GT06 server command frame (protocol 0x80).
+
+    Format: 78 78 [len] 80 [content_len] [server_flag 4B] [cmd ASCII] [serial] [crc] 0d 0a
+    """
+    cmd_bytes = cmd_str.encode("ascii")
+    content_len = 4 + len(cmd_bytes)
+    # length = protocol(1) + content_len_field(1) + server_flag(4) + cmd + serial(2) + crc(2)
+    length = 1 + 1 + content_len + 2 + 2
+    payload = struct.pack(">BB", length, 0x80)
+    payload += struct.pack(">B", content_len)
+    payload += b"\x00\x00\x00\x00"  # server flag
+    payload += cmd_bytes
+    payload += struct.pack(">H", cmd_serial)
+    crc = gt06_crc_itu(payload)
+    return b"\x78\x78" + payload + struct.pack(">H", crc) + b"\x0d\x0a"
+
+
+def gt06_parse_login(data):
+    """Parse login packet (protocol 0x01). Data is IMEI in BCD encoding."""
+    imei = data.hex()
+    imei = imei.lstrip("0")
+    if len(imei) == 16:
+        imei = imei[1:]  # Remove leading nibble padding for 15-digit IMEI
+    return imei
+
+
+def gt06_parse_location(data):
+    """Parse location packet (protocol 0x12 or 0x22).
+
+    Returns dict with lat, lon, speed_kmh, heading, satellites, gps_valid, ts.
+    """
+    if len(data) < 18:
+        return None
+
+    yy, mo, dd, hh, mi, ss = data[0:6]
+    gps_info = data[6]
+    sat_count = gps_info & 0x0F
+
+    lat_raw = struct.unpack(">I", data[7:11])[0]
+    lon_raw = struct.unpack(">I", data[11:15])[0]
+
+    speed_kmh = data[15]
+
+    course_status = struct.unpack(">H", data[16:18])[0]
+    heading = course_status & 0x03FF
+    is_west = bool(course_status & (1 << 11))
+    is_south = not bool(course_status & (1 << 10))
+    gps_valid = bool(course_status & (1 << 12))
+
+    lat = lat_raw / 1_800_000.0
+    lon = lon_raw / 1_800_000.0
+
+    if is_south:
+        lat = -lat
+    if is_west:
+        lon = -lon
+
+    # Convert GT06 datetime (UTC) to unix timestamp
+    try:
+        from calendar import timegm
+        ts = timegm((2000 + yy, mo, dd, hh, mi, ss))
+    except Exception:
+        ts = int(time.time())
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "speed_kmh": speed_kmh,
+        "heading": heading,
+        "satellites": sat_count,
+        "gps_valid": gps_valid,
+        "ts": ts,
+    }
+
+
+def gt06_parse_heartbeat(data):
+    """Parse heartbeat packet (protocol 0x13).
+
+    Returns dict with battery (0-100), signal (0-4), charging (bool).
+    """
+    result = {}
+    if len(data) >= 1:
+        info = data[0]
+        result["charging"] = bool(info & 0x08)
+    if len(data) >= 2:
+        vlevel = data[1]
+        result["battery"] = _GT06_BATTERY_MAP.get(vlevel, 0)
+    if len(data) >= 3:
+        result["signal"] = min(data[2], 4)
+    return result
+
+
+def load_gt06_config(config_path: Path) -> dict:
+    """Load GT06 device config from JSON file.
+
+    Returns {"default_eid": int, "devices": {imei: {...}}}.
+    If file doesn't exist, returns defaults.
+    """
+    default = {"default_eid": 1, "devices": {}}
+    if not config_path.exists():
+        return default
+    try:
+        with open(config_path) as f:
+            cfg = json.load(f)
+        result = {
+            "default_eid": cfg.get("default_eid", 1),
+            "devices": cfg.get("devices", {}),
+        }
+        log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
+        return result
+    except Exception as e:
+        log(f"[GT06] Warning: Could not load {config_path}: {e}")
+        return default
+
+
+class GT06Connection:
+    """State for one GT06 TCP connection."""
+
+    def __init__(self, sock, addr):
+        self.sock = sock
+        self.addr = addr
+        self.buf = b""
+        self.imei = None
+        self.sailor_id = None
+        self.eid = None
+        self.battery = -1
+        self.signal = -1
+        self.charging = None
+        self.cmd_serial = 0
+
+    def next_cmd_serial(self):
+        self.cmd_serial += 1
+        return self.cmd_serial
+
+
+class GT06Listener:
+    """Non-blocking TCP listener for GT06 GPS tracker devices.
+
+    Runs in a single daemon thread using selectors. Calls process_position()
+    on the appropriate EventTracker/PositionTracker when location data arrives.
+    """
+
+    def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None):
+        self.port = port
+        self.interval = interval
+        self.id_prefix = id_prefix
+        self.get_tracker = get_tracker_func
+        self.gt06_config = gt06_config or {"default_eid": 1, "devices": {}}
+        self.connections = {}  # fd -> GT06Connection
+        self.sel = selectors.DefaultSelector()
+
+    def _imei_to_sailor_id(self, imei):
+        """Map IMEI to sailor_id: prefix + last 6 digits."""
+        return self.id_prefix + imei[-6:]
+
+    def _accept(self, server_sock):
+        """Accept a new GT06 connection."""
+        conn, addr = server_sock.accept()
+        conn.setblocking(False)
+        fd = conn.fileno()
+        gt_conn = GT06Connection(conn, addr)
+        self.connections[fd] = gt_conn
+        self.sel.register(conn, selectors.EVENT_READ, data=fd)
+        log(f"[GT06] Connection from {addr[0]}:{addr[1]}")
+
+    def _disconnect(self, fd):
+        """Clean up a disconnected GT06 connection."""
+        gt_conn = self.connections.pop(fd, None)
+        if gt_conn is None:
+            return
+        try:
+            self.sel.unregister(gt_conn.sock)
+        except Exception:
+            pass
+        try:
+            gt_conn.sock.close()
+        except Exception:
+            pass
+        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+        log(f"[GT06] Disconnected: {label} ({gt_conn.addr[0]}:{gt_conn.addr[1]})")
+
+    def _send(self, gt_conn, data):
+        """Best-effort send to a GT06 connection."""
+        try:
+            gt_conn.sock.sendall(data)
+        except Exception as e:
+            log(f"[GT06] Send error to {gt_conn.addr}: {e}")
+            self._disconnect(gt_conn.sock.fileno())
+
+    def _process_frame(self, fd, frame):
+        """Process a complete GT06 frame."""
+        gt_conn = self.connections.get(fd)
+        if gt_conn is None:
+            return
+
+        protocol = frame[3]
+        length = frame[2]
+        crc_offset = 3 + length - 2
+        serial_offset = 3 + length - 4
+        crc_received = struct.unpack(">H", frame[crc_offset:crc_offset + 2])[0]
+        serial = struct.unpack(">H", frame[serial_offset:serial_offset + 2])[0]
+        crc_calc = gt06_crc_itu(frame[2:crc_offset])
+
+        if crc_received != crc_calc:
+            log(f"[GT06] CRC mismatch from {gt_conn.addr}: "
+                f"received 0x{crc_received:04X}, calculated 0x{crc_calc:04X}")
+            return
+
+        data = frame[4:serial_offset]
+
+        if protocol == 0x01:
+            # Login
+            imei = gt06_parse_login(data)
+            gt_conn.imei = imei
+            gt_conn.sailor_id = self._imei_to_sailor_id(imei)
+
+            # Look up IMEI in gt06_config for event routing
+            dev_cfg = self.gt06_config["devices"].get(imei, {})
+            gt_conn.eid = dev_cfg.get("eid", self.gt06_config["default_eid"])
+            log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
+            self._send(gt_conn, gt06_make_response(protocol, serial))
+
+            # Apply device name from gt06.json if configured
+            dev_name = dev_cfg.get("name")
+            if dev_name:
+                tracker = self.get_tracker(gt_conn.eid)
+                if tracker and hasattr(tracker, 'user_overrides') and hasattr(tracker, 'users_file'):
+                    overrides = tracker.user_overrides
+                    if gt_conn.sailor_id not in overrides or overrides[gt_conn.sailor_id].get("name") != dev_name:
+                        if gt_conn.sailor_id not in overrides:
+                            overrides[gt_conn.sailor_id] = {}
+                        overrides[gt_conn.sailor_id]["name"] = dev_name
+                        save_user_overrides(tracker.users_file, overrides)
+                        log(f"[GT06] Set display name for {gt_conn.sailor_id}: {dev_name}")
+
+            # Send TIMER command to set location reporting interval
+            cmd = f"TIMER,{self.interval},{self.interval}#"
+            self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
+            log(f"[GT06] Sent: {cmd}")
+
+            # Send HBT command to set heartbeat interval to 1 minute (protocol minimum)
+            hbt_cmd = "HBT,1,1#"
+            self._send(gt_conn, gt06_make_command(hbt_cmd, gt_conn.next_cmd_serial()))
+            log(f"[GT06] Sent: {hbt_cmd}")
+
+        elif protocol in (0x12, 0x22):
+            # Location
+            loc = gt06_parse_location(data)
+            if not loc:
+                log(f"[GT06] Location packet too short from {gt_conn.sailor_id}")
+                return
+            if not gt_conn.sailor_id:
+                log(f"[GT06] Location before login from {gt_conn.addr}")
+                return
+
+            if not loc["gps_valid"]:
+                return
+
+            # Convert speed from km/h to knots
+            speed_knots = loc["speed_kmh"] / 1.852
+
+            tracker = self.get_tracker(gt_conn.eid)
+            if tracker is None:
+                return
+
+            tracker.process_position(
+                sailor_id=gt_conn.sailor_id,
+                lat=loc["lat"],
+                lon=loc["lon"],
+                speed=round(speed_knots, 1),
+                heading=loc["heading"],
+                ts=loc["ts"],
+                assist=False,
+                battery=gt_conn.battery,
+                signal=gt_conn.signal,
+                role="sailor",
+                version="gt06",
+                flags={},
+                src_ip=gt_conn.addr[0],
+                source="GT06",
+                nsats=loc["satellites"],
+                charging=gt_conn.charging,
+            )
+
+        elif protocol == 0x13:
+            # Heartbeat
+            hb = gt06_parse_heartbeat(data)
+            if "battery" in hb:
+                gt_conn.battery = hb["battery"]
+            if "signal" in hb:
+                gt_conn.signal = hb["signal"]
+            if "charging" in hb:
+                gt_conn.charging = hb["charging"]
+
+            bat_str = f"{gt_conn.battery}%" if gt_conn.battery >= 0 else "?"
+            if gt_conn.charging:
+                bat_str += "+"
+            sig_str = f"{gt_conn.signal}/4" if gt_conn.signal >= 0 else "?"
+            label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+            log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}")
+            self._send(gt_conn, gt06_make_response(protocol, serial))
+
+        elif protocol == 0x23:
+            # Alarm — ack it, treat same as location
+            loc = gt06_parse_location(data)
+            self._send(gt_conn, gt06_make_response(protocol, serial))
+            if loc and gt_conn.sailor_id and loc["gps_valid"]:
+                speed_knots = loc["speed_kmh"] / 1.852
+                tracker = self.get_tracker(gt_conn.eid)
+                if tracker:
+                    tracker.process_position(
+                        sailor_id=gt_conn.sailor_id,
+                        lat=loc["lat"],
+                        lon=loc["lon"],
+                        speed=round(speed_knots, 1),
+                        heading=loc["heading"],
+                        ts=loc["ts"],
+                        assist=False,
+                        battery=gt_conn.battery,
+                        signal=gt_conn.signal,
+                        role="sailor",
+                        version="gt06",
+                        flags={},
+                        src_ip=gt_conn.addr[0],
+                        source="GT06",
+                        nsats=loc["satellites"],
+                        charging=gt_conn.charging,
+                    )
+
+        elif protocol == 0x15:
+            # Server command response — just log
+            label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+            log(f"[GT06] Command response from {label}: {data.hex()}")
+
+    def _on_readable(self, fd):
+        """Handle readable event on a GT06 connection."""
+        gt_conn = self.connections.get(fd)
+        if gt_conn is None:
+            return
+
+        try:
+            chunk = gt_conn.sock.recv(1024)
+        except Exception:
+            self._disconnect(fd)
+            return
+
+        if not chunk:
+            self._disconnect(fd)
+            return
+
+        gt_conn.buf += chunk
+
+        # Process all complete frames in the buffer
+        while True:
+            idx = gt_conn.buf.find(b"\x78\x78")
+            if idx < 0:
+                gt_conn.buf = b""
+                break
+            if idx > 0:
+                gt_conn.buf = gt_conn.buf[idx:]
+
+            if len(gt_conn.buf) < 8:
+                break
+
+            length = gt_conn.buf[2]
+            frame_size = 2 + 1 + length + 2
+            if len(gt_conn.buf) < frame_size:
+                break
+
+            frame = gt_conn.buf[:frame_size]
+            gt_conn.buf = gt_conn.buf[frame_size:]
+
+            try:
+                self._process_frame(fd, frame)
+            except Exception as e:
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                log(f"[GT06] Frame error from {label}: {e}")
+
+    def run(self):
+        """Main loop — runs in a daemon thread."""
+        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_sock.setblocking(False)
+        server_sock.bind(("0.0.0.0", self.port))
+        server_sock.listen(16)
+        self.sel.register(server_sock, selectors.EVENT_READ, data="server")
+        log(f"[GT06] Listening on TCP port {self.port} (interval={self.interval}s, prefix={self.id_prefix})")
+
+        while True:
+            try:
+                events = self.sel.select(timeout=60)
+            except Exception:
+                continue
+            for key, mask in events:
+                if key.data == "server":
+                    try:
+                        self._accept(server_sock)
+                    except Exception as e:
+                        log(f"[GT06] Accept error: {e}")
+                else:
+                    self._on_readable(key.data)
 
 
 class EventManager:
@@ -3354,7 +3786,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                http_port: int | None = None, admin_password: str = "admin", course_file: Path | None = None,
                static_dir: Path | None = None,
                users_file: Path | None = None, tracker_password: str | None = None,
-               manager_password: str | None = None, events_file: Path | None = None):
+               manager_password: str | None = None, events_file: Path | None = None,
+               gt06_port: int | None = None, gt06_interval: int = 10, gt06_id_prefix: str = "G",
+               gt06_config_path: Path | None = None):
     """Main server loop.
 
     If manager_password is provided, runs in multi-event mode where:
@@ -3460,6 +3894,22 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
     if http_port:
         http_thread = threading.Thread(target=run_http_server, args=(http_port,), daemon=True)
         http_thread.start()
+
+    # Start GT06 TCP listener if enabled
+    if gt06_port:
+        gt06_config = load_gt06_config(gt06_config_path) if gt06_config_path else {"default_eid": 1, "devices": {}}
+
+        if _event_manager:
+            # Multi-event mode: route by event ID from gt06_config
+            def _gt06_get_tracker(eid):
+                return get_event_tracker(eid)
+        else:
+            # Legacy single-event mode: ignore eid
+            def _gt06_get_tracker(eid):
+                return position_tracker
+        gt06_listener = GT06Listener(gt06_port, gt06_interval, gt06_id_prefix, _gt06_get_tracker, gt06_config)
+        gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
+        gt06_thread.start()
 
     # Start background summary generator if track logging is enabled
     if log_dir and not _event_manager:
@@ -3802,6 +4252,10 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
         "http_port": None,
         "no_http": False,
         "no_track_logs": False,
+        "gt06_port": None,
+        "gt06_interval": 10,
+        "gt06_id_prefix": "G",
+        "gt06_config": "gt06.json",
     }
 
     if settings_file.exists():
@@ -3919,6 +4373,30 @@ def main():
         default=None,
         help=f"Events configuration file (default: {settings['events_file']})"
     )
+    parser.add_argument(
+        "--gt06-port",
+        type=int,
+        default=None,
+        help="TCP port for GT06 GPS tracker protocol (disabled if not set)"
+    )
+    parser.add_argument(
+        "--gt06-interval",
+        type=int,
+        default=None,
+        help="GT06 location reporting interval in seconds (default: 10)"
+    )
+    parser.add_argument(
+        "--gt06-id-prefix",
+        type=str,
+        default=None,
+        help="Prefix for GT06 sailor IDs (default: G)"
+    )
+    parser.add_argument(
+        "--gt06-config",
+        type=Path,
+        default=None,
+        help="GT06 device config file for IMEI-to-event mapping (default: gt06.json)"
+    )
 
     args = parser.parse_args()
 
@@ -3966,13 +4444,22 @@ def main():
         if http_port and not admin_password:
             parser.error("admin_password is required when HTTP is enabled (use no_http: true to disable, or set manager_password for multi-event mode)")
 
+    # GT06 settings
+    gt06_port = args.gt06_port if args.gt06_port is not None else settings.get('gt06_port')
+    gt06_interval = args.gt06_interval if args.gt06_interval is not None else settings.get('gt06_interval', 10)
+    gt06_id_prefix = args.gt06_id_prefix if args.gt06_id_prefix is not None else settings.get('gt06_id_prefix', 'G')
+    gt06_config_path = args.gt06_config if args.gt06_config is not None else Path(settings.get('gt06_config', 'gt06.json'))
+
     run_server(port, args.log, positions_file, log_dir_final,
                http_port=http_port, admin_password=admin_password or "",
                course_file=course_file, static_dir=static_dir,
                users_file=users_file,
                tracker_password=tracker_password,
                manager_password=manager_password,
-               events_file=events_file)
+               events_file=events_file,
+               gt06_port=gt06_port, gt06_interval=gt06_interval,
+               gt06_id_prefix=gt06_id_prefix,
+               gt06_config_path=gt06_config_path)
 
 
 if __name__ == "__main__":
