@@ -222,13 +222,23 @@ struct WatchSettingsView: View {
                     Text("Your Name")
                         .font(.caption)
                         .foregroundColor(.gray)
-                    TextField("", text: $tempId)
-                        .textFieldStyle(.plain)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    NavigationLink {
+                        WatchTextInputView(title: "Your Name", text: $tempId)
+                    } label: {
+                        HStack {
+                            Text(tempId.isEmpty ? "Name" : tempId)
+                                .font(.caption)
+                                .foregroundColor(tempId.isEmpty ? .gray : .white)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
                         .padding(8)
                         .background(Color.gray.opacity(0.3))
                         .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Password (visible, not SecureField)
@@ -236,13 +246,23 @@ struct WatchSettingsView: View {
                     Text("Password")
                         .font(.caption)
                         .foregroundColor(.gray)
-                    TextField("", text: $tempPassword)
-                        .textFieldStyle(.plain)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    NavigationLink {
+                        WatchTextInputView(title: "Password", text: $tempPassword)
+                    } label: {
+                        HStack {
+                            Text(tempPassword.isEmpty ? "Password" : tempPassword)
+                                .font(.caption)
+                                .foregroundColor(tempPassword.isEmpty ? .gray : .white)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
                         .padding(8)
                         .background(Color.gray.opacity(0.3))
                         .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Event selection
@@ -436,12 +456,23 @@ struct WatchSettingsView: View {
                     Text("Server")
                         .font(.caption)
                         .foregroundColor(.gray)
-                    TextField("wstracker.org", text: $tempHost)
-                        .textFieldStyle(.plain)
-                        .textInputAutocapitalization(.never)
+                    NavigationLink {
+                        WatchTextInputView(title: "Server", text: $tempHost)
+                    } label: {
+                        HStack {
+                            Text(tempHost.isEmpty ? "wstracker.org" : tempHost)
+                                .font(.caption)
+                                .foregroundColor(tempHost.isEmpty ? .gray : .white)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
                         .padding(8)
                         .background(Color.gray.opacity(0.3))
                         .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Validation error
@@ -559,6 +590,44 @@ struct WatchSettingsView: View {
             return "\(version) (\(build)) \(hash)"
         } else {
             return "\(version) (\(build))"
+        }
+    }
+}
+
+/// Dedicated text input view - uses native TextField on Series 7+ (has system keyboard),
+/// falls back to custom tap keyboard on Series 6 and earlier (scribble-only is unusable).
+struct WatchTextInputView: View {
+    let title: String
+    @Binding var text: String
+    @Environment(\.dismiss) private var dismiss
+
+    /// Series 7+ has a system QWERTY keyboard (watchOS 9+, aspect ratio < 0.82).
+    /// Series 6 and earlier only offer scribble input which is unusable for names/passwords.
+    static var hasSystemKeyboard: Bool {
+        if #available(watchOS 9, *) {
+            let bounds = WKInterfaceDevice.current().screenBounds
+            let scale = WKInterfaceDevice.current().screenScale
+            let pw = bounds.width * scale
+            let ph = bounds.height * scale
+            return ph > 0 && (pw / ph) < 0.82
+        }
+        return false
+    }
+
+    var body: some View {
+        if Self.hasSystemKeyboard {
+            // Series 7+: use native TextField (shows QWERTY keyboard)
+            VStack(spacing: 12) {
+                TextField(title, text: $text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.done)
+                    .onSubmit { dismiss() }
+            }
+            .navigationTitle(title)
+        } else {
+            // Series 6 and earlier: use custom tap keyboard
+            WatchCustomKeyboard(title: title, text: $text, onDone: { dismiss() })
         }
     }
 }
