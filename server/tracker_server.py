@@ -538,6 +538,38 @@ def gt06_parse_location(data):
     }
 
 
+def gt06_parse_alarm_status(data):
+    """Parse alarm packet extended fields after the 18-byte location block.
+
+    Alarm packets (protocol 0x16/0x23) contain GPS data (18 bytes) followed by:
+    LBS length (1) + LBS data + terminal_info (1) + voltage (1) + signal (1) + alarm/lang (2).
+
+    Returns dict with is_sos, alarm_type, battery, signal, charging, or None on parse error.
+    """
+    if len(data) <= 18:
+        return None
+    extra = data[18:]
+    if len(extra) < 1:
+        return None
+    lbs_len = extra[0]
+    after_lbs = extra[1 + lbs_len:] if len(extra) > 1 + lbs_len else b""
+    if len(after_lbs) < 1:
+        return None
+    ti = after_lbs[0]
+    alarm_bits = (ti >> 3) & 0x07
+    _ALARM_NAMES = {0: "Normal", 1: "Shock", 2: "Power Cut", 3: "Low Battery", 4: "SOS"}
+    result = {
+        "is_sos": alarm_bits == 4,
+        "alarm_type": _ALARM_NAMES.get(alarm_bits, f"Unknown({alarm_bits})"),
+        "charging": bool(ti & 0x04),
+    }
+    if len(after_lbs) >= 2:
+        result["battery"] = _GT06_BATTERY_MAP.get(after_lbs[1], 0)
+    if len(after_lbs) >= 3:
+        result["signal"] = min(after_lbs[2], 4)
+    return result
+
+
 def gt06_parse_heartbeat(data):
     """Parse heartbeat packet (protocol 0x13).
 
@@ -592,6 +624,7 @@ class GT06Connection:
         self.signal = -1
         self.charging = None
         self.cmd_serial = 0
+        self.assist_active = False
 
     def next_cmd_serial(self):
         self.cmd_serial += 1
@@ -605,7 +638,7 @@ class GT06Listener:
     on the appropriate EventTracker/PositionTracker when location data arrives.
     """
 
-    def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None):
+    def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None, log_file=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
@@ -613,6 +646,20 @@ class GT06Listener:
         self.gt06_config = gt06_config or {"default_eid": 1, "devices": {}}
         self.connections = {}  # fd -> GT06Connection
         self.sel = selectors.DefaultSelector()
+        self.log_file = log_file
+        self._log_fd = None
+
+    def _log_packet(self, frame):
+        """Log a raw GT06 frame with timestamp+length header."""
+        if self._log_fd is None:
+            return
+        ts = time.time()
+        header = struct.pack("<dH", ts, len(frame))
+        try:
+            self._log_fd.write(header + frame)
+            self._log_fd.flush()
+        except Exception as e:
+            log(f"[GT06] Packet log write error: {e}")
 
     def _imei_to_sailor_id(self, imei):
         """Map IMEI to sailor_id: prefix + last 6 digits."""
@@ -735,7 +782,7 @@ class GT06Listener:
                 speed=round(speed_knots, 1),
                 heading=loc["heading"],
                 ts=loc["ts"],
-                assist=False,
+                assist=gt_conn.assist_active,
                 battery=gt_conn.battery,
                 signal=gt_conn.signal,
                 role="sailor",
@@ -765,10 +812,36 @@ class GT06Listener:
             log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}")
             self._send(gt_conn, gt06_make_response(protocol, serial))
 
-        elif protocol == 0x23:
-            # Alarm — ack it, treat same as location
+        elif protocol in (0x16, 0x23):
+            # Alarm — parse location + alarm status, detect SOS
             loc = gt06_parse_location(data)
             self._send(gt_conn, gt06_make_response(protocol, serial))
+
+            alarm = gt06_parse_alarm_status(data)
+            is_sos = alarm["is_sos"] if alarm else False
+            alarm_type = alarm["alarm_type"] if alarm else "Unknown"
+
+            # Update battery/signal from alarm packet
+            if alarm:
+                if "battery" in alarm:
+                    gt_conn.battery = alarm["battery"]
+                if "signal" in alarm:
+                    gt_conn.signal = alarm["signal"]
+                if "charging" in alarm:
+                    gt_conn.charging = alarm["charging"]
+
+            label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+            log(f"[GT06] Alarm from {label}: {alarm_type}")
+
+            if is_sos:
+                if gt_conn.assist_active:
+                    # Second SOS press — toggle off
+                    gt_conn.assist_active = False
+                    label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                    log(f"[GT06] SOS cancelled by second press from {label}")
+                else:
+                    gt_conn.assist_active = True
+
             if loc and gt_conn.sailor_id and loc["gps_valid"]:
                 speed_knots = loc["speed_kmh"] / 1.852
                 tracker = self.get_tracker(gt_conn.eid)
@@ -780,7 +853,7 @@ class GT06Listener:
                         speed=round(speed_knots, 1),
                         heading=loc["heading"],
                         ts=loc["ts"],
-                        assist=False,
+                        assist=gt_conn.assist_active,
                         battery=gt_conn.battery,
                         signal=gt_conn.signal,
                         role="sailor",
@@ -795,7 +868,29 @@ class GT06Listener:
         elif protocol == 0x15:
             # Server command response — just log
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-            log(f"[GT06] Command response from {label}: {data.hex()}")
+            text = ""
+            if len(data) >= 5:
+                text = " " + data[5:].decode("ascii", errors="replace")
+            log(f"[GT06] Command response from {label}:{text} ({data.hex()})")
+
+    def send_command_to(self, sailor_id, cmd_str):
+        """Send a command to a connected GT06 device by sailor_id."""
+        for gt_conn in self.connections.values():
+            if gt_conn.sailor_id == sailor_id:
+                self._send(gt_conn, gt06_make_command(cmd_str, gt_conn.next_cmd_serial()))
+                log(f"[GT06] Sent to {sailor_id}: {cmd_str}")
+                return True
+        return False
+
+    def cancel_assist(self, sailor_id):
+        """Cancel SOS assist for a GT06 device."""
+        for gt_conn in self.connections.values():
+            if gt_conn.sailor_id == sailor_id and gt_conn.assist_active:
+                gt_conn.assist_active = False
+                self._send(gt_conn, gt06_make_command("SENALM,OFF#", gt_conn.next_cmd_serial()))
+                log(f"[GT06] Cancelled assist for {sailor_id}, sent SENALM,OFF#")
+                return True
+        return False
 
     def _on_readable(self, fd):
         """Handle readable event on a GT06 connection."""
@@ -834,6 +929,7 @@ class GT06Listener:
 
             frame = gt_conn.buf[:frame_size]
             gt_conn.buf = gt_conn.buf[frame_size:]
+            self._log_packet(frame)
 
             try:
                 self._process_frame(fd, frame)
@@ -843,6 +939,13 @@ class GT06Listener:
 
     def run(self):
         """Main loop — runs in a daemon thread."""
+        if self.log_file:
+            try:
+                self._log_fd = open(self.log_file, "ab")
+                log(f"[GT06] Packet logging to {self.log_file}")
+            except Exception as e:
+                log(f"[GT06] Warning: Could not open packet log {self.log_file}: {e}")
+
         server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_sock.setblocking(False)
@@ -1747,6 +1850,7 @@ _tracker_password: str | None = None  # Password for UDP tracker packets (None =
 _course_file: Path | None = None
 _users_file: Path | None = None
 _user_overrides: dict[str, dict] = {}  # id -> {"name": "...", "role": "..."}
+_gt06_listener: "GT06Listener | None" = None
 
 # Pending commands: {event_id}:{user_id} -> (cmd, queued_time, expiry_seconds)
 # Only one pending command per client. New commands overwrite previous.
@@ -2365,6 +2469,31 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             self._send_json({"info": "", "source": "default"})
 
+        elif subpath.startswith('/admin/gt06-cmd/'):
+            # Send an arbitrary command to a GT06 device (for testing)
+            # URL: /api/event/{eid}/admin/gt06-cmd/{user_id}?cmd=FIND%23
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            from urllib.parse import unquote, parse_qs
+            user_id = unquote(subpath[len('/admin/gt06-cmd/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+            params = parse_qs(urlparse(self.path).query)
+            cmd_str = params.get("cmd", [None])[0]
+            if not cmd_str:
+                self._send_json({"error": "cmd parameter required"}, 400)
+                return
+            if _gt06_listener:
+                sent = _gt06_listener.send_command_to(user_id, cmd_str)
+                if sent:
+                    self._send_json({"success": True, "user_id": user_id, "cmd": cmd_str})
+                else:
+                    self._send_json({"error": f"GT06 device {user_id} not connected"}, 404)
+            else:
+                self._send_json({"error": "GT06 listener not running"}, 404)
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -2744,6 +2873,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             queue_pending_command(f"{eid}:{user_id}", "cancel_assist")
             send_proactive_command(f"{eid}:{user_id}", "cancel_assist")
+            # For GT06 devices, clear assist state and try to silence buzzer
+            if _gt06_listener:
+                _gt06_listener.cancel_assist(user_id)
             log(f"[EVENT {eid}] Remote cancel assist queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -3788,7 +3920,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                users_file: Path | None = None, tracker_password: str | None = None,
                manager_password: str | None = None, events_file: Path | None = None,
                gt06_port: int | None = None, gt06_interval: int = 10, gt06_id_prefix: str = "G",
-               gt06_config_path: Path | None = None):
+               gt06_config_path: Path | None = None, gt06_log_path: Path | None = None):
     """Main server loop.
 
     If manager_password is provided, runs in multi-event mode where:
@@ -3907,7 +4039,10 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             # Legacy single-event mode: ignore eid
             def _gt06_get_tracker(eid):
                 return position_tracker
-        gt06_listener = GT06Listener(gt06_port, gt06_interval, gt06_id_prefix, _gt06_get_tracker, gt06_config)
+        global _gt06_listener
+        gt06_listener = GT06Listener(gt06_port, gt06_interval, gt06_id_prefix, _gt06_get_tracker, gt06_config,
+                                      log_file=gt06_log_path)
+        _gt06_listener = gt06_listener
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
         gt06_thread.start()
 
@@ -4256,6 +4391,7 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
         "gt06_interval": 10,
         "gt06_id_prefix": "G",
         "gt06_config": "gt06.json",
+        "gt06_log": "gt06.log",
     }
 
     if settings_file.exists():
@@ -4397,6 +4533,12 @@ def main():
         default=None,
         help="GT06 device config file for IMEI-to-event mapping (default: gt06.json)"
     )
+    parser.add_argument(
+        "--gt06-log",
+        type=Path,
+        default=None,
+        help="GT06 binary packet log file (default: gt06.log)"
+    )
 
     args = parser.parse_args()
 
@@ -4449,6 +4591,7 @@ def main():
     gt06_interval = args.gt06_interval if args.gt06_interval is not None else settings.get('gt06_interval', 10)
     gt06_id_prefix = args.gt06_id_prefix if args.gt06_id_prefix is not None else settings.get('gt06_id_prefix', 'G')
     gt06_config_path = args.gt06_config if args.gt06_config is not None else Path(settings.get('gt06_config', 'gt06.json'))
+    gt06_log_path = args.gt06_log if args.gt06_log is not None else Path(settings.get('gt06_log', 'gt06.log'))
 
     run_server(port, args.log, positions_file, log_dir_final,
                http_port=http_port, admin_password=admin_password or "",
@@ -4459,7 +4602,8 @@ def main():
                events_file=events_file,
                gt06_port=gt06_port, gt06_interval=gt06_interval,
                gt06_id_prefix=gt06_id_prefix,
-               gt06_config_path=gt06_config_path)
+               gt06_config_path=gt06_config_path,
+               gt06_log_path=gt06_log_path)
 
 
 if __name__ == "__main__":
