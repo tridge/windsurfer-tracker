@@ -6,6 +6,7 @@ Provides HTTP endpoints for admin functions, course management, and event manage
 Supports multiple concurrent events, each with its own data directory and passwords.
 """
 
+import math
 import selectors
 import socket
 import json
@@ -628,6 +629,8 @@ class GT06Connection:
         self.idle = False
         self.last_lat = None
         self.last_lon = None
+        self.last_ts = None
+        self.pos_history = []  # last 3 (lat, lon, ts) for speed smoothing
 
     def next_cmd_serial(self):
         self.cmd_serial += 1
@@ -783,12 +786,30 @@ class GT06Listener:
             if not loc["gps_valid"]:
                 return
 
+            # GT06 reports speed as a single byte (integer km/h) which drops
+            # to 0 at low speeds.  When reported speed is 0, estimate from
+            # position delta over 3 samples (~3s) to smooth out GPS jitter.
+            speed_knots = loc["speed_kmh"] / 1.852
+            if speed_knots == 0 and len(gt_conn.pos_history) >= 3:
+                old_lat, old_lon, old_ts = gt_conn.pos_history[0]
+                dt = loc["ts"] - old_ts
+                if 0 < dt < 5:
+                    dlat = loc["lat"] - old_lat
+                    dlon = loc["lon"] - old_lon
+                    lat_nm = dlat * 60.0
+                    lon_nm = dlon * 60.0 * math.cos(math.radians(loc["lat"]))
+                    dist_nm = math.sqrt(lat_nm * lat_nm + lon_nm * lon_nm)
+                    speed_knots = dist_nm * 3600.0 / dt
+
+            # Maintain rolling 3-sample history for speed smoothing
+            gt_conn.pos_history.append((loc["lat"], loc["lon"], loc["ts"]))
+            if len(gt_conn.pos_history) > 3:
+                gt_conn.pos_history.pop(0)
+
             # Save last known position for idle heartbeat updates
             gt_conn.last_lat = loc["lat"]
             gt_conn.last_lon = loc["lon"]
-
-            # Convert speed from km/h to knots
-            speed_knots = loc["speed_kmh"] / 1.852
+            gt_conn.last_ts = loc["ts"]
 
             tracker = self.get_tracker(gt_conn.eid)
             if tracker is None:
