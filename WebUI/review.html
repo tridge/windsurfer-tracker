@@ -1957,8 +1957,30 @@
                 clearRubberBand();
             };
 
+            // Double-tap detection for mobile (dblclick doesn't fire on touch)
+            let lastTapTime = 0;
+
+            const resetTimeRange = () => {
+                document.getElementById('start-slider').value = 0;
+                document.getElementById('end-slider').value = 100;
+                updateSliderRange();
+                updateTimeDisplay();
+                resetPlaybackPosition();
+                redrawAll();
+            };
+
             const startSelection = (e) => {
                 e.preventDefault();
+                // Detect double-tap on touch
+                if (e.touches) {
+                    const now = Date.now();
+                    if (now - lastTapTime < 300) {
+                        lastTapTime = 0;
+                        resetTimeRange();
+                        return;
+                    }
+                    lastTapTime = now;
+                }
                 const x = getX(e, false);
                 rubberBandState = {
                     canvas: canvas,
