@@ -625,6 +625,9 @@ class GT06Connection:
         self.charging = None
         self.cmd_serial = 0
         self.assist_active = False
+        self.idle = False
+        self.last_lat = None
+        self.last_lon = None
 
     def next_cmd_serial(self):
         self.cmd_serial += 1
@@ -648,6 +651,8 @@ class GT06Listener:
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
         self._log_fd = None
+        self.idle_sailors = set()    # sailor_ids currently idle
+        self.active_sailors = set()  # sailor_ids explicitly started by admin
 
     def _log_packet(self, frame):
         """Log a raw GT06 frame with timestamp+length header."""
@@ -695,6 +700,7 @@ class GT06Listener:
         """Best-effort send to a GT06 connection."""
         try:
             gt_conn.sock.sendall(data)
+            self._log_packet(data)
         except Exception as e:
             log(f"[GT06] Send error to {gt_conn.addr}: {e}")
             self._disconnect(gt_conn.sock.fileno())
@@ -745,10 +751,19 @@ class GT06Listener:
                         save_user_overrides(tracker.users_file, overrides)
                         log(f"[GT06] Set display name for {gt_conn.sailor_id}: {dev_name}")
 
-            # Send TIMER command to set location reporting interval
-            cmd = f"TIMER,{self.interval},{self.interval}#"
-            self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
-            log(f"[GT06] Sent: {cmd}")
+            # Determine idle/active state for this device
+            if gt_conn.sailor_id in self.active_sailors:
+                # Admin explicitly started this device — resume active tracking
+                gt_conn.idle = False
+                cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+            else:
+                # Default to idle (including first-ever connection)
+                gt_conn.idle = True
+                self.idle_sailors.add(gt_conn.sailor_id)
+                cmds = ["TIMER,60,60#", "SUP,60#"]
+            for cmd in cmds:
+                self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
+            log(f"[GT06] Sent: {', '.join(cmds)} ({'active' if not gt_conn.idle else 'idle'})")
 
             # Send HBT command to set heartbeat interval to 1 minute (protocol minimum)
             hbt_cmd = "HBT,1,1#"
@@ -767,6 +782,10 @@ class GT06Listener:
 
             if not loc["gps_valid"]:
                 return
+
+            # Save last known position for idle heartbeat updates
+            gt_conn.last_lat = loc["lat"]
+            gt_conn.last_lon = loc["lon"]
 
             # Convert speed from km/h to knots
             speed_knots = loc["speed_kmh"] / 1.852
@@ -792,6 +811,8 @@ class GT06Listener:
                 source="GT06",
                 nsats=loc["satellites"],
                 charging=gt_conn.charging,
+                stopped=gt_conn.idle,
+                idle=gt_conn.idle,
             )
 
         elif protocol == 0x13:
@@ -809,8 +830,32 @@ class GT06Listener:
                 bat_str += "+"
             sig_str = f"{gt_conn.signal}/4" if gt_conn.signal >= 0 else "?"
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-            log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}")
+            log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}{' (idle)' if gt_conn.idle else ''}")
             self._send(gt_conn, gt06_make_response(protocol, serial))
+
+            # When idle and we have a last known position, send status to tracker
+            if gt_conn.idle and gt_conn.sailor_id and gt_conn.last_lat is not None:
+                tracker = self.get_tracker(gt_conn.eid)
+                if tracker:
+                    tracker.process_position(
+                        sailor_id=gt_conn.sailor_id,
+                        lat=gt_conn.last_lat,
+                        lon=gt_conn.last_lon,
+                        speed=0, heading=0,
+                        ts=int(time.time()),
+                        assist=gt_conn.assist_active,
+                        battery=gt_conn.battery,
+                        signal=gt_conn.signal,
+                        role="sailor",
+                        version="gt06",
+                        flags={},
+                        src_ip=gt_conn.addr[0],
+                        source="GT06",
+                        nsats=0,
+                        charging=gt_conn.charging,
+                        stopped=True,
+                        idle=True,
+                    )
 
         elif protocol in (0x16, 0x23):
             # Alarm — parse location + alarm status, detect SOS
@@ -890,6 +935,58 @@ class GT06Listener:
                 self._send(gt_conn, gt06_make_command("SENALM,OFF#", gt_conn.next_cmd_serial()))
                 log(f"[GT06] Cancelled assist for {sailor_id}, sent SENALM,OFF#")
                 return True
+        return False
+
+    def set_idle(self, sailor_id, idle):
+        """Set idle state for a GT06 device by sailor_id.
+
+        When idle=True: set SUP,60# (60-min static interval) + TIMER,60,60# (max GPS
+        interval) so stationary devices barely report.  Heartbeats still arrive every minute.
+        When idle=False: restore normal TIMER + SUP,1# so the device reports frequently.
+        """
+        if idle:
+            self.idle_sailors.add(sailor_id)
+            self.active_sailors.discard(sailor_id)
+        else:
+            self.idle_sailors.discard(sailor_id)
+            self.active_sailors.add(sailor_id)
+
+        for gt_conn in self.connections.values():
+            if gt_conn.sailor_id == sailor_id:
+                gt_conn.idle = idle
+                if idle:
+                    cmds = ["TIMER,60,60#", "SUP,60#"]
+                else:
+                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+                for cmd in cmds:
+                    self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
+                # Immediately update tracker so UI reflects idle/active state
+                if gt_conn.last_lat is not None:
+                    tracker = self.get_tracker(gt_conn.eid)
+                    if tracker:
+                        tracker.process_position(
+                            sailor_id=sailor_id,
+                            lat=gt_conn.last_lat,
+                            lon=gt_conn.last_lon,
+                            speed=0, heading=0,
+                            ts=int(time.time()),
+                            assist=gt_conn.assist_active,
+                            battery=gt_conn.battery,
+                            signal=gt_conn.signal,
+                            role="sailor",
+                            version="gt06",
+                            flags={},
+                            src_ip=gt_conn.addr[0],
+                            source="GT06",
+                            nsats=0,
+                            charging=gt_conn.charging,
+                            stopped=idle,
+                            idle=idle,
+                        )
+                log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}: {', '.join(cmds)}")
+                return True
+        # No active connection, but state is saved for reconnection
+        log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return False
 
     def _on_readable(self, fd):
@@ -2845,6 +2942,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 if not pos.get("stopped", False):
                     queue_pending_command(f"{eid}:{user_id}", "stop")
                     send_proactive_command(f"{eid}:{user_id}", "stop")
+                    if _gt06_listener:
+                        _gt06_listener.set_idle(user_id, True)
                     stopped_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
@@ -2860,6 +2959,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             queue_pending_command(f"{eid}:{user_id}", "stop")
             send_proactive_command(f"{eid}:{user_id}", "stop")
+            if _gt06_listener:
+                _gt06_listener.set_idle(user_id, True)
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -2891,6 +2992,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 if pos.get("idle", False):
                     queue_pending_command(f"{eid}:{user_id}", "start")
                     send_proactive_command(f"{eid}:{user_id}", "start")
+                    if _gt06_listener:
+                        _gt06_listener.set_idle(user_id, False)
                     started_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote start-all queued for {len(started_ids)} idle trackers: {started_ids}")
@@ -2923,6 +3026,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             queue_pending_command(f"{eid}:{user_id}", "start")
             send_proactive_command(f"{eid}:{user_id}", "start")
+            if _gt06_listener:
+                _gt06_listener.set_idle(user_id, False)
             log(f"[EVENT {eid}] Remote start queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
