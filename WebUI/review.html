@@ -4480,10 +4480,16 @@
         }
 
         function updateSliderEndpoints() {
-            // Update slider endpoints based on selected users' data range
-            const range = getSelectedTimeRange();
-            sliderMinTime = range.min;
-            sliderMaxTime = range.max;
+            // If a sublog is selected, keep its time bounds
+            if (selectedSublog) {
+                sliderMinTime = selectedSublog.start_ts;
+                sliderMaxTime = selectedSublog.end_ts;
+            } else {
+                // Update slider endpoints based on selected users' data range
+                const range = getSelectedTimeRange();
+                sliderMinTime = range.min;
+                sliderMaxTime = range.max;
+            }
 
             // Update edge labels
             document.getElementById('label-start').textContent = formatTimeInTz(sliderMinTime);
