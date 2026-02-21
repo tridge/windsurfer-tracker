@@ -53,3 +53,8 @@ play-store-key.json
 take_app_screenshots.sh
 restart_sim_tracks.sh
 *.txt
+*.jsonl
+*.gz
+/*.json
+/*.jpg
+/*.png
