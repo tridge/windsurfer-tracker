@@ -768,10 +768,34 @@ class GT06Listener:
                 self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
             log(f"[GT06] Sent: {', '.join(cmds)} ({'active' if not gt_conn.idle else 'idle'})")
 
-            # Send HBT command to set heartbeat interval to 1 minute (protocol minimum)
-            hbt_cmd = "HBT,1,1#"
+            # Send HBT command to set heartbeat interval to 15 seconds
+            hbt_cmd = "HBT,15,15#"
             self._send(gt_conn, gt06_make_command(hbt_cmd, gt_conn.next_cmd_serial()))
             log(f"[GT06] Sent: {hbt_cmd}")
+
+            # Restore last known position from tracker and immediately update
+            # idle/active state in current_positions.json so the UI reflects
+            # the correct state without waiting for the next packet.
+            tracker = self.get_tracker(gt_conn.eid)
+            if tracker:
+                pt = tracker.position_tracker if hasattr(tracker, 'position_tracker') else tracker
+                with pt._lock:
+                    existing = pt.current_positions.get(gt_conn.sailor_id)
+                if existing and existing.get("lat") and (time.time() - existing.get("last_seen", 0)) < 300:
+                    gt_conn.last_lat = existing["lat"]
+                    gt_conn.last_lon = existing["lon"]
+                    tracker.process_position(
+                        sailor_id=gt_conn.sailor_id,
+                        lat=gt_conn.last_lat, lon=gt_conn.last_lon,
+                        speed=0, heading=0, ts=int(time.time()),
+                        assist=existing.get("ast", False),
+                        battery=existing.get("bat", -1),
+                        signal=existing.get("sig", -1),
+                        role="sailor", version="gt06",
+                        flags={}, src_ip=gt_conn.addr[0], source="GT06",
+                        nsats=0, charging=existing.get("chg", False),
+                        stopped=gt_conn.idle, idle=gt_conn.idle,
+                    )
 
         elif protocol in (0x12, 0x22):
             # Location
