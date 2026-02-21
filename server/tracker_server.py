@@ -880,12 +880,16 @@ class GT06Listener:
 
             if is_sos:
                 if gt_conn.assist_active:
-                    # Second SOS press — toggle off
+                    # Second SOS press — toggle off, stay in active tracking
                     gt_conn.assist_active = False
                     label = gt_conn.sailor_id or gt_conn.imei or "unknown"
                     log(f"[GT06] SOS cancelled by second press from {label}")
                 else:
                     gt_conn.assist_active = True
+                    # Come out of idle so we get full GPS tracking
+                    if gt_conn.idle:
+                        self.set_idle(gt_conn.sailor_id, False)
+                        log(f"[GT06] Exited idle due to SOS from {label}")
 
             if loc and gt_conn.sailor_id and loc["gps_valid"]:
                 speed_knots = loc["speed_kmh"] / 1.852
