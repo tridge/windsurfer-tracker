@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -34,13 +35,15 @@ _ts_counter = int(time.time())
 
 class ServerInfo:
     """Holds connection details for the running server."""
-    def __init__(self, host, port, data_dir, manager_password, process, log_file):
+    def __init__(self, host, port, data_dir, manager_password, process, log_file,
+                 gt06_port=None):
         self.host = host
         self.port = port
         self.data_dir = data_dir
         self.manager_password = manager_password
         self.process = process
         self.log_file = log_file
+        self.gt06_port = gt06_port
 
 
 class UDPClient:
@@ -179,9 +182,221 @@ class HTTPClient:
         return self._request("POST", path, data=body, headers=req_headers)
 
 
-def _find_free_port():
+def _gt06_crc_itu(data):
+    """CRC-ITU (CRC-16/X.25) — matches server implementation."""
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0x8408
+            else:
+                crc >>= 1
+    return crc ^ 0xFFFF
+
+
+class GT06Client:
+    """TCP client emulator for GT06 GPS tracker protocol.
+
+    Builds and sends binary GT06 frames (login, location, heartbeat, alarm)
+    and receives/parses server responses and commands.
+    """
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.sock = None
+        self._serial = 0
+
+    def connect(self):
+        """Open TCP connection to the GT06 listener."""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(3.0)
+        self.sock.connect((self.host, self.port))
+
+    def close(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+
+    def _next_serial(self):
+        self._serial += 1
+        return self._serial
+
+    def _build_frame(self, protocol, data):
+        """Build a complete GT06 frame with CRC."""
+        serial = self._next_serial()
+        # length = protocol(1) + data + serial(2) + crc(2)
+        length = 1 + len(data) + 2 + 2
+        payload = struct.pack(">B", length) + struct.pack(">B", protocol) + data
+        payload += struct.pack(">H", serial)
+        crc = _gt06_crc_itu(payload)
+        return b"\x78\x78" + payload + struct.pack(">H", crc) + b"\x0d\x0a"
+
+    def _recv_frames(self, timeout=0.5):
+        """Receive all available frames from the server within timeout."""
+        frames = []
+        buf = b""
+        self.sock.settimeout(timeout)
+        try:
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                # Extract complete frames
+                while len(buf) >= 5:
+                    if buf[0:2] != b"\x78\x78":
+                        # Skip junk
+                        idx = buf.find(b"\x78\x78", 1)
+                        if idx < 0:
+                            buf = b""
+                            break
+                        buf = buf[idx:]
+                        continue
+                    length = buf[2]
+                    frame_size = 2 + 1 + length + 2  # start(2) + len(1) + payload + end(2)
+                    if len(buf) < frame_size:
+                        break
+                    frames.append(buf[:frame_size])
+                    buf = buf[frame_size:]
+        except socket.timeout:
+            pass
+        return frames
+
+    def _parse_frame(self, frame):
+        """Parse a GT06 frame into (protocol, data_bytes, serial)."""
+        protocol = frame[3]
+        length = frame[2]
+        serial_offset = 3 + length - 4
+        serial = struct.unpack(">H", frame[serial_offset:serial_offset + 2])[0]
+        data = frame[4:serial_offset]
+        return protocol, data, serial
+
+    def _extract_command_text(self, frame):
+        """Extract ASCII command string from a server command frame (protocol 0x80)."""
+        protocol, data, serial = self._parse_frame(frame)
+        if protocol != 0x80:
+            return None
+        # data: content_len(1) + server_flag(4) + cmd_ascii
+        if len(data) < 5:
+            return None
+        return data[5:].decode("ascii", errors="replace")
+
+    def send_login(self, imei="863874081226122"):
+        """Send login packet and return list of received frames."""
+        # BCD-encode the IMEI (pad to 16 digits = 8 bytes)
+        imei_padded = imei.rjust(16, "0")
+        imei_bcd = bytes.fromhex(imei_padded)
+        frame = self._build_frame(0x01, imei_bcd)
+        self.sock.sendall(frame)
+        return self._recv_frames()
+
+    def build_location_data(self, lat=-35.2999, lon=149.1003, speed_kmh=0,
+                            heading=180, satellites=8, gps_valid=True,
+                            year=26, month=2, day=21, hour=12, minute=0, second=0):
+        """Build 18-byte location data block."""
+        data = struct.pack(">BBBBBB", year, month, day, hour, minute, second)
+        gps_info = (satellites & 0x0F) | 0xF0  # high nibble = GPS data length
+        data += struct.pack(">B", gps_info)
+
+        lat_raw = int(abs(lat) * 1_800_000)
+        lon_raw = int(abs(lon) * 1_800_000)
+        data += struct.pack(">II", lat_raw, lon_raw)
+
+        data += struct.pack(">B", speed_kmh)
+
+        course_status = heading & 0x03FF
+        if gps_valid:
+            course_status |= (1 << 12)
+        if lat >= 0:
+            course_status |= (1 << 10)  # North
+        if lon < 0:
+            course_status |= (1 << 11)  # West
+        data += struct.pack(">H", course_status)
+
+        return data
+
+    def send_location(self, protocol=0x12, **kwargs):
+        """Send a location packet. Returns list of received frames."""
+        data = self.build_location_data(**kwargs)
+        frame = self._build_frame(protocol, data)
+        self.sock.sendall(frame)
+        return self._recv_frames(timeout=0.1)
+
+    def send_heartbeat(self, battery_level=6, signal=4, charging=False):
+        """Send heartbeat packet. Returns list of received frames.
+
+        battery_level: 0-6 (GT06 raw level, mapped to 0-100% by server)
+        signal: 0-4
+        charging: bool
+        """
+        info = 0x08 if charging else 0x00
+        data = struct.pack(">BBB", info, battery_level, signal)
+        frame = self._build_frame(0x13, data)
+        self.sock.sendall(frame)
+        return self._recv_frames()
+
+    def send_alarm(self, alarm_type="SOS", protocol=0x16, battery_level=6,
+                   signal=4, charging=False, **loc_kwargs):
+        """Send alarm/SOS packet. Returns list of received frames.
+
+        alarm_type: "Normal", "Shock", "Power Cut", "Low Battery", "SOS"
+        """
+        loc_data = self.build_location_data(**loc_kwargs)
+
+        alarm_bits_map = {"Normal": 0, "Shock": 1, "Power Cut": 2,
+                          "Low Battery": 3, "SOS": 4}
+        alarm_bits = alarm_bits_map.get(alarm_type, 0)
+
+        # LBS data (minimal: 0 bytes)
+        lbs_len = 0
+        # terminal_info: alarm_bits in bits 3-5, charging in bit 2
+        ti = (alarm_bits << 3)
+        if charging:
+            ti |= 0x04
+
+        extra = struct.pack(">BBBB", lbs_len, ti, battery_level, signal)
+        frame = self._build_frame(protocol, loc_data + extra)
+        self.sock.sendall(frame)
+        return self._recv_frames()
+
+    def get_commands(self, frames):
+        """Extract command text strings from a list of frames."""
+        cmds = []
+        for f in frames:
+            cmd = self._extract_command_text(f)
+            if cmd is not None:
+                cmds.append(cmd)
+        return cmds
+
+    def drain(self, timeout=0.1):
+        """Read and discard any pending data from the socket."""
+        self.sock.settimeout(timeout)
+        try:
+            while self.sock.recv(4096):
+                pass
+        except socket.timeout:
+            pass
+
+
+@pytest.fixture
+def gt06_client(server):
+    """Function-scoped GT06 TCP client."""
+    client = GT06Client(server.host, server.gt06_port)
+    client.connect()
+    yield client
+    client.close()
+
+
+def _find_free_port(tcp=False):
     """Find a free port by binding to port 0."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+    sock_type = socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM
+    with socket.socket(socket.AF_INET, sock_type) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
@@ -219,6 +434,7 @@ def server(tmp_path_factory):
     (html_dir / "index.html").write_text("<html><body>test</body></html>")
 
     port = _find_free_port()
+    gt06_port = _find_free_port(tcp=True)
 
     # Pre-write events.json with manager password and a default event
     events_data = {
@@ -249,6 +465,9 @@ def server(tmp_path_factory):
             "--static-dir", str(html_dir),
             "--events-file", str(events_file),
             "--manager-password", MANAGER_PASSWORD,
+            "--gt06-port", str(gt06_port),
+            "--gt06-interval", "10",
+            "--gt06-id-prefix", "G",
         ],
         stdout=log_fh,
         stderr=subprocess.STDOUT,
@@ -270,6 +489,7 @@ def server(tmp_path_factory):
         manager_password=MANAGER_PASSWORD,
         process=proc,
         log_file=log_path,
+        gt06_port=gt06_port,
     )
 
     yield info
