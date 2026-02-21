@@ -1734,7 +1734,7 @@
             // Show a single "all data" entry in log list
             document.getElementById('race-list').innerHTML = `
                 <div class="race-item selected">
-                    <div class="race-time">All Data (Legacy Mode)</div>
+                    <div class="race-time">All Data</div>
                     <div class="race-stats">
                         ${Object.keys(userData).length} sailors | ${allData.length.toLocaleString()} points
                     </div>
@@ -1913,7 +1913,9 @@
             const getX = (e, clamp) => {
                 const rect = canvas.getBoundingClientRect();
                 let x;
-                if (e.touches) {
+                if (e.changedTouches) {
+                    x = e.changedTouches[0].clientX - rect.left;
+                } else if (e.touches) {
                     x = e.touches[0].clientX - rect.left;
                 } else {
                     x = e.clientX - rect.left;
