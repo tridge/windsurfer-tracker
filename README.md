@@ -25,8 +25,6 @@ A GPS tracking system for windsurfing races using UDP for maximum reliability on
 
 ### Android Phone
 
-<img src="store/screenshots/android/screenshot1.png" width="250" alt="Android App Screenshot">
-
 Native Kotlin app for Android phones:
 - Tracks GPS position every 10 seconds
 - Sends UDP packets with position, speed, heading, battery, signal strength
@@ -43,8 +41,6 @@ cd android
 ```
 
 ### Wear OS (Samsung Galaxy Watch, Pixel Watch)
-
-<img src="store/screenshots/wearos/screenshot1.png" width="200" alt="Wear OS App Screenshot">
 
 Native Kotlin app for Wear OS smartwatches:
 - Standalone tracking (no phone required with LTE watches)
@@ -96,7 +92,7 @@ The Apple Watch app is bundled with the iPhone app and installed via the Watch a
 
 ### GT06 GPS Tracker
 
-<img src="W07_MG133_GT06.jpg" width="250" alt="W07 MG133 GT06 GPS Tracker">
+<img src="WebUI/install/gt06-device.jpg" width="250" alt="W07 MG133 GT06 GPS Tracker">
 
 Standalone GPS tracker for boats and vehicles (no phone required):
 - Connects to server via GT06 binary protocol over TCP
