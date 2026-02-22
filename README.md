@@ -94,6 +94,22 @@ Native Swift app for Apple Watch:
 
 The Apple Watch app is bundled with the iPhone app and installed via the Watch app on your paired iPhone after installing from TestFlight.
 
+### GT06 GPS Tracker
+
+<img src="W07_MG133_GT06.jpg" width="250" alt="W07 MG133 GT06 GPS Tracker">
+
+Standalone GPS tracker for boats and vehicles (no phone required):
+- Connects to server via GT06 binary protocol over TCP
+- Position reports with speed, heading, and satellite count
+- Battery and signal strength monitoring via heartbeats
+- SOS button triggers assist alert in the web UI
+- Admin-controlled idle/active mode for battery conservation
+- Automatic reconnection on connection loss
+
+Supported devices: GT06, GT06N, W07C (MG133), LT604, and other Concox GT06-compatible trackers.
+
+**Setup:** Configure via SMS commands - see `WebUI/install/gt06.html` for details.
+
 ## Components
 
 ### Server (`server/tracker_server.py`)
@@ -180,6 +196,11 @@ The server reads configuration from `settings.json` (recommended) or command lin
 | `manager_password` | Password for event management API |
 | `static_dir` | Directory to serve static files (Web UI) |
 | `events_file` | Path to events.json file |
+| `gt06_port` | TCP port for GT06 tracker connections (disabled if not set) |
+| `gt06_interval` | GT06 GPS reporting interval in seconds (default: 10) |
+| `gt06_id_prefix` | Prefix for GT06 tracker IDs (default: G) |
+| `gt06_config` | GT06 device config file (default: gt06.json) |
+| `gt06_log` | GT06 binary packet log file (default: gt06.log) |
 
 **Command line options:**
 | Option | Default | Description |
@@ -190,6 +211,11 @@ The server reads configuration from `settings.json` (recommended) or command lin
 | `--no-http` | | Disable HTTP server |
 | `--no-track-logs` | | Disable daily track logging |
 | `--no-current` | | Disable current positions file |
+| `--gt06-port` | (disabled) | TCP port for GT06 tracker protocol |
+| `--gt06-interval` | 10 | GT06 GPS reporting interval (seconds) |
+| `--gt06-id-prefix` | G | Prefix for GT06 tracker IDs |
+| `--gt06-config` | gt06.json | GT06 device config file |
+| `--gt06-log` | gt06.log | GT06 binary packet log file |
 
 ### Android App Build
 
