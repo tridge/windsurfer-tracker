@@ -527,8 +527,10 @@ def write_log_entry_1hz(f, entity: 'SimulatedEntity', pos_buffer: List[Tuple[int
         "sig": entity.signal,
         "role": entity.role,
         "ver": GIT_HASH,
-        "hac": 5.0  # Simulated horizontal accuracy
+        "hac": round(random.uniform(100, 500), 1) if entity.poor_accuracy else 5.0
     }
+    if entity.poor_accuracy:
+        entry["nsats"] = random.randint(2, 4)
     if entity.heart_rate > 0:
         entry["hr"] = entity.heart_rate
     f.write(json.dumps(entry) + "\n")
