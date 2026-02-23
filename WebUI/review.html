@@ -41,6 +41,7 @@
                 <label><input type="checkbox" id="show-outliers"> Show outliers (red)</label>
                 <label><input type="checkbox" id="show-course" checked> Show course</label>
                 <label title="During playback, show full track instead of 30s tail"><input type="checkbox" id="playback-full-track"> Playback full track</label>
+                <label><input type="checkbox" id="filter-bad-gps"> Filter bad GPS</label>
                 <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
                     <label style="font-size:11px;color:#aaa;margin-bottom:3px;display:block;">Map Type</label>
                     <label><input type="radio" name="map-type" value="osm" checked onchange="setMapType(this.value)"> OpenStreetMap</label>
@@ -632,6 +633,7 @@
             if (!document.getElementById('filter-outliers').checked) params.set('nofilter', '1');
             if (document.getElementById('show-outliers').checked) params.set('showoutliers', '1');
             if (!document.getElementById('show-course').checked) params.set('nocourse', '1');
+            if (document.getElementById('filter-bad-gps').checked) params.set('filterbadgps', '1');
 
             // Graphs
             const graphs = [];
@@ -669,6 +671,7 @@
             if (params.has('nofilter')) document.getElementById('filter-outliers').checked = false;
             if (params.has('showoutliers')) document.getElementById('show-outliers').checked = true;
             if (params.has('nocourse')) document.getElementById('show-course').checked = false;
+            if (params.has('filterbadgps')) document.getElementById('filter-bad-gps').checked = true;
 
             // Graphs
             if (params.has('graphs')) {
@@ -2155,6 +2158,11 @@
                         filtered = timeFiltered;
                         outliers = [];
                     }
+                }
+
+                const doFilterBadGPS = document.getElementById('filter-bad-gps').checked;
+                if (doFilterBadGPS) {
+                    filtered = filtered.filter(e => !e.hac || e.hac <= 100);
                 }
 
                 if (filtered.length < 2) continue;
@@ -4825,6 +4833,10 @@
             drawTracks();
         });
 
+        document.getElementById('filter-bad-gps').addEventListener('change', () => {
+            drawTracks();
+        });
+
         document.getElementById('show-course').addEventListener('change', (e) => {
             showCourse = e.target.checked;
             if (showCourse && currentCourseFile) {
@@ -5345,6 +5357,11 @@
                     if (filtered.length < 2 && timeFiltered.length >= 2) {
                         filtered = timeFiltered;
                     }
+                }
+
+                const doFilterBadGPS = document.getElementById('filter-bad-gps').checked;
+                if (doFilterBadGPS) {
+                    filtered = filtered.filter(e => !e.hac || e.hac <= 100);
                 }
 
                 if (filtered.length < 2) continue;
