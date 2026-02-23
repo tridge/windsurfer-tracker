@@ -1004,13 +1004,13 @@ class TrackerService : LifecycleService() {
         positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
         lastBufferedLocation = location
 
-        // Send first packet immediately to get quick ACK, then batch every 10 positions
+        // Send first packet immediately to get quick ACK, then batch every 10 positions or 10 seconds
         if (!firstPacketSent && positionBuffer.size >= 1) {
             // First GPS lock - send immediately (even if only 1 position)
             sendPositionArray()
             firstPacketSent = true
-        } else if (positionBuffer.size >= 10) {
-            // Subsequent packets - send every 10 positions (10 seconds at 1Hz)
+        } else if (positionBuffer.size >= 10 ||
+                   (positionBuffer.size > 0 && ts - positionBuffer.first().ts >= 10)) {
             sendPositionArray()
         }
     }
@@ -1212,12 +1212,17 @@ class TrackerService : LifecycleService() {
                 while (isRunning.get()) {
                     val elapsed = System.currentTimeMillis() - lastPositionSendTime.get()
                     if (elapsed >= LOCATION_INTERVAL_MS) {
-                        // If we have a recent poor-accuracy fix, send that instead of bare heartbeat
-                        val poorLoc = lastPoorLocation
-                        if (poorLoc != null && (System.currentTimeMillis() - poorLoc.time) < 60_000) {
-                            sendPoorAccuracyPosition(poorLoc)
+                        if (positionBuffer.size > 0) {
+                            // Flush buffered positions (e.g. GPS lost before buffer reached 10)
+                            sendPositionArray()
                         } else {
-                            sendGpsWaitPacket()
+                            // If we have a recent poor-accuracy fix, send that instead of bare heartbeat
+                            val poorLoc = lastPoorLocation
+                            if (poorLoc != null && (System.currentTimeMillis() - poorLoc.time) < 60_000) {
+                                sendPoorAccuracyPosition(poorLoc)
+                            } else {
+                                sendGpsWaitPacket()
+                            }
                         }
                     }
                     delay(LOCATION_INTERVAL_MS)

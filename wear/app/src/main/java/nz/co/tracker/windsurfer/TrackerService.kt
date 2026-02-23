@@ -302,6 +302,9 @@ class TrackerService : LifecycleService() {
     // GPS-wait heartbeat job (sends packets while waiting for GPS fix)
     private var gpsWaitJob: Job? = null
 
+    // Keepalive job (flushes buffered positions and sends heartbeats during tracking)
+    private var keepaliveJob: Job? = null
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -852,7 +855,8 @@ class TrackerService : LifecycleService() {
                         } else 0.0
                         positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
                         lastBufferedLocation = location
-                        if (positionBuffer.size >= 10) {
+                        if (positionBuffer.size >= 10 ||
+                            (positionBuffer.size > 0 && ts - positionBuffer.first().ts >= 10)) {
                             sendPositionArray()
                         }
                         return
@@ -892,8 +896,9 @@ class TrackerService : LifecycleService() {
                     positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
                     lastBufferedLocation = location
 
-                    // Send every 10 positions (10 seconds at 1Hz)
-                    if (positionBuffer.size >= 10) {
+                    // Send every 10 positions or 10 seconds (whichever comes first)
+                    if (positionBuffer.size >= 10 ||
+                        (positionBuffer.size > 0 && ts - positionBuffer.first().ts >= 10)) {
                         sendPositionArray()
                     }
 
@@ -1104,6 +1109,19 @@ class TrackerService : LifecycleService() {
                 }
             }
 
+            // Start keepalive loop to flush buffered positions every 10s
+            keepaliveJob = serviceScope.launch {
+                while (isRunning.get()) {
+                    delay(LOCATION_INTERVAL_MS)
+                    if (positionBuffer.size > 0) {
+                        val ts = System.currentTimeMillis() / 1000
+                        if (ts - positionBuffer.first().ts >= 10) {
+                            sendPositionArray()
+                        }
+                    }
+                }
+            }
+
             // Start tracker beep timer (first beep after 60 seconds)
             beepHandler.postDelayed(beepRunnable, 60000L)
         } catch (e: SecurityException) {
@@ -1120,9 +1138,11 @@ class TrackerService : LifecycleService() {
         // Stop assist alarm if running
         assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
 
-        // Stop GPS-wait heartbeat
+        // Stop GPS-wait heartbeat and keepalive
         gpsWaitJob?.cancel()
         gpsWaitJob = null
+        keepaliveJob?.cancel()
+        keepaliveJob = null
 
         // Stop tracker beep timer
         beepHandler.removeCallbacks(beepRunnable)
@@ -1301,9 +1321,11 @@ class TrackerService : LifecycleService() {
         isIdleMode.set(true)
         isRunning.set(false)
 
-        // Stop GPS-wait heartbeat
+        // Stop GPS-wait heartbeat and keepalive
         gpsWaitJob?.cancel()
         gpsWaitJob = null
+        keepaliveJob?.cancel()
+        keepaliveJob = null
 
         // Stop GPS updates and clear position buffer
         fusedLocationClient.removeLocationUpdates(locationCallback)
