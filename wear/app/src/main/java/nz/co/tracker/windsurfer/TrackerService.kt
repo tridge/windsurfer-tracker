@@ -842,9 +842,19 @@ class TrackerService : LifecycleService() {
                         return
                     }
 
-                    // Filter out inaccurate locations
+                    // Poor accuracy: send position so server knows approximate location,
+                    // but don't update tracking state (speed/distance calculations)
                     if (MAX_ACCURACY_METERS > 0 && location.accuracy > MAX_ACCURACY_METERS) {
-                        Log.d(TAG, "Skipping inaccurate location: accuracy=${location.accuracy}m")
+                        Log.d(TAG, "Poor accuracy location: ${location.accuracy}m > ${MAX_ACCURACY_METERS}m, sending as low-GPS")
+                        val ts = System.currentTimeMillis() / 1000
+                        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+                            (location.speed * 1.94384 * 10).toInt() / 10.0
+                        } else 0.0
+                        positionBuffer.add(BufferedPosition(ts, location.latitude, location.longitude, speedKnots))
+                        lastBufferedLocation = location
+                        if (positionBuffer.size >= 10) {
+                            sendPositionArray()
+                        }
                         return
                     }
 

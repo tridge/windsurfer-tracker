@@ -197,9 +197,8 @@ public final class LocationManager: NSObject, ObservableObject {
     private func processLocation(_ location: CLLocation) {
         lastLocation = location
 
-        // Filter by accuracy
-        guard location.horizontalAccuracy > 0,
-              location.horizontalAccuracy <= TrackerConfig.maxAccuracyMeters else {
+        // Filter out invalid fixes (negative accuracy means no GPS fix)
+        guard location.horizontalAccuracy >= 0 else {
             return
         }
 

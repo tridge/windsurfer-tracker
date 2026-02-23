@@ -1685,8 +1685,8 @@ class TrackerService : LifecycleService() {
     }
 
     /**
-     * Send a poor-accuracy position packet. Includes lat/lon and accuracy
-     * but sends speed=0, hdg=0 since those are unreliable from poor fixes.
+     * Send a poor-accuracy position packet. Includes lat/lon and accuracy.
+     * Uses actual speed/heading if available from GPS.
      * Does NOT update tracking state (lastLocation, previousLocation, distance).
      */
     private fun sendPoorAccuracyPosition(location: Location) {
@@ -1702,6 +1702,11 @@ class TrackerService : LifecycleService() {
             telephonyManager.signalStrength?.level ?: -1
         } catch (e: Exception) { -1 }
 
+        val speedKnots = if (location.hasSpeed() && location.speed > 0) {
+            String.format("%.2f", location.speed * 1.94384).toDouble()
+        } else 0.0
+        val heading = if (location.hasBearing()) location.bearing.toInt() else 0
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("eid", eventId)
@@ -1711,8 +1716,8 @@ class TrackerService : LifecycleService() {
             put("lon", location.longitude)
             put("hac", String.format("%.2f", location.accuracy).toDouble())
             if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
-            put("spd", 0)
-            put("hdg", 0)
+            put("spd", speedKnots)
+            put("hdg", heading)
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
             put("chg", batteryManager.isCharging)
