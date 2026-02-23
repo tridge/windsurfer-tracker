@@ -85,6 +85,7 @@ class SimulatedEntity:
     # 1Hz mode (batched position updates)
     pos_buffer: List[Tuple[int, float, float, float]] = field(default_factory=list)  # [(ts, lat, lon, spd), ...]
     heart_rate: int = 0
+    poor_accuracy: bool = False  # Simulate poor GPS accuracy (100-500m)
 
     # Race state tracking (for multi-race simulation)
     race_state: RaceState = RaceState.PRE_RACE
@@ -963,6 +964,8 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
     """Send position packet and wait for ACK"""
     entity.seq += 1
 
+    hac = round(random.uniform(100, 500), 1) if entity.poor_accuracy else 0.5
+
     packet = {
         "id": entity.id,
         "eid": eid,
@@ -970,7 +973,7 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
         "ts": int(time.time()),
         "lat": round(entity.lat, 6),
         "lon": round(entity.lon, 6),
-        "hac": 0.5,
+        "hac": hac,
         "spd": round(entity.spd, 2),
         "hdg": int(entity.hdg) % 360,
         "ast": entity.assist,
@@ -979,6 +982,8 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
         "role": entity.role,
         "ver": GIT_HASH
     }
+    if entity.poor_accuracy:
+        packet["nsats"] = random.randint(2, 4)  # Low sat count for poor accuracy
 
     if password:
         packet["pwd"] = password
@@ -1008,13 +1013,15 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
     # pos array format: [[ts, lat, lon, spd], ...]
     pos_array = [[ts, round(lat, 6), round(lon, 6), round(spd, 1)] for ts, lat, lon, spd in entity.pos_buffer]
 
+    hac = round(random.uniform(100, 500), 1) if entity.poor_accuracy else 0.5
+
     packet = {
         "id": entity.id,
         "eid": eid,
         "sq": entity.seq,
         "ts": int(time.time()),  # Current timestamp (for sorting)
         "pos": pos_array,        # Array of [ts, lat, lon, spd] positions
-        "hac": 0.5,
+        "hac": hac,
         "spd": round(entity.spd, 2),
         "hdg": int(entity.hdg) % 360,
         "ast": entity.assist,
@@ -1024,6 +1031,8 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
         "ver": GIT_HASH,
         "hr": entity.heart_rate   # Heart rate included in 1Hz packets
     }
+    if entity.poor_accuracy:
+        packet["nsats"] = random.randint(2, 4)  # Low sat count for poor accuracy
 
     if password:
         packet["pwd"] = password
@@ -1427,6 +1436,8 @@ def main():
                         help="Speed multiplier for offline mode (default: 100)")
     parser.add_argument("--speed", type=float, default=12.0,
                         help="Average sailor speed in knots (default: 12, std dev: 20%%)")
+    parser.add_argument("--poor-accuracy", type=int, default=0, metavar="N",
+                        help="Number of sailors to simulate with poor GPS accuracy (100-500m)")
 
     args = parser.parse_args()
 
@@ -1479,6 +1490,8 @@ def main():
     print(f"  Update interval: {args.delay}s")
     if coastline:
         print(f"  Land avoidance: enabled")
+    if args.poor_accuracy > 0:
+        print(f"  Poor accuracy: {args.poor_accuracy} sailors")
     print()
 
     # Create entities
@@ -1493,6 +1506,14 @@ def main():
             if e.id == args.assist:
                 e.assist = True
                 print(f"*** {e.id} has ASSIST flag set ***")
+
+    # Set poor accuracy on some sailors
+    if args.poor_accuracy > 0:
+        sailors = [e for e in entities if e.role == "sailor"]
+        for i, s in enumerate(sailors):
+            if i < args.poor_accuracy:
+                s.poor_accuracy = True
+                print(f"*** {s.id} has POOR ACCURACY simulation ***")
 
     # For offline mode with races, calculate wind from course
     wind_direction = args.wind_direction
@@ -1579,9 +1600,10 @@ def main():
                 for e in entities:
                     status = "⚠ ASSIST" if e.assist else ""
                     hr_str = f" hr={e.heart_rate}"
+                    gps_str = " LOWGPS" if e.poor_accuracy else ""
                     lap_info = f" lap={e.current_lap} wp={e.current_waypoint_idx}" if e.course_waypoints else ""
                     print(f"  {e.id} ({e.role}): {e.lat:.5f}, {e.lon:.5f} "
-                          f"spd={e.spd:.1f}kn hdg={e.hdg:.0f}° bat={e.battery}%{hr_str}{lap_info} {status}")
+                          f"spd={e.spd:.1f}kn hdg={e.hdg:.0f}° bat={e.battery}%{hr_str}{gps_str}{lap_info} {status}")
             else:
                 elapsed = int(current_time - start_time)
                 assist_count = sum(1 for e in entities if e.assist)

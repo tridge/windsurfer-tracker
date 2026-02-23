@@ -2199,43 +2199,45 @@
                 // Create coords array for both cases
                 const coords = filtered.map(e => [e.lat, e.lon]);
 
+                // Helper: check if a point has poor GPS accuracy
+                const isPoorAccuracy = (point) => point.hac !== undefined && point.hac > 100;
+
                 if (useSpeedColor) {
                     // Draw segments colored by speed - batch consecutive same-color segments
                     const layerGroup = L.layerGroup();
 
-                    // Group consecutive segments by color
+                    // Group consecutive segments by color and accuracy
                     let currentColor = null;
+                    let currentPoor = false;
                     let currentCoords = [];
+
+                    const flushSegment = () => {
+                        if (currentCoords.length > 1) {
+                            const opts = {
+                                color: currentColor,
+                                weight: 3,
+                                opacity: currentPoor ? 0.4 : 0.8
+                            };
+                            if (currentPoor) opts.dashArray = '6, 4';
+                            layerGroup.addLayer(L.polyline(currentCoords, opts));
+                        }
+                    };
 
                     for (let i = 0; i < filtered.length; i++) {
                         const point = filtered[i];
                         const color = speedToColor(point.spd || 0);
+                        const poor = isPoorAccuracy(point);
 
-                        if (color !== currentColor && currentCoords.length > 1) {
-                            // Flush previous color batch
-                            const line = L.polyline(currentCoords, {
-                                color: currentColor,
-                                weight: 3,
-                                opacity: 0.8
-                            });
-                            layerGroup.addLayer(line);
-                            // Start new batch with last point of previous (for continuity)
+                        if ((color !== currentColor || poor !== currentPoor) && currentCoords.length > 1) {
+                            flushSegment();
                             currentCoords = [currentCoords[currentCoords.length - 1]];
                         }
 
                         currentCoords.push([point.lat, point.lon]);
                         currentColor = color;
+                        currentPoor = poor;
                     }
-
-                    // Flush final batch
-                    if (currentCoords.length > 1) {
-                        const line = L.polyline(currentCoords, {
-                            color: currentColor,
-                            weight: 3,
-                            opacity: 0.8
-                        });
-                        layerGroup.addLayer(line);
-                    }
+                    flushSegment();
 
                     // Add invisible wider polyline for hover detection
                     const hitArea = L.polyline(coords, {
@@ -2249,14 +2251,37 @@
                     trackLayers[userId] = layerGroup;
                     trackLayers[userId].hitArea = hitArea;
                 } else {
-                    // Draw single color track with invisible hit area for hover
+                    // Draw single color track with segments split by accuracy
                     const layerGroup = L.layerGroup();
-                    const polyline = L.polyline(coords, {
-                        color: userColor,
-                        weight: 3,
-                        opacity: 0.8
-                    });
-                    layerGroup.addLayer(polyline);
+
+                    let currentPoor = false;
+                    let currentCoords = [];
+
+                    const flushSegment = () => {
+                        if (currentCoords.length > 1) {
+                            const opts = {
+                                color: userColor,
+                                weight: 3,
+                                opacity: currentPoor ? 0.4 : 0.8
+                            };
+                            if (currentPoor) opts.dashArray = '6, 4';
+                            layerGroup.addLayer(L.polyline(currentCoords, opts));
+                        }
+                    };
+
+                    for (let i = 0; i < filtered.length; i++) {
+                        const point = filtered[i];
+                        const poor = isPoorAccuracy(point);
+
+                        if (poor !== currentPoor && currentCoords.length > 1) {
+                            flushSegment();
+                            currentCoords = [currentCoords[currentCoords.length - 1]];
+                        }
+
+                        currentCoords.push([point.lat, point.lon]);
+                        currentPoor = poor;
+                    }
+                    flushSegment();
 
                     // Add invisible wider polyline for hover detection
                     const hitArea = L.polyline(coords, {
@@ -2304,7 +2329,9 @@
                         Heading: ${closest.hdg || 0}°<br>
                         Battery: ${closest.bat || '?'}%`;
                     if (closest.hac !== undefined) {
-                        content += `<br>Accuracy: ${closest.hac.toFixed(1)}m`;
+                        const hacColor = closest.hac > 100 ? '#e74c3c' : closest.hac > 50 ? '#f97316' : '#2ecc71';
+                        const hacLabel = closest.hac > 100 ? 'Poor GPS' : 'Accuracy';
+                        content += `<br>${hacLabel}: <span style="color:${hacColor}">${closest.hac > 100 ? '~' : ''}${closest.hac.toFixed(1)}m</span>`;
                         if (closest.nsats !== undefined && closest.nsats > 0) {
                             content += ` · &#128752;${closest.nsats}`;
                         }
@@ -2371,7 +2398,9 @@
 
                     let markerHacText = '';
                     if (last.hac !== undefined) {
-                        markerHacText = `<br>Accuracy: ${last.hac.toFixed(1)}m`;
+                        const hacColor = last.hac > 100 ? '#e74c3c' : last.hac > 50 ? '#f97316' : '#2ecc71';
+                        const hacLabel = last.hac > 100 ? 'Poor GPS' : 'Accuracy';
+                        markerHacText = `<br>${hacLabel}: <span style="color:${hacColor}">${last.hac > 100 ? '~' : ''}${last.hac.toFixed(1)}m</span>`;
                         if (last.nsats !== undefined && last.nsats > 0) {
                             markerHacText += ` · &#128752;${last.nsats}`;
                         }

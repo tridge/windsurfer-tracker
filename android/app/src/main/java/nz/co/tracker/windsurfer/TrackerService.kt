@@ -89,6 +89,7 @@ class TrackerService : LifecycleService() {
     private val positionBuffer = mutableListOf<BufferedPosition>()
     private var lastBufferedLocation: Location? = null
     private var firstPacketSent = false  // Track if initial packet sent for quick ACK
+    private var lastPoorLocation: Location? = null  // Last poor-accuracy fix for keepalive fallback
 
     // Battery drain tracking
     private var trackingStartTime: Long = 0
@@ -953,12 +954,20 @@ class TrackerService : LifecycleService() {
             return
         }
 
-        // Filter out inaccurate locations (technique from OwnTracks)
+        // Poor accuracy: send position so server knows approximate location,
+        // but don't update tracking state (speed/bearing/distance calculations)
         if (MAX_ACCURACY_METERS > 0 && location.accuracy > MAX_ACCURACY_METERS) {
-            Log.d(TAG, "Skipping inaccurate location: accuracy=${location.accuracy}m > ${MAX_ACCURACY_METERS}m")
+            Log.d(TAG, "Poor accuracy location: ${location.accuracy}m > ${MAX_ACCURACY_METERS}m, sending as low-GPS")
+            lastPoorLocation = location
+            val elapsed = System.currentTimeMillis() - lastPositionSendTime.get()
+            if (elapsed >= LOCATION_INTERVAL_MS) {
+                sendPoorAccuracyPosition(location)
+            }
             return
         }
 
+        // Good fix arrived - clear poor location fallback
+        lastPoorLocation = null
         lastLocation = location
 
         // Save last position to device-protected storage for shutdown stop packet
@@ -1203,7 +1212,13 @@ class TrackerService : LifecycleService() {
                 while (isRunning.get()) {
                     val elapsed = System.currentTimeMillis() - lastPositionSendTime.get()
                     if (elapsed >= LOCATION_INTERVAL_MS) {
-                        sendGpsWaitPacket()
+                        // If we have a recent poor-accuracy fix, send that instead of bare heartbeat
+                        val poorLoc = lastPoorLocation
+                        if (poorLoc != null && (System.currentTimeMillis() - poorLoc.time) < 60_000) {
+                            sendPoorAccuracyPosition(poorLoc)
+                        } else {
+                            sendGpsWaitPacket()
+                        }
                     }
                     delay(LOCATION_INTERVAL_MS)
                 }
@@ -1666,6 +1681,69 @@ class TrackerService : LifecycleService() {
             Log.e(TAG, "Failed to send GPS-wait heartbeat, closing socket for reconnection", e)
             socket?.close()
             socket = null
+        }
+    }
+
+    /**
+     * Send a poor-accuracy position packet. Includes lat/lon and accuracy
+     * but sends speed=0, hdg=0 since those are unreliable from poor fixes.
+     * Does NOT update tracking state (lastLocation, previousLocation, distance).
+     */
+    private fun sendPoorAccuracyPosition(location: Location) {
+        lastPositionSendTime.set(System.currentTimeMillis())
+        val seq = sequenceNumber.incrementAndGet()
+        val currentPassword = getCurrentPassword()
+        val eventId = getCurrentEventId()
+
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val signalLevel = try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            telephonyManager.signalStrength?.level ?: -1
+        } catch (e: Exception) { -1 }
+
+        val packet = JSONObject().apply {
+            put("id", sailorId)
+            put("eid", eventId)
+            put("sq", seq)
+            put("ts", System.currentTimeMillis() / 1000)
+            put("lat", location.latitude)
+            put("lon", location.longitude)
+            put("hac", String.format("%.2f", location.accuracy).toDouble())
+            if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
+            put("spd", 0)
+            put("hdg", 0)
+            put("ast", assistRequested.get())
+            put("bat", batteryPercent)
+            put("chg", batteryManager.isCharging)
+            put("sig", signalLevel)
+            put("role", getCurrentRole())
+            put("ver", BuildConfig.VERSION_STRING)
+            put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+            if (currentPassword.isNotEmpty()) {
+                put("pwd", currentPassword)
+            }
+        }
+
+        val data = packet.toString().toByteArray(Charsets.UTF_8)
+
+        serviceScope.launch {
+            val address = getServerAddress() ?: return@launch
+
+            val sock = ensureSocket()
+            if (sock == null) {
+                Log.w(TAG, "No socket available for poor-accuracy position, will retry next interval")
+                return@launch
+            }
+            try {
+                val dgram = DatagramPacket(data, data.size, address, serverPort)
+                sock.send(dgram)
+                Log.d(TAG, "Sent poor-accuracy position seq=$seq hac=${location.accuracy}m bat=$batteryPercent%")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send poor-accuracy position, closing socket for reconnection", e)
+                socket?.close()
+                socket = null
+            }
         }
     }
 

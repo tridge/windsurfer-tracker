@@ -1128,6 +1128,12 @@
                     <span>Show track outliers (red)</span>
                 </label>
             </div>
+            <div style="margin-bottom:8px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+                    <input type="checkbox" id="showAccuracyToggle" onchange="toggleShowAccuracy()" style="width:16px;height:16px;" checked>
+                    <span>Show accuracy circles</span>
+                </label>
+            </div>
         </div>
 
         <div class="admin-section">
@@ -1356,6 +1362,8 @@
         const sailorOutliers = {};    // Outlier markers for each sailor
         const showTrack = {};         // Whether to show track for each sailor
         let showOutliers = false;     // Admin toggle to show outlier points
+        let showAccuracyCircles = localStorage.getItem('showAccuracyCircles') !== 'false';  // Show accuracy radius circles
+        const accuracyCircles = {};   // L.circle for each sailor with poor accuracy
         let deviceMarker = null;
         let deviceHeadingMarker = null;
         let currentPositions = null;
@@ -1595,6 +1603,11 @@
         // Read from ?eid=N URL parameter, default to 1 for backwards compatibility
         const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
 
+        // Accuracy threshold - ?accuracy=N sets the hac threshold for BADGPS badge/circles
+        // Default: 100m for BADGPS badge, 50m for accuracy circles (circle threshold = badge / 2)
+        const ACCURACY_BADGE_THRESHOLD = parseInt(urlParams.get('accuracy')) || 100;
+        const ACCURACY_CIRCLE_THRESHOLD = ACCURACY_BADGE_THRESHOLD / 2;
+
         // Data paths for this event (positions, logs, etc.)
         const DATA_BASE = `${EVENT_ID}/`;
 
@@ -1751,6 +1764,7 @@
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('menuExportCourse').style.display = '';
                     document.getElementById('menuImportCourse').style.display = '';
+                    document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
                     await loadUserOverrides();
                     // Refresh markers to show edit buttons
@@ -3173,6 +3187,19 @@
             }
         }
 
+        function toggleShowAccuracy() {
+            showAccuracyCircles = document.getElementById('showAccuracyToggle').checked;
+            localStorage.setItem('showAccuracyCircles', showAccuracyCircles);
+            // Show or hide all accuracy circles
+            for (const id in accuracyCircles) {
+                if (showAccuracyCircles) {
+                    accuracyCircles[id].addTo(map);
+                } else {
+                    map.removeLayer(accuracyCircles[id]);
+                }
+            }
+        }
+
         // Panel toggle functions
         function togglePanel() {
             panelCollapsed = !panelCollapsed;
@@ -3703,9 +3730,9 @@
                                 <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
                                 ${sailor.idle ? '<span style="background:#2563eb;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">IDLE</span>' : ''}
-                                ${(sailor.nsats === 0 && !sailor.idle && !sailor.stopped) ? '<span style="background:#d97706;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">NOGPS</span>' : ''}
+                                ${(sailor.nsats === 0 && !sailor.idle && !sailor.stopped) ? '<span style="background:#d97706;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD && !sailor.idle && !sailor.stopped) ? '<span style="background:#f97316;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">~' + Math.round(sailor.hac) + 'm</span>' : ''}
                                 <div class="sailor-details">
-                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr}${sailor.nsats !== undefined ? ' · <span style="color:#16a34a" title="GPS satellites">&#128752;' + sailor.nsats + '</span>' : ''} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}
+                                    ${sailor.spd !== undefined ? sailor.spd.toFixed(1) + ' kn · ' : ''}<span style="${batColor}">${batStr}</span> · ${sigStr}${sailor.nsats !== undefined ? ' · <span style="color:#16a34a" title="GPS satellites">&#128752;' + sailor.nsats + '</span>' : ''} · ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD) ? ' <span style="color:#f97316;font-weight:bold">BADGPS ~' + Math.round(sailor.hac) + 'm</span>' : ''}
                                 </div>
                             </div>
                         </div>
@@ -3761,6 +3788,10 @@
             const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
             const heartRateLine = (sailor.hr && sailor.hr > 0) ? `<br>Heart Rate: <span style="color:#e91e63">${sailor.hr} bpm</span>` : '';
             const nsatsLine = (sailor.nsats !== undefined) ? `<br>&#128752; Satellites: <span style="color:#16a34a">${sailor.nsats}</span>` : '';
+            const hacLineInfo = (sailor.hac !== undefined && sailor.hac > 0) ? (() => {
+                const hacColor = sailor.hac > ACCURACY_BADGE_THRESHOLD ? '#e74c3c' : sailor.hac > ACCURACY_CIRCLE_THRESHOLD ? '#f97316' : '#16a34a';
+                return `<br>Accuracy: <span style="color:${hacColor}">${sailor.hac.toFixed(1)}m</span>`;
+            })() : '';
 
             let drainStr = '';
             if (sailor.chg === true) {
@@ -3779,8 +3810,8 @@
                 ${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}
                 ${infoLine}<br>
                 Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
-                Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
-                Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}<br>
+                Signal: ${sigStr}${heartRateLine}${nsatsLine}${hacLineInfo}<br>
+                Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD) ? ' <span style="color:#f97316;font-weight:bold">BADGPS</span>' : ''}<br>
                 Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${powerSaveWarning}${batOptWarning}
             `;
 
@@ -3813,6 +3844,10 @@
                 if (!activeSailorIds.has(id)) {
                     map.removeLayer(sailorMarkers[id]);
                     delete sailorMarkers[id];
+                    if (accuracyCircles[id]) {
+                        map.removeLayer(accuracyCircles[id]);
+                        delete accuracyCircles[id];
+                    }
                 }
             }
 
@@ -3848,6 +3883,27 @@
                     sailorMarkers[id].setIcon(icon);
                 } else {
                     sailorMarkers[id] = L.marker(pos, { icon }).addTo(map);
+                }
+
+                // Update accuracy circle
+                if (sailor.hac > ACCURACY_CIRCLE_THRESHOLD && showAccuracyCircles) {
+                    if (accuracyCircles[id]) {
+                        accuracyCircles[id].setLatLng(pos);
+                        accuracyCircles[id].setRadius(sailor.hac);
+                    } else {
+                        accuracyCircles[id] = L.circle(pos, {
+                            radius: sailor.hac,
+                            color: '#f97316',
+                            weight: 2,
+                            opacity: 0.6,
+                            dashArray: '6, 4',
+                            fillColor: '#f97316',
+                            fillOpacity: 0.08
+                        }).addTo(map);
+                    }
+                } else if (accuracyCircles[id]) {
+                    map.removeLayer(accuracyCircles[id]);
+                    delete accuracyCircles[id];
                 }
 
                 // Update tail polyline (last 20 seconds of positions)
@@ -3908,6 +3964,10 @@
                 const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
                 const heartRateLine = (sailor.hr && sailor.hr > 0) ? `<br>Heart Rate: <span style="color:#e91e63">${sailor.hr} bpm</span>` : '';
                 const nsatsLine = (sailor.nsats !== undefined) ? `<br>&#128752; Satellites: <span style="color:#16a34a">${sailor.nsats}</span>` : '';
+                const hacLine = (sailor.hac !== undefined && sailor.hac > 0) ? (() => {
+                    const hacColor = sailor.hac > ACCURACY_BADGE_THRESHOLD ? '#e74c3c' : sailor.hac > ACCURACY_CIRCLE_THRESHOLD ? '#f97316' : '#16a34a';
+                    return `<br>Accuracy: <span style="color:${hacColor}">${sailor.hac.toFixed(1)}m</span>`;
+                })() : '';
 
                 // Calculate sampling rate from track data
                 const trackPoints = sailorTrackData[id] || [];
@@ -3938,8 +3998,8 @@
                     ${sailor.hdg !== undefined ? `Heading: ${sailor.hdg}°<br>` : ''}
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
-                    Signal: ${sigStr}${heartRateLine}${nsatsLine}<br>
-                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : ''}<br>
+                    Signal: ${sigStr}${heartRateLine}${nsatsLine}${hacLine}<br>
+                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD) ? ' <span style="color:#f97316;font-weight:bold">BADGPS</span>' : ''}<br>
                     Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
                     <div class="popup-checkbox">
                         <label>
