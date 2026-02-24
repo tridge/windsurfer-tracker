@@ -286,6 +286,7 @@ public actor TrackerService {
             pwd: preferences.password.isEmpty ? nil : preferences.password,
             chg: batteryMonitor.status.isCharging,
             ps: batteryMonitor.status.isLowPowerMode,
+            did: deviceId,
             stopped: true
         )
 
@@ -364,6 +365,7 @@ public actor TrackerService {
             pwd: preferences.password.isEmpty ? nil : preferences.password,
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
+            did: deviceId,
             idle: true
         )
 
@@ -404,7 +406,8 @@ public actor TrackerService {
             pwd: preferences.password.isEmpty ? nil : preferences.password,
             chg: battery.isCharging,
             ps: battery.isLowPowerMode,
-            nsats: 0
+            nsats: 0,
+            did: deviceId
         )
 
         let response = await networkManager.send(packet)
@@ -623,7 +626,8 @@ public actor TrackerService {
             ps: battery.isLowPowerMode,
             pos: positionArray,
             hac: position.accuracy > 0 ? (position.accuracy * 100).rounded() / 100 : nil,
-            hr: heartRate
+            hr: heartRate,
+            did: deviceId
         )
     }
 
@@ -806,4 +810,8 @@ public actor TrackerService {
 
 #if os(watchOS)
 import WatchKit
+
+private let deviceId = WKInterfaceDevice.current().identifierForVendor?.uuidString
+#else
+private let deviceId = UIDevice.current.identifierForVendor?.uuidString
 #endif

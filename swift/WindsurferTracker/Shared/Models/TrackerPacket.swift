@@ -68,6 +68,9 @@ public struct TrackerPacket: Codable {
     /// GPS satellite count (optional, not available on iOS - CLLocation has no satellite API)
     public let nsats: Int?
 
+    /// Device ID (identifierForVendor UUID)
+    public let did: String?
+
     /// Stopped flag - true when user deliberately stops tracking
     public let stopped: Bool?
 
@@ -97,6 +100,7 @@ public struct TrackerPacket: Codable {
         hac: Double? = nil,
         hr: Int? = nil,
         nsats: Int? = nil,
+        did: String? = nil,
         stopped: Bool? = nil,
         idle: Bool? = nil
     ) {
@@ -122,6 +126,7 @@ public struct TrackerPacket: Codable {
         self.hac = hac
         self.hr = hr
         self.nsats = nsats
+        self.did = did
         self.stopped = stopped
         self.idle = idle
     }

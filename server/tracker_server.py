@@ -154,6 +154,10 @@ def sanitize_tracker_packet(packet: dict) -> dict:
     if 'nsats' in packet and packet.get('nsats') is not None:
         sanitized['nsats'] = sanitize_int(packet.get('nsats'), default=0, min_val=0, max_val=200)
 
+    # Device ID (stable identifier, optional)
+    if 'did' in packet:
+        sanitized['did'] = sanitize_string(packet.get('did'), max_length=64, default='')
+
     # Boolean fields
     sanitized['ast'] = sanitize_bool(packet.get('ast'), default=False)
     if 'chg' in packet:
@@ -1531,7 +1535,7 @@ class PositionTracker:
                          skip_log: bool = False, stopped: bool = False,
                          pos_array: list | None = None, user_overrides: dict | None = None,
                          idle: bool = False, charging: bool | None = None,
-                         sq: int = 0) -> bool:
+                         sq: int = 0, did: str | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -1562,6 +1566,8 @@ class PositionTracker:
                     "stopped": True,
                     "idle": True,
                 }
+                if did:
+                    pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
                 if os_version:
@@ -1613,6 +1619,8 @@ class PositionTracker:
                 }
                 if stopped:
                     pos_data["stopped"] = True
+                if did:
+                    pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
                 if os_version:
@@ -1649,6 +1657,8 @@ class PositionTracker:
                     "ver": version,
                     "flg": flags
                 }
+                if did:
+                    track_entry["did"] = did
                 if charging is not None:
                     track_entry["chg"] = charging
                 if battery_drain_rate is not None:
@@ -1745,6 +1755,8 @@ class PositionTracker:
                 }
                 if sq > 0:
                     pos_data["sq"] = sq
+                if did:
+                    pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
                 if battery_drain_rate is not None:
@@ -1799,6 +1811,8 @@ class PositionTracker:
                     "ver": version,
                     "flg": flags
                 }
+                if did:
+                    track_entry["did"] = did
                 if charging is not None:
                     track_entry["chg"] = charging
                 if battery_drain_rate is not None:
@@ -1860,7 +1874,8 @@ class EventTracker:
                          nsats: int | None = None,
                          skip_log: bool = False, pos_array: list | None = None,
                          stopped: bool = False, idle: bool = False,
-                         charging: bool | None = None, sq: int = 0) -> bool:
+                         charging: bool | None = None, sq: int = 0,
+                         did: str | None = None) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -1873,7 +1888,7 @@ class EventTracker:
                 src_ip=src_ip, source=f"[E{self.eid}]{source}",
                 os_version=os_version, idle=True,
                 user_overrides=self.user_overrides,
-                charging=charging, sq=sq
+                charging=charging, sq=sq, did=did
             )
 
         # If 1Hz array format, log as single entry with pos array (more compact)
@@ -1893,6 +1908,8 @@ class EventTracker:
                 "ver": version,
                 "flg": flags
             }
+            if did:
+                track_entry["did"] = did
             if charging is not None:
                 track_entry["chg"] = charging
             if battery_drain_rate is not None:
@@ -1938,7 +1955,8 @@ class EventTracker:
             pos_array=pos_array,
             user_overrides=self.user_overrides,
             charging=charging,
-            sq=sq
+            sq=sq,
+            did=did
         )
 
         # Write positions with event-specific user overrides
@@ -3501,6 +3519,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             nsats = packet.get("nsats")  # Number of GPS satellites (optional)
             stopped = packet.get("stopped", False)  # User deliberately stopped tracking
             idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
+            device_id = packet.get("did")  # Stable device identifier (optional)
 
             # Extract event ID (default to 1 for backwards compatibility)
             eid = packet.get("eid", 1)
@@ -3616,7 +3635,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     stopped=stopped,
                     idle=idle,
                     charging=charging,
-                    sq=seq
+                    sq=seq,
+                    did=device_id
                 )
             else:
                 # Legacy single-event mode
@@ -3636,6 +3656,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         "ver": version,
                         "flg": flags
                     }
+                    if device_id:
+                        track_entry["did"] = device_id
                     if charging is not None:
                         track_entry["chg"] = charging
                     if battery_drain_rate is not None:
@@ -3681,7 +3703,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     user_overrides=_user_overrides,
                     idle=idle,
                     charging=charging,
-                    sq=seq
+                    sq=seq,
+                    did=device_id
                 )
 
             # Send ACK response (same format as UDP)
@@ -4283,6 +4306,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                 nsats = packet.get("nsats")  # Number of GPS satellites (optional)
                 stopped = packet.get("stopped", False)  # User deliberately stopped tracking
                 idle = packet.get("idle", False)  # Idle heartbeat (no GPS)
+                device_id = packet.get("did")  # Stable device identifier (optional)
 
                 # Extract event ID (default to 1 for backwards compatibility)
                 eid = packet.get("eid", 1)
@@ -4394,7 +4418,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         stopped=stopped,
                         idle=idle,
                         charging=charging,
-                        sq=seq
+                        sq=seq,
+                        did=device_id
                     )
 
                 else:
@@ -4448,6 +4473,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                             "ver": version,
                             "flg": flags
                         }
+                        if device_id:
+                            track_entry["did"] = device_id
                         if charging is not None:
                             track_entry["chg"] = charging
                         if battery_drain_rate is not None:
@@ -4495,7 +4522,8 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         user_overrides=user_overrides,
                         idle=idle,
                         charging=charging,
-                        sq=seq
+                        sq=seq,
+                        did=device_id
                     )
 
                 # Write to legacy log file (JSON lines format for easy parsing later)

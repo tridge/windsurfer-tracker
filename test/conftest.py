@@ -538,6 +538,7 @@ def make_packet(eid=1, **overrides):
         "role": "sailor",
         "ver": "test",
         "eid": eid,
+        "did": "test_device_001",
     }
     packet.update(overrides)
     return packet

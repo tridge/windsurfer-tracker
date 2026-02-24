@@ -27,6 +27,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.telephony.TelephonyManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -76,6 +77,11 @@ class TrackerService : LifecycleService() {
     private var lastSatelliteCount: Int = 0  // From GnssStatus callback
     private var gnssStatusCallback: android.location.GnssStatus.Callback? = null
     
+    // Stable device identifier (persists across app reinstalls, resets on factory reset)
+    private val deviceId: String by lazy {
+        Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+    }
+
     // UDP
     private var socket: DatagramSocket? = null
     private var serverHost: String = DEFAULT_SERVER_HOST
@@ -1295,6 +1301,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -1401,6 +1408,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -1599,6 +1607,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -1652,6 +1661,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -1714,6 +1724,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -1878,6 +1889,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
@@ -2044,6 +2056,7 @@ class TrackerService : LifecycleService() {
 
         val packet = JSONObject().apply {
             put("id", sailorId)
+            put("did", deviceId)
             put("eid", eventId)
             put("sq", seq)
             put("ts", System.currentTimeMillis() / 1000)
