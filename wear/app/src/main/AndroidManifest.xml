@@ -70,5 +70,9 @@
             android:name=".presentation.TextInputActivity"
             android:exported="false"
             android:theme="@style/Theme.WindsurferTracker" />
+
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false" />
     </application>
 </manifest>

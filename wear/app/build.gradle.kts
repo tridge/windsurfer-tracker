@@ -43,6 +43,18 @@ android {
         buildConfigField("String", "VERSION_STRING", "\"wear-${versionName}(${getGitHash()})\"")
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("playstore") {
+            dimension = "distribution"
+            buildConfigField("Boolean", "ENABLE_SELF_UPDATE", "false")
+        }
+        create("sideload") {
+            dimension = "distribution"
+            buildConfigField("Boolean", "ENABLE_SELF_UPDATE", "true")
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (keystoreFile.exists() && keystorePropertiesFile.exists()) {

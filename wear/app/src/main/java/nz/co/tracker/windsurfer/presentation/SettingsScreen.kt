@@ -27,6 +27,8 @@ import nz.co.tracker.windsurfer.EventInfo
 import nz.co.tracker.windsurfer.SettingsRepository
 import nz.co.tracker.windsurfer.TrackerService
 import nz.co.tracker.windsurfer.TrackerSettings
+import nz.co.tracker.windsurfer.UpdateChecker
+import nz.co.tracker.windsurfer.UpdateCheckResult
 
 @Composable
 fun SettingsScreen(
@@ -66,6 +68,12 @@ fun SettingsScreen(
     var events by remember { mutableStateOf<List<EventInfo>>(emptyList()) }
     var eventsLoading by remember { mutableStateOf(true) }
     var isCheckingPassword by remember { mutableStateOf(false) }
+
+    // Update checker state
+    var updateStatus by remember { mutableStateOf("") }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateProgress by remember { mutableStateOf(-1) }
+    val updateChecker = remember { UpdateChecker(context) }
 
     val roles = listOf("sailor", "support", "spectator")
     val eventFetcher = remember { EventFetcher() }
@@ -534,6 +542,65 @@ fun SettingsScreen(
                 ) {
                     Text(if (isCheckingPassword) "..." else "Save")
                 }
+            }
+
+            // Check for Updates (sideload builds only)
+            if (BuildConfig.ENABLE_SELF_UPDATE) {
+            item {
+                Chip(
+                    onClick = {
+                        if (isCheckingUpdate) return@Chip
+                        isCheckingUpdate = true
+                        updateStatus = "Checking..."
+                        updateProgress = -1
+                        coroutineScope.launch {
+                            when (val result = updateChecker.checkForUpdate()) {
+                                is UpdateCheckResult.UpdateAvailable -> {
+                                    val info = result.versionInfo
+                                    updateStatus = "Downloading ${info.version}..."
+                                    updateChecker.downloadAndInstall(
+                                        versionInfo = info,
+                                        onProgress = { percent ->
+                                            updateProgress = percent
+                                            updateStatus = "Downloading ${percent}%"
+                                        },
+                                        onComplete = {
+                                            updateStatus = "Installing..."
+                                            isCheckingUpdate = false
+                                            updateProgress = -1
+                                        },
+                                        onError = { error ->
+                                            updateStatus = error
+                                            isCheckingUpdate = false
+                                            updateProgress = -1
+                                        }
+                                    )
+                                }
+                                is UpdateCheckResult.NoUpdate -> {
+                                    updateStatus = "Up to date"
+                                    isCheckingUpdate = false
+                                }
+                                is UpdateCheckResult.Error -> {
+                                    updateStatus = result.message
+                                    isCheckingUpdate = false
+                                }
+                            }
+                        }
+                    },
+                    label = {
+                        Text(
+                            text = if (updateStatus.isEmpty()) "Check for Updates"
+                                   else updateStatus,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(top = 8.dp),
+                    colors = ChipDefaults.secondaryChipColors()
+                )
+            }
             }
 
             // Version info
