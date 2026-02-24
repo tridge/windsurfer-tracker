@@ -745,18 +745,21 @@ class GT06Listener:
             log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
             self._send(gt_conn, gt06_make_response(protocol, serial))
 
-            # Apply device name from gt06.json if configured
+            # Apply device name from gt06.json if configured (keyed by did:IMEI)
             dev_name = dev_cfg.get("name")
             if dev_name:
                 tracker = self.get_tracker(gt_conn.eid)
                 if tracker and hasattr(tracker, 'user_overrides') and hasattr(tracker, 'users_file'):
                     overrides = tracker.user_overrides
-                    if gt_conn.sailor_id not in overrides or overrides[gt_conn.sailor_id].get("name") != dev_name:
-                        if gt_conn.sailor_id not in overrides:
-                            overrides[gt_conn.sailor_id] = {}
-                        overrides[gt_conn.sailor_id]["name"] = dev_name
+                    did_key = f"did:{imei}"
+                    existing = overrides.get(did_key)
+                    if not existing or existing.get("name") != dev_name or existing.get("_last_id") != gt_conn.sailor_id:
+                        overrides[did_key] = {"name": dev_name, "_last_id": gt_conn.sailor_id}
+                        # Remove old sailor_id entry if present
+                        if gt_conn.sailor_id in overrides:
+                            del overrides[gt_conn.sailor_id]
                         save_user_overrides(tracker.users_file, overrides)
-                        log(f"[GT06] Set display name for {gt_conn.sailor_id}: {dev_name}")
+                        log(f"[GT06] Set display name for {gt_conn.sailor_id} (did:{imei}): {dev_name}")
 
             # Determine idle/active state for this device
             if gt_conn.sailor_id in self.active_sailors:
@@ -799,6 +802,7 @@ class GT06Listener:
                         flags={}, src_ip=gt_conn.addr[0], source="GT06",
                         nsats=0, charging=existing.get("chg", False),
                         stopped=gt_conn.idle, idle=gt_conn.idle,
+                        did=gt_conn.imei,
                     )
 
         elif protocol in (0x12, 0x22):
@@ -862,6 +866,7 @@ class GT06Listener:
                 charging=gt_conn.charging,
                 stopped=gt_conn.idle,
                 idle=gt_conn.idle,
+                did=gt_conn.imei,
             )
 
         elif protocol == 0x13:
@@ -904,6 +909,7 @@ class GT06Listener:
                         charging=gt_conn.charging,
                         stopped=True,
                         idle=True,
+                        did=gt_conn.imei,
                     )
 
         elif protocol in (0x16, 0x23):
@@ -961,6 +967,7 @@ class GT06Listener:
                         source="GT06",
                         nsats=loc["satellites"],
                         charging=gt_conn.charging,
+                        did=gt_conn.imei,
                     )
 
         elif protocol == 0x15:
@@ -1035,6 +1042,7 @@ class GT06Listener:
                             charging=gt_conn.charging,
                             stopped=idle,
                             idle=idle,
+                            did=gt_conn.imei,
                         )
                 log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}: {', '.join(cmds)}")
                 return True
@@ -1295,8 +1303,8 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
     display_positions = {}
     for sailor_id, pos in positions.items():
         display_pos = pos.copy()
-        if user_overrides and sailor_id in user_overrides:
-            override = user_overrides[sailor_id]
+        override = get_user_override(user_overrides, sailor_id, pos.get("did"))
+        if override:
             if 'name' in override:
                 display_pos['name'] = override['name']
                 display_pos['displayid'] = override['name']
@@ -1826,10 +1834,9 @@ class PositionTracker:
                 if nsats is not None:
                     track_entry["nsats"] = nsats
                 # Add displayid if user has a name mapping
-                if user_overrides and sailor_id in user_overrides:
-                    override = user_overrides[sailor_id]
-                    if override.get('name'):
-                        track_entry["displayid"] = override['name']
+                override = get_user_override(user_overrides, sailor_id, did)
+                if override and override.get('name'):
+                    track_entry["displayid"] = override['name']
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -1923,10 +1930,9 @@ class EventTracker:
             if nsats is not None:
                 track_entry["nsats"] = nsats
             # Add displayid if user has a name mapping
-            if self.user_overrides and sailor_id in self.user_overrides:
-                override = self.user_overrides[sailor_id]
-                if override.get('name'):
-                    track_entry["displayid"] = override['name']
+            override = get_user_override(self.user_overrides, sailor_id, did)
+            if override and override.get('name'):
+                track_entry["displayid"] = override['name']
             self.daily_logger.write(track_entry)
 
         # Process through position tracker
@@ -2130,6 +2136,47 @@ def save_user_overrides(users_file: Path, overrides: dict[str, dict]):
         json.dump(output, f, indent=2)
     tmp_file.rename(users_file)
     log(f"[ADMIN] Saved user overrides: {len(overrides)} users")
+
+
+def get_user_override(user_overrides: dict, sailor_id: str, did: str | None = None) -> dict | None:
+    """Look up user override: check did:XXX first, then sailor_id."""
+    if not user_overrides:
+        return None
+    if did:
+        override = user_overrides.get(f"did:{did}")
+        if override:
+            return override
+    return user_overrides.get(sailor_id)
+
+
+def _resolve_did_overrides(user_overrides: dict, current_positions: dict) -> dict:
+    """Resolve did:XXX keys to current sailor_ids for the API response.
+
+    The WebUI always works with sailor_ids, so we translate did:XXX entries
+    back to their current sailor_id using the live positions map.
+    """
+    if not user_overrides:
+        return {}
+    # Build reverse map: did -> current sailor_id
+    did_to_id = {}
+    for sid, pos in current_positions.items():
+        did = pos.get("did")
+        if did:
+            did_to_id[did] = sid
+
+    resolved = {}
+    for key, override in user_overrides.items():
+        if key.startswith("did:"):
+            did = key[4:]
+            sailor_id = did_to_id.get(did) or override.get("_last_id")
+            if sailor_id:
+                # Strip internal _last_id from the response
+                clean = {k: v for k, v in override.items() if k != "_last_id"}
+                resolved[sailor_id] = clean
+            # else: orphaned did entry, skip
+        else:
+            resolved[key] = override
+    return resolved
 
 
 _static_dir: Path | None = None
@@ -2413,7 +2460,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 self._send_json({"error": "Unauthorized"}, 401)
                 return
-            self._send_json({"users": _user_overrides})
+            positions = _position_tracker.current_positions if _position_tracker else {}
+            resolved = _resolve_did_overrides(_user_overrides, positions)
+            self._send_json({"users": resolved})
 
         elif path == '/api/events':
             # Return list of active events (public endpoint)
@@ -2542,7 +2591,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
             tracker = get_event_tracker(eid)
             if tracker:
-                self._send_json({"users": tracker.user_overrides})
+                resolved = _resolve_did_overrides(tracker.user_overrides,
+                                                  tracker.position_tracker.current_positions)
+                self._send_json({"users": resolved})
             else:
                 self._send_json({"users": {}})
 
@@ -2582,7 +2633,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                                 displayid = sailor_data.get('displayid', '')
 
                                 # Get display name from user overrides (fallback for old summaries)
-                                override_name = user_overrides.get(original_id, {}).get('name', '')
+                                search_override = get_user_override(user_overrides, original_id)
+                                override_name = search_override.get('name', '') if search_override else ''
 
                                 # The display name is: displayid (from log) > override name > key
                                 display_name = displayid or override_name or key
@@ -2978,7 +3030,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     override['info'] = str(data['info'])
 
                 if override:
-                    tracker.user_overrides[user_id] = override
+                    # Prefer did:XXX key if device has a did
+                    store_key = user_id
+                    pos = tracker.position_tracker.current_positions.get(user_id)
+                    if pos and pos.get("did"):
+                        store_key = f"did:{pos['did']}"
+                        override["_last_id"] = user_id
+                        # Remove old sailor_id entry if migrating to did key
+                        if user_id in tracker.user_overrides and store_key != user_id:
+                            del tracker.user_overrides[user_id]
+                    tracker.user_overrides[store_key] = override
                     save_user_overrides(tracker.users_file, tracker.user_overrides)
                     # Refresh positions file
                     write_current_positions(
@@ -2987,7 +3048,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         tracker.user_overrides,
                         tracker.position_tracker.position_tails
                     )
-                    log(f"[EVENT {eid}] User override set for {user_id}: {override}")
+                    log(f"[EVENT {eid}] User override set for {user_id} (key={store_key}): {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
                     self._send_json({"error": "No valid fields (name, role, info)"}, 400)
@@ -3232,16 +3293,28 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             tracker = get_event_tracker(eid)
-            if tracker and user_id in tracker.user_overrides:
-                del tracker.user_overrides[user_id]
-                save_user_overrides(tracker.users_file, tracker.user_overrides)
-                write_current_positions(
-                    tracker.position_tracker.current_positions,
-                    tracker.positions_file,
-                    tracker.user_overrides,
-                    tracker.position_tracker.position_tails
-                )
-                log(f"[EVENT {eid}] User override removed for {user_id}")
+            if tracker:
+                removed = False
+                # Remove sailor_id entry
+                if user_id in tracker.user_overrides:
+                    del tracker.user_overrides[user_id]
+                    removed = True
+                # Remove did:XXX entry if device has a did
+                pos = tracker.position_tracker.current_positions.get(user_id)
+                if pos and pos.get("did"):
+                    did_key = f"did:{pos['did']}"
+                    if did_key in tracker.user_overrides:
+                        del tracker.user_overrides[did_key]
+                        removed = True
+                if removed:
+                    save_user_overrides(tracker.users_file, tracker.user_overrides)
+                    write_current_positions(
+                        tracker.position_tracker.current_positions,
+                        tracker.positions_file,
+                        tracker.user_overrides,
+                        tracker.position_tracker.position_tails
+                    )
+                    log(f"[EVENT {eid}] User override removed for {user_id}")
             self._send_json({"success": True, "user_id": user_id})
 
         elif subpath.startswith('/log/') and '/sublog/' in subpath:
@@ -3419,7 +3492,17 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     override['info'] = str(data['info'])
 
                 if override:
-                    _user_overrides[user_id] = override
+                    # Prefer did:XXX key if device has a did
+                    store_key = user_id
+                    if _position_tracker:
+                        pos = _position_tracker.current_positions.get(user_id)
+                        if pos and pos.get("did"):
+                            store_key = f"did:{pos['did']}"
+                            override["_last_id"] = user_id
+                            # Remove old sailor_id entry if migrating to did key
+                            if user_id in _user_overrides and store_key != user_id:
+                                del _user_overrides[user_id]
+                    _user_overrides[store_key] = override
                     if _users_file:
                         save_user_overrides(_users_file, _user_overrides)
                     # Refresh current positions to apply the override
@@ -3430,7 +3513,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             _user_overrides,
                             _position_tracker.position_tails
                         )
-                    log(f"[ADMIN] User override set for {user_id}: {override}")
+                    log(f"[ADMIN] User override set for {user_id} (key={store_key}): {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
                     self._send_json({"error": "No valid fields (name, role, info)"}, 400)
@@ -3671,10 +3754,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     if nsats is not None:
                         track_entry["nsats"] = nsats
                     # Add displayid if user has a name mapping
-                    if _user_overrides and sailor_id in _user_overrides:
-                        override = _user_overrides[sailor_id]
-                        if override.get('name'):
-                            track_entry["displayid"] = override['name']
+                    override = get_user_override(_user_overrides, sailor_id, device_id)
+                    if override and override.get('name'):
+                        track_entry["displayid"] = override['name']
                     _daily_logger.write(track_entry)
 
                 _position_tracker.process_position(
@@ -3927,8 +4009,20 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "User ID required"}, 400)
                 return
             global _user_overrides
+            removed = False
+            # Remove sailor_id entry
             if user_id in _user_overrides:
                 del _user_overrides[user_id]
+                removed = True
+            # Remove did:XXX entry if device has a did
+            if _position_tracker:
+                pos = _position_tracker.current_positions.get(user_id)
+                if pos and pos.get("did"):
+                    did_key = f"did:{pos['did']}"
+                    if did_key in _user_overrides:
+                        del _user_overrides[did_key]
+                        removed = True
+            if removed:
                 if _users_file:
                     save_user_overrides(_users_file, _user_overrides)
                 # Refresh current positions to remove the override
@@ -4488,10 +4582,9 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
                         if nsats is not None:
                             track_entry["nsats"] = nsats
                         # Add displayid if user has a name mapping
-                        if user_overrides and sailor_id in user_overrides:
-                            override = user_overrides[sailor_id]
-                            if override.get('name'):
-                                track_entry["displayid"] = override['name']
+                        override = get_user_override(user_overrides, sailor_id, device_id)
+                        if override and override.get('name'):
+                            track_entry["displayid"] = override['name']
                         daily_logger.write(track_entry)
 
                     # Process position through shared tracker (updates live display)
