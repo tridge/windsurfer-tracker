@@ -201,6 +201,7 @@ struct WatchSettingsView: View {
     @State private var tempPassword: String = ""
     @State private var validationError: String? = nil
     @State private var isCheckingPassword = false
+    @State private var hasInitialized = false
 
     // Track original auth values to detect changes
     @State private var originalSailorId: String = ""
@@ -570,13 +571,16 @@ struct WatchSettingsView: View {
             .padding(.horizontal, 8)
         }
         .onAppear {
-            tempId = viewModel.sailorId
-            tempHost = viewModel.serverHost
-            tempPassword = viewModel.password
-            // Track original auth values
-            originalSailorId = viewModel.sailorId
-            originalPassword = viewModel.password
-            originalEventId = viewModel.eventId
+            if !hasInitialized {
+                hasInitialized = true
+                tempId = viewModel.sailorId
+                tempHost = viewModel.serverHost
+                tempPassword = viewModel.password
+                // Track original auth values
+                originalSailorId = viewModel.sailorId
+                originalPassword = viewModel.password
+                originalEventId = viewModel.eventId
+            }
             viewModel.fetchEvents()
         }
     }
