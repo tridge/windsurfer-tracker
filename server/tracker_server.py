@@ -6,6 +6,7 @@ Provides HTTP endpoints for admin functions, course management, and event manage
 Supports multiple concurrent events, each with its own data directory and passwords.
 """
 
+import fcntl
 import math
 import selectors
 import socket
@@ -636,6 +637,23 @@ class GT06Connection:
         self.last_ts = None
         self.pos_history = []  # last 3 (lat, lon, ts) for speed smoothing
 
+        # Command queue — sequential delivery with SIOCOUTQ verification
+        self.cmd_queue = []           # list of command strings waiting to send
+        self.cmd_pending = None       # command string currently awaiting TCP ACK
+        self.cmd_pending_frame = None # raw frame bytes (for retry)
+        self.cmd_sent_time = 0        # time.monotonic() when cmd was sent
+        self.cmd_tcp_acked = False    # True once SIOCOUTQ shows 0
+        self.cmd_tcp_ack_time = 0    # time.monotonic() when TCP ACK confirmed
+
+        # Rate monitoring — detect when device ignores commands
+        self.rate_check_time = 0      # monotonic time when current rate window started
+        self.loc_count = 0            # LOC packets received in current window
+        self.hbt_count = 0            # HBT packets received in current window
+        self.last_hbt_time = 0        # monotonic time of last heartbeat
+        self.expected_loc_interval = 60  # expected LOC interval (updated on state change)
+        self.expected_hbt_interval = 15  # expected HBT interval
+        self.rate_retry_count = 0     # how many times we've re-sent commands for wrong rate
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -712,6 +730,126 @@ class GT06Listener:
             log(f"[GT06] Send error to {gt_conn.addr}: {e}")
             self._disconnect(gt_conn.sock.fileno())
 
+    # -- Command queue: sequential delivery with SIOCOUTQ verification --
+
+    def _queue_commands(self, gt_conn, cmds):
+        """Queue command strings for sequential delivery to a GT06 device."""
+        gt_conn.cmd_queue.extend(cmds)
+        self._send_next_cmd(gt_conn)
+
+    def _send_next_cmd(self, gt_conn):
+        """Send the next queued command if none is pending."""
+        if gt_conn.cmd_pending is not None:
+            return  # waiting for current command
+        if not gt_conn.cmd_queue:
+            return
+        cmd_str = gt_conn.cmd_queue.pop(0)
+        frame = gt06_make_command(cmd_str, gt_conn.next_cmd_serial())
+        self._send(gt_conn, frame)
+        gt_conn.cmd_pending = cmd_str
+        gt_conn.cmd_pending_frame = frame
+        gt_conn.cmd_sent_time = time.monotonic()
+        gt_conn.cmd_tcp_acked = False
+        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+        log(f"[GT06] Sent to {label}: {cmd_str} (queue: {len(gt_conn.cmd_queue)} remaining)")
+
+    def _check_siocoutq(self, gt_conn):
+        """Check if all outbound TCP data has been ACKed by the remote TCP stack.
+        Returns True if the kernel send buffer is empty (SIOCOUTQ == 0)."""
+        SIOCOUTQ = 0x5411
+        try:
+            buf = fcntl.ioctl(gt_conn.sock.fileno(), SIOCOUTQ, b'\x00\x00\x00\x00')
+            pending = struct.unpack("I", buf)[0]
+            return pending == 0
+        except Exception:
+            return False
+
+    def _check_cmd_delivery(self, fd, gt_conn, now):
+        """Check SIOCOUTQ and timeouts for a pending command."""
+        if not gt_conn.cmd_tcp_acked:
+            if self._check_siocoutq(gt_conn):
+                gt_conn.cmd_tcp_acked = True
+                gt_conn.cmd_tcp_ack_time = now
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                log(f"[GT06] TCP ACK confirmed for {label}: {gt_conn.cmd_pending}")
+            elif now - gt_conn.cmd_sent_time > 30:
+                # TCP can't deliver the data — connection dead/very laggy
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                log(f"[GT06] TCP delivery timeout for {label}: {gt_conn.cmd_pending} — disconnecting")
+                self._disconnect(fd)
+                return
+        else:
+            # TCP delivered but no 0x15 app ACK — not all commands produce one
+            # (e.g. SUP doesn't ACK). Advance queue after 10s.
+            if now - gt_conn.cmd_tcp_ack_time > 10:
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                log(f"[GT06] No app ACK for {label}: {gt_conn.cmd_pending} — advancing queue")
+                gt_conn.cmd_pending = None
+                gt_conn.cmd_pending_frame = None
+                self._send_next_cmd(gt_conn)
+
+    def _reset_rate_monitoring(self, gt_conn, expected_loc_interval):
+        """Reset rate monitoring counters after a state transition."""
+        gt_conn.rate_check_time = time.monotonic()
+        gt_conn.loc_count = 0
+        gt_conn.hbt_count = 0
+        gt_conn.expected_loc_interval = expected_loc_interval
+        gt_conn.rate_retry_count = 0
+
+    def _check_rates(self, fd, gt_conn, now):
+        """Check LOC/HBT rates and retry or disconnect if device ignores commands."""
+        if gt_conn.rate_check_time == 0:
+            return
+
+        elapsed = now - gt_conn.rate_check_time
+        if elapsed < 30:
+            return  # grace period
+
+        # Check LOC rate
+        expected_loc_rate = 1.0 / gt_conn.expected_loc_interval
+        actual_loc_rate = gt_conn.loc_count / elapsed if elapsed > 0 else 0
+        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+
+        loc_rate_wrong = False
+        if gt_conn.expected_loc_interval >= 60:
+            # Idle: flag if rate is more than 3x expected (getting too many packets)
+            if actual_loc_rate > expected_loc_rate * 3:
+                loc_rate_wrong = True
+        else:
+            # Tracking: flag if rate is less than 0.3x expected (not enough packets)
+            if actual_loc_rate < expected_loc_rate * 0.3 and gt_conn.loc_count > 0:
+                loc_rate_wrong = True
+
+        if loc_rate_wrong:
+            if gt_conn.rate_retry_count < 2:
+                gt_conn.rate_retry_count += 1
+                if gt_conn.idle:
+                    cmds = ["TIMER,60,60#", "SUP,60#"]
+                else:
+                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+                log(f"[GT06] Rate mismatch for {label}: "
+                    f"expected {expected_loc_rate:.3f}/s, actual {actual_loc_rate:.3f}/s "
+                    f"({gt_conn.loc_count} LOC in {elapsed:.0f}s) — "
+                    f"retry {gt_conn.rate_retry_count}/2")
+                gt_conn.cmd_queue.clear()
+                gt_conn.cmd_pending = None
+                self._queue_commands(gt_conn, cmds)
+                gt_conn.rate_check_time = now
+                gt_conn.loc_count = 0
+                gt_conn.hbt_count = 0
+            else:
+                log(f"[GT06] Rate mismatch for {label} after 2 retries — disconnecting")
+                self._disconnect(fd)
+                return
+
+        # Check HBT rate — if no heartbeat for > 3x expected interval and we're getting LOC
+        if gt_conn.last_hbt_time > 0 and gt_conn.loc_count > 0:
+            hbt_gap = now - gt_conn.last_hbt_time
+            if hbt_gap > gt_conn.expected_hbt_interval * 3:
+                log(f"[GT06] No heartbeat from {label} for {hbt_gap:.0f}s — re-queuing HBT")
+                self._queue_commands(gt_conn, ["HBT,15,15#"])
+                gt_conn.last_hbt_time = now  # prevent repeated re-queuing
+
     def _process_frame(self, fd, frame):
         """Process a complete GT06 frame."""
         gt_conn = self.connections.get(fd)
@@ -765,20 +903,16 @@ class GT06Listener:
             if gt_conn.sailor_id in self.active_sailors:
                 # Admin explicitly started this device — resume active tracking
                 gt_conn.idle = False
-                cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+                cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#", "HBT,15,15#"]
+                self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 # Default to idle (including first-ever connection)
                 gt_conn.idle = True
                 self.idle_sailors.add(gt_conn.sailor_id)
-                cmds = ["TIMER,60,60#", "SUP,60#"]
-            for cmd in cmds:
-                self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
-            log(f"[GT06] Sent: {', '.join(cmds)} ({'active' if not gt_conn.idle else 'idle'})")
-
-            # Send HBT command to set heartbeat interval to 15 seconds
-            hbt_cmd = "HBT,15,15#"
-            self._send(gt_conn, gt06_make_command(hbt_cmd, gt_conn.next_cmd_serial()))
-            log(f"[GT06] Sent: {hbt_cmd}")
+                cmds = ["TIMER,60,60#", "SUP,60#", "HBT,15,15#"]
+                self._reset_rate_monitoring(gt_conn, 60)
+            self._queue_commands(gt_conn, cmds)
+            log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
 
             # Restore last known position from tracker and immediately update
             # idle/active state in current_positions.json so the UI reflects
@@ -794,15 +928,16 @@ class GT06Listener:
                     tracker.process_position(
                         sailor_id=gt_conn.sailor_id,
                         lat=gt_conn.last_lat, lon=gt_conn.last_lon,
-                        speed=0, heading=0, ts=int(time.time()),
+                        speed=0, heading=0, ts=existing.get("ts", int(time.time())),
                         assist=existing.get("ast", False),
                         battery=existing.get("bat", -1),
                         signal=existing.get("sig", -1),
                         role="sailor", version="gt06",
                         flags={}, src_ip=gt_conn.addr[0], source="GT06",
-                        nsats=0, charging=existing.get("chg", False),
+                        charging=existing.get("chg", False),
                         stopped=gt_conn.idle, idle=gt_conn.idle,
                         did=gt_conn.imei,
+                        skip_log=True,
                     )
 
         elif protocol in (0x12, 0x22):
@@ -817,6 +952,8 @@ class GT06Listener:
 
             if not loc["gps_valid"]:
                 return
+
+            gt_conn.loc_count += 1
 
             # GT06 reports speed as a single byte (integer km/h) which drops
             # to 0 at low speeds.  When reported speed is 0, estimate from
@@ -878,6 +1015,9 @@ class GT06Listener:
                 gt_conn.signal = hb["signal"]
             if "charging" in hb:
                 gt_conn.charging = hb["charging"]
+
+            gt_conn.hbt_count += 1
+            gt_conn.last_hbt_time = time.monotonic()
 
             bat_str = f"{gt_conn.battery}%" if gt_conn.battery >= 0 else "?"
             if gt_conn.charging:
@@ -971,19 +1111,21 @@ class GT06Listener:
                     )
 
         elif protocol == 0x15:
-            # Server command response — just log
+            # Server command response — clear pending, advance queue
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
             text = ""
             if len(data) >= 5:
                 text = " " + data[5:].decode("ascii", errors="replace")
-            log(f"[GT06] Command response from {label}:{text} ({data.hex()})")
+            log(f"[GT06] Command ACK from {label}:{text}")
+            gt_conn.cmd_pending = None
+            gt_conn.cmd_pending_frame = None
+            self._send_next_cmd(gt_conn)
 
     def send_command_to(self, sailor_id, cmd_str):
         """Send a command to a connected GT06 device by sailor_id."""
         for gt_conn in self.connections.values():
             if gt_conn.sailor_id == sailor_id:
-                self._send(gt_conn, gt06_make_command(cmd_str, gt_conn.next_cmd_serial()))
-                log(f"[GT06] Sent to {sailor_id}: {cmd_str}")
+                self._queue_commands(gt_conn, [cmd_str])
                 return True
         return False
 
@@ -992,8 +1134,8 @@ class GT06Listener:
         for gt_conn in self.connections.values():
             if gt_conn.sailor_id == sailor_id and gt_conn.assist_active:
                 gt_conn.assist_active = False
-                self._send(gt_conn, gt06_make_command("SENALM,OFF#", gt_conn.next_cmd_serial()))
-                log(f"[GT06] Cancelled assist for {sailor_id}, sent SENALM,OFF#")
+                self._queue_commands(gt_conn, ["SENALM,OFF#"])
+                log(f"[GT06] Cancelled assist for {sailor_id}")
                 return True
         return False
 
@@ -1014,37 +1156,33 @@ class GT06Listener:
         for gt_conn in self.connections.values():
             if gt_conn.sailor_id == sailor_id:
                 gt_conn.idle = idle
+                # Clear any pending commands from previous state
+                gt_conn.cmd_queue.clear()
+                gt_conn.cmd_pending = None
                 if idle:
                     cmds = ["TIMER,60,60#", "SUP,60#"]
+                    self._reset_rate_monitoring(gt_conn, 60)
                 else:
                     cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
-                for cmd in cmds:
-                    self._send(gt_conn, gt06_make_command(cmd, gt_conn.next_cmd_serial()))
+                    self._reset_rate_monitoring(gt_conn, self.interval)
+                self._queue_commands(gt_conn, cmds)
                 # Immediately update tracker so UI reflects idle/active state
-                if gt_conn.last_lat is not None:
-                    tracker = self.get_tracker(gt_conn.eid)
-                    if tracker:
-                        tracker.process_position(
-                            sailor_id=sailor_id,
-                            lat=gt_conn.last_lat,
-                            lon=gt_conn.last_lon,
-                            speed=0, heading=0,
-                            ts=int(time.time()),
-                            assist=gt_conn.assist_active,
-                            battery=gt_conn.battery,
-                            signal=gt_conn.signal,
-                            role="sailor",
-                            version="gt06",
-                            flags={},
-                            src_ip=gt_conn.addr[0],
-                            source="GT06",
-                            nsats=0,
-                            charging=gt_conn.charging,
-                            stopped=idle,
-                            idle=idle,
-                            did=gt_conn.imei,
-                        )
-                log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}: {', '.join(cmds)}")
+                # (direct metadata update to avoid advancing dedup timestamp)
+                tracker = self.get_tracker(gt_conn.eid)
+                if tracker:
+                    pt = tracker.position_tracker if hasattr(tracker, 'position_tracker') else tracker
+                    with pt._lock:
+                        existing = pt.current_positions.get(sailor_id)
+                        if existing:
+                            existing["stopped"] = idle
+                            existing["idle"] = idle
+                            now = time.time()
+                            existing["last_seen"] = now
+                            existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()
+                    if pt.positions_file:
+                        overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
+                        write_current_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
+                log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}")
                 return True
         # No active connection, but state is saved for reconnection
         log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
@@ -1114,7 +1252,7 @@ class GT06Listener:
 
         while True:
             try:
-                events = self.sel.select(timeout=60)
+                events = self.sel.select(timeout=5)
             except Exception:
                 continue
             for key, mask in events:
@@ -1125,6 +1263,18 @@ class GT06Listener:
                         log(f"[GT06] Accept error: {e}")
                 else:
                     self._on_readable(key.data)
+
+            # Periodic checks on all connections
+            now = time.monotonic()
+            for fd in list(self.connections):
+                gt_conn = self.connections.get(fd)
+                if gt_conn is None or gt_conn.sailor_id is None:
+                    continue
+                # Check SIOCOUTQ for pending commands
+                if gt_conn.cmd_pending:
+                    self._check_cmd_delivery(fd, gt_conn, now)
+                # Check LOC/HBT rates
+                self._check_rates(fd, gt_conn, now)
 
 
 class EventManager:

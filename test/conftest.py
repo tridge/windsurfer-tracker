@@ -373,6 +373,40 @@ class GT06Client:
                 cmds.append(cmd)
         return cmds
 
+    def send_command_ack(self, cmd_text=""):
+        """Send a 0x15 command response frame to ACK a server command."""
+        # data: content_len(1) + server_flag(4) + cmd_text
+        cmd_bytes = cmd_text.encode("ascii")
+        data = struct.pack(">B4s", len(cmd_bytes) + 4, b"\x00\x00\x00\x00") + cmd_bytes
+        frame = self._build_frame(0x15, data)
+        self.sock.sendall(frame)
+
+    def recv_all_queued_commands(self, initial_frames=None, timeout=0.5):
+        """Receive all queued commands, ACKing each one to advance the queue.
+
+        Args:
+            initial_frames: frames already received (e.g. from send_login())
+                that may contain command frames needing ACKs.
+            timeout: socket receive timeout per round.
+
+        Returns list of command text strings. Sends a 0x15 ACK for each
+        0x80 command frame to trigger the server to send the next queued command.
+        """
+        all_cmds = []
+        if initial_frames:
+            cmds = self.get_commands(initial_frames)
+            all_cmds.extend(cmds)
+            if cmds:
+                self.send_command_ack(cmds[-1])
+        while True:
+            frames = self._recv_frames(timeout=timeout)
+            cmds = self.get_commands(frames)
+            if not cmds:
+                break
+            all_cmds.extend(cmds)
+            self.send_command_ack(cmds[-1])
+        return all_cmds
+
     def drain(self, timeout=0.1):
         """Read and discard any pending data from the socket."""
         self.sock.settimeout(timeout)

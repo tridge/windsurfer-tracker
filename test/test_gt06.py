@@ -23,7 +23,7 @@ def _start_device(gt06_client, http_client, imei, sailor_id):
     """Login, send a location (to register), and admin-start the device."""
     gt06_client.send_login(imei)
     gt06_client.drain()
-    gt06_client.send_location()
+    gt06_client.send_location(minute=0, second=1)  # unique ts to avoid dedup with test body
     gt06_client.drain()
     time.sleep(0.2)
     http_client.post(
@@ -46,9 +46,9 @@ def test_login_response(gt06_client):
 
 
 def test_login_sends_commands(gt06_client):
-    """Login should trigger TIMER, SUP, and HBT commands."""
+    """Login should trigger TIMER, SUP, and HBT commands (queued sequentially)."""
     frames = gt06_client.send_login()
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
     cmd_text = " ".join(cmds)
     assert "TIMER," in cmd_text, f"Expected TIMER command, got: {cmds}"
     assert "HBT," in cmd_text, f"Expected HBT command, got: {cmds}"
@@ -57,7 +57,7 @@ def test_login_sends_commands(gt06_client):
 def test_login_defaults_to_idle(gt06_client):
     """First-ever login should default to idle (TIMER,60,60#)."""
     frames = gt06_client.send_login()
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
     assert "TIMER,60,60#" in cmds, f"Expected idle TIMER, got: {cmds}"
     assert "SUP,60#" in cmds, f"Expected idle SUP, got: {cmds}"
 
@@ -82,7 +82,7 @@ def test_location_appears_in_positions(gt06_client, http_client, server):
     imei = "863874081111111"
     _start_device(gt06_client, http_client, imei, "G111111")
 
-    gt06_client.send_location(lat=-36.85, lon=174.76, speed_kmh=15, heading=90)
+    gt06_client.send_location(lat=-36.85, lon=174.76, speed_kmh=15, heading=90, second=10)
     time.sleep(0.2)
 
     positions = _read_positions(server, eid=1)
@@ -98,7 +98,7 @@ def test_location_speed_converted_to_knots(gt06_client, http_client, server):
     imei = "863874081222222"
     _start_device(gt06_client, http_client, imei, "G222222")
 
-    gt06_client.send_location(speed_kmh=18)  # 18 km/h ~ 9.7 knots
+    gt06_client.send_location(speed_kmh=18, second=10)  # 18 km/h ~ 9.7 knots
     time.sleep(0.2)
 
     positions = _read_positions(server, eid=1)
@@ -172,8 +172,7 @@ def test_stop_sets_gt06_idle(gt06_client, http_client, server):
     )
     assert status == 200
 
-    frames = gt06_client._recv_frames(timeout=0.5)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands()
     assert "TIMER,60,60#" in cmds, f"Expected idle TIMER, got: {cmds}"
     assert "SUP,60#" in cmds, f"Expected idle SUP, got: {cmds}"
 
@@ -194,8 +193,7 @@ def test_start_sets_gt06_active(gt06_client, http_client, server):
     )
     assert status == 200
 
-    frames = gt06_client._recv_frames(timeout=0.5)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands()
     assert "TIMER,10,10#" in cmds, f"Expected active TIMER, got: {cmds}"
     assert "SUP,1#" in cmds, f"Expected active SUP, got: {cmds}"
 
@@ -221,7 +219,7 @@ def test_active_position_not_stopped(gt06_client, http_client, server):
     _start_device(gt06_client, http_client, imei, "G888888")
 
     # Send another location while active
-    gt06_client.send_location(lat=-36.83, lon=174.78)
+    gt06_client.send_location(lat=-36.83, lon=174.78, second=10)
     time.sleep(0.2)
 
     positions = _read_positions(server, eid=1)
@@ -235,7 +233,7 @@ def test_stop_immediately_updates_positions(gt06_client, http_client, server):
     imei = "863874081999999"
     _start_device(gt06_client, http_client, imei, "G999999")
 
-    gt06_client.send_location()
+    gt06_client.send_location(second=10)
     gt06_client.drain()
     time.sleep(0.2)
 
@@ -281,7 +279,7 @@ def test_sos_exits_idle(gt06_client, server):
 
     # Send SOS — should exit idle and send active TIMER commands
     frames = gt06_client.send_alarm(alarm_type="SOS", lat=-36.85, lon=174.76)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
     assert "TIMER,10,10#" in cmds, f"Expected active TIMER after SOS, got: {cmds}"
     assert "SUP,1#" in cmds, f"Expected active SUP after SOS, got: {cmds}"
 
@@ -354,7 +352,7 @@ def test_reconnect_stays_idle(gt06_client, server):
     gt06_client.connect()
 
     frames = gt06_client.send_login(imei)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
     assert "TIMER,60,60#" in cmds, f"Expected idle TIMER on reconnect, got: {cmds}"
 
 
@@ -368,7 +366,7 @@ def test_reconnect_stays_active(gt06_client, http_client, server):
     gt06_client.connect()
 
     frames = gt06_client.send_login(imei)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
     assert "TIMER,10,10#" in cmds, f"Expected active TIMER on reconnect, got: {cmds}"
     assert "SUP,1#" in cmds, f"Expected active SUP on reconnect, got: {cmds}"
 
@@ -382,7 +380,7 @@ def test_stop_all_includes_gt06(gt06_client, http_client, server):
     imei = "863874081300001"
     _start_device(gt06_client, http_client, imei, "G300001")
 
-    gt06_client.send_location()
+    gt06_client.send_location(second=10)
     gt06_client.drain()
     time.sleep(0.2)
 
@@ -393,8 +391,7 @@ def test_stop_all_includes_gt06(gt06_client, http_client, server):
     )
     assert status == 200
 
-    frames = gt06_client._recv_frames(timeout=0.5)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands()
     assert "TIMER,60,60#" in cmds, f"Expected idle TIMER from stop-all, got: {cmds}"
 
 
@@ -414,8 +411,7 @@ def test_start_all_includes_gt06(gt06_client, http_client, server):
     )
     assert status == 200
 
-    frames = gt06_client._recv_frames(timeout=0.5)
-    cmds = gt06_client.get_commands(frames)
+    cmds = gt06_client.recv_all_queued_commands()
     assert "TIMER,10,10#" in cmds, f"Expected active TIMER from start-all, got: {cmds}"
 
 
