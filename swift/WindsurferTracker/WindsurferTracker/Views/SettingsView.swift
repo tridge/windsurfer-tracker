@@ -113,6 +113,12 @@ struct SettingsView: View {
                     Text("Vibrates each minute to remind you the tracker is running")
                         .font(.caption)
                         .foregroundColor(.gray)
+
+                    Toggle("Volume Button Assist", isOn: $viewModel.volumeAssist)
+
+                    Text("Press volume up+down together to toggle assist")
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
 
                 // Role Section - less commonly changed

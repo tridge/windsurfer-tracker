@@ -391,6 +391,13 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Check if volume button assist is enabled. Defaults to false.
+     */
+    private fun isVolumeAssistEnabled(): Boolean {
+        return getPrefs().getBoolean("volume_assist", false)
+    }
+
+    /**
      * Save last position to device-protected storage so BootReceiver can send
      * a stop packet on shutdown even if the service is killed first.
      */
@@ -623,6 +630,8 @@ class TrackerService : LifecycleService() {
      * multiple mechanisms fire for the same combo.
      */
     private fun setupVolumeAssist() {
+        if (!isVolumeAssistEnabled()) return
+
         // 1. AccessibilityService callback (sideload only — not available in Play Store build)
         if (BuildConfig.ENABLE_SELF_UPDATE) {
             VolumeKeyService.onVolumeComboDetected = { handleVolumeCombo() }
@@ -750,6 +759,15 @@ class TrackerService : LifecycleService() {
         } else {
             Log.i(TAG, "Registered volume combo: MediaSession + broadcast")
         }
+    }
+
+    /**
+     * Re-evaluate volume assist setting. Call after preferences change.
+     * Tears down any existing volume assist, then sets up again if enabled.
+     */
+    fun updateVolumeAssist() {
+        teardownVolumeAssist()
+        setupVolumeAssist()
     }
 
     private fun teardownVolumeAssist() {

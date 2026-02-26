@@ -33,6 +33,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var password: String
     @Published public var eventId: Int
     @Published public var trackerBeep: Bool
+    @Published public var volumeAssist: Bool
 
     // MARK: - HealthKit
 
@@ -75,6 +76,7 @@ public class TrackerViewModel: ObservableObject {
         self.password = preferences.password
         self.eventId = preferences.eventId
         self.trackerBeep = preferences.trackerBeep
+        self.volumeAssist = preferences.volumeAssist
 
         setupBindings()
         setupVolumeAssist()
@@ -138,6 +140,20 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        $volumeAssist
+            .dropFirst()
+            .sink { [weak self] value in
+                guard let self = self else { return }
+                self.preferences.volumeAssist = value
+                // Start/stop volume assist dynamically when setting changes mid-session
+                if value && (self.isTracking || self.isIdleMode) {
+                    self.volumeButtonAssist.start()
+                } else {
+                    self.volumeButtonAssist.stop()
+                }
+            }
+            .store(in: &cancellables)
+
         // Subscribe to tracker state
         TrackerService.shared.statePublisher
             .receive(on: DispatchQueue.main)
@@ -146,8 +162,8 @@ public class TrackerViewModel: ObservableObject {
                 self.isTracking = state.isTracking
                 self.isIdleMode = state.isIdleMode
 
-                // Start/stop volume button assist with tracking
-                if state.isTracking || state.isIdleMode {
+                // Start/stop volume button assist with tracking (only if enabled)
+                if self.preferences.volumeAssist && (state.isTracking || state.isIdleMode) {
                     self.volumeButtonAssist.start()
                 } else {
                     self.volumeButtonAssist.stop()

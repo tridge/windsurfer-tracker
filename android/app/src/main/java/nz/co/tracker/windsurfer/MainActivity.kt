@@ -551,6 +551,12 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             return
         }
 
+        // Skip prompt if volume button assist is disabled
+        if (!getPrefs().getBoolean("volume_assist", false)) {
+            startTrackerService()
+            return
+        }
+
         if (VolumeKeyService.isEnabled(this)) {
             startTrackerService()
             return
@@ -1042,6 +1048,21 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
             setPadding(48, 0, 0, 16)
         }
 
+        // Volume button assist checkbox
+        val volumeAssistCheckbox = android.widget.CheckBox(this).apply {
+            text = "Volume Button Assist"
+            isChecked = prefs.getBoolean("volume_assist", false)
+            setTextColor(0xFF000000.toInt())
+            textSize = 14f
+            setPadding(0, 8, 0, 0)
+        }
+        val volumeAssistHint = android.widget.TextView(this).apply {
+            text = "Press volume up+down together to toggle assist"
+            setTextColor(0xFF666666.toInt())
+            textSize = 12f
+            setPadding(48, 0, 0, 16)
+        }
+
         // Auto-start on boot checkbox
         val autoStartCheckbox = android.widget.CheckBox(this).apply {
             text = "Auto-Start on Boot"
@@ -1087,6 +1108,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         layout.addView(eventLoadingText)
         layout.addView(trackerBeepCheckbox)
         layout.addView(trackerBeepHint)
+        layout.addView(volumeAssistCheckbox)
+        layout.addView(volumeAssistHint)
         layout.addView(autoStartCheckbox)
         layout.addView(autoStartHint)
         layout.addView(roleLabel)
@@ -1158,6 +1181,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     fun saveSettings() {
                         // Validation passed, save settings
                         val newTrackerBeep = trackerBeepCheckbox.isChecked
+                        val newVolumeAssist = volumeAssistCheckbox.isChecked
                         val newAutoStartOnBoot = autoStartCheckbox.isChecked
                         val newRole = roleValues[selectedRoleIndex]
                         val newServerHost = serverInput.text.toString()
@@ -1171,6 +1195,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                             putInt("event_id", selectedEventId)
                             putString("password", password)
                             putBoolean("tracker_beep", newTrackerBeep)
+                            putBoolean("volume_assist", newVolumeAssist)
                             putBoolean("auto_start_on_boot", newAutoStartOnBoot)
                             // Save password per event for quick switching
                             putString("event_password_$selectedEventId", password)
@@ -1192,6 +1217,9 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         // Update the idle screen display to keep it in sync
                         binding.tvIdleSailorName.text = if (sailorId.isNotEmpty()) sailorId else "(not set)"
                         updateIdleScreen()  // Update event name and live tracking link
+
+                        // Re-evaluate volume assist (enable/disable immediately)
+                        trackerService?.updateVolumeAssist()
 
                         // Auto-restart tracking if any settings changed while tracking
                         val isTracking = trackerService?.isTracking() == true
