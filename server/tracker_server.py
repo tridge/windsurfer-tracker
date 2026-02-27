@@ -2841,7 +2841,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not self._check_event_admin_auth(eid):
                 self._send_json({"error": "Unauthorized"}, 401)
                 return
-            from urllib.parse import unquote, parse_qs
+            from urllib.parse import unquote
             user_id = unquote(subpath[len('/admin/gt06-cmd/'):])
             if not user_id:
                 self._send_json({"error": "User ID required"}, 400)
