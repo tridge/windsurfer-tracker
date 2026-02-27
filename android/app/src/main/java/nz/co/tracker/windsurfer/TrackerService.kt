@@ -1677,6 +1677,14 @@ class TrackerService : LifecycleService() {
             telephonyManager.signalStrength?.level ?: -1
         } catch (e: Exception) { -1 }
 
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isPowerSaveMode = powerManager.isPowerSaveMode
+        val isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
+        val flags = JSONObject().apply {
+            put("ps", isPowerSaveMode as Boolean)
+            put("bo", isBatteryOptIgnored as Boolean)
+        }
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("did", deviceId)
@@ -1691,6 +1699,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("nsats", 0)
             put("role", getCurrentRole())
+            put("flg", flags)
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             if (currentPassword.isNotEmpty()) {

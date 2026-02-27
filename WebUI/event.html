@@ -3999,8 +3999,8 @@
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
                     Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
                     Signal: ${sigStr}${heartRateLine}${nsatsLine}${hacLine}<br>
-                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD) ? ' <span style="color:#f97316;font-weight:bold">BADGPS</span>' : ''}<br>
-                    Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${powerSaveWarning}${batOptWarning}
+                    Updated: ${timeAgo(sailor.last_seen)}${sailor.idle ? ' <span style="color:#2563eb;font-weight:bold">IDLE</span>' : sailor.stopped ? ' <span style="color:#c00;font-weight:bold">STOPPED</span>' : (sailor.nsats === 0) ? ' <span style="color:#d97706;font-weight:bold">NOGPS</span>' + powerSaveWarning + batOptWarning : (sailor.hac > ACCURACY_BADGE_THRESHOLD) ? ' <span style="color:#f97316;font-weight:bold">BADGPS</span>' : ''}<br>
+                    Version: <span style="color:#666;font-size:11px">${versionStr}</span>${osLine}${samplingStr}${sailor.nsats === 0 ? '' : powerSaveWarning + batOptWarning}
                     <div class="popup-checkbox">
                         <label>
                             <input type="checkbox" ${trackChecked} onchange="toggleTrack('${id}', this.checked)">

@@ -1468,6 +1468,11 @@ class TrackerService : LifecycleService() {
             telephonyManager.signalStrength?.level ?: -1
         } catch (e: Exception) { -1 }
 
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val flags = JSONObject().apply {
+            put("ps", powerManager.isPowerSaveMode)
+        }
+
         val packet = JSONObject().apply {
             put("id", sailorId)
             put("did", deviceId)
@@ -1481,6 +1486,7 @@ class TrackerService : LifecycleService() {
             put("sig", signalLevel)
             put("nsats", 0)
             put("role", role)
+            put("flg", flags)
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             if (password.isNotEmpty()) {
