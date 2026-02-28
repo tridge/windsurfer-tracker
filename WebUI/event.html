@@ -3886,8 +3886,8 @@
 
             // Update or create markers
             for (const [id, sailor] of Object.entries(visibleSailors)) {
-                // Skip idle or NOGPS users with no valid position (never tracked)
-                if ((sailor.idle || (sailor.nsats === 0 && !sailor.idle)) && (sailor.lat === undefined || sailor.lon === undefined)) {
+                // Skip users with no valid position (never tracked, or exact 0/0)
+                if (sailor.lat === undefined || sailor.lon === undefined || (sailor.lat === 0 && sailor.lon === 0)) {
                     if (sailorMarkers[id]) {
                         map.removeLayer(sailorMarkers[id]);
                         delete sailorMarkers[id];
