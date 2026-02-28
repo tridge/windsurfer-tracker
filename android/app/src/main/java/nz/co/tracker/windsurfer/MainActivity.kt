@@ -124,7 +124,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
             Toast.makeText(this, "Battery optimization still enabled - tracking may be unreliable", Toast.LENGTH_LONG).show()
         }
-        checkAccessibilityService()
+        checkPowerSaveMode()
     }
 
     private val accessibilitySettingsRequest = registerForActivityResult(
@@ -515,11 +515,52 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to open battery optimization settings", e)
                         Toast.makeText(this, "Please manually disable battery optimization in Settings", Toast.LENGTH_LONG).show()
-                        checkAccessibilityService()
+                        checkPowerSaveMode()
                     }
                 }
                 .setNegativeButton("SKIP") { _, _ ->
                     Toast.makeText(this, "Tracking may be unreliable with battery optimization enabled", Toast.LENGTH_LONG).show()
+                    checkPowerSaveMode()
+                }
+                .setCancelable(false)
+                .create()
+                .apply {
+                    setOnShowListener {
+                        getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+                            setTextColor(0xFFFFFFFF.toInt())
+                            setBackgroundColor(0xFF00AA00.toInt())
+                            textSize = 18f
+                        }
+                        getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+                            setTextColor(0xFF000000.toInt())
+                            setBackgroundColor(0xFFCCCCCC.toInt())
+                            textSize = 18f
+                        }
+                    }
+                }
+                .show()
+        } else {
+            checkPowerSaveMode()
+        }
+    }
+
+    private fun checkPowerSaveMode() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (powerManager.isPowerSaveMode) {
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
+                .setTitle("Power Saver Enabled")
+                .setMessage("Power Saver mode reduces GPS accuracy and may cause sporadic position updates.\n\nPlease turn off Power Saver for reliable tracking.")
+                .setPositiveButton("SETTINGS") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to open battery saver settings", e)
+                        Toast.makeText(this, "Please disable Power Saver in Settings > Battery", Toast.LENGTH_LONG).show()
+                    }
+                    checkAccessibilityService()
+                }
+                .setNegativeButton("SKIP") { _, _ ->
+                    Toast.makeText(this, "Tracking may be unreliable with Power Saver enabled", Toast.LENGTH_LONG).show()
                     checkAccessibilityService()
                 }
                 .setCancelable(false)

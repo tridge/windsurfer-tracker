@@ -3,6 +3,7 @@ import SwiftUI
 /// Active tracking status display - matches Android layout
 struct TrackingView: View {
     @EnvironmentObject var viewModel: TrackerViewModel
+    @ObservedObject private var batteryMonitor = BatteryMonitor.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -152,6 +153,34 @@ struct TrackingView: View {
             }
             .padding(16)
 
+            // Warning banners for settings that cause unreliable tracking
+            VStack(spacing: 8) {
+                if !viewModel.hasAlwaysPermission && viewModel.locationAuthStatus == .authorizedWhenInUse {
+                    WarningBanner(
+                        icon: "location.slash",
+                        title: "Location set to 'When In Use'",
+                        subtitle: "Change to 'Always' in Settings for reliable background tracking"
+                    )
+                }
+
+                if viewModel.backgroundRefreshDisabled {
+                    WarningBanner(
+                        icon: "arrow.clockwise.circle",
+                        title: "Background App Refresh disabled",
+                        subtitle: "Enable in Settings for reliable tracking"
+                    )
+                }
+
+                if batteryMonitor.isLowPowerMode {
+                    WarningBanner(
+                        icon: "battery.25",
+                        title: "Low Power Mode enabled",
+                        subtitle: "May reduce GPS accuracy and background activity"
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+
             Spacer(minLength: 16)
 
             // Assist button - large and prominent (only show if assist is enabled for this event)
@@ -254,6 +283,44 @@ struct TrackingView: View {
             return Color(red: 0.8, green: 0.4, blue: 0)  // Dark orange
         case .poor:
             return Color(red: 0.8, green: 0, blue: 0)    // Dark red
+        }
+    }
+}
+
+// MARK: - Warning Banner
+
+/// Tappable warning banner that opens Settings
+private struct WarningBanner: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.orange)
+
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(8)
         }
     }
 }

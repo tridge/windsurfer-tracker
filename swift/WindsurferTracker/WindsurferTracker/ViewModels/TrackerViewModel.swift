@@ -53,6 +53,7 @@ public class TrackerViewModel: ObservableObject {
     // MARK: - Authorization
 
     @Published public var locationAuthStatus: CLAuthorizationStatus = .notDetermined
+    @Published public var backgroundRefreshDisabled: Bool = false
 
     // MARK: - Private
 
@@ -80,6 +81,9 @@ public class TrackerViewModel: ObservableObject {
 
         setupBindings()
         setupVolumeAssist()
+
+        // Initial background refresh status
+        backgroundRefreshDisabled = UIApplication.shared.backgroundRefreshStatus != .available
 
         // Auto-show settings if ID or password is missing
         if sailorId.isEmpty || password.isEmpty {
@@ -302,6 +306,14 @@ public class TrackerViewModel: ObservableObject {
             .store(in: &cancellables)
 
         locationAuthStatus = locationManager.authorizationStatus
+
+        // Subscribe to background refresh status changes
+        NotificationCenter.default.publisher(for: UIApplication.backgroundRefreshStatusDidChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.backgroundRefreshDisabled = UIApplication.shared.backgroundRefreshStatus != .available
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Volume Button Assist
