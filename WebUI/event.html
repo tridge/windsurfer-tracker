@@ -1608,6 +1608,9 @@
         const ACCURACY_BADGE_THRESHOLD = parseInt(urlParams.get('accuracy')) || 100;
         const ACCURACY_CIRCLE_THRESHOLD = ACCURACY_BADGE_THRESHOLD / 2;
 
+        // Minimum app version - trackers below this show OLDVER badge
+        const min_version_warning = "1.10.33";
+
         // Data paths for this event (positions, logs, etc.)
         const DATA_BASE = `${EVENT_ID}/`;
 
@@ -3625,7 +3628,26 @@
             if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
             return `${Math.floor(seconds / 3600)}h ago`;
         }
-        
+
+        // Check if a version string is older than the minimum required version
+        function isOldVersion(verStr, minVersion) {
+            if (!verStr) return false;
+            // Non-app sources should never be flagged
+            if (/^(gt06|gpx-|fit-|test_client)/.test(verStr)) return false;
+            // Extract first semver (major.minor.patch) from the string
+            const m = verStr.match(/(\d+)\.(\d+)\.(\d+)/);
+            if (!m) return false;
+            const mMin = minVersion.match(/(\d+)\.(\d+)\.(\d+)/);
+            if (!mMin) return false;
+            const v = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
+            const mv = [parseInt(mMin[1]), parseInt(mMin[2]), parseInt(mMin[3])];
+            for (let i = 0; i < 3; i++) {
+                if (v[i] < mv[i]) return true;
+                if (v[i] > mv[i]) return false;
+            }
+            return false;  // equal
+        }
+
         // Update sailor list panel
         function updateSailorList(sailors) {
             if (!sailors || Object.keys(sailors).length === 0) {
@@ -3721,13 +3743,16 @@
                     const displayName = sailor.displayid || sailor.id;
                     const idSuffix = (adminMode && sailor.displayid) ? ` <span style="color:#999;font-size:10px">[${sailor.id}]</span>` : '';
                     const hiddenBadge = sailor.hidden ? '<span style="background:#888;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">HIDDEN</span>' : '';
+                    const oldVerBadge = isOldVersion(sailor.ver, min_version_warning)
+                        ? '<span style="background:#7c3aed;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;" title="Version ' + (sailor.ver || 'unknown') + ' < ' + min_version_warning + '">OLDVER</span>'
+                        : '';
                     const rowStyle = sailor.hidden ? 'opacity:0.6;' : '';
 
                     return `
                         <div class="sailor-item" style="${rowStyle}" onclick="centerOnSailor('${sailor.id}')">
                             <div class="status-dot ${statusClass}"></div>
                             <div class="sailor-info">
-                                <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}
+                                <span class="sailor-id">${displayName}</span>${idSuffix}${hiddenBadge}${warningBadge}${oldVerBadge}
                                 ${sailor.ast ? '<span class="assist-badge">ASSIST</span>' : ''}
                                 ${sailor.idle ? '<span style="background:#2563eb;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">IDLE</span>' : ''}
                                 ${(sailor.nsats === 0 && !sailor.idle && !sailor.stopped) ? '<span style="background:#d97706;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">NOGPS</span>' : (sailor.hac > ACCURACY_BADGE_THRESHOLD && !sailor.idle && !sailor.stopped) ? '<span style="background:#f97316;color:white;padding:1px 4px;border-radius:3px;font-size:9px;margin-left:4px;">~' + Math.round(sailor.hac) + 'm</span>' : ''}

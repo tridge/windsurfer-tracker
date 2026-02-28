@@ -499,7 +499,7 @@ def write_log_entry(f, entity: 'SimulatedEntity', ts: int):
         "bat": entity.battery,
         "sig": entity.signal,
         "role": entity.role,
-        "ver": GIT_HASH
+        "ver": f"test_client({GIT_HASH})"
     }
     if entity.heart_rate > 0:
         entry["hr"] = entity.heart_rate
@@ -526,7 +526,7 @@ def write_log_entry_1hz(f, entity: 'SimulatedEntity', pos_buffer: List[Tuple[int
         "bat": entity.battery,
         "sig": entity.signal,
         "role": entity.role,
-        "ver": GIT_HASH,
+        "ver": f"test_client({GIT_HASH})",
         "hac": round(random.uniform(100, 500), 1) if entity.poor_accuracy else 5.0
     }
     if entity.poor_accuracy:
@@ -982,7 +982,7 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
         "bat": entity.battery,
         "sig": entity.signal,
         "role": entity.role,
-        "ver": GIT_HASH
+        "ver": f"test_client({GIT_HASH})"
     }
     if entity.poor_accuracy:
         packet["nsats"] = random.randint(2, 4)  # Low sat count for poor accuracy
@@ -1030,7 +1030,7 @@ def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: Simulated
         "bat": entity.battery,
         "sig": entity.signal,
         "role": entity.role,
-        "ver": GIT_HASH,
+        "ver": f"test_client({GIT_HASH})",
         "hr": entity.heart_rate   # Heart rate included in 1Hz packets
     }
     if entity.poor_accuracy:
