@@ -1449,6 +1449,20 @@ class EventManager:
 
 def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None, position_tails: dict | None = None):
     """Write current positions to a JSON file for web UI consumption."""
+    # Deduplicate did entries: if two positions share the same did,
+    # clear did from the older one (keep position, just remove did link)
+    did_map: dict[str, list[tuple[str, float]]] = {}
+    for sid, pos in positions.items():
+        did = pos.get("did")
+        if did:
+            did_map.setdefault(did, []).append((sid, pos.get("last_seen", 0)))
+    for did, entries in did_map.items():
+        if len(entries) > 1:
+            entries.sort(key=lambda x: x[1], reverse=True)
+            for sid, last_seen in entries[1:]:
+                del positions[sid]["did"]
+                log(f"[CLEANUP] Cleared duplicate did={did} from {sid} (keeping in {entries[0][0]})")
+
     # Apply user overrides for display (name, role, hidden, info)
     display_positions = {}
     for sailor_id, pos in positions.items():
@@ -1462,6 +1476,8 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
                 display_pos['role'] = override['role']
             if override.get('hidden'):
                 display_pos['hidden'] = True
+            else:
+                display_pos.pop('hidden', None)
             if 'info' in override:
                 display_pos['info'] = override['info']
         # Add position tail if available (last 20 seconds of positions)
@@ -1664,6 +1680,8 @@ class PositionTracker:
                         "last_seen_iso": pos.get("last_seen_iso", ""),
                         "src_ip": pos.get("src_ip", "")
                     }
+                    if "did" in pos:
+                        self.current_positions[sailor_id]["did"] = pos["did"]
                     if "chg" in pos:
                         self.current_positions[sailor_id]["chg"] = pos["chg"]
                     # Restore timestamp and sq tracking for duplicate detection
@@ -3154,7 +3172,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         elif subpath.startswith('/admin/user/'):
             # Create or update a user override for this event
-            user_id = subpath[len('/admin/user/'):]
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/user/'):])
             if not user_id:
                 self._send_json({"error": "User ID required"}, 400)
                 return
@@ -3437,7 +3456,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True})
 
         elif subpath.startswith('/admin/user/'):
-            user_id = subpath[len('/admin/user/'):]
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/user/'):])
             if not user_id:
                 self._send_json({"error": "User ID required"}, 400)
                 return
@@ -3620,7 +3640,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         elif path.startswith('/api/admin/user/'):
             # Create or update a user override
-            user_id = path[len('/api/admin/user/'):]
+            from urllib.parse import unquote
+            user_id = unquote(path[len('/api/admin/user/'):])
             if not user_id:
                 self._send_json({"error": "User ID required"}, 400)
                 return
@@ -4154,7 +4175,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         elif path.startswith('/api/admin/user/'):
             # Delete a user override
-            user_id = path[len('/api/admin/user/'):]
+            from urllib.parse import unquote
+            user_id = unquote(path[len('/api/admin/user/'):])
             if not user_id:
                 self._send_json({"error": "User ID required"}, 400)
                 return
@@ -4279,6 +4301,7 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
             for tb_line in tb_lines:
                 log(f"[COMPRESS]   {tb_line}")
         time.sleep(interval)
+
 
 
 def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
@@ -4505,6 +4528,7 @@ def run_server(port: int, log_file: Path | None, positions_file: Path | None, lo
             name="midnight-clearer"
         )
         midnight_thread.start()
+
 
     # Open legacy log file if specified
     log_fh = None
