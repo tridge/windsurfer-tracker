@@ -1027,14 +1027,18 @@ class GT06Listener:
             log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}{' (idle)' if gt_conn.idle else ''}")
             self._send(gt_conn, gt06_make_response(protocol, serial))
 
-            # When idle and we have a last known position, send status to tracker
-            if gt_conn.idle and gt_conn.sailor_id and gt_conn.last_lat is not None:
+            # Update tracker on heartbeat only when GPS is stale (no LOC for 15s+)
+            # to avoid overwriting satellite/position data from recent LOC packets
+            gps_stale = gt_conn.last_ts is None or (time.time() - gt_conn.last_ts) >= 15
+            if gt_conn.sailor_id and gps_stale:
                 tracker = self.get_tracker(gt_conn.eid)
                 if tracker:
+                    lat = gt_conn.last_lat if gt_conn.last_lat is not None else 0.0
+                    lon = gt_conn.last_lon if gt_conn.last_lon is not None else 0.0
                     tracker.process_position(
                         sailor_id=gt_conn.sailor_id,
-                        lat=gt_conn.last_lat,
-                        lon=gt_conn.last_lon,
+                        lat=lat,
+                        lon=lon,
                         speed=0, heading=0,
                         ts=int(time.time()),
                         assist=gt_conn.assist_active,
@@ -1047,8 +1051,8 @@ class GT06Listener:
                         source="GT06",
                         nsats=0,
                         charging=gt_conn.charging,
-                        stopped=True,
-                        idle=True,
+                        stopped=gt_conn.idle,
+                        idle=gt_conn.idle,
                         did=gt_conn.imei,
                     )
 
