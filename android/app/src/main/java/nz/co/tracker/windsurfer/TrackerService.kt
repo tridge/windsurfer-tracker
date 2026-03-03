@@ -375,6 +375,17 @@ class TrackerService : LifecycleService() {
     }
 
     /**
+     * Check if power cable is connected via ACTION_BATTERY_CHANGED sticky intent.
+     * Uses EXTRA_PLUGGED (cable connected) rather than EXTRA_STATUS (battery charging)
+     * because some devices report NOT_CHARGING even when plugged in.
+     */
+    private fun isChargingFromIntent(): Boolean {
+        val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        return plugged != 0
+    }
+
+    /**
      * Get the current event ID from SharedPreferences.
      * This is read on each send so settings changes take effect immediately.
      * Defaults to 1 for backwards compatibility.
@@ -1631,7 +1642,7 @@ class TrackerService : LifecycleService() {
             put("ts", System.currentTimeMillis() / 1000)
             put("idle", true)
             put("bat", batteryPercent)
-            put("chg", batteryManager.isCharging)
+            put("chg", isChargingFromIntent())
             put("sig", signalLevel)
             put("role", getCurrentRole())
             put("ver", BuildConfig.VERSION_STRING)
@@ -1695,7 +1706,7 @@ class TrackerService : LifecycleService() {
             put("hdg", 0)
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
-            put("chg", batteryManager.isCharging)
+            put("chg", isChargingFromIntent())
             put("sig", signalLevel)
             put("nsats", 0)
             put("role", getCurrentRole())
@@ -1763,7 +1774,7 @@ class TrackerService : LifecycleService() {
             put("hdg", heading)
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
-            put("chg", batteryManager.isCharging)
+            put("chg", isChargingFromIntent())
             put("sig", signalLevel)
             put("role", getCurrentRole())
             put("ver", BuildConfig.VERSION_STRING)
@@ -1842,7 +1853,7 @@ class TrackerService : LifecycleService() {
         // Get battery level and charging state
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val isCharging = batteryManager.isCharging
+        val isCharging = isChargingFromIntent()
 
         // Calculate battery drain rate (%/hr) - need at least 5 minutes of tracking
         var drainRate: Double? = null
@@ -1999,7 +2010,7 @@ class TrackerService : LifecycleService() {
         // Get battery level
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryPercent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val isCharging = batteryManager.isCharging
+        val isCharging = isChargingFromIntent()
 
         // Calculate battery drain rate (%/hr) - need at least 5 minutes of tracking
         var drainRate: Double? = null
