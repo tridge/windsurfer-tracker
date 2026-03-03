@@ -63,9 +63,14 @@
             font-size: 17px;
             font-weight: 600;
         }
-        .race-header .start-time {
+        .race-header .race-time-info {
             font-size: 13px;
             opacity: 0.85;
+            text-align: right;
+        }
+        .race-header .race-duration {
+            font-size: 12px;
+            opacity: 0.7;
         }
 
         .result-row {
@@ -203,6 +208,16 @@ function formatTime(ts) {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDuration(sec) {
+    if (!sec || sec <= 0) return '';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
 function esc(str) {
     const d = document.createElement('div');
     d.textContent = str;
@@ -240,10 +255,20 @@ async function loadResults() {
         const finishers = (race.finishers || []).filter(f => f.status === 'finished');
         const dnfs = (race.finishers || []).filter(f => f.status === 'dnf');
 
+        let timeInfo = '';
+        if (!race.start_ts) {
+            timeInfo = 'Not started';
+        } else if (race.end_ts) {
+            const dur = race.end_ts - race.start_ts;
+            timeInfo = `${formatTime(race.start_ts)} - ${formatTime(race.end_ts)}<div class="race-duration">${formatDuration(dur)}</div>`;
+        } else {
+            timeInfo = `${formatTime(race.start_ts)} - In progress`;
+        }
+
         html += `<div class="race-card">
             <div class="race-header">
                 <h2>${esc(race.name)}</h2>
-                <span class="start-time">${race.start_ts ? formatTime(race.start_ts) : 'Not started'}</span>
+                <span class="race-time-info">${timeInfo}</span>
             </div>`;
 
         if (finishers.length === 0 && dnfs.length === 0) {

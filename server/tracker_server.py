@@ -2299,6 +2299,39 @@ def save_user_overrides(users_file: Path, overrides: dict[str, dict]):
     log(f"[ADMIN] Saved user overrides: {len(overrides)} users")
 
 
+def load_races(data_dir: Path) -> tuple[int, list]:
+    """Load races from results.jsonl. Returns (next_id, races_list)."""
+    races_file = data_dir / "results.jsonl"
+    if not races_file.exists():
+        return 1, []
+    try:
+        with open(races_file, 'r') as f:
+            lines = f.read().strip().split('\n')
+        if not lines or not lines[0]:
+            return 1, []
+        header = json.loads(lines[0])
+        next_id = header.get('next_id', 1)
+        races = []
+        for line in lines[1:]:
+            if line.strip():
+                races.append(json.loads(line))
+        return next_id, races
+    except Exception as e:
+        log(f"Error loading races from {races_file}: {e}")
+        return 1, []
+
+
+def save_races(data_dir: Path, next_id: int, races: list):
+    """Save races to results.jsonl atomically."""
+    races_file = data_dir / "results.jsonl"
+    tmp_file = races_file.with_suffix('.tmp')
+    with open(tmp_file, 'w') as f:
+        f.write(json.dumps({"next_id": next_id}) + '\n')
+        for race in races:
+            f.write(json.dumps(race) + '\n')
+    tmp_file.rename(races_file)
+
+
 def get_user_override(user_overrides: dict, sailor_id: str, did: str | None = None) -> dict | None:
     """Look up user override: check did:XXX first, then sailor_id."""
     if not user_overrides:
@@ -2796,6 +2829,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"GT06 device {user_id} not connected"}, 404)
             else:
                 self._send_json({"error": "GT06 listener not running"}, 404)
+
+        elif subpath == '/races':
+            # Return all races for this event (public)
+            tracker = get_event_tracker(eid)
+            if tracker:
+                next_id, races = load_races(tracker.data_dir)
+                self._send_json({"races": races})
+            else:
+                self._send_json({"races": []})
 
         else:
             self._send_json({"error": "Not found"}, 404)
@@ -3353,6 +3395,183 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath == '/admin/races':
+            # Create a new race
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                name = str(data.get('name', '')).strip()
+                if not name:
+                    self._send_json({"error": "Race name required"}, 400)
+                    return
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = {"id": next_id, "name": name, "start_ts": None, "end_ts": None, "finishers": []}
+                races.append(race)
+                save_races(tracker.data_dir, next_id + 1, races)
+                log(f"[EVENT {eid}] Race created: {name} (id={next_id})")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif re.match(r'^/admin/races/\d+/start$', subpath):
+            # Set race start time
+            race_id = int(subpath.split('/')[3])
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                start_ts = data.get('start_ts')
+                if start_ts is not None:
+                    start_ts = float(start_ts)
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = next((r for r in races if r['id'] == race_id), None)
+                if not race:
+                    self._send_json({"error": f"Race {race_id} not found"}, 404)
+                    return
+
+                race['start_ts'] = start_ts
+                save_races(tracker.data_dir, next_id, races)
+                log(f"[EVENT {eid}] Race {race_id} start set to {start_ts}")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif re.match(r'^/admin/races/\d+/end$', subpath):
+            # Set race end time
+            race_id = int(subpath.split('/')[3])
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                end_ts = data.get('end_ts')
+                if end_ts is not None:
+                    end_ts = float(end_ts)
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = next((r for r in races if r['id'] == race_id), None)
+                if not race:
+                    self._send_json({"error": f"Race {race_id} not found"}, 404)
+                    return
+
+                race['end_ts'] = end_ts
+                save_races(tracker.data_dir, next_id, races)
+                log(f"[EVENT {eid}] Race {race_id} end set to {end_ts}")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif re.match(r'^/admin/races/\d+/finish$', subpath):
+            # Record a finish
+            race_id = int(subpath.split('/')[3])
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                sailor_id = str(data.get('sailor_id', '')).strip()
+                finish_ts = float(data.get('finish_ts', 0))
+                if not sailor_id:
+                    self._send_json({"error": "sailor_id required"}, 400)
+                    return
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = next((r for r in races if r['id'] == race_id), None)
+                if not race:
+                    self._send_json({"error": f"Race {race_id} not found"}, 404)
+                    return
+
+                # Check for duplicate
+                if any(f['sailor_id'] == sailor_id for f in race['finishers']):
+                    self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
+                    return
+
+                race['finishers'].append({
+                    "sailor_id": sailor_id,
+                    "finish_ts": finish_ts,
+                    "status": "finished"
+                })
+                save_races(tracker.data_dir, next_id, races)
+                log(f"[EVENT {eid}] Race {race_id}: {sailor_id} finished at {finish_ts}")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif re.match(r'^/admin/races/\d+/dnf$', subpath):
+            # Mark sailor as DNF
+            race_id = int(subpath.split('/')[3])
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                sailor_id = str(data.get('sailor_id', '')).strip()
+                if not sailor_id:
+                    self._send_json({"error": "sailor_id required"}, 400)
+                    return
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = next((r for r in races if r['id'] == race_id), None)
+                if not race:
+                    self._send_json({"error": f"Race {race_id} not found"}, 404)
+                    return
+
+                # Check for duplicate
+                if any(f['sailor_id'] == sailor_id for f in race['finishers']):
+                    self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
+                    return
+
+                race['finishers'].append({
+                    "sailor_id": sailor_id,
+                    "finish_ts": None,
+                    "status": "dnf"
+                })
+                save_races(tracker.data_dir, next_id, races)
+                log(f"[EVENT {eid}] Race {race_id}: {sailor_id} DNF")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -3476,6 +3695,53 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+
+        elif re.match(r'^/admin/races/\d+$', subpath):
+            # Delete a race
+            race_id = int(subpath.split('/')[3])
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": "Could not get event tracker"}, 500)
+                return
+
+            next_id, races = load_races(tracker.data_dir)
+            original_len = len(races)
+            races = [r for r in races if r['id'] != race_id]
+            if len(races) == original_len:
+                self._send_json({"error": f"Race {race_id} not found"}, 404)
+                return
+
+            save_races(tracker.data_dir, next_id, races)
+            log(f"[EVENT {eid}] Race {race_id} deleted")
+            self._send_json({"success": True})
+
+        elif re.match(r'^/admin/races/\d+/finish/.+$', subpath):
+            # Undo a finish - DELETE /admin/races/{id}/finish/{sailor_id}
+            parts = subpath.split('/')
+            race_id = int(parts[3])
+            from urllib.parse import unquote
+            sailor_id = unquote(parts[5])
+
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": "Could not get event tracker"}, 500)
+                return
+
+            next_id, races = load_races(tracker.data_dir)
+            race = next((r for r in races if r['id'] == race_id), None)
+            if not race:
+                self._send_json({"error": f"Race {race_id} not found"}, 404)
+                return
+
+            original_len = len(race['finishers'])
+            race['finishers'] = [f for f in race['finishers'] if f['sailor_id'] != sailor_id]
+            if len(race['finishers']) == original_len:
+                self._send_json({"error": f"Sailor {sailor_id} not found in race {race_id}"}, 404)
+                return
+
+            save_races(tracker.data_dir, next_id, races)
+            log(f"[EVENT {eid}] Race {race_id}: undid result for {sailor_id}")
+            self._send_json(race)
 
         else:
             self._send_json({"error": "Not found"}, 404)

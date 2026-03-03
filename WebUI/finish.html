@@ -33,6 +33,7 @@
             text-decoration: none;
             font-size: 16px;
             white-space: nowrap;
+            cursor: pointer;
         }
         .header .event-name {
             font-size: 16px;
@@ -42,7 +43,17 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             flex: 1;
-            text-align: center;
+        }
+        .header .race-select {
+            font-size: 14px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #0f3460;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            max-width: 160px;
+            flex-shrink: 1;
+            min-width: 0;
         }
 
         /* Race controls bar */
@@ -56,17 +67,6 @@
             position: sticky;
             top: 44px;
             z-index: 99;
-            flex-wrap: wrap;
-        }
-        .race-select {
-            font-size: 16px;
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid #0f3460;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            min-width: 120px;
-            max-width: 200px;
         }
         .btn {
             padding: 8px 16px;
@@ -89,45 +89,63 @@
         .btn-start.running {
             background: #c0392b;
         }
+        .btn-end {
+            background: #991b1b;
+            color: #fca5a5;
+        }
+        .btn-end.ended {
+            background: #555;
+            color: #999;
+            cursor: default;
+        }
         .btn-delete {
             background: #7f1d1d;
             color: #fca5a5;
             font-size: 13px;
             padding: 6px 10px;
         }
+        .race-bar-spacer {
+            width: 1px;
+            height: 28px;
+            background: #0f3460;
+            flex-shrink: 0;
+            margin: 0 4px;
+        }
         .race-timer {
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 700;
             font-variant-numeric: tabular-nums;
             color: #ffd700;
-            margin-left: auto;
-            min-width: 80px;
+            min-width: 60px;
             text-align: right;
+            flex-shrink: 0;
         }
 
         /* Section header */
         .section-header {
             background: #16213e;
-            padding: 8px 16px;
+            padding: 6px 16px;
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             border-bottom: 1px solid #0f3460;
             position: sticky;
             top: 98px;
             z-index: 98;
-            font-size: 14px;
+            font-size: 13px;
             color: #90a4ae;
         }
         .btn-sort {
             background: #0f3460;
             color: #64b5f6;
             border: none;
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 14px;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 15px;
+            font-weight: 600;
             cursor: pointer;
             touch-action: manipulation;
+            white-space: nowrap;
         }
         .btn-sort:disabled {
             opacity: 0.3;
@@ -136,7 +154,7 @@
 
         /* Sailor rows */
         .sailor-list {
-            padding-bottom: 80px;
+            padding-bottom: 20px;
         }
         .sailor-row {
             display: flex;
@@ -171,12 +189,26 @@
             min-width: 0;
             overflow: hidden;
         }
+        .sailor-name-line {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
         .sailor-name {
             font-size: 18px;
             font-weight: 600;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        .name-badge {
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
         }
         .sailor-badges {
             font-size: 13px;
@@ -188,6 +220,14 @@
         }
         .sailor-badges .bat-low { color: #ef4444; font-weight: 700; }
         .sailor-badges .bat-chg { color: #22c55e; font-weight: 700; }
+        .sailor-info-line {
+            font-size: 12px;
+            color: #64b5f6;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
         /* Place badge for finished sailors */
         .place-badge {
@@ -249,6 +289,9 @@
             cursor: pointer;
             touch-action: manipulation;
             flex-shrink: 0;
+            height: 36px;
+            display: flex;
+            align-items: center;
         }
         .btn-dnf:active {
             background: #78350f;
@@ -280,6 +323,25 @@
             align-items: center;
             justify-content: center;
             cursor: default;
+        }
+
+        /* Add sailor button */
+        .btn-add-sailor {
+            display: block;
+            margin: 12px auto;
+            padding: 10px 24px;
+            background: #0f3460;
+            color: #64b5f6;
+            border: 1px solid #1d4ed8;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        .btn-add-sailor:active {
+            background: #1d4ed8;
+            color: white;
         }
 
         /* Toast */
@@ -330,7 +392,7 @@
         }
         .auth-screen .error { color: #ef4444; font-size: 14px; }
 
-        /* New race dialog */
+        /* Dialogs */
         .dialog-overlay {
             position: fixed;
             inset: 0;
@@ -380,8 +442,8 @@
 </head>
 <body>
 
-<!-- Auth screen -->
-<div class="auth-screen" id="authScreen">
+<!-- Auth screen (hidden initially during auto-auth) -->
+<div class="auth-screen" id="authScreen" style="display:none">
     <h2>Finish Recorder</h2>
     <form onsubmit="doAuth(); return false;" autocomplete="off">
         <input type="password" id="authPassword" placeholder="Admin password" autocomplete="off">
@@ -393,24 +455,27 @@
 <!-- Main UI (hidden until auth) -->
 <div id="mainUI" style="display:none">
     <div class="header">
-        <a id="backLink" href="event.html">&#8592; Live</a>
+        <a id="backLink" onclick="goBack()" href="event.html">&#8592; Live</a>
         <div class="event-name" id="eventName"></div>
+        <select class="race-select" id="raceSelect" onchange="onRaceChanged()"></select>
+        <button class="btn btn-new" onclick="showNewRaceDialog()">+ New</button>
+        <div class="race-timer" id="raceTimer">--:--</div>
     </div>
 
     <div class="race-bar">
-        <select class="race-select" id="raceSelect" onchange="onRaceChanged()"></select>
-        <button class="btn btn-new" onclick="showNewRaceDialog()">+ New</button>
         <button class="btn btn-start" id="btnStart" onclick="onStartStop()">START</button>
+        <button class="btn btn-end" id="btnEnd" onclick="showEndDialog()" style="display:none">END</button>
+        <div class="race-bar-spacer" id="barSpacer1" style="display:none"></div>
+        <button class="btn-sort" id="btnSort" onclick="sortByDistance()" title="Sort by distance to finish">&#8597; Sort</button>
         <button class="btn btn-delete" id="btnDelete" onclick="showDeleteDialog()" style="display:none">Del</button>
-        <div class="race-timer" id="raceTimer">--:--</div>
     </div>
 
     <div class="section-header">
         <span id="sailorCount">Sailors (0)</span>
-        <button class="btn-sort" id="btnSort" onclick="sortByDistance()" title="Sort by distance to finish">&#8597; Sort</button>
     </div>
 
     <div class="sailor-list" id="sailorList"></div>
+    <button class="btn-add-sailor" onclick="showAddSailorDialog()">+ Add Sailor</button>
 </div>
 
 <!-- New Race dialog -->
@@ -437,6 +502,42 @@
     </div>
 </div>
 
+<!-- Reset Race dialog -->
+<div class="dialog-overlay" id="resetRaceDialog">
+    <div class="dialog">
+        <h3>Reset Race</h3>
+        <p id="resetRaceMsg">Reset the start time and all results?</p>
+        <div class="dialog-btns">
+            <button class="btn btn-cancel" onclick="hideResetDialog()">Cancel</button>
+            <button class="btn btn-danger" onclick="doReset()">Reset</button>
+        </div>
+    </div>
+</div>
+
+<!-- End Race dialog -->
+<div class="dialog-overlay" id="endRaceDialog">
+    <div class="dialog">
+        <h3>End Race</h3>
+        <p id="endRaceMsg">End this race and stop the timer?</p>
+        <div class="dialog-btns">
+            <button class="btn btn-cancel" onclick="hideEndDialog()">Cancel</button>
+            <button class="btn btn-danger" onclick="doEndRace()">End Race</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add Sailor dialog -->
+<div class="dialog-overlay" id="addSailorDialog">
+    <div class="dialog">
+        <h3>Add Sailor</h3>
+        <input type="text" id="addSailorName" placeholder="Sailor name" autocomplete="off">
+        <div class="dialog-btns">
+            <button class="btn btn-cancel" onclick="hideAddSailorDialog()">Cancel</button>
+            <button class="btn btn-ok" onclick="addManualSailor()">Add</button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -453,13 +554,24 @@ let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
 let races = [];
 let currentRaceId = null;
 let sailors = {};           // id -> {lat,lon,spd,hdg,ts,bat,sig,chg,role,displayid,...}
-let userOverrides = {};     // id -> {name, role}
+let userOverrides = {};     // id -> {name, role, info}
 let courseData = null;
 let finishLine = null;      // {p1:{lat,lon}, p2:{lat,lon}} or null
 let rowOrder = [];          // sailor IDs in display order - NEVER changes except on explicit sort
 let newSailorsQueue = [];   // sailor IDs that appeared since last sort
 let timerInterval = null;
 let projectionInterval = null;
+let manualNextId = 1;       // auto-increment for manual sailor IDs
+
+// ── Back link (iframe-aware) ─────────────────────────────────
+function goBack() {
+    if (window.parent !== window) {
+        window.parent.postMessage('closeFinish', '*');
+    } else {
+        window.location.href = `event.html?eid=${EVENT_ID}`;
+    }
+    return false;
+}
 
 // ── Auth ─────────────────────────────────────────────────────
 async function doAuth() {
@@ -483,21 +595,29 @@ async function doAuth() {
     }
 }
 
-// Auto-auth if password stored
+// Auto-auth if password stored, otherwise show auth screen
 if (adminPassword) {
     fetch(`${EVENT_API}/auth/check`, { headers: { 'X-Admin-Password': adminPassword } })
         .then(r => r.json())
         .then(d => {
             if (d.authenticated) {
-                document.getElementById('authScreen').style.display = 'none';
                 document.getElementById('mainUI').style.display = '';
                 init();
+            } else {
+                // Stored password is invalid, show auth screen
+                adminPassword = '';
+                document.getElementById('authScreen').style.display = '';
             }
-        }).catch(() => {});
+        }).catch(() => {
+            document.getElementById('authScreen').style.display = '';
+        });
+} else {
+    document.getElementById('authScreen').style.display = '';
 }
 
 // ── Init ─────────────────────────────────────────────────────
 async function init() {
+    // Back link - set href for non-iframe fallback
     document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
 
     // Load event name
@@ -538,19 +658,26 @@ function computeFinishLine() {
         return;
     }
     const fin = courseData.finish;
-    // Get last leg direction
-    let fromPt;
+    // Get last leg direction — walk backwards through marks to find one not at the finish
+    let fromPt = null;
     if (courseData.marks && courseData.marks.length > 0) {
-        const last = courseData.marks[courseData.marks.length - 1];
-        fromPt = { lat: last.lat, lon: last.lon };
-    } else if (courseData.start) {
+        for (let i = courseData.marks.length - 1; i >= 0; i--) {
+            const m = courseData.marks[i];
+            if (m.lat !== fin.lat || m.lon !== fin.lon) {
+                fromPt = { lat: m.lat, lon: m.lon };
+                break;
+            }
+        }
+    }
+    if (!fromPt && courseData.start) {
         fromPt = { lat: courseData.start.lat, lon: courseData.start.lon };
-    } else {
+    }
+    if (!fromPt) {
         finishLine = null;
         return;
     }
 
-    // Direction from last mark to finish
+    // Direction from last distinct mark to finish
     const dlat = fin.lat - fromPt.lat;
     const dlon = fin.lon - fromPt.lon;
     const dist = Math.sqrt(dlat * dlat + dlon * dlon);
@@ -624,6 +751,15 @@ async function loadPositions() {
                 idle: s.idle || false,
                 stopped: s.stopped || false,
                 last_seen: s.last_seen || now,
+                nsats: s.nsats,
+                hac: s.hac || 0,
+                hr: s.hr || 0,
+                flg: s.flg || {},
+                info: s.info || '',
+                ast: s.ast || false,
+                ver: s.ver || '',
+                os: s.os || '',
+                hidden: s.hidden || false,
                 // Projected position (reset to actual)
                 proj_lat: s.lat || 0,
                 proj_lon: s.lon || 0
@@ -657,7 +793,7 @@ function tickProjection() {
     const now = Date.now() / 1000;
     for (const id in sailors) {
         const s = sailors[id];
-        if (s.spd <= 0 || s.idle || s.stopped) {
+        if (s.manual || s.spd <= 0 || s.idle || s.stopped) {
             s.proj_lat = s.lat;
             s.proj_lon = s.lon;
             continue;
@@ -680,6 +816,7 @@ function tickProjection() {
 function distToFinish(id) {
     const s = sailors[id];
     if (!s || !finishLine) return Infinity;
+    if (s.manual) return Infinity;
     if (s.proj_lat === 0 && s.proj_lon === 0) return Infinity;
 
     // Distance from projected position to closest point on finish line segment
@@ -782,21 +919,38 @@ function updateRaceControls() {
     const race = getCurrentRace();
     const btn = document.getElementById('btnStart');
     const del = document.getElementById('btnDelete');
+    const endBtn = document.getElementById('btnEnd');
+    const spacer = document.getElementById('barSpacer1');
     if (!race) {
         btn.textContent = 'START';
         btn.classList.remove('running');
         btn.disabled = true;
         del.style.display = 'none';
+        endBtn.style.display = 'none';
+        spacer.style.display = 'none';
         return;
     }
     btn.disabled = false;
     del.style.display = '';
+    spacer.style.display = '';
     if (race.start_ts) {
         btn.textContent = 'RESET';
         btn.classList.add('running');
+        // Show END button when race is started
+        endBtn.style.display = '';
+        if (race.end_ts) {
+            endBtn.textContent = 'ENDED';
+            endBtn.classList.add('ended');
+            endBtn.disabled = true;
+        } else {
+            endBtn.textContent = 'END';
+            endBtn.classList.remove('ended');
+            endBtn.disabled = false;
+        }
     } else {
         btn.textContent = 'START';
         btn.classList.remove('running');
+        endBtn.style.display = 'none';
     }
 }
 
@@ -806,6 +960,12 @@ function tickTimer() {
     const el = document.getElementById('raceTimer');
     if (!race || !race.start_ts) {
         el.textContent = '--:--';
+        return;
+    }
+    // If race ended, show fixed duration
+    if (race.end_ts) {
+        const elapsed = race.end_ts - race.start_ts;
+        el.textContent = formatElapsed(elapsed);
         return;
     }
     const elapsed = Date.now() / 1000 - race.start_ts;
@@ -822,6 +982,13 @@ function formatElapsed(sec) {
     const s = Math.floor(sec % 60);
     if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function timeAgo(timestamp) {
+    const seconds = Math.floor(Date.now() / 1000 - timestamp);
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    return `${Math.floor(seconds / 3600)}h ago`;
 }
 
 // ── Race actions ─────────────────────────────────────────────
@@ -867,16 +1034,8 @@ async function onStartStop() {
     const race = getCurrentRace();
     if (!race) return;
     if (race.start_ts) {
-        // Reset start time
-        try {
-            const r = await fetch(`${EVENT_API}/admin/races/${race.id}/start`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
-                body: JSON.stringify({ start_ts: null })
-            });
-            if (!r.ok) { showToast('Failed to reset start'); return; }
-            await loadRaces();
-        } catch(e) { showToast('Connection error'); }
+        // Show confirmation for reset
+        showResetDialog();
     } else {
         // Start now
         const start_ts = Date.now() / 1000;
@@ -890,6 +1049,65 @@ async function onStartStop() {
             await loadRaces();
         } catch(e) { showToast('Connection error'); }
     }
+}
+
+// ── Reset confirmation ───────────────────────────────────────
+function showResetDialog() {
+    const race = getCurrentRace();
+    if (!race) return;
+    document.getElementById('resetRaceMsg').textContent = `Reset "${race.name}"? This clears the start time and end time.`;
+    document.getElementById('resetRaceDialog').classList.add('visible');
+}
+function hideResetDialog() {
+    document.getElementById('resetRaceDialog').classList.remove('visible');
+}
+
+async function doReset() {
+    const race = getCurrentRace();
+    if (!race) return;
+    hideResetDialog();
+    try {
+        const r = await fetch(`${EVENT_API}/admin/races/${race.id}/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+            body: JSON.stringify({ start_ts: null })
+        });
+        if (!r.ok) { showToast('Failed to reset start'); return; }
+        // Also clear end time
+        await fetch(`${EVENT_API}/admin/races/${race.id}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+            body: JSON.stringify({ end_ts: null })
+        });
+        await loadRaces();
+    } catch(e) { showToast('Connection error'); }
+}
+
+// ── End race confirmation ────────────────────────────────────
+function showEndDialog() {
+    const race = getCurrentRace();
+    if (!race || !race.start_ts || race.end_ts) return;
+    document.getElementById('endRaceMsg').textContent = `End "${race.name}" and stop the timer?`;
+    document.getElementById('endRaceDialog').classList.add('visible');
+}
+function hideEndDialog() {
+    document.getElementById('endRaceDialog').classList.remove('visible');
+}
+
+async function doEndRace() {
+    const race = getCurrentRace();
+    if (!race || !race.start_ts || race.end_ts) return;
+    hideEndDialog();
+    const end_ts = Date.now() / 1000;
+    try {
+        const r = await fetch(`${EVENT_API}/admin/races/${race.id}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+            body: JSON.stringify({ end_ts })
+        });
+        if (!r.ok) { showToast('Failed to end race'); return; }
+        await loadRaces();
+    } catch(e) { showToast('Connection error'); }
 }
 
 function showDeleteDialog() {
@@ -915,6 +1133,48 @@ async function deleteRace() {
         currentRaceId = null;
         await loadRaces();
     } catch(e) { showToast('Connection error'); }
+}
+
+// ── Manual sailors ───────────────────────────────────────────
+function showAddSailorDialog() {
+    const dlg = document.getElementById('addSailorDialog');
+    const inp = document.getElementById('addSailorName');
+    inp.value = '';
+    dlg.classList.add('visible');
+    inp.focus();
+}
+function hideAddSailorDialog() {
+    document.getElementById('addSailorDialog').classList.remove('visible');
+}
+
+document.getElementById('addSailorName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addManualSailor();
+    if (e.key === 'Escape') hideAddSailorDialog();
+});
+
+function addManualSailor() {
+    const name = document.getElementById('addSailorName').value.trim();
+    if (!name) return;
+    hideAddSailorDialog();
+
+    const id = `M${String(manualNextId).padStart(2, '0')}`;
+    manualNextId++;
+
+    sailors[id] = {
+        id: id,
+        displayid: name,
+        manual: true,
+        lat: 0, lon: 0, spd: 0, hdg: 0, ts: 0,
+        bat: -1, sig: -1, chg: false,
+        idle: false, stopped: false, last_seen: 0,
+        nsats: undefined, hac: 0, hr: 0, flg: {}, info: '',
+        ast: false, ver: '', os: '', hidden: false,
+        proj_lat: 0, proj_lon: 0
+    };
+
+    rowOrder.push(id);
+    renderSailorList();
+    document.getElementById('sailorCount').textContent = `Sailors (${rowOrder.length})`;
 }
 
 // ── Finish / DNF / Undo ──────────────────────────────────────
@@ -1060,48 +1320,120 @@ function renderSailorList() {
             </div>`;
         } else {
             // Racing row
+            const isManual = s && s.manual;
             const age = s ? now - s.last_seen : 9999;
-            const dotClass = !s ? 'gray' : age < 120 ? 'green' : 'orange';
+            const dotClass = isManual ? 'gray' : !s ? 'gray' : age < 120 ? 'green' : 'orange';
+            const nameBadges = buildNameBadges(s);
             const badges = buildBadges(s);
+            const infoLine = buildInfoLine(s, id);
             const hasRace = race && race.start_ts;
 
             html += `<div class="sailor-row" data-id="${id}">
                 <div class="sdot ${dotClass}"></div>
                 ${hasRace ? `<button class="btn-finish" onclick="recordFinish('${esc(id)}')" title="Finish">\uD83C\uDFC1</button>` : ''}
-                <div class="sailor-main">
-                    <div class="sailor-name">${esc(name)}</div>
-                    <div class="sailor-badges" data-badges="${id}">${badges}</div>
-                </div>
                 ${hasRace ? `<button class="btn-dnf" onclick="recordDNF('${esc(id)}')">DNF</button>` : ''}
+                <div class="sailor-main">
+                    <div class="sailor-name-line">
+                        <span class="sailor-name">${esc(name)}</span>
+                        <span data-namebadges="${id}">${nameBadges}</span>
+                    </div>
+                    <div class="sailor-badges" data-badges="${id}">${badges}</div>
+                    ${infoLine ? `<div class="sailor-info-line" data-info="${id}">${infoLine}</div>` : ''}
+                </div>
             </div>`;
         }
     }
     container.innerHTML = html;
 }
 
+function buildNameBadges(s) {
+    if (!s || s.manual) return '';
+    const badges = [];
+
+    // ASSIST badge
+    if (s.ast) {
+        badges.push('<span class="name-badge" style="background:#ef4444">ASSIST</span>');
+    }
+    // IDLE badge
+    if (s.idle) {
+        badges.push('<span class="name-badge" style="background:#2563eb">IDLE</span>');
+    }
+    // NOGPS / accuracy badge
+    if (s.nsats === 0 && !s.idle && !s.stopped) {
+        badges.push('<span class="name-badge" style="background:#d97706">NOGPS</span>');
+    } else if (s.hac > 100 && !s.idle && !s.stopped) {
+        badges.push(`<span class="name-badge" style="background:#f97316">~${Math.round(s.hac)}m</span>`);
+    }
+    // Power saver warning
+    const flg = s.flg || {};
+    if (flg.ps === true || flg.bo === false) {
+        const title = flg.ps ? 'Power saver ON' : 'Battery optimization enabled';
+        badges.push(`<span class="name-badge" style="background:#f97316" title="${title}">\u26A1</span>`);
+    }
+
+    return badges.join('');
+}
+
 function buildBadges(s) {
     if (!s) return '<span style="color:#666">No data</span>';
+    if (s.manual) return '<span style="color:#666">Manual</span>';
     const parts = [];
 
     // Speed
-    if (s.idle) {
-        parts.push('<span style="color:#2563eb;font-weight:700">IDLE</span>');
-    } else if (s.stopped) {
-        parts.push('<span style="color:#c00;font-weight:700">STOPPED</span>');
-    } else if (s.spd !== undefined) {
-        parts.push(`${s.spd.toFixed(0)}kn`);
+    if (s.spd !== undefined) {
+        parts.push(`${s.spd.toFixed(1)} kn`);
     }
 
     // Battery
     if (s.bat >= 0) {
-        const batClass = s.bat < 20 ? 'bat-low' : '';
+        const batColor = s.bat < 20 ? 'color:#ef4444;font-weight:700' : '';
         const chg = s.chg ? '<span class="bat-chg">\u26A1</span>' : '';
-        parts.push(`<span class="${batClass}">${s.bat}%</span>${chg}`);
+        parts.push(`<span style="${batColor}">${s.bat}%</span>${chg}`);
     }
 
     // Signal
     if (s.sig >= 0) {
         parts.push('\u2582\u2584\u2586\u2588'.slice(0, s.sig + 1));
+    }
+
+    // Satellites
+    if (s.nsats !== undefined) {
+        parts.push(`<span style="color:#16a34a" title="GPS satellites">&#128752;${s.nsats}</span>`);
+    }
+
+    // Time ago
+    if (s.last_seen > 0) {
+        parts.push(timeAgo(s.last_seen));
+    }
+
+    // Status text
+    if (s.idle) {
+        parts.push('<span style="color:#2563eb;font-weight:700">IDLE</span>');
+    } else if (s.stopped) {
+        parts.push('<span style="color:#c00;font-weight:700">STOPPED</span>');
+    } else if (s.nsats === 0) {
+        parts.push('<span style="color:#d97706;font-weight:700">NOGPS</span>');
+    } else if (s.hac > 100) {
+        parts.push(`<span style="color:#f97316;font-weight:700">BADGPS ~${Math.round(s.hac)}m</span>`);
+    }
+
+    return parts.join(' \u00B7 ');
+}
+
+function buildInfoLine(s, id) {
+    if (!s || s.manual) return '';
+    const parts = [];
+
+    // User override info text
+    const ov = userOverrides[id];
+    const infoText = (ov && ov.info) ? ov.info : (s.info || '');
+    if (infoText) {
+        parts.push(esc(infoText));
+    }
+
+    // Heart rate
+    if (s.hr && s.hr > 0) {
+        parts.push(`<span style="color:#e91e63">\u2764\uFE0F ${s.hr} bpm</span>`);
     }
 
     return parts.join(' \u00B7 ');
@@ -1114,11 +1446,21 @@ function updateBadges() {
         if (el) {
             el.innerHTML = buildBadges(sailors[id]);
         }
+        // Update name-line badges
+        const nbEl = document.querySelector(`[data-namebadges="${id}"]`);
+        if (nbEl) {
+            nbEl.innerHTML = buildNameBadges(sailors[id]);
+        }
+        // Update info line
+        const infoEl = document.querySelector(`[data-info="${id}"]`);
+        if (infoEl) {
+            infoEl.innerHTML = buildInfoLine(sailors[id], id);
+        }
         // Also update status dot
         const row = document.querySelector(`.sailor-row[data-id="${id}"]`);
         if (row && !row.classList.contains('finished') && !row.classList.contains('dnf')) {
             const dot = row.querySelector('.sdot');
-            if (dot && sailors[id]) {
+            if (dot && sailors[id] && !sailors[id].manual) {
                 const age = Date.now() / 1000 - sailors[id].last_seen;
                 dot.className = 'sdot ' + (age < 120 ? 'green' : 'orange');
             }

@@ -483,6 +483,74 @@ def test_undo_requires_auth(http_client):
     assert status == 401
 
 
+# ── End race ─────────────────────────────────────────────────
+
+
+def test_end_race(http_client):
+    """POST /admin/races/{id}/end should set end time."""
+    eid = create_event(http_client, name="Race End", admin_password="raceend")
+    pw = {"X-Admin-Password": "raceend"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+
+    start_ts = time.time()
+    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/start", data={"start_ts": start_ts}, headers=pw)
+
+    end_ts = start_ts + 600
+    status, body = http_client.post(
+        f"/api/event/{eid}/admin/races/{race['id']}/end",
+        data={"end_ts": end_ts},
+        headers=pw,
+    )
+    assert status == 200
+    assert abs(body["end_ts"] - end_ts) < 0.01
+
+
+def test_reset_end_time(http_client):
+    """Setting end_ts to null should clear the end time."""
+    eid = create_event(http_client, name="Race ResetEnd", admin_password="raceresetend")
+    pw = {"X-Admin-Password": "raceresetend"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+
+    start_ts = time.time()
+    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/start", data={"start_ts": start_ts}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/end", data={"end_ts": start_ts + 600}, headers=pw)
+
+    # Clear end time
+    status, body = http_client.post(
+        f"/api/event/{eid}/admin/races/{race['id']}/end",
+        data={"end_ts": None},
+        headers=pw,
+    )
+    assert status == 200
+    assert body["end_ts"] is None
+
+
+def test_end_requires_auth(http_client):
+    """End race should require admin auth."""
+    eid = create_event(http_client, name="Race EndAuth", admin_password="raceendauth")
+    pw = {"X-Admin-Password": "raceendauth"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+
+    status, _ = http_client.post(
+        f"/api/event/{eid}/admin/races/{race['id']}/end",
+        data={"end_ts": time.time()},
+        headers={"X-Admin-Password": "wrong", "X-Forwarded-For": "10.20.7.1"},
+    )
+    assert status == 401
+
+
+def test_end_nonexistent_race(http_client):
+    """Ending a nonexistent race should return 404."""
+    eid = create_event(http_client, name="Race End404", admin_password="raceend404")
+    pw = {"X-Admin-Password": "raceend404"}
+    status, _ = http_client.post(
+        f"/api/event/{eid}/admin/races/999/end",
+        data={"end_ts": time.time()},
+        headers=pw,
+    )
+    assert status == 404
+
+
 def test_delete_requires_auth(http_client):
     """Delete race should require admin auth."""
     eid = create_event(http_client, name="Race DelAuth", admin_password="racedelauth")
