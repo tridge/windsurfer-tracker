@@ -68,11 +68,22 @@ def fmt(b):
     return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
 
+def set_overage_limit(auth, orgid, linkid, limit_bytes):
+    """Set the overage limit for a cellular link."""
+    url = f"{BASE_URL}/links/cellular/{linkid}/limit/overage"
+    resp = requests.post(url, auth=auth, params={"orgid": orgid},
+                         json={"limit": limit_bytes})
+    resp.raise_for_status()
+    return resp.json()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Check Hologram SIM data usage")
     parser.add_argument("--tag", default="Trackers", help="Device tag to filter (default: Trackers)")
     parser.add_argument("--orgid", type=int, help="Hologram org ID (auto-detected if omitted)")
     parser.add_argument("--warn", type=float, default=80, help="Warn threshold percentage (default: 80)")
+    parser.add_argument("--min-remaining", type=float, metavar="MB",
+                        help="Raise overage limit so remaining data is at least this many MB")
     args = parser.parse_args()
 
     api_key = load_api_key()
@@ -95,6 +106,7 @@ def main():
     for dev in devices:
         name = dev.get("name", "?")
         for link in dev.get("links", {}).get("cellular", []):
+            linkid = link.get("id")
             state = link.get("state", "?")
             used = link.get("cur_billing_data_used", 0)
             plan = link.get("plan", {})
@@ -107,20 +119,44 @@ def main():
             else:
                 cap = plan_data + overage
                 pct = (used / cap * 100) if cap > 0 else 0
-            rows.append((name, state, used, cap, pct, expires))
+            rows.append((name, state, used, cap, pct, expires, linkid, plan_data, overage))
 
     rows.sort(key=lambda r: -r[4])
 
     hdr = f"{'Device':<20} {'State':<8} {'Used':>10} {'Cap':>10} {'Remaining':>10} {'%':>6}  {'Renews':<10}"
     print(hdr)
     print("-" * len(hdr))
-    for name, state, used, cap, pct, expires in rows:
+    for name, state, used, cap, pct, expires, *_ in rows:
         cap_s = "Unlim" if cap is None else fmt(cap)
         rem_s = "Unlim" if cap is None else f"{max(0, cap - used) / (1024*1024):.1f} MB"
         warn = " <<<" if pct >= args.warn else ""
         print(f"{name:<20} {state:<8} {fmt(used):>10} {cap_s:>10} {rem_s:>10} {pct:>5.1f}%{warn}  {expires}")
 
     print(f"\n{len(rows)} SIMs, tag='{args.tag}'")
+
+    # Raise overage limits if --min-remaining specified
+    if args.min_remaining:
+        min_bytes = int(args.min_remaining * 1024 * 1024)
+        adjusted = 0
+        for name, state, used, cap, pct, expires, linkid, plan_data, overage in rows:
+            if cap is None or linkid is None:
+                continue  # skip unlimited or missing linkid
+            remaining = cap - used
+            if remaining >= min_bytes:
+                continue
+            # Need: plan_data + new_overage - used >= min_bytes
+            new_overage = max(overage, min_bytes + used - plan_data)
+            if new_overage <= overage:
+                continue
+            new_remaining = plan_data + new_overage - used
+            print(f"  {name}: raising overage {fmt(overage)} -> {fmt(new_overage)} "
+                  f"(remaining {fmt(remaining)} -> {fmt(new_remaining)})")
+            set_overage_limit(auth, orgid, linkid, new_overage)
+            adjusted += 1
+        if adjusted:
+            print(f"\nAdjusted {adjusted} SIM(s) to >= {args.min_remaining:.0f} MB remaining")
+        else:
+            print(f"\nAll SIMs already have >= {args.min_remaining:.0f} MB remaining")
 
 
 if __name__ == "__main__":
