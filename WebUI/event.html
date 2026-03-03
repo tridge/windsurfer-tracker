@@ -1074,6 +1074,16 @@
             <span>⚙️</span>
             <span>Admin</span>
         </div>
+        <div class="menu-item" id="menuFinish" style="display:none" onclick="openFinishRecorder()">
+            <span>🏁</span>
+            <span>Finish Recorder</span>
+        </div>
+        <div class="menu-item" id="menuResults">
+            <a href="results.html">
+                <span>🏆</span>
+                <span>Results</span>
+            </a>
+        </div>
         <div class="menu-item" id="menuExportCourse" onclick="exportCourse()" style="display:none">
             <span>📤</span>
             <span>Export Course</span>
@@ -1746,6 +1756,7 @@
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('menuExportCourse').style.display = 'none';
                 document.getElementById('menuImportCourse').style.display = 'none';
+                document.getElementById('menuFinish').style.display = 'none';
                 cancelDrawing();
                 // Refresh course display to remove edit buttons from marks
                 if (courseData) {
@@ -1767,6 +1778,7 @@
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('menuExportCourse').style.display = '';
                     document.getElementById('menuImportCourse').style.display = '';
+                    document.getElementById('menuFinish').style.display = '';
                     document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
                     await loadUserOverrides();
@@ -4152,6 +4164,16 @@
         const reviewLink = document.querySelector('#menuReview a');
         if (reviewLink) {
             reviewLink.href = `review.html?eid=${EVENT_ID}`;
+        }
+        const resultsLink = document.querySelector('#menuResults a');
+        if (resultsLink) {
+            resultsLink.href = `results.html?eid=${EVENT_ID}`;
+        }
+
+        let finishWindow = null;
+        function openFinishRecorder() {
+            finishWindow = window.open(`finish.html?eid=${EVENT_ID}`, 'finish');
+            if (finishWindow) finishWindow.focus();
         }
 
         // Initial fetch and start polling

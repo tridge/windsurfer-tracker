@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>Results - Windsurfer Tracker</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: #1565c0;
+            color: white;
+            padding: 16px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .header .subtitle {
+            font-size: 14px;
+            opacity: 0.85;
+        }
+        .header a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        .race-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        .race-header {
+            background: #1976d2;
+            color: white;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .race-header h2 {
+            font-size: 17px;
+            font-weight: 600;
+        }
+        .race-header .start-time {
+            font-size: 13px;
+            opacity: 0.85;
+        }
+
+        .result-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid #eee;
+            gap: 12px;
+        }
+        .result-row:last-child { border-bottom: none; }
+
+        .place {
+            font-size: 16px;
+            font-weight: 700;
+            min-width: 36px;
+            text-align: center;
+        }
+        .place.p1 { color: #d4a017; }
+        .place.p2 { color: #757575; }
+        .place.p3 { color: #a0522d; }
+        .place.other { color: #999; }
+
+        .result-name {
+            flex: 1;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .result-time {
+            font-size: 15px;
+            font-variant-numeric: tabular-nums;
+            color: #555;
+        }
+
+        .dnf-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid #eee;
+            gap: 12px;
+            color: #999;
+        }
+        .dnf-row:last-child { border-bottom: none; }
+        .dnf-badge {
+            font-size: 13px;
+            font-weight: 700;
+            color: #b45309;
+            min-width: 36px;
+            text-align: center;
+        }
+
+        .no-results {
+            padding: 20px 16px;
+            color: #999;
+            text-align: center;
+            font-size: 14px;
+        }
+        .no-races {
+            text-align: center;
+            color: #999;
+            padding: 60px 20px;
+            font-size: 16px;
+        }
+        .preliminary {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 8px;
+            padding-bottom: 20px;
+        }
+        .auto-refresh {
+            text-align: center;
+            color: #aaa;
+            font-size: 11px;
+            padding: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a class="back-link" id="backLink" href="event.html">&larr; Live Tracking</a>
+        <h1>Preliminary Results</h1>
+        <div class="subtitle" id="eventName"></div>
+    </div>
+
+    <div class="container" id="content">
+        <div class="no-races">Loading...</div>
+    </div>
+
+    <div class="auto-refresh">Auto-refreshes every 30 seconds</div>
+
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const API_BASE = urlParams.get('api') || window.location.origin;
+const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
+
+let userOverrides = {};
+
+document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
+
+// Load event name
+fetch(`${API_BASE}/api/events`).then(r => r.json()).then(d => {
+    const ev = (d.events || []).find(e => e.id === EVENT_ID);
+    if (ev) document.getElementById('eventName').textContent = ev.name || '';
+}).catch(() => {});
+
+// Load user overrides for display names
+async function loadUserOverrides() {
+    try {
+        const r = await fetch(`${EVENT_API}/users`);
+        if (r.ok) {
+            const d = await r.json();
+            userOverrides = d.users || {};
+        }
+    } catch(e) {}
+}
+
+function sailorName(id) {
+    if (userOverrides[id] && userOverrides[id].name) return userOverrides[id].name;
+    return id;
+}
+
+function formatElapsed(sec) {
+    if (!sec || sec <= 0) return '--:--';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function formatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+async function loadResults() {
+    await loadUserOverrides();
+
+    let races = [];
+    try {
+        const r = await fetch(`${EVENT_API}/races`);
+        const d = await r.json();
+        races = d.races || [];
+    } catch(e) {
+        document.getElementById('content').innerHTML = '<div class="no-races">Failed to load results</div>';
+        return;
+    }
+
+    if (races.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="no-races">No races yet</div>';
+        return;
+    }
+
+    // Sort most recent first (by start_ts, or by id if no start_ts)
+    races.sort((a, b) => {
+        if (a.start_ts && b.start_ts) return b.start_ts - a.start_ts;
+        if (a.start_ts && !b.start_ts) return -1;
+        if (!a.start_ts && b.start_ts) return 1;
+        return b.id - a.id;
+    });
+
+    let html = '';
+    for (const race of races) {
+        const finishers = (race.finishers || []).filter(f => f.status === 'finished');
+        const dnfs = (race.finishers || []).filter(f => f.status === 'dnf');
+
+        html += `<div class="race-card">
+            <div class="race-header">
+                <h2>${esc(race.name)}</h2>
+                <span class="start-time">${race.start_ts ? formatTime(race.start_ts) : 'Not started'}</span>
+            </div>`;
+
+        if (finishers.length === 0 && dnfs.length === 0) {
+            html += '<div class="no-results">No results yet</div>';
+        } else {
+            let place = 0;
+            for (const f of finishers) {
+                place++;
+                const elapsed = (race.start_ts && f.finish_ts) ? f.finish_ts - race.start_ts : 0;
+                const placeLabel = place === 1 ? '1st' : place === 2 ? '2nd' : place === 3 ? '3rd' : `${place}th`;
+                const placeClass = place <= 3 ? `p${place}` : 'other';
+                html += `<div class="result-row">
+                    <div class="place ${placeClass}">${placeLabel}</div>
+                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                    <div class="result-time">${formatElapsed(elapsed)}</div>
+                </div>`;
+            }
+            for (const f of dnfs) {
+                html += `<div class="dnf-row">
+                    <div class="dnf-badge">DNF</div>
+                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                </div>`;
+            }
+        }
+
+        html += '</div>';
+    }
+
+    html += '<div class="preliminary">Results are preliminary and unofficial</div>';
+    document.getElementById('content').innerHTML = html;
+}
+
+// Initial load
+loadResults();
+
+// Auto-refresh every 30 seconds
+setInterval(loadResults, 30000);
+</script>
+</body>
+</html>
