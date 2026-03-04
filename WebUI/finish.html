@@ -9,8 +9,8 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            background: #fff;
+            color: #000;
             overflow-x: hidden;
             -webkit-user-select: none;
             user-select: none;
@@ -18,26 +18,27 @@
 
         /* Header */
         .header {
-            background: #16213e;
+            background: #003;
             padding: 10px 16px;
             display: flex;
             align-items: center;
             gap: 12px;
-            border-bottom: 1px solid #0f3460;
+            border-bottom: 2px solid #000;
             position: sticky;
             top: 0;
             z-index: 100;
         }
         .header a {
-            color: #64b5f6;
+            color: #8cf;
             text-decoration: none;
             font-size: 16px;
             white-space: nowrap;
             cursor: pointer;
+            font-weight: 700;
         }
         .header .event-name {
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
             color: #fff;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -48,22 +49,23 @@
             font-size: 14px;
             padding: 6px 10px;
             border-radius: 6px;
-            border: 1px solid #0f3460;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            border: 2px solid #555;
+            background: #002;
+            color: #fff;
             max-width: 160px;
             flex-shrink: 1;
             min-width: 0;
+            font-weight: 600;
         }
 
         /* Race controls bar */
         .race-bar {
-            background: #16213e;
+            background: #e8e8e8;
             padding: 10px 12px;
             display: flex;
             align-items: center;
             gap: 8px;
-            border-bottom: 1px solid #0f3460;
+            border-bottom: 2px solid #999;
             position: sticky;
             top: 44px;
             z-index: 99;
@@ -73,49 +75,51 @@
             border: none;
             border-radius: 8px;
             font-size: 15px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             white-space: nowrap;
             touch-action: manipulation;
         }
         .btn-new {
-            background: #0f3460;
-            color: #64b5f6;
+            background: #036;
+            color: #fff;
         }
         .btn-start {
-            background: #27ae60;
+            background: #060;
             color: white;
+            font-size: 16px;
         }
         .btn-start.running {
-            background: #c0392b;
+            background: #b00;
+            color: white;
         }
         .btn-end {
-            background: #991b1b;
-            color: #fca5a5;
+            background: #900;
+            color: #fff;
         }
         .btn-end.ended {
-            background: #555;
-            color: #999;
+            background: #999;
+            color: #fff;
             cursor: default;
         }
         .btn-delete {
-            background: #7f1d1d;
-            color: #fca5a5;
+            background: #800;
+            color: #fff;
             font-size: 13px;
             padding: 6px 10px;
         }
         .race-bar-spacer {
-            width: 1px;
+            width: 2px;
             height: 28px;
-            background: #0f3460;
+            background: #999;
             flex-shrink: 0;
             margin: 0 4px;
         }
         .race-timer {
-            font-size: 20px;
-            font-weight: 700;
+            font-size: 22px;
+            font-weight: 900;
             font-variant-numeric: tabular-nums;
-            color: #ffd700;
+            color: #b00;
             min-width: 60px;
             text-align: right;
             flex-shrink: 0;
@@ -123,26 +127,27 @@
 
         /* Section header */
         .section-header {
-            background: #16213e;
+            background: #e8e8e8;
             padding: 6px 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-bottom: 1px solid #0f3460;
+            border-bottom: 2px solid #999;
             position: sticky;
             top: 98px;
             z-index: 98;
-            font-size: 13px;
-            color: #90a4ae;
+            font-size: 14px;
+            font-weight: 700;
+            color: #333;
         }
         .btn-sort {
-            background: #0f3460;
-            color: #64b5f6;
+            background: #036;
+            color: #fff;
             border: none;
             border-radius: 8px;
             padding: 8px 16px;
             font-size: 15px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             touch-action: manipulation;
             white-space: nowrap;
@@ -160,28 +165,28 @@
             display: flex;
             align-items: center;
             padding: 10px 12px;
-            border-bottom: 1px solid #222;
+            border-bottom: 2px solid #ccc;
             gap: 8px;
             min-height: 56px;
-            transition: background-color 0.3s;
         }
         .sailor-row.finished {
-            background: #14532d;
+            background: #d0f5d0;
         }
         .sailor-row.dnf, .sailor-row.dns {
-            background: #78350f;
+            background: #ffe0b0;
         }
 
         /* Status dot */
         .sdot {
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             flex-shrink: 0;
+            border: 1px solid #999;
         }
-        .sdot.green { background: #22c55e; }
-        .sdot.orange { background: #f97316; }
-        .sdot.gray { background: #666; }
+        .sdot.green { background: #0a0; border-color: #070; }
+        .sdot.orange { background: #e60; border-color: #c40; }
+        .sdot.gray { background: #999; border-color: #666; }
 
         /* Sailor name/info area */
         .sailor-main {
@@ -196,33 +201,36 @@
             flex-wrap: wrap;
         }
         .sailor-name {
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 19px;
+            font-weight: 800;
+            color: #000;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
         .name-badge {
-            padding: 1px 4px;
+            padding: 1px 5px;
             border-radius: 3px;
-            font-size: 9px;
-            font-weight: 700;
+            font-size: 10px;
+            font-weight: 800;
             color: white;
             flex-shrink: 0;
         }
         .sailor-badges {
             font-size: 13px;
-            color: #90a4ae;
+            color: #444;
+            font-weight: 600;
             margin-top: 2px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .sailor-badges .bat-low { color: #ef4444; font-weight: 700; }
-        .sailor-badges .bat-chg { color: #22c55e; font-weight: 700; }
+        .sailor-badges .bat-low { color: #c00; font-weight: 800; }
+        .sailor-badges .bat-chg { color: #080; font-weight: 800; }
         .sailor-info-line {
             font-size: 12px;
-            color: #64b5f6;
+            color: #036;
+            font-weight: 600;
             margin-top: 2px;
             white-space: nowrap;
             overflow: hidden;
@@ -231,43 +239,43 @@
 
         /* Place badge for finished sailors */
         .place-badge {
-            font-size: 14px;
-            font-weight: 700;
+            font-size: 16px;
+            font-weight: 900;
             min-width: 36px;
             text-align: center;
-            color: #ffd700;
+            color: #000;
         }
-        .place-badge.p1 { color: #ffd700; }
-        .place-badge.p2 { color: #c0c0c0; }
-        .place-badge.p3 { color: #cd7f32; }
+        .place-badge.p1 { color: #a08000; }
+        .place-badge.p2 { color: #555; }
+        .place-badge.p3 { color: #8b4513; }
 
         /* Elapsed time for finished sailors */
         .elapsed {
-            font-size: 16px;
-            font-weight: 600;
+            font-size: 17px;
+            font-weight: 800;
             font-variant-numeric: tabular-nums;
-            color: #a7f3d0;
+            color: #060;
             min-width: 70px;
             text-align: right;
         }
         .dnf-label {
-            font-size: 16px;
-            font-weight: 700;
-            color: #fbbf24;
+            font-size: 17px;
+            font-weight: 900;
+            color: #c60;
             min-width: 40px;
             text-align: center;
         }
 
         /* Action buttons */
         .btn-finish {
-            width: 48px;
-            height: 48px;
-            border: none;
+            width: 52px;
+            height: 52px;
+            border: 2px solid #004;
             border-radius: 10px;
-            font-size: 22px;
+            font-size: 24px;
             cursor: pointer;
             touch-action: manipulation;
-            background: #1d4ed8;
+            background: #00c;
             color: white;
             flex-shrink: 0;
             display: flex;
@@ -275,64 +283,65 @@
             justify-content: center;
         }
         .btn-finish:active {
-            background: #1e40af;
+            background: #009;
             transform: scale(0.95);
         }
         .btn-dnf {
             padding: 6px 10px;
-            border: 1px solid #92400e;
+            border: 2px solid #a60;
             border-radius: 8px;
-            background: transparent;
-            color: #fbbf24;
-            font-size: 12px;
-            font-weight: 700;
+            background: #fff8e0;
+            color: #840;
+            font-size: 13px;
+            font-weight: 800;
             cursor: pointer;
             touch-action: manipulation;
             flex-shrink: 0;
-            height: 36px;
+            height: 40px;
             display: flex;
             align-items: center;
         }
         .btn-dnf:active, .btn-dns:active {
-            background: #78350f;
+            background: #f0d080;
         }
         .btn-dns {
             padding: 6px 10px;
-            border: 1px solid #92400e;
+            border: 2px solid #a60;
             border-radius: 8px;
-            background: transparent;
-            color: #fb923c;
-            font-size: 12px;
-            font-weight: 700;
+            background: #fff8e0;
+            color: #a60;
+            font-size: 13px;
+            font-weight: 800;
             cursor: pointer;
             touch-action: manipulation;
             flex-shrink: 0;
-            height: 36px;
+            height: 40px;
             display: flex;
             align-items: center;
         }
         .btn-undo {
             padding: 6px 10px;
-            border: 1px solid #555;
+            border: 2px solid #999;
             border-radius: 8px;
-            background: transparent;
-            color: #aaa;
-            font-size: 13px;
+            background: #eee;
+            color: #333;
+            font-size: 14px;
+            font-weight: 700;
             cursor: pointer;
             touch-action: manipulation;
             flex-shrink: 0;
         }
         .btn-undo:active {
-            background: #333;
+            background: #ccc;
         }
         .btn-pending {
-            width: 48px;
-            height: 48px;
-            border: none;
+            width: 52px;
+            height: 52px;
+            border: 2px solid #999;
             border-radius: 10px;
             font-size: 22px;
-            background: #333;
-            color: #999;
+            background: #ddd;
+            color: #666;
             flex-shrink: 0;
             display: flex;
             align-items: center;
@@ -345,17 +354,17 @@
             display: block;
             margin: 12px auto;
             padding: 10px 24px;
-            background: #0f3460;
-            color: #64b5f6;
-            border: 1px solid #1d4ed8;
+            background: #036;
+            color: #fff;
+            border: 2px solid #024;
             border-radius: 8px;
             font-size: 15px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             touch-action: manipulation;
         }
         .btn-add-sailor:active {
-            background: #1d4ed8;
+            background: #048;
             color: white;
         }
 
@@ -365,12 +374,12 @@
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: #c0392b;
+            background: #c00;
             color: white;
             padding: 12px 24px;
             border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
+            font-size: 15px;
+            font-weight: 700;
             z-index: 1000;
             opacity: 0;
             transition: opacity 0.3s;
@@ -386,26 +395,27 @@
             justify-content: center;
             height: 100vh;
             gap: 16px;
+            background: #fff;
         }
-        .auth-screen h2 { font-size: 20px; color: #fff; }
+        .auth-screen h2 { font-size: 22px; color: #000; font-weight: 800; }
         .auth-screen input {
             font-size: 18px;
             padding: 12px 16px;
             border-radius: 8px;
-            border: 1px solid #0f3460;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            border: 2px solid #333;
+            background: #fff;
+            color: #000;
             width: 280px;
             text-align: center;
         }
         .auth-screen .btn {
-            background: #1d4ed8;
+            background: #00c;
             color: white;
             width: 280px;
             font-size: 18px;
             padding: 12px;
         }
-        .auth-screen .error { color: #ef4444; font-size: 14px; }
+        .auth-screen .error { color: #c00; font-size: 15px; font-weight: 700; }
 
         /* Dialogs */
         .dialog-overlay {
@@ -419,21 +429,22 @@
         }
         .dialog-overlay.visible { display: flex; }
         .dialog {
-            background: #16213e;
+            background: #fff;
+            border: 3px solid #333;
             border-radius: 12px;
             padding: 24px;
             width: 90%;
             max-width: 360px;
         }
-        .dialog h3 { margin-bottom: 16px; color: #fff; font-size: 18px; }
+        .dialog h3 { margin-bottom: 16px; color: #000; font-size: 19px; font-weight: 800; }
         .dialog input {
             width: 100%;
             font-size: 16px;
             padding: 10px 14px;
             border-radius: 8px;
-            border: 1px solid #0f3460;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            border: 2px solid #666;
+            background: #fff;
+            color: #000;
             margin-bottom: 16px;
         }
         .dialog .dialog-btns {
@@ -442,17 +453,18 @@
             justify-content: flex-end;
         }
         .dialog .btn-cancel {
-            background: #333;
-            color: #aaa;
+            background: #ddd;
+            color: #333;
+            font-weight: 700;
         }
         .dialog .btn-ok {
-            background: #1d4ed8;
+            background: #00c;
             color: white;
         }
 
         /* Confirm delete dialog */
-        .dialog p { color: #ccc; margin-bottom: 16px; font-size: 15px; }
-        .btn-danger { background: #991b1b; color: #fca5a5; }
+        .dialog p { color: #222; margin-bottom: 16px; font-size: 16px; font-weight: 600; }
+        .btn-danger { background: #c00; color: #fff; }
     </style>
 </head>
 <body>
@@ -1419,7 +1431,7 @@ function renderSailorList() {
                         <span class="sailor-name">${esc(name)}</span>
                         <span data-namebadges="${id}">${nameBadges}</span>
                     </div>
-                    <div class="sailor-badges"><span data-badges="${id}">${badges}</span>${s && s.last_seen > 0 ? ` <span style="color:#888" data-age="${id}">${timeAgo(s.last_seen)}</span>` : ''}</div>
+                    <div class="sailor-badges"><span data-badges="${id}">${badges}</span>${s && s.last_seen > 0 ? ` <span style="color:#666" data-age="${id}">${timeAgo(s.last_seen)}</span>` : ''}</div>
                     ${infoLine ? `<div class="sailor-info-line" data-info="${id}">${infoLine}</div>` : ''}
                 </div>
             </div>`;
@@ -1457,8 +1469,8 @@ function buildNameBadges(s) {
 }
 
 function buildBadges(s) {
-    if (!s) return '<span style="color:#666">No data</span>';
-    if (s.manual) return '<span style="color:#666">Manual</span>';
+    if (!s) return '<span style="color:#888">No data</span>';
+    if (s.manual) return '<span style="color:#888">Manual</span>';
     const parts = [];
 
     // Speed
@@ -1468,7 +1480,7 @@ function buildBadges(s) {
 
     // Battery
     if (s.bat >= 0) {
-        const batColor = s.bat < 20 ? 'color:#ef4444;font-weight:700' : '';
+        const batColor = s.bat < 20 ? 'color:#c00;font-weight:800' : '';
         const chg = s.chg ? '<span class="bat-chg">\u26A1</span>' : '';
         parts.push(`<span style="${batColor}">${s.bat}%</span>${chg}`);
     }
@@ -1480,18 +1492,18 @@ function buildBadges(s) {
 
     // Satellites
     if (s.nsats !== undefined) {
-        parts.push(`<span style="color:#16a34a" title="GPS satellites">&#128752;${s.nsats}</span>`);
+        parts.push(`<span style="color:#060" title="GPS satellites">&#128752;${s.nsats}</span>`);
     }
 
     // Status text
     if (s.idle) {
-        parts.push('<span style="color:#2563eb;font-weight:700">IDLE</span>');
+        parts.push('<span style="color:#00c;font-weight:800">IDLE</span>');
     } else if (s.stopped) {
-        parts.push('<span style="color:#c00;font-weight:700">STOPPED</span>');
+        parts.push('<span style="color:#c00;font-weight:800">STOPPED</span>');
     } else if (s.nsats === 0) {
-        parts.push('<span style="color:#d97706;font-weight:700">NOGPS</span>');
+        parts.push('<span style="color:#a60;font-weight:800">NOGPS</span>');
     } else if (s.hac > 100) {
-        parts.push(`<span style="color:#f97316;font-weight:700">BADGPS ~${Math.round(s.hac)}m</span>`);
+        parts.push(`<span style="color:#c40;font-weight:800">BADGPS ~${Math.round(s.hac)}m</span>`);
     }
 
     return parts.join(' \u00B7 ');
