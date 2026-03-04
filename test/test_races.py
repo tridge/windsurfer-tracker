@@ -285,6 +285,57 @@ def test_dnf_after_finish_rejected(http_client):
     assert status == 400
 
 
+# ── DNS ──────────────────────────────────────────────────────
+
+
+def test_mark_dns(http_client):
+    """POST /admin/races/{id}/dns should mark a sailor as DNS."""
+    eid = create_event(http_client, name="Race DNS", admin_password="racedns")
+    pw = {"X-Admin-Password": "racedns"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+
+    status, body = http_client.post(
+        f"/api/event/{eid}/admin/races/{race['id']}/dns",
+        data={"sailor_id": "S10"},
+        headers=pw,
+    )
+    assert status == 200
+    assert len(body["finishers"]) == 1
+    assert body["finishers"][0]["sailor_id"] == "S10"
+    assert body["finishers"][0]["status"] == "dns"
+    assert body["finishers"][0]["finish_ts"] is None
+
+
+def test_duplicate_dns_rejected(http_client):
+    """DNS for the same sailor twice should return 400."""
+    eid = create_event(http_client, name="Race DupDNS", admin_password="racedupdns")
+    pw = {"X-Admin-Password": "racedupdns"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/dns", data={"sailor_id": "S10"}, headers=pw)
+
+    status, _ = http_client.post(
+        f"/api/event/{eid}/admin/races/{race['id']}/dns",
+        data={"sailor_id": "S10"},
+        headers=pw,
+    )
+    assert status == 400
+
+
+def test_undo_dns(http_client):
+    """DELETE /admin/races/{id}/finish/{sailor_id} should also undo a DNS."""
+    eid = create_event(http_client, name="Race UndoDNS", admin_password="raceundodns")
+    pw = {"X-Admin-Password": "raceundodns"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/dns", data={"sailor_id": "S10"}, headers=pw)
+
+    status, body = http_client.delete(
+        f"/api/event/{eid}/admin/races/{race['id']}/finish/S10",
+        headers=pw,
+    )
+    assert status == 200
+    assert len(body["finishers"]) == 0
+
+
 # ── Undo finish ──────────────────────────────────────────────
 
 

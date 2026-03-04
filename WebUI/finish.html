@@ -168,7 +168,7 @@
         .sailor-row.finished {
             background: #14532d;
         }
-        .sailor-row.dnf {
+        .sailor-row.dnf, .sailor-row.dns {
             background: #78350f;
         }
 
@@ -293,8 +293,23 @@
             display: flex;
             align-items: center;
         }
-        .btn-dnf:active {
+        .btn-dnf:active, .btn-dns:active {
             background: #78350f;
+        }
+        .btn-dns {
+            padding: 6px 10px;
+            border: 1px solid #92400e;
+            border-radius: 8px;
+            background: transparent;
+            color: #fb923c;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            touch-action: manipulation;
+            flex-shrink: 0;
+            height: 36px;
+            display: flex;
+            align-items: center;
         }
         .btn-undo {
             padding: 6px 10px;
@@ -1227,6 +1242,31 @@ async function recordDNF(sailorId) {
     }
 }
 
+async function recordDNS(sailorId) {
+    const race = getCurrentRace();
+    if (!race) return;
+
+    setPending(sailorId);
+
+    try {
+        const r = await fetch(`${EVENT_API}/admin/races/${race.id}/dns`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+            body: JSON.stringify({ sailor_id: sailorId })
+        });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            showToast(d.error || 'Failed to mark DNS');
+            restoreRacing(sailorId);
+            return;
+        }
+        await loadRaces();
+    } catch(e) {
+        showToast('Connection error');
+        restoreRacing(sailorId);
+    }
+}
+
 async function undoResult(sailorId) {
     const race = getCurrentRace();
     if (!race) return;
@@ -1259,8 +1299,10 @@ function setPending(sailorId) {
     if (!row) return;
     const finBtn = row.querySelector('.btn-finish');
     const dnfBtn = row.querySelector('.btn-dnf');
+    const dnsBtn = row.querySelector('.btn-dns');
     if (finBtn) { finBtn.className = 'btn-pending'; finBtn.textContent = '\u23F3'; finBtn.onclick = null; }
     if (dnfBtn) { dnfBtn.disabled = true; dnfBtn.style.opacity = '0.3'; }
+    if (dnsBtn) { dnsBtn.disabled = true; dnsBtn.style.opacity = '0.3'; }
 }
 
 function restoreRacing(sailorId) {
@@ -1313,6 +1355,13 @@ function renderSailorList() {
                 <div class="sailor-main"><div class="sailor-name">${esc(name)}</div></div>
                 <button class="btn-undo" onclick="undoResult('${esc(id)}')" title="Undo">\u21A9</button>
             </div>`;
+        } else if (fin && fin.status === 'dns') {
+            // DNS row
+            html += `<div class="sailor-row dns" data-id="${id}">
+                <div class="dnf-label">DNS</div>
+                <div class="sailor-main"><div class="sailor-name">${esc(name)}</div></div>
+                <button class="btn-undo" onclick="undoResult('${esc(id)}')" title="Undo">\u21A9</button>
+            </div>`;
         } else {
             // Racing row
             const isManual = s && s.manual;
@@ -1327,6 +1376,7 @@ function renderSailorList() {
                 <div class="sdot ${dotClass}"></div>
                 ${hasRace ? `<button class="btn-finish" onclick="recordFinish('${esc(id)}')" title="Finish">\uD83C\uDFC1</button>` : ''}
                 ${hasRace ? `<button class="btn-dnf" onclick="recordDNF('${esc(id)}')">DNF</button>` : ''}
+                ${hasRace ? `<button class="btn-dns" onclick="recordDNS('${esc(id)}')">DNS</button>` : ''}
                 <div class="sailor-main">
                     <div class="sailor-name-line">
                         <span class="sailor-name">${esc(name)}</span>
@@ -1453,7 +1503,7 @@ function updateBadges() {
         }
         // Also update status dot
         const row = document.querySelector(`.sailor-row[data-id="${id}"]`);
-        if (row && !row.classList.contains('finished') && !row.classList.contains('dnf')) {
+        if (row && !row.classList.contains('finished') && !row.classList.contains('dnf') && !row.classList.contains('dns')) {
             const dot = row.querySelector('.sdot');
             if (dot && sailors[id] && !sailors[id].manual) {
                 const age = Date.now() / 1000 - sailors[id].last_seen;

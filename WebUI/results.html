@@ -296,6 +296,7 @@ async function loadResults() {
     for (const race of races) {
         const finishers = (race.finishers || []).filter(f => f.status === 'finished');
         const dnfs = (race.finishers || []).filter(f => f.status === 'dnf');
+        const dnss = (race.finishers || []).filter(f => f.status === 'dns');
 
         let timeInfo = '';
         if (!race.start_ts) {
@@ -313,7 +314,7 @@ async function loadResults() {
                 <span class="race-time-info">${timeInfo}</span>
             </div>`;
 
-        if (finishers.length === 0 && dnfs.length === 0) {
+        if (finishers.length === 0 && dnfs.length === 0 && dnss.length === 0) {
             html += '<div class="no-results">No results yet</div>';
         } else {
             let place = 0;
@@ -331,6 +332,12 @@ async function loadResults() {
             for (const f of dnfs) {
                 html += `<div class="dnf-row">
                     <div class="dnf-badge">DNF</div>
+                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                </div>`;
+            }
+            for (const f of dnss) {
+                html += `<div class="dnf-row">
+                    <div class="dnf-badge">DNS</div>
                     <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
                 </div>`;
             }
@@ -357,7 +364,8 @@ function buildExportData() {
     for (const race of races) {
         const finishers = (race.finishers || []).filter(f => f.status === 'finished');
         const dnfs = (race.finishers || []).filter(f => f.status === 'dnf');
-        if (finishers.length === 0 && dnfs.length === 0) continue;
+        const dnss = (race.finishers || []).filter(f => f.status === 'dns');
+        if (finishers.length === 0 && dnfs.length === 0 && dnss.length === 0) continue;
 
         const raceInfo = {
             name: race.name,
@@ -386,6 +394,15 @@ function buildExportData() {
                 id: f.sailor_id,
                 time: '',
                 status: 'DNF',
+            });
+        }
+        for (const f of dnss) {
+            rows.push({
+                place: '',
+                name: sailorName(f.sailor_id),
+                id: f.sailor_id,
+                time: '',
+                status: 'DNS',
             });
         }
 
@@ -487,8 +504,8 @@ async function downloadXLSX() {
                 row.getCell(1).font = { bold: true, color: { argb: 'FFA0522D' } };
             }
 
-            // DNF styling
-            if (r.status === 'DNF') {
+            // DNF/DNS styling
+            if (r.status === 'DNF' || r.status === 'DNS') {
                 row.getCell(5).font = { bold: true, color: { argb: 'FFB45309' } };
             }
 

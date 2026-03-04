@@ -3576,6 +3576,48 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif re.match(r'^/admin/races/\d+/dns$', subpath):
+            # Mark sailor as DNS (Did Not Start)
+            race_id = int(subpath.split('/')[3])
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                sailor_id = str(data.get('sailor_id', '')).strip()
+                if not sailor_id:
+                    self._send_json({"error": "sailor_id required"}, 400)
+                    return
+
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+
+                next_id, races = load_races(tracker.data_dir)
+                race = next((r for r in races if r['id'] == race_id), None)
+                if not race:
+                    self._send_json({"error": f"Race {race_id} not found"}, 404)
+                    return
+
+                # Check for duplicate
+                if any(f['sailor_id'] == sailor_id for f in race['finishers']):
+                    self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
+                    return
+
+                race['finishers'].append({
+                    "sailor_id": sailor_id,
+                    "finish_ts": None,
+                    "status": "dns"
+                })
+                save_races(tracker.data_dir, next_id, races)
+                log(f"[EVENT {eid}] Race {race_id}: {sailor_id} DNS")
+                self._send_json(race)
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
