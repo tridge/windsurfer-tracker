@@ -4226,15 +4226,15 @@
         function openFinishOverlay() {
             const overlay = document.getElementById('finishOverlay');
             const iframe = document.getElementById('finishIframe');
-            iframe.src = `finish.html?eid=${EVENT_ID}`;
+            // Load iframe once, then just show/hide
+            if (!iframe.src || !iframe.src.includes('finish.html')) {
+                iframe.src = `finish.html?eid=${EVENT_ID}`;
+            }
             overlay.classList.add('visible');
         }
 
         function closeFinishOverlay() {
-            const overlay = document.getElementById('finishOverlay');
-            const iframe = document.getElementById('finishIframe');
-            overlay.classList.remove('visible');
-            iframe.src = '';
+            document.getElementById('finishOverlay').classList.remove('visible');
         }
 
         // Listen for close message from finish.html iframe

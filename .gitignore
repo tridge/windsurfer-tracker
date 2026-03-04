@@ -41,6 +41,7 @@
 /increment_version.py
 android/app/build/
 build/
+/release/
 current_positions.json
 version.json
 WebUI/config.js

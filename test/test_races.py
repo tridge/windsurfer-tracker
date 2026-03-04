@@ -101,22 +101,28 @@ def test_start_race(http_client):
 
 
 def test_reset_start_time(http_client):
-    """Setting start_ts to null should clear the start time."""
+    """Setting start_ts to null should clear start, end, and all finishers."""
     eid = create_event(http_client, name="Race Reset", admin_password="racereset")
     pw = {"X-Admin-Password": "racereset"}
     _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "R1"}, headers=pw)
+    rid = race['id']
 
-    # Start
-    http_client.post(f"/api/event/{eid}/admin/races/{race['id']}/start", data={"start_ts": time.time()}, headers=pw)
+    # Start, end, and record some finishes
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/start", data={"start_ts": time.time()}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/end", data={"end_ts": time.time() + 3600}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/finish", data={"sailor_id": "S01", "finish_ts": time.time() + 100}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/dnf", data={"sailor_id": "S02"}, headers=pw)
 
     # Reset
     status, body = http_client.post(
-        f"/api/event/{eid}/admin/races/{race['id']}/start",
+        f"/api/event/{eid}/admin/races/{rid}/start",
         data={"start_ts": None},
         headers=pw,
     )
     assert status == 200
     assert body["start_ts"] is None
+    assert body["end_ts"] is None
+    assert body["finishers"] == []
 
 
 def test_start_nonexistent_race(http_client):

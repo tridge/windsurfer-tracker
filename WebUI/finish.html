@@ -1055,7 +1055,7 @@ async function onStartStop() {
 function showResetDialog() {
     const race = getCurrentRace();
     if (!race) return;
-    document.getElementById('resetRaceMsg').textContent = `Reset "${race.name}"? This clears the start time and end time.`;
+    document.getElementById('resetRaceMsg').textContent = `Reset "${race.name}"? This clears the start time, end time, and all results.`;
     document.getElementById('resetRaceDialog').classList.add('visible');
 }
 function hideResetDialog() {
@@ -1067,18 +1067,13 @@ async function doReset() {
     if (!race) return;
     hideResetDialog();
     try {
+        // Setting start_ts to null also clears end_ts and all finishers on server
         const r = await fetch(`${EVENT_API}/admin/races/${race.id}/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
             body: JSON.stringify({ start_ts: null })
         });
-        if (!r.ok) { showToast('Failed to reset start'); return; }
-        // Also clear end time
-        await fetch(`${EVENT_API}/admin/races/${race.id}/end`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
-            body: JSON.stringify({ end_ts: null })
-        });
+        if (!r.ok) { showToast('Failed to reset race'); return; }
         await loadRaces();
     } catch(e) { showToast('Connection error'); }
 }

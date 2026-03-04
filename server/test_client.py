@@ -769,11 +769,13 @@ class SailingSimulator:
 def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                     start_loc: Tuple[float, float], end_loc: Tuple[float, float],
                     course_waypoints: Optional[List[Tuple[float, float]]] = None,
-                    avg_speed: float = 12.0) -> List[SimulatedEntity]:
+                    avg_speed: float = 12.0,
+                    sailor_names: Optional[List[str]] = None) -> List[SimulatedEntity]:
     """Create all simulated entities spread along the course.
 
     avg_speed: Average sailor speed in knots. Individual speeds are normally
                distributed with std dev of 20% of avg_speed.
+    sailor_names: Optional list of names to use as sailor IDs (e.g. ["AndrewT", "BruceK"]).
     """
     entities = []
 
@@ -841,8 +843,9 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
 
             target_lat, target_lon = course_waypoints[next_idx]
 
+            sailor_id = sailor_names[i] if sailor_names and i < len(sailor_names) else f"Test{i+1:02d}"
             entity = SimulatedEntity(
-                id=f"Test{i+1:02d}",
+                id=sailor_id,
                 role="sailor",
                 lat=lat,
                 lon=lon,
@@ -906,8 +909,9 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                 target_lat, target_lon = end_loc[0], end_loc[1]
             else:
                 target_lat, target_lon = start_loc[0], start_loc[1]
+            sailor_id = sailor_names[i] if sailor_names and i < len(sailor_names) else f"Test{i+1:02d}"
             entity = SimulatedEntity(
-                id=f"Test{i+1:02d}",
+                id=sailor_id,
                 role="sailor",
                 lat=lat,
                 lon=lon,
@@ -1440,6 +1444,8 @@ def main():
                         help="Average sailor speed in knots (default: 12, std dev: 20%%)")
     parser.add_argument("--poor-accuracy", type=int, default=0, metavar="N",
                         help="Number of sailors to simulate with poor GPS accuracy (100-500m)")
+    parser.add_argument("--sailors", type=str, default="",
+                        help="File with sailor names (one per line), assigned to sailors in order")
 
     args = parser.parse_args()
 
@@ -1475,6 +1481,19 @@ def main():
         if coastline:
             print(f"Loaded coastline with {len(coastline.land_polygons)} polygons")
 
+    # Auto-set num-sailors from sailors file if not explicitly set
+    sailor_names_list = []
+    if args.sailors:
+        try:
+            with open(args.sailors, "r") as f:
+                sailor_names_list = [line.strip() for line in f if line.strip()]
+            if sailor_names_list and args.num_sailors == 5:  # 5 is the default
+                args.num_sailors = len(sailor_names_list)
+                print(f"  Using {len(sailor_names_list)} sailors from {args.sailors}")
+        except FileNotFoundError:
+            print(f"Error: sailors file '{args.sailors}' not found")
+            return
+
     print(f"Starting simulation:")
     print(f"  Event ID: {args.eid}")
     print(f"  Sailors: {args.num_sailors}")
@@ -1499,7 +1518,8 @@ def main():
     # Create entities
     entities = create_entities(
         args.num_sailors, args.num_support, args.num_spectators,
-        start_loc, end_loc, course_waypoints, avg_speed=args.speed
+        start_loc, end_loc, course_waypoints, avg_speed=args.speed,
+        sailor_names=sailor_names_list if sailor_names_list else None
     )
 
     # Set assist if requested

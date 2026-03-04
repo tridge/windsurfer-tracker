@@ -3446,6 +3446,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     return
 
                 race['start_ts'] = start_ts
+                # Clearing start time also clears all results
+                if start_ts is None:
+                    race['finishers'] = []
+                    race['end_ts'] = None
                 save_races(tracker.data_dir, next_id, races)
                 log(f"[EVENT {eid}] Race {race_id} start set to {start_ts}")
                 self._send_json(race)

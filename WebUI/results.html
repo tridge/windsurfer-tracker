@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <title>Results - Windsurfer Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -37,6 +38,30 @@
             margin-bottom: 8px;
             font-size: 14px;
         }
+
+        .download-bar {
+            max-width: 640px;
+            margin: 12px auto 0;
+            padding: 0 16px;
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .dl-btn {
+            padding: 6px 14px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .dl-btn:hover { background: #f0f0f0; }
+        .dl-btn:active { background: #e0e0e0; }
 
         .container {
             max-width: 640px;
@@ -155,6 +180,11 @@
         <div class="subtitle" id="eventName"></div>
     </div>
 
+    <div class="download-bar" id="downloadBar" style="display:none">
+        <button class="dl-btn" onclick="downloadXLSX()" title="Download as Excel spreadsheet">&#128196; Excel</button>
+        <button class="dl-btn" onclick="downloadCSV()" title="Download as CSV">&#128196; CSV</button>
+    </div>
+
     <div class="container" id="content">
         <div class="no-races">Loading...</div>
     </div>
@@ -168,13 +198,18 @@ const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
 const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
 
 let userOverrides = {};
+let currentRaces = [];
+let eventName = '';
 
 document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
 
 // Load event name
 fetch(`${API_BASE}/api/events`).then(r => r.json()).then(d => {
     const ev = (d.events || []).find(e => e.id === EVENT_ID);
-    if (ev) document.getElementById('eventName').textContent = ev.name || '';
+    if (ev) {
+        eventName = ev.name || '';
+        document.getElementById('eventName').textContent = eventName;
+    }
 }).catch(() => {});
 
 // Load user overrides for display names
@@ -239,6 +274,7 @@ async function loadResults() {
 
     if (races.length === 0) {
         document.getElementById('content').innerHTML = '<div class="no-races">No races yet</div>';
+        document.getElementById('downloadBar').style.display = 'none';
         return;
     }
 
@@ -249,6 +285,12 @@ async function loadResults() {
         if (!a.start_ts && b.start_ts) return 1;
         return b.id - a.id;
     });
+
+    currentRaces = races;
+
+    // Show download buttons if any race has results
+    const hasResults = races.some(r => (r.finishers || []).length > 0);
+    document.getElementById('downloadBar').style.display = hasResults ? 'flex' : 'none';
 
     let html = '';
     for (const race of races) {
@@ -299,6 +341,198 @@ async function loadResults() {
 
     html += '<div class="preliminary">Results are preliminary and unofficial</div>';
     document.getElementById('content').innerHTML = html;
+}
+
+// ── Build race data for export ───────────────────────────────
+function buildExportData() {
+    // Sort races by start time (earliest first for export)
+    const races = [...currentRaces].sort((a, b) => {
+        if (a.start_ts && b.start_ts) return a.start_ts - b.start_ts;
+        if (a.start_ts && !b.start_ts) return -1;
+        if (!a.start_ts && b.start_ts) return 1;
+        return a.id - b.id;
+    });
+
+    const data = [];
+    for (const race of races) {
+        const finishers = (race.finishers || []).filter(f => f.status === 'finished');
+        const dnfs = (race.finishers || []).filter(f => f.status === 'dnf');
+        if (finishers.length === 0 && dnfs.length === 0) continue;
+
+        const raceInfo = {
+            name: race.name,
+            startTime: race.start_ts ? formatTime(race.start_ts) : '',
+            endTime: race.end_ts ? formatTime(race.end_ts) : '',
+            duration: (race.start_ts && race.end_ts) ? formatDuration(race.end_ts - race.start_ts) : '',
+        };
+
+        const rows = [];
+        let place = 0;
+        for (const f of finishers) {
+            place++;
+            const elapsed = (race.start_ts && f.finish_ts) ? f.finish_ts - race.start_ts : 0;
+            rows.push({
+                place,
+                name: sailorName(f.sailor_id),
+                id: f.sailor_id,
+                time: formatElapsed(elapsed),
+                status: 'Finished',
+            });
+        }
+        for (const f of dnfs) {
+            rows.push({
+                place: '',
+                name: sailorName(f.sailor_id),
+                id: f.sailor_id,
+                time: '',
+                status: 'DNF',
+            });
+        }
+
+        data.push({ info: raceInfo, rows });
+    }
+    return data;
+}
+
+// ── CSV download ─────────────────────────────────────────────
+function downloadCSV() {
+    const data = buildExportData();
+    if (data.length === 0) return;
+
+    const lines = [];
+    for (let i = 0; i < data.length; i++) {
+        const { info, rows } = data[i];
+        if (i > 0) lines.push('');
+        lines.push(csvRow([info.name, 'Start: ' + info.startTime, info.endTime ? 'End: ' + info.endTime : '', info.duration]));
+        lines.push(csvRow(['Place', 'Name', 'ID', 'Time', 'Status']));
+        for (const r of rows) {
+            lines.push(csvRow([r.place, r.name, r.id, r.time, r.status]));
+        }
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, makeFilename('csv'));
+}
+
+function csvRow(fields) {
+    return fields.map(f => {
+        const s = String(f ?? '');
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+            return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+    }).join(',');
+}
+
+// ── XLSX download ────────────────────────────────────────────
+async function downloadXLSX() {
+    if (typeof ExcelJS === 'undefined') {
+        alert('Excel library not loaded. Please try again.');
+        return;
+    }
+
+    const data = buildExportData();
+    if (data.length === 0) return;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Windsurfer Tracker';
+
+    for (const { info, rows } of data) {
+        // Sheet name: max 31 chars, no special chars
+        const sheetName = info.name.replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
+        const ws = wb.addWorksheet(sheetName);
+
+        // Column widths
+        ws.columns = [
+            { width: 8 },   // Place
+            { width: 24 },  // Name
+            { width: 10 },  // ID
+            { width: 12 },  // Time
+            { width: 10 },  // Status
+        ];
+
+        // Title row
+        const titleText = info.name +
+            (info.startTime ? '  |  ' + info.startTime : '') +
+            (info.endTime ? ' - ' + info.endTime : '') +
+            (info.duration ? '  (' + info.duration + ')' : '');
+        const titleRow = ws.addRow([titleText]);
+        ws.mergeCells(titleRow.number, 1, titleRow.number, 5);
+        titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+        titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1565C0' } };
+        titleRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+        titleRow.height = 28;
+
+        // Header row
+        const headerRow = ws.addRow(['Place', 'Name', 'ID', 'Time', 'Status']);
+        for (let c = 1; c <= 5; c++) {
+            const cell = headerRow.getCell(c);
+            cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1976D2' } };
+            cell.alignment = { horizontal: c === 1 ? 'center' : 'left', vertical: 'middle' };
+        }
+        headerRow.height = 22;
+
+        // Data rows
+        for (const r of rows) {
+            const row = ws.addRow([r.place, r.name, r.id, r.time, r.status]);
+            row.getCell(1).alignment = { horizontal: 'center' };
+
+            // Gold/silver/bronze place coloring
+            if (r.place === 1) {
+                row.getCell(1).font = { bold: true, color: { argb: 'FFB8860B' } };
+            } else if (r.place === 2) {
+                row.getCell(1).font = { bold: true, color: { argb: 'FF757575' } };
+            } else if (r.place === 3) {
+                row.getCell(1).font = { bold: true, color: { argb: 'FFA0522D' } };
+            }
+
+            // DNF styling
+            if (r.status === 'DNF') {
+                row.getCell(5).font = { bold: true, color: { argb: 'FFB45309' } };
+            }
+
+            // Alternate row shading
+            if (row.number % 2 === 0) {
+                for (let c = 1; c <= 5; c++) {
+                    row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+                }
+            }
+        }
+
+        // Thin borders on all data cells
+        const borderStyle = { style: 'thin', color: { argb: 'FFD0D0D0' } };
+        for (let r = headerRow.number; r <= ws.rowCount; r++) {
+            for (let c = 1; c <= 5; c++) {
+                ws.getRow(r).getCell(c).border = {
+                    top: borderStyle, bottom: borderStyle,
+                    left: borderStyle, right: borderStyle,
+                };
+            }
+        }
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    downloadBlob(blob, makeFilename('xlsx'));
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+function makeFilename(ext) {
+    const name = (eventName || 'results').replace(/[^a-zA-Z0-9_\- ]/g, '').replace(/\s+/g, '_');
+    const date = new Date().toISOString().slice(0, 10);
+    return `${name}_results_${date}.${ext}`;
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 // Initial load
