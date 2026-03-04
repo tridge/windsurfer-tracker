@@ -1042,7 +1042,7 @@
     </div>
 
     <!-- Finish recorder button (admin only) -->
-    <button class="finish-btn" id="finishBtn" onclick="openFinishOverlay()" title="Finish Recorder">&#127937;</button>
+    <button class="finish-btn" id="finishBtn" style="display:none" onclick="openFinishOverlay()" title="Finish Recorder">&#127937;</button>
 
     <!-- Finish recorder overlay -->
     <div class="finish-overlay" id="finishOverlay">
@@ -1119,10 +1119,6 @@
         <div class="menu-item" id="menuAdmin" onclick="toggleAdminMode()">
             <span>⚙️</span>
             <span>Admin</span>
-        </div>
-        <div class="menu-item" id="menuFinish" style="display:none" onclick="openFinishRecorder()">
-            <span>🏁</span>
-            <span>Finish Recorder</span>
         </div>
         <div class="menu-item" id="menuResults">
             <a href="results.html">
@@ -1802,7 +1798,6 @@
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('menuExportCourse').style.display = 'none';
                 document.getElementById('menuImportCourse').style.display = 'none';
-                document.getElementById('menuFinish').style.display = 'none';
                 document.getElementById('finishBtn').style.display = 'none';
                 cancelDrawing();
                 // Refresh course display to remove edit buttons from marks
@@ -1825,7 +1820,6 @@
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('menuExportCourse').style.display = '';
                     document.getElementById('menuImportCourse').style.display = '';
-                    document.getElementById('menuFinish').style.display = '';
                     document.getElementById('finishBtn').style.display = 'flex';
                     document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
@@ -4219,10 +4213,6 @@
         }
 
         let finishWindow = null;
-        function openFinishRecorder() {
-            openFinishOverlay();
-        }
-
         function openFinishOverlay() {
             const overlay = document.getElementById('finishOverlay');
             const iframe = document.getElementById('finishIframe');
@@ -4235,6 +4225,11 @@
 
         function closeFinishOverlay() {
             document.getElementById('finishOverlay').classList.remove('visible');
+            // Ensure admin UI stays visible after returning from finish view
+            if (adminMode) {
+                document.getElementById('finishBtn').style.display = 'flex';
+                document.getElementById('adminBtn').classList.add('active');
+            }
         }
 
         // Listen for close message from finish.html iframe
@@ -4243,6 +4238,13 @@
                 closeFinishOverlay();
             }
         });
+
+        // Auto-restore admin mode if password was previously saved
+        if (adminPassword) {
+            checkAdminAuth().then(ok => {
+                if (ok) toggleAdminMode();
+            });
+        }
 
         // Initial fetch and start polling
         fetchPositions();

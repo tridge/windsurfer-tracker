@@ -461,7 +461,10 @@
 <div class="auth-screen" id="authScreen" style="display:none">
     <h2>Finish Recorder</h2>
     <form onsubmit="doAuth(); return false;" autocomplete="off">
-        <input type="password" id="authPassword" placeholder="Admin password" autocomplete="off">
+        <div style="position:relative">
+            <input type="password" id="authPassword" placeholder="Admin password" autocomplete="off">
+            <button type="button" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#999;font-size:18px;cursor:pointer;padding:4px" onclick="togglePasswordVisibility()" id="togglePwBtn" title="Show password">👁</button>
+        </div>
         <button class="btn" type="submit">Sign In</button>
     </form>
     <div class="error" id="authError"></div>
@@ -589,6 +592,20 @@ function goBack() {
 }
 
 // ── Auth ─────────────────────────────────────────────────────
+function togglePasswordVisibility() {
+    const inp = document.getElementById('authPassword');
+    const btn = document.getElementById('togglePwBtn');
+    if (inp.type === 'password') {
+        inp.type = 'text';
+        btn.textContent = '🔒';
+        btn.title = 'Hide password';
+    } else {
+        inp.type = 'password';
+        btn.textContent = '👁';
+        btn.title = 'Show password';
+    }
+}
+
 async function doAuth() {
     const pw = document.getElementById('authPassword').value;
     if (!pw) return;
@@ -610,8 +627,14 @@ async function doAuth() {
     }
 }
 
-// Auto-auth if password stored, otherwise show auth screen
-if (adminPassword) {
+// When in iframe, parent already verified auth - just use stored password
+// When standalone, verify stored password or show auth screen
+const inIframe = window.parent !== window;
+if (adminPassword && inIframe) {
+    // Trust parent's auth - skip server check to avoid race/network issues
+    document.getElementById('mainUI').style.display = '';
+    init();
+} else if (adminPassword) {
     fetch(`${EVENT_API}/auth/check`, { headers: { 'X-Admin-Password': adminPassword } })
         .then(r => r.json())
         .then(d => {
@@ -619,7 +642,6 @@ if (adminPassword) {
                 document.getElementById('mainUI').style.display = '';
                 init();
             } else {
-                // Stored password is invalid, show auth screen
                 adminPassword = '';
                 document.getElementById('authScreen').style.display = '';
             }
@@ -738,7 +760,10 @@ function displayName(id) {
 }
 
 // ── Position loading ─────────────────────────────────────────
+let positionsLoading = false;
 async function loadPositions() {
+    if (positionsLoading) return;
+    positionsLoading = true;
     try {
         const r = await fetch(`${DATA_BASE}current_positions.json`);
         if (!r.ok) return;
@@ -801,6 +826,7 @@ async function loadPositions() {
 
         document.getElementById('sailorCount').textContent = `Sailors (${rowOrder.length})`;
     } catch(e) {}
+    positionsLoading = false;
 }
 
 // ── Dead reckoning projection ────────────────────────────────
@@ -860,23 +886,34 @@ function distToFinish(id) {
 function sortByDistance() {
     if (!finishLine) return;
     const race = getCurrentRace();
-    const finisherIds = race ? race.finishers.map(f => f.sailor_id) : [];
-
-    // Sort unfinished sailors by distance; keep finished ones in their place order
-    rowOrder.sort((a, b) => {
-        const aFinished = finisherIds.includes(a);
-        const bFinished = finisherIds.includes(b);
-        // Both finished - keep by finish order
-        if (aFinished && bFinished) {
-            const aIdx = race.finishers.findIndex(f => f.sailor_id === a);
-            const bIdx = race.finishers.findIndex(f => f.sailor_id === b);
-            return aIdx - bIdx;
+    const finisherMap = {};
+    if (race) {
+        for (const f of race.finishers) {
+            finisherMap[f.sailor_id] = f;
         }
-        // Finished before unfinished
-        if (aFinished && !bFinished) return -1;
-        if (!aFinished && bFinished) return 1;
-        // Both unfinished - by distance
-        return distToFinish(a) - distToFinish(b);
+    }
+
+    // Sort order: racing (by distance), finished (by place), DNF, DNS
+    function sortKey(id) {
+        const f = finisherMap[id];
+        if (!f) return 0;                // racing
+        if (f.status === 'finished') return 1;
+        if (f.status === 'dnf') return 2;
+        if (f.status === 'dns') return 3;
+        return 2;
+    }
+
+    rowOrder.sort((a, b) => {
+        const ka = sortKey(a), kb = sortKey(b);
+        if (ka !== kb) return ka - kb;
+        // Same group
+        if (ka === 0) return distToFinish(a) - distToFinish(b);  // racing: by distance
+        if (ka === 1) {  // finished: by finish order
+            const ai = race.finishers.findIndex(f => f.sailor_id === a);
+            const bi = race.finishers.findIndex(f => f.sailor_id === b);
+            return ai - bi;
+        }
+        return 0;  // DNF/DNS: keep current order
     });
     renderSailorList();
 }
@@ -1382,7 +1419,7 @@ function renderSailorList() {
                         <span class="sailor-name">${esc(name)}</span>
                         <span data-namebadges="${id}">${nameBadges}</span>
                     </div>
-                    <div class="sailor-badges" data-badges="${id}">${badges}</div>
+                    <div class="sailor-badges"><span data-badges="${id}">${badges}</span>${s && s.last_seen > 0 ? ` <span style="color:#888" data-age="${id}">${timeAgo(s.last_seen)}</span>` : ''}</div>
                     ${infoLine ? `<div class="sailor-info-line" data-info="${id}">${infoLine}</div>` : ''}
                 </div>
             </div>`;
@@ -1446,11 +1483,6 @@ function buildBadges(s) {
         parts.push(`<span style="color:#16a34a" title="GPS satellites">&#128752;${s.nsats}</span>`);
     }
 
-    // Time ago
-    if (s.last_seen > 0) {
-        parts.push(timeAgo(s.last_seen));
-    }
-
     // Status text
     if (s.idle) {
         parts.push('<span style="color:#2563eb;font-weight:700">IDLE</span>');
@@ -1485,30 +1517,39 @@ function buildInfoLine(s, id) {
 }
 
 // Update badge text in-place without re-rendering the list
+// Only touches DOM when content actually changed to avoid repaint flashing
 function updateBadges() {
+    const now = Date.now() / 1000;
     for (const id of rowOrder) {
-        const el = document.querySelector(`[data-badges="${id}"]`);
-        if (el) {
-            el.innerHTML = buildBadges(sailors[id]);
-        }
-        // Update name-line badges
-        const nbEl = document.querySelector(`[data-namebadges="${id}"]`);
-        if (nbEl) {
-            nbEl.innerHTML = buildNameBadges(sailors[id]);
-        }
-        // Update info line
-        const infoEl = document.querySelector(`[data-info="${id}"]`);
-        if (infoEl) {
-            infoEl.innerHTML = buildInfoLine(sailors[id], id);
-        }
-        // Also update status dot
+        const s = sailors[id];
         const row = document.querySelector(`.sailor-row[data-id="${id}"]`);
-        if (row && !row.classList.contains('finished') && !row.classList.contains('dnf') && !row.classList.contains('dns')) {
-            const dot = row.querySelector('.sdot');
-            if (dot && sailors[id] && !sailors[id].manual) {
-                const age = Date.now() / 1000 - sailors[id].last_seen;
-                dot.className = 'sdot ' + (age < 120 ? 'green' : 'orange');
-            }
+        if (!row || row.classList.contains('finished') || row.classList.contains('dnf') || row.classList.contains('dns')) continue;
+
+        const el = row.querySelector(`[data-badges="${id}"]`);
+        if (el) {
+            const h = buildBadges(s);
+            if (el.innerHTML !== h) el.innerHTML = h;
+        }
+        // Time-ago is in its own span so badges don't churn every poll
+        const ageEl = row.querySelector(`[data-age="${id}"]`);
+        if (ageEl && s && s.last_seen > 0) {
+            ageEl.textContent = timeAgo(s.last_seen);
+        }
+        const nbEl = row.querySelector(`[data-namebadges="${id}"]`);
+        if (nbEl) {
+            const h = buildNameBadges(s);
+            if (nbEl.innerHTML !== h) nbEl.innerHTML = h;
+        }
+        const infoEl = row.querySelector(`[data-info="${id}"]`);
+        if (infoEl) {
+            const h = buildInfoLine(s, id);
+            if (infoEl.innerHTML !== h) infoEl.innerHTML = h;
+        }
+        const dot = row.querySelector('.sdot');
+        if (dot && s && !s.manual) {
+            const age = now - s.last_seen;
+            const cls = 'sdot ' + (age < 120 ? 'green' : 'orange');
+            if (dot.className !== cls) dot.className = cls;
         }
     }
 }
