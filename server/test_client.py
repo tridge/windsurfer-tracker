@@ -1446,6 +1446,8 @@ def main():
                         help="Number of sailors to simulate with poor GPS accuracy (100-500m)")
     parser.add_argument("--sailors", type=str, default="",
                         help="File with sailor names (one per line), assigned to sailors in order")
+    parser.add_argument("--no-heartbeat", action="store_true",
+                        help="Disable heart rate simulation for all entities")
 
     args = parser.parse_args()
 
@@ -1537,6 +1539,11 @@ def main():
                 s.poor_accuracy = True
                 print(f"*** {s.id} has POOR ACCURACY simulation ***")
 
+    # Disable heart rate if requested
+    if args.no_heartbeat:
+        for e in entities:
+            e.heart_rate = 0
+
     # For offline mode with races, calculate wind from course
     wind_direction = args.wind_direction
     if args.offline and course_waypoints and len(course_waypoints) >= 2:
@@ -1594,7 +1601,7 @@ def main():
                     entity.pos_buffer.append((ts, entity.lat, entity.lon, entity.spd))
 
                     # Update heart rate occasionally (varies slowly)
-                    if random.random() < 0.1:
+                    if entity.heart_rate > 0 and random.random() < 0.1:
                         entity.heart_rate = max(50, min(180, entity.heart_rate + random.randint(-3, 5)))
 
             # Common updates for all entities
