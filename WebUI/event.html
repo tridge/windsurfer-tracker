@@ -1220,6 +1220,15 @@
                 No course set
             </div>
         </div>
+
+        <div class="admin-section">
+            <h4>Users</h4>
+            <div class="admin-btn-group">
+                <a class="admin-action-btn primary" id="viewUsersLink" href="users.html" target="_blank" style="text-decoration:none;display:block;">
+                    👥 View Users
+                </a>
+            </div>
+        </div>
     </div>
     
     <div class="drawing-mode-indicator" id="drawingIndicator">
@@ -4210,6 +4219,10 @@
         const resultsLink = document.querySelector('#menuResults a');
         if (resultsLink) {
             resultsLink.href = `results.html?eid=${EVENT_ID}`;
+        }
+        const viewUsersLink = document.getElementById('viewUsersLink');
+        if (viewUsersLink) {
+            viewUsersLink.href = `users.html?eid=${EVENT_ID}`;
         }
 
         let finishWindow = null;

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>Users - Windsurfer Tracker</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #ddd;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .header .back-link {
+            color: #0066cc;
+            text-decoration: none;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .header .back-link:hover { text-decoration: underline; }
+        .search-bar {
+            flex: 1;
+            min-width: 0;
+        }
+        .search-bar input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .search-bar input:focus { border-color: #0066cc; }
+        .user-count {
+            font-size: 13px;
+            color: #666;
+            white-space: nowrap;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th {
+            text-align: left;
+            padding: 10px 12px;
+            background: #f8f8f8;
+            border-bottom: 2px solid #e0e0e0;
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        th:hover { background: #eee; }
+        th .sort-arrow { margin-left: 4px; font-size: 10px; }
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+            vertical-align: top;
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fafafa; }
+        tr.hidden-user td { opacity: 0.5; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .badge-sailor { background: #e0f0ff; color: #0066cc; }
+        .badge-support { background: #fff3e0; color: #e65100; }
+        .badge-spectator { background: #e8f5e9; color: #2e7d32; }
+        .badge-hidden { background: #fee; color: #c00; }
+        .mono { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
+        .did {
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 11px;
+            color: #888;
+            word-break: break-all;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 48px 16px;
+            color: #999;
+            font-size: 15px;
+        }
+        @media (max-width: 700px) {
+            .header { flex-wrap: wrap; gap: 8px; }
+            .search-bar { order: 10; flex-basis: 100%; }
+            td, th { padding: 6px 8px; font-size: 12px; }
+            .col-info { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <a class="back-link" id="backLink" href="event.html">← Live</a>
+    <h1>Users</h1>
+    <div class="search-bar">
+        <input type="text" id="searchInput" placeholder="Search by ID, name, DID, or info..." oninput="renderUsers()">
+    </div>
+    <span class="user-count" id="userCount"></span>
+</div>
+<div class="container">
+    <table id="usersTable">
+        <thead>
+            <tr>
+                <th onclick="sortBy('id')">ID <span class="sort-arrow" id="sort-id"></span></th>
+                <th onclick="sortBy('name')">Display Name <span class="sort-arrow" id="sort-name"></span></th>
+                <th onclick="sortBy('role')">Role <span class="sort-arrow" id="sort-role"></span></th>
+                <th onclick="sortBy('hidden')">Hidden <span class="sort-arrow" id="sort-hidden"></span></th>
+                <th class="col-info" onclick="sortBy('info')">Info <span class="sort-arrow" id="sort-info"></span></th>
+            </tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">No users found</div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+
+    let usersData = {};
+    let sortCol = 'id';
+    let sortAsc = true;
+
+    document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
+    loadUsers();
+
+    async function loadUsers() {
+        try {
+            const resp = await fetch(`${EVENT_ID}/users.json`);
+            if (!resp.ok) {
+                document.getElementById('emptyState').style.display = '';
+                document.getElementById('emptyState').textContent = 'No users file found';
+                document.getElementById('usersTable').style.display = 'none';
+                return;
+            }
+            const data = await resp.json();
+            usersData = data.users || {};
+            renderUsers();
+        } catch (e) {
+            console.error('Failed to load users:', e);
+        }
+    }
+
+    function sortBy(col) {
+        if (sortCol === col) {
+            sortAsc = !sortAsc;
+        } else {
+            sortCol = col;
+            sortAsc = true;
+        }
+        renderUsers();
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function renderUsers() {
+        const query = (document.getElementById('searchInput').value || '').toLowerCase();
+        const tbody = document.getElementById('usersBody');
+        const emptyState = document.getElementById('emptyState');
+
+        // Build array from raw users.json data
+        // Keys can be "did:XXXX" or plain IDs like "S01"
+        let rows = Object.entries(usersData).map(([key, u]) => {
+            const isDid = key.startsWith('did:');
+            return {
+                key,
+                did: isDid ? key.slice(4) : '',
+                id: isDid ? (u._last_id || '') : key,
+                name: u.name || '',
+                role: u.role || '',
+                hidden: u.hidden ? 'yes' : '',
+                info: u.info || ''
+            };
+        });
+
+        // Filter on DID, ID, Display Name, Info
+        if (query) {
+            rows = rows.filter(r =>
+                r.id.toLowerCase().includes(query) ||
+                r.did.toLowerCase().includes(query) ||
+                r.name.toLowerCase().includes(query) ||
+                r.info.toLowerCase().includes(query)
+            );
+        }
+
+        // Sort
+        rows.sort((a, b) => {
+            let va = (a[sortCol] || '').toLowerCase();
+            let vb = (b[sortCol] || '').toLowerCase();
+            if (va < vb) return sortAsc ? -1 : 1;
+            if (va > vb) return sortAsc ? 1 : -1;
+            return 0;
+        });
+
+        // Update sort arrows
+        document.querySelectorAll('.sort-arrow').forEach(el => el.textContent = '');
+        const arrow = document.getElementById(`sort-${sortCol}`);
+        if (arrow) arrow.textContent = sortAsc ? '▲' : '▼';
+
+        // Render
+        if (rows.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.style.display = '';
+            emptyState.textContent = 'No users found';
+            document.getElementById('usersTable').style.display = 'none';
+        } else {
+            emptyState.style.display = 'none';
+            document.getElementById('usersTable').style.display = '';
+            tbody.innerHTML = rows.map(r => {
+                const roleBadge = r.role
+                    ? `<span class="badge badge-${escapeHtml(r.role)}">${escapeHtml(r.role)}</span>`
+                    : '<span style="color:#999">—</span>';
+                const hiddenBadge = r.hidden === 'yes'
+                    ? '<span class="badge badge-hidden">hidden</span>'
+                    : '';
+                const trClass = r.hidden === 'yes' ? ' class="hidden-user"' : '';
+                const idCell = r.did
+                    ? `<span class="mono">${escapeHtml(r.id) || '<span style="color:#999">—</span>'}</span><br><span class="did">${escapeHtml(r.did)}</span>`
+                    : `<span class="mono">${escapeHtml(r.id)}</span>`;
+                return `<tr${trClass}>
+                    <td>${idCell}</td>
+                    <td>${escapeHtml(r.name) || '<span style="color:#999">—</span>'}</td>
+                    <td>${roleBadge}</td>
+                    <td>${hiddenBadge}</td>
+                    <td class="col-info">${escapeHtml(r.info) || ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Count
+        const total = Object.keys(usersData).length;
+        const shown = rows.length;
+        document.getElementById('userCount').textContent = query
+            ? `${shown} / ${total}`
+            : `${total} users`;
+    }
+</script>
+</body>
+</html>
