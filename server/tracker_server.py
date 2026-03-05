@@ -3458,6 +3458,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 race['start_ts'] = start_ts
                 # Clearing start time also clears all results
                 if start_ts is None:
+                    if race['finishers']:
+                        log(f"[EVENT {eid}] Race {race_id} reset — clearing {len(race['finishers'])} results: {json.dumps(race['finishers'])}")
                     race['finishers'] = []
                     race['end_ts'] = None
                 save_races(tracker.data_dir, next_id, races)
@@ -3761,14 +3763,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             next_id, races = load_races(tracker.data_dir)
-            original_len = len(races)
-            races = [r for r in races if r['id'] != race_id]
-            if len(races) == original_len:
+            deleted_race = next((r for r in races if r['id'] == race_id), None)
+            if not deleted_race:
                 self._send_json({"error": f"Race {race_id} not found"}, 404)
                 return
 
+            races = [r for r in races if r['id'] != race_id]
             save_races(tracker.data_dir, next_id, races)
-            log(f"[EVENT {eid}] Race {race_id} deleted")
+            log(f"[EVENT {eid}] Race {race_id} deleted: {json.dumps(deleted_race)}")
             self._send_json({"success": True})
 
         elif re.match(r'^/admin/races/\d+/finish/.+$', subpath):
@@ -3789,14 +3791,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Race {race_id} not found"}, 404)
                 return
 
-            original_len = len(race['finishers'])
-            race['finishers'] = [f for f in race['finishers'] if f['sailor_id'] != sailor_id]
-            if len(race['finishers']) == original_len:
+            removed = [f for f in race['finishers'] if f['sailor_id'] == sailor_id]
+            if not removed:
                 self._send_json({"error": f"Sailor {sailor_id} not found in race {race_id}"}, 404)
                 return
 
+            race['finishers'] = [f for f in race['finishers'] if f['sailor_id'] != sailor_id]
             save_races(tracker.data_dir, next_id, races)
-            log(f"[EVENT {eid}] Race {race_id}: undid result for {sailor_id}")
+            log(f"[EVENT {eid}] Race {race_id}: undid result for {sailor_id}: {json.dumps(removed[0])}")
             self._send_json(race)
 
         else:

@@ -1,5 +1,6 @@
 """Tests for race management API (create, start, finish, DNF, undo, delete)."""
 
+import json
 import time
 
 from conftest import create_event
@@ -619,3 +620,103 @@ def test_delete_requires_auth(http_client):
         headers={"X-Admin-Password": "wrong", "X-Forwarded-For": "10.20.6.1"},
     )
     assert status == 401
+
+
+# ── Log audit (destructive ops log full data for reconstruction) ─────
+
+
+def _read_server_log(server):
+    """Read the server log and return its contents."""
+    server.process.stdout  # ensure flushed
+    return server.log_file.read_text()
+
+
+def test_delete_race_logs_full_data(http_client, server):
+    """Deleting a race should log the full race JSON for reconstruction."""
+    eid = create_event(http_client, name="Race LogDel", admin_password="racelogdel")
+    pw = {"X-Admin-Password": "racelogdel"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "LoggedRace"}, headers=pw)
+    rid = race['id']
+
+    start_ts = time.time()
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/start", data={"start_ts": start_ts}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/finish",
+                     data={"sailor_id": "S01", "finish_ts": start_ts + 100}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/dnf", data={"sailor_id": "S02"}, headers=pw)
+
+    # Delete the race
+    http_client.delete(f"/api/event/{eid}/admin/races/{rid}", headers=pw)
+    time.sleep(0.2)
+
+    log_text = _read_server_log(server)
+    # Find the delete log line
+    delete_lines = [l for l in log_text.splitlines() if f"Race {rid} deleted:" in l]
+    assert delete_lines, "Expected a delete log line with full race data"
+
+    # Extract JSON from the log line (everything after "deleted: ")
+    json_str = delete_lines[-1].split("deleted: ", 1)[1]
+    deleted_race = json.loads(json_str)
+    assert deleted_race["name"] == "LoggedRace"
+    assert len(deleted_race["finishers"]) == 2
+    assert deleted_race["finishers"][0]["sailor_id"] == "S01"
+    assert deleted_race["finishers"][0]["status"] == "finished"
+    assert deleted_race["finishers"][1]["sailor_id"] == "S02"
+    assert deleted_race["finishers"][1]["status"] == "dnf"
+
+
+def test_reset_race_logs_cleared_results(http_client, server):
+    """Resetting a race (start_ts=null) should log the cleared finishers."""
+    eid = create_event(http_client, name="Race LogReset", admin_password="racelogreset")
+    pw = {"X-Admin-Password": "racelogreset"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "ResetRace"}, headers=pw)
+    rid = race['id']
+
+    start_ts = time.time()
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/start", data={"start_ts": start_ts}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/finish",
+                     data={"sailor_id": "S10", "finish_ts": start_ts + 200}, headers=pw)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/dns", data={"sailor_id": "S11"}, headers=pw)
+
+    # Reset (clear start)
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/start",
+                     data={"start_ts": None}, headers=pw)
+    time.sleep(0.2)
+
+    log_text = _read_server_log(server)
+    reset_lines = [l for l in log_text.splitlines() if f"Race {rid} reset" in l]
+    assert reset_lines, "Expected a reset log line with cleared results"
+
+    # Extract JSON array from the log line
+    json_str = reset_lines[-1].split("clearing 2 results: ", 1)[1]
+    cleared = json.loads(json_str)
+    assert len(cleared) == 2
+    sids = {f["sailor_id"] for f in cleared}
+    assert sids == {"S10", "S11"}
+
+
+def test_undo_finish_logs_removed_entry(http_client, server):
+    """Undoing a finish should log the removed finisher entry."""
+    eid = create_event(http_client, name="Race LogUndo", admin_password="racelogundo")
+    pw = {"X-Admin-Password": "racelogundo"}
+    _, race = http_client.post(f"/api/event/{eid}/admin/races", data={"name": "UndoRace"}, headers=pw)
+    rid = race['id']
+
+    start_ts = time.time()
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/start", data={"start_ts": start_ts}, headers=pw)
+    finish_ts = start_ts + 150
+    http_client.post(f"/api/event/{eid}/admin/races/{rid}/finish",
+                     data={"sailor_id": "S20", "finish_ts": finish_ts}, headers=pw)
+
+    # Undo
+    http_client.delete(f"/api/event/{eid}/admin/races/{rid}/finish/S20", headers=pw)
+    time.sleep(0.2)
+
+    log_text = _read_server_log(server)
+    undo_lines = [l for l in log_text.splitlines() if f"Race {rid}: undid result for S20:" in l]
+    assert undo_lines, "Expected undo log line with removed entry data"
+
+    json_str = undo_lines[-1].split("for S20: ", 1)[1]
+    removed = json.loads(json_str)
+    assert removed["sailor_id"] == "S20"
+    assert removed["status"] == "finished"
+    assert abs(removed["finish_ts"] - finish_ts) < 0.01
