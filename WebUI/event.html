@@ -3761,7 +3761,7 @@
                 alertsDiv.style.display = 'block';
                 alertsDiv.innerHTML = assistList.map(s => `
                     <div class="assist-alert-item" onclick="centerOnSailor('${s.id}')">
-                        ⚠ ${s.id} NEEDS ASSISTANCE
+                        ⚠ ${s.displayid || s.id} NEEDS ASSISTANCE
                     </div>
                 `).join('');
             } else {
