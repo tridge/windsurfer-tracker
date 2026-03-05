@@ -4718,7 +4718,7 @@
                 // Use r.key (displayid or original id) for selection - this matches how userData is keyed
                 const userKey = r.key || r.sailor_id;
                 return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${userKey}">
-                    <strong>${r.name}</strong><br>
+                    <strong>${r.name}${r.sailor_id !== r.name ? ` <span style="color:#999">[${r.sailor_id}]</span>` : ''}</strong><br>
                     <span class="search-result-detail">${dateDisplay} | ${duration}</span>
                 </div>`;
             }).join('');
