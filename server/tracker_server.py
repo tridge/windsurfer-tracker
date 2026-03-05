@@ -678,6 +678,7 @@ class GT06Listener:
         self._log_fd = None
         self.idle_sailors = set()    # sailor_ids currently idle
         self.active_sailors = set()  # sailor_ids explicitly started by admin
+        self._sticky_assist: set = set()  # IMEIs with sticky SOS active
 
     def _log_packet(self, frame):
         """Log a raw GT06 frame with timestamp+length header."""
@@ -914,6 +915,13 @@ class GT06Listener:
             self._queue_commands(gt_conn, cmds)
             log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
 
+            # Restore sticky SOS across TCP reconnects
+            if imei in self._sticky_assist:
+                gt_conn.assist_active = True
+                if gt_conn.idle:
+                    self.set_idle(gt_conn.sailor_id, False)
+                log(f"[GT06] Restored sticky SOS after reconnect for {gt_conn.sailor_id}")
+
             # Restore last known position from tracker and immediately update
             # idle/active state in current_positions.json so the UI reflects
             # the correct state without waiting for the next packet.
@@ -1078,17 +1086,17 @@ class GT06Listener:
             log(f"[GT06] Alarm from {label}: {alarm_type}")
 
             if is_sos:
-                if gt_conn.assist_active:
-                    # Second SOS press — toggle off, stay in active tracking
-                    gt_conn.assist_active = False
-                    label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-                    log(f"[GT06] SOS cancelled by second press from {label}")
-                else:
+                imei = gt_conn.imei
+                if imei not in self._sticky_assist:
                     gt_conn.assist_active = True
+                    self._sticky_assist.add(imei)
+                    log(f"[GT06] SOS activated (sticky) from {label}")
                     # Come out of idle so we get full GPS tracking
                     if gt_conn.idle:
                         self.set_idle(gt_conn.sailor_id, False)
                         log(f"[GT06] Exited idle due to SOS from {label}")
+                else:
+                    log(f"[GT06] SOS already active, ignoring repeat press from {label}")
 
             if loc and gt_conn.sailor_id and loc["gps_valid"]:
                 speed_knots = loc["speed_kmh"] / 1.852
@@ -1139,7 +1147,9 @@ class GT06Listener:
             if gt_conn.sailor_id == sailor_id and gt_conn.assist_active:
                 gt_conn.assist_active = False
                 self._queue_commands(gt_conn, ["SENALM,OFF#"])
-                log(f"[GT06] Cancelled assist for {sailor_id}")
+                if gt_conn.imei:
+                    self._sticky_assist.discard(gt_conn.imei)
+                log(f"[GT06] Cancelled assist for {sailor_id} (sticky cleared)")
                 return True
         return False
 

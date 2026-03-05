@@ -284,8 +284,8 @@ def test_sos_exits_idle(gt06_client, server):
     assert "SUP,1#" in cmds, f"Expected active SUP after SOS, got: {cmds}"
 
 
-def test_sos_toggle_off(gt06_client, server):
-    """Second SOS press should cancel assist but stay active."""
+def test_sos_sticky_repeat_press(gt06_client, server):
+    """Second SOS press should keep assist active (sticky, not toggled off)."""
     imei = "863874081100003"
     gt06_client.send_login(imei)
     gt06_client.drain()
@@ -298,13 +298,13 @@ def test_sos_toggle_off(gt06_client, server):
     positions = _read_positions(server, eid=1)
     assert positions["G100003"].get("ast") is True
 
-    # Second SOS — cancels assist (different timestamp to avoid dup detection)
+    # Second SOS — should still be active (sticky)
     gt06_client.send_alarm(alarm_type="SOS", lat=-36.85, lon=174.76, second=20)
     gt06_client.drain()
     time.sleep(0.2)
 
     positions = _read_positions(server, eid=1)
-    assert positions["G100003"].get("ast") is not True
+    assert positions["G100003"].get("ast") is True
 
 
 def test_cancel_assist_via_admin(gt06_client, http_client, server):
@@ -335,6 +335,72 @@ def test_cancel_assist_via_admin(gt06_client, http_client, server):
 
     positions = _read_positions(server, eid=1)
     assert positions["G100004"].get("ast") is not True
+
+
+def test_sos_sticky_survives_reconnect(gt06_client, server):
+    """Sticky SOS should be restored after TCP reconnect."""
+    imei = "863874081100005"
+    gt06_client.send_login(imei)
+    gt06_client.drain()
+
+    # Activate SOS
+    gt06_client.send_alarm(alarm_type="SOS", lat=-36.85, lon=174.76, second=10)
+    gt06_client.drain()
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    assert positions["G100005"].get("ast") is True
+
+    # Disconnect and reconnect (simulates TCP drop)
+    gt06_client.close()
+    gt06_client.connect()
+
+    gt06_client.send_login(imei)
+    gt06_client.drain()
+
+    # Send a location to trigger position update
+    gt06_client.send_location(second=20)
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    assert positions["G100005"].get("ast") is True
+
+
+def test_sos_reactivates_after_admin_cancel(gt06_client, http_client, server):
+    """After admin cancels SOS, a new SOS press should re-activate it."""
+    imei = "863874081100006"
+    gt06_client.send_login(imei)
+    gt06_client.drain()
+
+    # Activate SOS
+    gt06_client.send_alarm(alarm_type="SOS", lat=-36.85, lon=174.76, second=10)
+    gt06_client.drain()
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    assert positions["G100006"].get("ast") is True
+
+    # Admin cancels
+    status, body = http_client.post(
+        "/api/event/1/admin/cancel-assist/G100006",
+        headers={"X-Admin-Password": "admin123"},
+    )
+    assert status == 200
+    gt06_client.drain()
+
+    gt06_client.send_location(second=20)
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    assert positions["G100006"].get("ast") is not True
+
+    # New SOS press should re-activate
+    gt06_client.send_alarm(alarm_type="SOS", lat=-36.85, lon=174.76, second=30)
+    gt06_client.drain()
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    assert positions["G100006"].get("ast") is True
 
 
 # ---------------------------------------------------------------------------
