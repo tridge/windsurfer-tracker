@@ -212,18 +212,33 @@ fetch(`${API_BASE}/api/events`).then(r => r.json()).then(d => {
     }
 }).catch(() => {});
 
-// Load user overrides for display names
+// Load user overrides for display names (public file, no auth needed)
 async function loadUserOverrides() {
     try {
-        const r = await fetch(`${EVENT_API}/users`);
+        const r = await fetch(`${API_BASE}/${EVENT_ID}/users.json`);
         if (r.ok) {
             const d = await r.json();
-            userOverrides = d.users || {};
+            const raw = d.users || {};
+            // Build map: resolve did:XXX keys to sailor_id via _last_id
+            userOverrides = {};
+            for (const [key, val] of Object.entries(raw)) {
+                if (key.startsWith('did:') && val._last_id) {
+                    userOverrides[val._last_id] = val;
+                } else if (!key.startsWith('did:')) {
+                    userOverrides[key] = val;
+                }
+            }
         }
     } catch(e) {}
 }
 
-function sailorName(id) {
+function sailorName(f) {
+    if (typeof f === 'string') { // backward compat
+        if (userOverrides[f] && userOverrides[f].name) return userOverrides[f].name;
+        return f;
+    }
+    if (f.displayid) return f.displayid;
+    const id = f.sailor_id;
     if (userOverrides[id] && userOverrides[id].name) return userOverrides[id].name;
     return id;
 }
@@ -325,20 +340,20 @@ async function loadResults() {
                 const placeClass = place <= 3 ? `p${place}` : 'other';
                 html += `<div class="result-row">
                     <div class="place ${placeClass}">${placeLabel}</div>
-                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                    <div class="result-name">${esc(sailorName(f))}</div>
                     <div class="result-time">${formatElapsed(elapsed)}</div>
                 </div>`;
             }
             for (const f of dnfs) {
                 html += `<div class="dnf-row">
                     <div class="dnf-badge">DNF</div>
-                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                    <div class="result-name">${esc(sailorName(f))}</div>
                 </div>`;
             }
             for (const f of dnss) {
                 html += `<div class="dnf-row">
                     <div class="dnf-badge">DNS</div>
-                    <div class="result-name">${esc(sailorName(f.sailor_id))}</div>
+                    <div class="result-name">${esc(sailorName(f))}</div>
                 </div>`;
             }
         }
@@ -381,7 +396,7 @@ function buildExportData() {
             const elapsed = (race.start_ts && f.finish_ts) ? f.finish_ts - race.start_ts : 0;
             rows.push({
                 place,
-                name: sailorName(f.sailor_id),
+                name: sailorName(f),
                 id: f.sailor_id,
                 time: formatElapsed(elapsed),
                 status: 'Finished',
@@ -390,7 +405,7 @@ function buildExportData() {
         for (const f of dnfs) {
             rows.push({
                 place: '',
-                name: sailorName(f.sailor_id),
+                name: sailorName(f),
                 id: f.sailor_id,
                 time: '',
                 status: 'DNF',
@@ -399,7 +414,7 @@ function buildExportData() {
         for (const f of dnss) {
             rows.push({
                 place: '',
-                name: sailorName(f.sailor_id),
+                name: sailorName(f),
                 id: f.sailor_id,
                 time: '',
                 status: 'DNS',

@@ -3532,11 +3532,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
                     return
 
-                race['finishers'].append({
+                # Look up display name from user overrides
+                finisher = {
                     "sailor_id": sailor_id,
                     "finish_ts": finish_ts,
                     "status": "finished"
-                })
+                }
+                if tracker.user_overrides:
+                    pos = tracker.position_tracker.current_positions.get(sailor_id, {})
+                    override = get_user_override(tracker.user_overrides, sailor_id, pos.get("did"))
+                    if override and override.get('name'):
+                        finisher["displayid"] = override['name']
+                race['finishers'].append(finisher)
                 save_races(tracker.data_dir, next_id, races)
                 log(f"[EVENT {eid}] Race {race_id}: {sailor_id} finished at {finish_ts}")
                 self._send_json(race)
@@ -3574,11 +3581,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
                     return
 
-                race['finishers'].append({
+                # Look up display name from user overrides
+                finisher = {
                     "sailor_id": sailor_id,
                     "finish_ts": None,
                     "status": "dnf"
-                })
+                }
+                if tracker.user_overrides:
+                    pos = tracker.position_tracker.current_positions.get(sailor_id, {})
+                    override = get_user_override(tracker.user_overrides, sailor_id, pos.get("did"))
+                    if override and override.get('name'):
+                        finisher["displayid"] = override['name']
+                race['finishers'].append(finisher)
                 save_races(tracker.data_dir, next_id, races)
                 log(f"[EVENT {eid}] Race {race_id}: {sailor_id} DNF")
                 self._send_json(race)
@@ -3616,11 +3630,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Sailor {sailor_id} already has a result in this race"}, 400)
                     return
 
-                race['finishers'].append({
+                # Look up display name from user overrides
+                finisher = {
                     "sailor_id": sailor_id,
                     "finish_ts": None,
                     "status": "dns"
-                })
+                }
+                if tracker.user_overrides:
+                    pos = tracker.position_tracker.current_positions.get(sailor_id, {})
+                    override = get_user_override(tracker.user_overrides, sailor_id, pos.get("did"))
+                    if override and override.get('name'):
+                        finisher["displayid"] = override['name']
+                race['finishers'].append(finisher)
                 save_races(tracker.data_dir, next_id, races)
                 log(f"[EVENT {eid}] Race {race_id}: {sailor_id} DNS")
                 self._send_json(race)
