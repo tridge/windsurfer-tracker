@@ -6,6 +6,7 @@ public final class PreferencesManager: ObservableObject {
     public static let shared = PreferencesManager()
 
     private let defaults: UserDefaults
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Preference Keys
 
@@ -29,74 +30,27 @@ public final class PreferencesManager: ObservableObject {
     }
 
     // MARK: - Published Properties
+    // Note: persistence is done via Combine subscriptions in init(), NOT didSet.
+    // Using didSet with @Published is unreliable — SwiftUI Bindings from
+    // @ObservedObject can bypass didSet and set the wrapper's storage directly,
+    // causing writes to UserDefaults to silently never happen.
 
-    @Published public var sailorId: String {
-        didSet { defaults.set(sailorId, forKey: Keys.sailorId) }
-    }
-
-    @Published public var serverHost: String {
-        didSet {
-            // Migrate legacy server address
-            let host = serverHost == "track.tridgell.net" ? TrackerConfig.defaultServerHost : serverHost
-            defaults.set(host, forKey: Keys.serverHost)
-        }
-    }
-
-    @Published public var serverPort: Int {
-        didSet { defaults.set(serverPort, forKey: Keys.serverPort) }
-    }
-
-    @Published public var role: TrackerRole {
-        didSet { defaults.set(role.rawValue, forKey: Keys.role) }
-    }
-
-    @Published public var password: String {
-        didSet { defaults.set(password, forKey: Keys.password) }
-    }
-
-    @Published public var eventId: Int {
-        didSet { defaults.set(eventId, forKey: Keys.eventId) }
-    }
-
-    @Published public var heartRateEnabled: Bool {
-        didSet { defaults.set(heartRateEnabled, forKey: Keys.heartRateEnabled) }
-    }
-
-    @Published public var trackerBeep: Bool {
-        didSet { defaults.set(trackerBeep, forKey: Keys.trackerBeep) }
-    }
-
-    @Published public var waterLock: Bool {
-        didSet { defaults.set(waterLock, forKey: Keys.waterLock) }
-    }
-
-    @Published public var trackingActive: Bool {
-        didSet { defaults.set(trackingActive, forKey: Keys.trackingActive) }
-    }
-
-    @Published public var batteryOptAsked: Bool {
-        didSet { defaults.set(batteryOptAsked, forKey: Keys.batteryOptAsked) }
-    }
-
-    @Published public var raceTimerEnabled: Bool {
-        didSet { defaults.set(raceTimerEnabled, forKey: Keys.raceTimerEnabled) }
-    }
-
-    @Published public var raceTimerMinutes: Int {
-        didSet { defaults.set(raceTimerMinutes, forKey: Keys.raceTimerMinutes) }
-    }
-
-    @Published public var raceTimerTapGForce: Int {
-        didSet { defaults.set(raceTimerTapGForce, forKey: Keys.raceTimerTapGForce) }
-    }
-
-    @Published public var volumeAssist: Bool {
-        didSet { defaults.set(volumeAssist, forKey: Keys.volumeAssist) }
-    }
-
-    @Published public var eulaAccepted: Bool {
-        didSet { defaults.set(eulaAccepted, forKey: Keys.eulaAccepted) }
-    }
+    @Published public var sailorId: String
+    @Published public var serverHost: String
+    @Published public var serverPort: Int
+    @Published public var role: TrackerRole
+    @Published public var password: String
+    @Published public var eventId: Int
+    @Published public var heartRateEnabled: Bool
+    @Published public var trackerBeep: Bool
+    @Published public var waterLock: Bool
+    @Published public var trackingActive: Bool
+    @Published public var batteryOptAsked: Bool
+    @Published public var raceTimerEnabled: Bool
+    @Published public var raceTimerMinutes: Int
+    @Published public var raceTimerTapGForce: Int
+    @Published public var volumeAssist: Bool
+    @Published public var eulaAccepted: Bool
 
     // MARK: - Initialization
 
@@ -143,6 +97,31 @@ public final class PreferencesManager: ObservableObject {
         self.raceTimerTapGForce = gForce > 0 ? min(max(gForce, 2), 9) : 3  // Default 3g, range 2-9g
         self.volumeAssist = defaults.bool(forKey: Keys.volumeAssist)  // Default false
         self.eulaAccepted = defaults.bool(forKey: Keys.eulaAccepted)  // Default false
+
+        // Persist all changes via Combine subscriptions (reliable with SwiftUI Bindings)
+        setupPersistence()
+    }
+
+    private func setupPersistence() {
+        $sailorId.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.sailorId) }.store(in: &cancellables)
+        $serverHost.dropFirst().sink { [weak self] v in
+            let host = v == "track.tridgell.net" ? TrackerConfig.defaultServerHost : v
+            self?.defaults.set(host, forKey: Keys.serverHost)
+        }.store(in: &cancellables)
+        $serverPort.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.serverPort) }.store(in: &cancellables)
+        $role.dropFirst().sink { [weak self] v in self?.defaults.set(v.rawValue, forKey: Keys.role) }.store(in: &cancellables)
+        $password.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.password) }.store(in: &cancellables)
+        $eventId.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.eventId) }.store(in: &cancellables)
+        $heartRateEnabled.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.heartRateEnabled) }.store(in: &cancellables)
+        $trackerBeep.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.trackerBeep) }.store(in: &cancellables)
+        $waterLock.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.waterLock) }.store(in: &cancellables)
+        $trackingActive.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.trackingActive) }.store(in: &cancellables)
+        $batteryOptAsked.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.batteryOptAsked) }.store(in: &cancellables)
+        $raceTimerEnabled.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.raceTimerEnabled) }.store(in: &cancellables)
+        $raceTimerMinutes.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.raceTimerMinutes) }.store(in: &cancellables)
+        $raceTimerTapGForce.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.raceTimerTapGForce) }.store(in: &cancellables)
+        $volumeAssist.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.volumeAssist) }.store(in: &cancellables)
+        $eulaAccepted.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.eulaAccepted) }.store(in: &cancellables)
     }
 
     // MARK: - Convenience Methods
