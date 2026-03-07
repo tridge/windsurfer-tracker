@@ -4562,6 +4562,15 @@ def run_server(port: int, http_port: int | None = None,
                 idle_interval = event.get('idle_interval', 0)
                 ack_data["idle"] = idle_interval
 
+                # Check if any sailor has active assist (for support boat alerts)
+                any_assist = any(
+                    pos.get('ast', False)
+                    for pos in event_tracker.position_tracker.current_positions.values()
+                    if pos.get('role', 'sailor') == 'sailor'
+                )
+                if any_assist:
+                    ack_data["any_assist"] = True
+
                 # Check for pending command
                 cmd_key = f"{eid}:{sailor_id}"
                 if cmd_key in _pending_commands:

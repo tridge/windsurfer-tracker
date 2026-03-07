@@ -1262,6 +1262,11 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                         // Re-evaluate volume assist (enable/disable immediately)
                         trackerService?.updateVolumeAssist()
 
+                        // Re-evaluate assist button visibility (only sailors can request assist)
+                        if (newRole != "sailor") {
+                            binding.btnAssist.visibility = View.GONE
+                        }
+
                         // Auto-restart tracking if any settings changed while tracking
                         val isTracking = trackerService?.isTracking() == true
                         val settingsChanged = sailorId != oldSailorId ||
@@ -1377,8 +1382,14 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
 
     override fun onAssistEnabled(enabled: Boolean) {
         runOnUiThread {
-            binding.btnAssist.visibility = if (enabled) View.VISIBLE else View.GONE
+            // Only show assist button for sailors
+            val isSailor = getPrefs().getString("role", "sailor") == "sailor"
+            binding.btnAssist.visibility = if (enabled && isSailor) View.VISIBLE else View.GONE
         }
+    }
+
+    override fun onAnyAssist(active: Boolean) {
+        // No UI change needed - TrackerService handles the alarm sound
     }
 
     override fun onRemoteStop() {

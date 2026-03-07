@@ -237,6 +237,18 @@ class TrackerService : LifecycleService() {
         }
     }
 
+    // Any-assist alarm: plays quad-beep every 5 seconds on support boats when any sailor has active assist
+    private var anyAssistActive = AtomicBoolean(false)
+    private val anyAssistAlarmHandler = Handler(Looper.getMainLooper())
+    private val anyAssistAlarmRunnable = object : Runnable {
+        override fun run() {
+            if (anyAssistActive.get() && (isRunning.get() || isIdleMode.get())) {
+                playQuadBeep()
+                anyAssistAlarmHandler.postDelayed(this, 5000L)
+            }
+        }
+    }
+
     // GPS watchdog - detects when OEM power management throttles GPS callbacks
     // and re-registers requestLocationUpdates() to restore them
     private val gpsWatchdogHandler = Handler(Looper.getMainLooper())
@@ -328,6 +340,7 @@ class TrackerService : LifecycleService() {
         fun onEventName(name: String)
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
+        fun onAnyAssist(active: Boolean)  // Whether any sailor has active assist (for support boat alerts)
         fun onRemoteStop()  // Server sent remote stop command
         fun onRemoteCancelAssist()  // Server sent remote cancel assist command
         fun onRemoteStart()  // Server sent start command (from idle mode)
@@ -525,6 +538,61 @@ class TrackerService : LifecycleService() {
                 track.release()
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to play assist tones: ${e.message}")
+            }
+        }.start()
+    }
+
+    /**
+     * Play quad-beep (high-low-high-low) for support boat alert when any sailor has active assist.
+     * Uses DTMF dual-tone frequencies matching the assist tone pattern.
+     */
+    private fun playQuadBeep() {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val toneSamples = sampleRate * 150 / 1000   // 150ms per tone
+                val gapSamples = sampleRate * 50 / 1000     // 50ms gap
+                val totalSamples = toneSamples * 4 + gapSamples * 3
+
+                // High = DTMF 9 (852+1477), Low = DTMF 1 (697+1209)
+                val highFreq = 852.0 to 1477.0
+                val lowFreq = 697.0 to 1209.0
+                val freqs = arrayOf(highFreq, lowFreq, highFreq, lowFreq)
+
+                val buffer = ShortArray(totalSamples)
+                var offset = 0
+                for ((i, freq) in freqs.withIndex()) {
+                    for (s in 0 until toneSamples) {
+                        val t = s.toDouble() / sampleRate
+                        val sample = (Math.sin(2 * Math.PI * freq.first * t) +
+                                Math.sin(2 * Math.PI * freq.second * t)) * 0.4 * Short.MAX_VALUE
+                        buffer[offset + s] = sample.toInt().toShort()
+                    }
+                    offset += toneSamples
+                    if (i < 3) offset += gapSamples  // gap is zeros = silence
+                }
+
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                    .setBufferSizeInBytes(totalSamples * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+
+                track.write(buffer, 0, buffer.size)
+                track.play()
+                Thread.sleep((150 * 4 + 50 * 3 + 50).toLong())
+                track.stop()
+                track.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to play quad beep: ${e.message}")
             }
         }.start()
     }
@@ -1375,8 +1443,10 @@ class TrackerService : LifecycleService() {
         toneGenerator?.release()
         toneGenerator = null
 
-        // Stop assist alarm
+        // Stop assist alarms
         assistAlarmHandler.removeCallbacks(assistAlarmRunnable)
+        anyAssistAlarmHandler.removeCallbacks(anyAssistAlarmRunnable)
+        anyAssistActive.set(false)
 
         // Stop GPS watchdog
         gpsWatchdogHandler.removeCallbacks(gpsWatchdogRunnable)
@@ -2245,6 +2315,19 @@ class TrackerService : LifecycleService() {
                         } else {
                             // Default to enabled if not specified
                             statusListener?.onAssistEnabled(true)
+                        }
+
+                        // Check for any_assist (any sailor has active assist - for support boat alerts)
+                        val newAnyAssist = ack.optBoolean("any_assist", false)
+                        val prevAnyAssist = anyAssistActive.getAndSet(newAnyAssist)
+                        if (newAnyAssist != prevAnyAssist) {
+                            statusListener?.onAnyAssist(newAnyAssist)
+                            if (newAnyAssist && role == "support") {
+                                playQuadBeep()
+                                anyAssistAlarmHandler.postDelayed(anyAssistAlarmRunnable, 5000L)
+                            } else {
+                                anyAssistAlarmHandler.removeCallbacks(anyAssistAlarmRunnable)
+                            }
                         }
 
                         // Cache idle interval from server ACK

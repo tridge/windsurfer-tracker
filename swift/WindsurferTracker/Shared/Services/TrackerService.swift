@@ -20,6 +20,7 @@ public actor TrackerService {
     public nonisolated let statusLinePublisher = CurrentValueSubject<String, Never>("---")  // GPS wait, connecting..., auth failure, or event name
     public nonisolated let errorPublisher = PassthroughSubject<TrackerError, Never>()
     public nonisolated let assistEnabledPublisher = CurrentValueSubject<Bool, Never>(true)  // Whether assist button should be shown
+    public nonisolated let anyAssistPublisher = CurrentValueSubject<Bool, Never>(false)  // Whether any sailor has active assist
     public nonisolated let remoteStopPublisher = PassthroughSubject<Void, Never>()  // Signals remote stop command from server
     public nonisolated let remoteCancelAssistPublisher = PassthroughSubject<Void, Never>()  // Signals remote cancel assist command from server
     public nonisolated let remoteStartPublisher = PassthroughSubject<Void, Never>()  // Signals remote start command (resume from idle)
@@ -702,6 +703,9 @@ public actor TrackerService {
             assistRequested = false
             print("[TrackerService] Assist cleared by server (assist disabled for event)")
         }
+
+        // Update any_assist state (for support boat alerts)
+        anyAssistPublisher.send(response.isAnyAssist)
 
         // Parse idle interval from server
         if let interval = response.idle {

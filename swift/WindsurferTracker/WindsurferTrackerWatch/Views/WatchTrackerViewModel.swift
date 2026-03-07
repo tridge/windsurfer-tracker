@@ -97,6 +97,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     // Audio playback
     private var audioPlayer: AVAudioPlayer?
     private let tonePlayer = AssistTonePlayer()
+    private var anyAssistAlarmTimer: Timer?
 
     // Tap detection (accelerometer)
     private let motionManager = CMMotionManager()
@@ -210,11 +211,26 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Subscribe to assist enabled status
+        // Subscribe to assist enabled status — only show for sailors
         TrackerService.shared.assistEnabledPublisher
+            .combineLatest($role)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled in
-                self?.assistEnabled = enabled
+            .sink { [weak self] enabled, role in
+                self?.assistEnabled = enabled && role == .sailor
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to any_assist for support boat alarm
+        TrackerService.shared.anyAssistPublisher
+            .combineLatest($role)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] anyAssist, role in
+                guard let self = self else { return }
+                if anyAssist && role == .support {
+                    self.startAnyAssistAlarm()
+                } else {
+                    self.stopAnyAssistAlarm()
+                }
             }
             .store(in: &cancellables)
 
@@ -228,6 +244,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 self.stopBeepTimer()
                 self.stopTapDetection()
                 self.stopAssistToneTimer()
+                self.stopAnyAssistAlarm()
                 self.tonePlayer.playDouble(ascending: false)
                 Task {
                     await self.stopWorkoutSession()
@@ -536,6 +553,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         // Stop tracker beep timer
         stopBeepTimer()
         stopAssistToneTimer()
+        stopAnyAssistAlarm()
 
         // Stop tap detection and reset countdown
         stopTapDetection()
@@ -662,6 +680,26 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
     private func stopAssistToneTimer() {
         assistToneTimer?.invalidate()
         assistToneTimer = nil
+    }
+
+    // MARK: - Any-Assist Alarm (Support Boat)
+
+    /// Start 5-second repeating quad-beep alarm for support boats when any sailor has active assist
+    private func startAnyAssistAlarm() {
+        stopAnyAssistAlarm()
+        // Play immediately, then repeat every 5 seconds
+        tonePlayer.playQuadBeep()
+        anyAssistAlarmTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.tonePlayer.playQuadBeep()
+            }
+        }
+    }
+
+    /// Stop the any-assist alarm timer
+    private func stopAnyAssistAlarm() {
+        anyAssistAlarmTimer?.invalidate()
+        anyAssistAlarmTimer = nil
     }
 
     private func playTrackerBeep() {

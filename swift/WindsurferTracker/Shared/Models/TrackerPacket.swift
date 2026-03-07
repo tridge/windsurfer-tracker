@@ -164,6 +164,9 @@ public struct AckResponse: Codable {
     /// Idle interval in seconds (0 or nil = idle mode disabled)
     public let idle: Int?
 
+    /// Whether any sailor has active assist (for support boat alerts)
+    public let any_assist: Bool?
+
     /// Whether this is an unsolicited proactive command (not a response to a send)
     public let proactive: Bool?
 
@@ -198,6 +201,11 @@ public struct AckResponse: Codable {
     /// Whether this is a remote shutdown command (exit idle mode)
     public var isShutdownCommand: Bool {
         return cmd == "shutdown"
+    }
+
+    /// Whether any sailor has active assist (defaults to false if not specified)
+    public var isAnyAssist: Bool {
+        return any_assist ?? false
     }
 }
 

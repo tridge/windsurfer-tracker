@@ -65,6 +65,7 @@ public class TrackerViewModel: ObservableObject {
     private let volumeButtonAssist = VolumeButtonAssist()
     private let assistTonePlayer = AssistTonePlayer()
     private var assistAlarmTimer: Timer?
+    private var anyAssistAlarmTimer: Timer?
 
     // MARK: - Initialization
 
@@ -225,11 +226,26 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Subscribe to assist enabled status
+        // Subscribe to assist enabled status — only show for sailors
         TrackerService.shared.assistEnabledPublisher
+            .combineLatest($role)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled in
-                self?.assistEnabled = enabled
+            .sink { [weak self] enabled, role in
+                self?.assistEnabled = enabled && role == .sailor
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to any_assist for support boat alarm
+        TrackerService.shared.anyAssistPublisher
+            .combineLatest($role)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] anyAssist, role in
+                guard let self = self else { return }
+                if anyAssist && role == .support {
+                    self.startAnyAssistAlarm()
+                } else {
+                    self.stopAnyAssistAlarm()
+                }
             }
             .store(in: &cancellables)
 
@@ -242,6 +258,7 @@ public class TrackerViewModel: ObservableObject {
                 self.playTrackingTone(ascending: false)
                 self.stopBeepTimer()
                 self.stopAssistAlarm()
+                self.stopAnyAssistAlarm()
                 self.endLiveActivity()
             }
             .store(in: &cancellables)
@@ -373,6 +390,34 @@ public class TrackerViewModel: ObservableObject {
         assistAlarmTimer = nil
     }
 
+    /// Start 5-second repeating quad-beep alarm for support boats when any sailor has active assist
+    private func startAnyAssistAlarm() {
+        stopAnyAssistAlarm()
+        // Play immediately, then repeat every 5 seconds
+        playQuadBeepTones()
+        anyAssistAlarmTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.playQuadBeepTones()
+        }
+        RunLoop.main.add(anyAssistAlarmTimer!, forMode: .common)
+    }
+
+    /// Stop the any-assist alarm timer
+    private func stopAnyAssistAlarm() {
+        anyAssistAlarmTimer?.invalidate()
+        anyAssistAlarmTimer = nil
+    }
+
+    /// Play quad-beep at max volume for support boat alert
+    private func playQuadBeepTones() {
+        let savedVolume = AVAudioSession.sharedInstance().outputVolume
+        volumeButtonAssist.setSystemVolume(1.0)
+        assistTonePlayer.playQuadBeep()
+        // Restore volume after tones finish (~800ms for 4 tones)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            self?.volumeButtonAssist.setSystemVolume(savedVolume)
+        }
+    }
+
     // MARK: - Actions
 
     public func startTracking() {
@@ -427,8 +472,9 @@ public class TrackerViewModel: ObservableObject {
         // Stop tracker beep timer
         stopBeepTimer()
 
-        // Stop assist alarm
+        // Stop assist alarms
         stopAssistAlarm()
+        stopAnyAssistAlarm()
 
         // End Live Activity
         endLiveActivity()

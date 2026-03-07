@@ -68,6 +68,21 @@ class AssistTonePlayer {
         }
     }
 
+    /// Play quad-beep (high-low-high-low) for support boat alert when a sailor has active assist
+    func playQuadBeep() {
+        ensureAudioSession()
+        let freqs: [Double] = [Self.highFreq, Self.lowFreq, Self.highFreq, Self.lowFreq]
+
+        let data = generateWAV(frequencies: freqs)
+        do {
+            player = try AVAudioPlayer(data: data)
+            player?.volume = 1.0
+            player?.play()
+        } catch {
+            NSLog("[AssistTone] Failed to play quad beep: \(error)")
+        }
+    }
+
     func stop() {
         player?.stop()
         player = nil
