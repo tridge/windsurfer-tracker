@@ -1,5 +1,8 @@
 import Foundation
 import Combine
+#if os(iOS)
+import UIKit
+#endif
 
 /// UserDefaults wrapper for tracker preferences with Combine publishers
 public final class PreferencesManager: ObservableObject {
@@ -100,6 +103,20 @@ public final class PreferencesManager: ObservableObject {
 
         // Persist all changes via Combine subscriptions (reliable with SwiftUI Bindings)
         setupPersistence()
+
+        // Belt-and-suspenders: if the singleton was created before first unlock
+        // (e.g. background location relaunch after reboot), all UserDefaults reads
+        // above returned nil/defaults. Re-read everything once data is available.
+        #if os(iOS)
+        if !UIApplication.shared.isProtectedDataAvailable {
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.reloadFromDefaults()
+            }
+        }
+        #endif
     }
 
     private func setupPersistence() {
@@ -122,6 +139,46 @@ public final class PreferencesManager: ObservableObject {
         $raceTimerTapGForce.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.raceTimerTapGForce) }.store(in: &cancellables)
         $volumeAssist.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.volumeAssist) }.store(in: &cancellables)
         $eulaAccepted.dropFirst().sink { [weak self] v in self?.defaults.set(v, forKey: Keys.eulaAccepted) }.store(in: &cancellables)
+    }
+
+    /// Re-read all preferences from UserDefaults. Called when protected data
+    /// becomes available after the singleton was created before first unlock.
+    private func reloadFromDefaults() {
+        sailorId = defaults.string(forKey: Keys.sailorId) ?? ""
+
+        var host = defaults.string(forKey: Keys.serverHost) ?? TrackerConfig.defaultServerHost
+        if host == "track.tridgell.net" {
+            host = TrackerConfig.defaultServerHost
+        }
+        serverHost = host
+
+        let port = defaults.integer(forKey: Keys.serverPort)
+        serverPort = port > 0 ? port : Int(TrackerConfig.defaultServerPort)
+
+        let roleString = defaults.string(forKey: Keys.role) ?? TrackerRole.sailor.rawValue
+        role = TrackerRole(rawValue: roleString) ?? .sailor
+
+        password = defaults.string(forKey: Keys.password) ?? ""
+
+        let eid = defaults.integer(forKey: Keys.eventId)
+        eventId = eid > 0 ? eid : 2
+
+        heartRateEnabled = defaults.bool(forKey: Keys.heartRateEnabled)
+        if defaults.object(forKey: Keys.trackerBeep) == nil {
+            trackerBeep = true
+        } else {
+            trackerBeep = defaults.bool(forKey: Keys.trackerBeep)
+        }
+        waterLock = defaults.bool(forKey: Keys.waterLock)
+        trackingActive = defaults.bool(forKey: Keys.trackingActive)
+        batteryOptAsked = defaults.bool(forKey: Keys.batteryOptAsked)
+        raceTimerEnabled = defaults.bool(forKey: Keys.raceTimerEnabled)
+        let minutes = defaults.integer(forKey: Keys.raceTimerMinutes)
+        raceTimerMinutes = minutes > 0 ? min(minutes, 9) : 5
+        let gForce = defaults.integer(forKey: Keys.raceTimerTapGForce)
+        raceTimerTapGForce = gForce > 0 ? min(max(gForce, 2), 9) : 3
+        volumeAssist = defaults.bool(forKey: Keys.volumeAssist)
+        eulaAccepted = defaults.bool(forKey: Keys.eulaAccepted)
     }
 
     // MARK: - Convenience Methods

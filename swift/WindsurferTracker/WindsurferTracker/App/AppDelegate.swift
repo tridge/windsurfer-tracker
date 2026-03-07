@@ -14,6 +14,24 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // For user-initiated launches (reboot, force-quit, tap icon), start in idle.
         let backgroundLocationRelaunch = launchOptions?[.location] != nil
 
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            // Device not yet unlocked after reboot — UserDefaults is encrypted.
+            // Accessing PreferencesManager now would load empty/default values,
+            // overwriting real settings. Defer startup until data is available.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.performStartup(backgroundLocationRelaunch: backgroundLocationRelaunch)
+            }
+            return true
+        }
+
+        performStartup(backgroundLocationRelaunch: backgroundLocationRelaunch)
+        return true
+    }
+
+    private func performStartup(backgroundLocationRelaunch: Bool) {
         if backgroundLocationRelaunch && PreferencesManager.shared.trackingActive {
             Task {
                 do {
@@ -30,8 +48,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                 await TrackerService.shared.startInIdleMode()
             }
         }
-
-        return true
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
