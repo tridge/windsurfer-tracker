@@ -90,6 +90,36 @@ public class TrackerViewModel: ObservableObject {
         if sailorId.isEmpty || password.isEmpty {
             showSettings = true
         }
+
+        // If created before first unlock (background relaunch after reboot),
+        // preferences were empty. Re-read once protected data is available.
+        if !UIApplication.shared.isProtectedDataAvailable {
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.reloadFromPreferences()
+            }
+        }
+    }
+
+    /// Re-read settings from PreferencesManager after it has reloaded from
+    /// UserDefaults (post first-unlock). Hides settings sheet if credentials
+    /// are now present.
+    private func reloadFromPreferences() {
+        sailorId = preferences.sailorId
+        serverHost = preferences.serverHost
+        serverPort = preferences.serverPort
+        role = preferences.role
+        password = preferences.password
+        eventId = preferences.eventId
+        trackerBeep = preferences.trackerBeep
+        volumeAssist = preferences.volumeAssist
+
+        // Dismiss the auto-shown settings sheet if credentials are restored
+        if !sailorId.isEmpty && !password.isEmpty {
+            showSettings = false
+        }
     }
 
     private func setupBindings() {
