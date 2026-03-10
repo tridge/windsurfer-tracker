@@ -2211,11 +2211,14 @@
                 marks: courseData.marks || [],
                 finish: courseData.finish
             };
+            const defaultName = `course-${EVENT_ID}.json`;
+            const filename = prompt('Save course as:', defaultName);
+            if (!filename) return;
             const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `course-${EVENT_ID}.json`;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
