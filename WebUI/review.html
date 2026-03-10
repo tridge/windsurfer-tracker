@@ -1837,22 +1837,26 @@
                 element.classList.add('selected');
             }
 
-            // During playback or pause: just redraw current state without resetting
-            if (playbackInterval || playbackPaused) {
-                drawTracksUpTo(playbackCurrentTime);
-                return;
-            }
+            // Defer heavy track rendering until after the browser has
+            // painted the selection highlight (avoids perceived double-click)
+            requestAnimationFrame(() => { setTimeout(() => {
+                // During playback or pause: just redraw current state without resetting
+                if (playbackInterval || playbackPaused) {
+                    drawTracksUpTo(playbackCurrentTime);
+                    return;
+                }
 
-            // Not in playback: do full reset
-            // Update slider endpoints based on newly selected users
-            updateSliderEndpoints();
+                // Not in playback: do full reset
+                // Update slider endpoints based on newly selected users
+                updateSliderEndpoints();
 
-            resetPlaybackToSelection();
+                resetPlaybackToSelection();
 
-            // Auto-fit map to show all selected tracks
-            if (selectedUsers.size > 0) {
-                fitMapToData();
-            }
+                // Auto-fit map to show all selected tracks
+                if (selectedUsers.size > 0) {
+                    fitMapToData();
+                }
+            }, 0); });
         }
 
         function resetPlaybackToSelection() {
