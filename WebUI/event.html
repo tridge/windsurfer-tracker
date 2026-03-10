@@ -420,6 +420,29 @@
             background: #555;
         }
 
+        .admin-menu-btn {
+            position: fixed;
+            bottom: 15px;
+            right: 67px;
+            z-index: 9999;
+            background: #e67e22;
+            color: white;
+            border: none;
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 22px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .admin-menu-btn:hover {
+            background: #d35400;
+        }
+
         .menu-panel {
             position: fixed;
             bottom: 70px;
@@ -1085,6 +1108,7 @@
     </div>
 
     <!-- Hamburger menu -->
+    <button class="admin-menu-btn" id="adminMenuBtn" onclick="toggleAdminPanel()" title="Admin Controls">⚙</button>
     <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
 
     <div class="menu-panel" id="menuPanel">
@@ -1609,6 +1633,13 @@
             }
         }
 
+        function toggleAdminPanel() {
+            const adminPanel = document.getElementById('adminPanel');
+            adminPanel.classList.toggle('visible');
+            document.getElementById('menuPanel').classList.remove('visible');
+            menuOpen = false;
+        }
+
         function toggleLabels() {
             showLabels = !showLabels;
             localStorage.setItem('showLabels', showLabels);
@@ -1648,7 +1679,7 @@
 
         // Close menu/admin when clicking outside
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.menu-btn') && !e.target.closest('.menu-panel') && !e.target.closest('.admin-panel')) {
+            if (!e.target.closest('.menu-btn') && !e.target.closest('.admin-menu-btn') && !e.target.closest('.menu-panel') && !e.target.closest('.admin-panel')) {
                 menuOpen = false;
                 document.getElementById('menuPanel').classList.remove('visible');
                 document.getElementById('adminPanel').classList.remove('visible');
@@ -1808,6 +1839,7 @@
                 document.getElementById('menuExportCourse').style.display = 'none';
                 document.getElementById('menuImportCourse').style.display = 'none';
                 document.getElementById('finishBtn').style.display = 'none';
+                document.getElementById('adminMenuBtn').style.display = 'none';
                 cancelDrawing();
                 // Refresh course display to remove edit buttons from marks
                 if (courseData) {
@@ -1830,6 +1862,7 @@
                     document.getElementById('menuExportCourse').style.display = '';
                     document.getElementById('menuImportCourse').style.display = '';
                     document.getElementById('finishBtn').style.display = 'flex';
+                    document.getElementById('adminMenuBtn').style.display = 'flex';
                     document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
                     await loadUserOverrides();
