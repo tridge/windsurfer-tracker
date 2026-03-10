@@ -1902,9 +1902,12 @@
 
         function updateTimeDisplay() {
             const durationSec = rangeEndTime - rangeStartTime;
-            const durationMin = Math.floor(durationSec / 60);
-            const durationRemSec = Math.floor(durationSec % 60);
-            const durationStr = `${durationMin}:${String(durationRemSec).padStart(2, '0')}`;
+            const durationH = Math.floor(durationSec / 3600);
+            const durationM = Math.floor((durationSec % 3600) / 60);
+            const durationS = Math.floor(durationSec % 60);
+            const durationStr = durationH > 0
+                ? `${durationH}h ${durationM}m ${durationS}s`
+                : `${durationM}m ${durationS}s`;
 
             document.getElementById('time-display').innerHTML =
                 `<span style="color:#2ecc71">Start: ${formatTimeInTz(rangeStartTime)}</span> &nbsp;|&nbsp;` +
