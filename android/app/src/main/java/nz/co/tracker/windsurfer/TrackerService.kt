@@ -88,6 +88,7 @@ class TrackerService : LifecycleService() {
     private var serverPort: Int = DEFAULT_SERVER_PORT
     private var sailorId: String = ""
     private var role: String = "sailor"  // sailor, support, spectator
+    private var effectiveRole: String? = null  // Admin-overridden role from server
     // Note: password is read from SharedPreferences on each send to pick up changes immediately
 
     // 1Hz position buffer: [[ts, lat, lon, spd], ...]
@@ -341,6 +342,7 @@ class TrackerService : LifecycleService() {
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
         fun onAnyAssist(active: Boolean)  // Whether any sailor has active assist (for support boat alerts)
+        fun onEffectiveRole(role: String?)  // Admin-overridden role from server
         fun onRemoteStop()  // Server sent remote stop command
         fun onRemoteCancelAssist()  // Server sent remote cancel assist command
         fun onRemoteStart()  // Server sent start command (from idle mode)
@@ -2304,6 +2306,14 @@ class TrackerService : LifecycleService() {
                             updateStatusLine()
                         }
 
+                        // Parse effective role from server (admin override)
+                        val newEffectiveRole = if (ack.has("eRole")) ack.optString("eRole", role) else null
+                        if (newEffectiveRole != effectiveRole) {
+                            effectiveRole = newEffectiveRole
+                            statusListener?.onEffectiveRole(newEffectiveRole)
+                        }
+                        val activeRole = effectiveRole ?: role
+
                         // Check for assist enabled status (missing = true, explicit false = disabled)
                         if (ack.has("assist")) {
                             val assistEnabled = ack.optBoolean("assist", true)
@@ -2322,7 +2332,7 @@ class TrackerService : LifecycleService() {
                         val prevAnyAssist = anyAssistActive.getAndSet(newAnyAssist)
                         if (newAnyAssist != prevAnyAssist) {
                             statusListener?.onAnyAssist(newAnyAssist)
-                            if (newAnyAssist && role == "support") {
+                            if (newAnyAssist && activeRole == "support") {
                                 playQuadBeep()
                                 anyAssistAlarmHandler.postDelayed(anyAssistAlarmRunnable, 5000L)
                             } else {

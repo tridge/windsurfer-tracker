@@ -2353,6 +2353,14 @@ def get_user_override(user_overrides: dict, sailor_id: str, did: str | None = No
     return user_overrides.get(sailor_id)
 
 
+def _effective_role(user_overrides: dict, sailor_id: str, pos: dict) -> str:
+    """Return effective role for a position, considering admin overrides."""
+    override = get_user_override(user_overrides, sailor_id, pos.get('did'))
+    if override and 'role' in override:
+        return override['role']
+    return pos.get('role', 'sailor')
+
+
 def _resolve_did_overrides(user_overrides: dict, current_positions: dict) -> dict:
     """Resolve did:XXX keys to current sailor_ids for the API response.
 
@@ -4027,9 +4035,22 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not assist_enabled:
                 ack_response["assist"] = False
 
+            # Include effective role (admin override or self-reported)
+            override = get_user_override(tracker.user_overrides, sailor_id, device_id)
+            ack_response["eRole"] = override.get("role", role) if override else role
+
             # Always include idle_interval so idle clients receive idle=0 when disabled
             idle_interval = event.get('idle_interval', 0)
             ack_response["idle"] = idle_interval
+
+            # Check if any sailor has active assist (for support boat alerts)
+            any_assist = any(
+                pos.get('ast', False)
+                for sid, pos in tracker.position_tracker.current_positions.items()
+                if _effective_role(tracker.user_overrides, sid, pos) == 'sailor'
+            )
+            if any_assist:
+                ack_response["any_assist"] = True
 
             # Check for pending command
             cmd_key = f"{eid}:{sailor_id}"
@@ -4558,6 +4579,10 @@ def run_server(port: int, http_port: int | None = None,
                 if not assist_enabled:
                     ack_data["assist"] = False
 
+                # Include effective role (admin override or self-reported)
+                override = get_user_override(event_tracker.user_overrides, sailor_id, device_id)
+                ack_data["eRole"] = override.get("role", role) if override else role
+
                 # Always include idle_interval so idle clients receive idle=0 when disabled
                 idle_interval = event.get('idle_interval', 0)
                 ack_data["idle"] = idle_interval
@@ -4565,8 +4590,8 @@ def run_server(port: int, http_port: int | None = None,
                 # Check if any sailor has active assist (for support boat alerts)
                 any_assist = any(
                     pos.get('ast', False)
-                    for pos in event_tracker.position_tracker.current_positions.values()
-                    if pos.get('role', 'sailor') == 'sailor'
+                    for sid, pos in event_tracker.position_tracker.current_positions.items()
+                    if _effective_role(event_tracker.user_overrides, sid, pos) == 'sailor'
                 )
                 if any_assist:
                     ack_data["any_assist"] = True

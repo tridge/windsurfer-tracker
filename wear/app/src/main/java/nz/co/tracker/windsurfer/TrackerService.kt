@@ -96,6 +96,7 @@ class TrackerService : LifecycleService() {
     private var serverPort: Int = DEFAULT_SERVER_PORT
     private var sailorId: String = ""
     private var role: String = "sailor"
+    private var effectiveRole: String? = null  // Admin-overridden role from server
     private var password: String = ""
     private var eventId: Int = 2  // Event ID for multi-event support
     private var heartRateEnabled: Boolean = false
@@ -329,6 +330,7 @@ class TrackerService : LifecycleService() {
         fun onError(message: String)
         fun onStatusLine(status: String)  // GPS wait, connecting..., auth failure, or event name
         fun onAssistEnabled(enabled: Boolean)  // Whether assist button should be shown
+        fun onEffectiveRole(role: String?)  // Admin-overridden role from server
         fun onRemoteStop()  // Server sent remote stop command
         fun onRemoteCancelAssist()  // Server sent remote cancel assist command
         fun onIdleEntered()  // Entered idle mode after user stop
@@ -1831,11 +1833,21 @@ class TrackerService : LifecycleService() {
                             updateStatusLine()
                         }
 
+                        // Parse effective role from server (admin override)
+                        val newEffectiveRole = if (ack.has("eRole")) ack.optString("eRole", role) else null
+                        if (newEffectiveRole != effectiveRole) {
+                            effectiveRole = newEffectiveRole
+                            statusListener?.onEffectiveRole(newEffectiveRole)
+                        }
+                        val activeRole = effectiveRole ?: role
+
                         // Check for assist enabled status (missing = true, explicit false = disabled)
+                        // Only show assist for sailors (using effective role)
                         if (ack.has("assist")) {
                             val assistEnabled = ack.optBoolean("assist", true)
-                            assistButtonEnabled.set(assistEnabled)
-                            statusListener?.onAssistEnabled(assistEnabled)
+                            val showAssist = assistEnabled && activeRole == "sailor"
+                            assistButtonEnabled.set(showAssist)
+                            statusListener?.onAssistEnabled(showAssist)
                             // Clear local assist flag if server says assist is disabled
                             if (!assistEnabled && assistRequested.getAndSet(false)) {
                                 Log.d(TAG, "Assist cleared by server (assist disabled for event)")
@@ -1843,9 +1855,10 @@ class TrackerService : LifecycleService() {
                                 playAssistTones(ascending = false)
                             }
                         } else {
-                            // Default to enabled if not specified
-                            assistButtonEnabled.set(true)
-                            statusListener?.onAssistEnabled(true)
+                            // Default to enabled if not specified (but still check role)
+                            val showAssist = activeRole == "sailor"
+                            assistButtonEnabled.set(showAssist)
+                            statusListener?.onAssistEnabled(showAssist)
                         }
 
                         // Cache idle interval from server ACK

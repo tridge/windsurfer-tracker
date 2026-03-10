@@ -170,6 +170,9 @@ public struct AckResponse: Codable {
     /// Whether this is an unsolicited proactive command (not a response to a send)
     public let proactive: Bool?
 
+    /// Effective role after admin override (e.g., admin changed sailor to support)
+    public let eRole: String?
+
     public var isSuccess: Bool {
         return error == nil
     }

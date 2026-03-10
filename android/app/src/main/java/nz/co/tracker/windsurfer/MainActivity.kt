@@ -46,6 +46,8 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     private lateinit var updateChecker: UpdateChecker
     private var currentEventName: String = ""
     private var pendingAssistOnConnect = false
+    private var currentEffectiveRole: String? = null
+    private var lastAssistEnabledFromServer = true
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -1381,15 +1383,25 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
 
     override fun onAssistEnabled(enabled: Boolean) {
-        runOnUiThread {
-            // Only show assist button for sailors
-            val isSailor = getPrefs().getString("role", "sailor") == "sailor"
-            binding.btnAssist.visibility = if (enabled && isSailor) View.VISIBLE else View.GONE
-        }
+        lastAssistEnabledFromServer = enabled
+        updateAssistButtonVisibility()
     }
 
     override fun onAnyAssist(active: Boolean) {
         // No UI change needed - TrackerService handles the alarm sound
+    }
+
+    override fun onEffectiveRole(role: String?) {
+        currentEffectiveRole = role
+        updateAssistButtonVisibility()
+    }
+
+    private fun updateAssistButtonVisibility() {
+        runOnUiThread {
+            val localRole = getPrefs().getString("role", "sailor")
+            val activeRole = currentEffectiveRole ?: localRole
+            binding.btnAssist.visibility = if (lastAssistEnabledFromServer && activeRole == "sailor") View.VISIBLE else View.GONE
+        }
     }
 
     override fun onRemoteStop() {

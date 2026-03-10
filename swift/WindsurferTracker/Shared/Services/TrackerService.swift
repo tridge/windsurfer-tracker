@@ -25,6 +25,7 @@ public actor TrackerService {
     public nonisolated let remoteCancelAssistPublisher = PassthroughSubject<Void, Never>()  // Signals remote cancel assist command from server
     public nonisolated let remoteStartPublisher = PassthroughSubject<Void, Never>()  // Signals remote start command (resume from idle)
     public nonisolated let remoteShutdownPublisher = PassthroughSubject<Void, Never>()  // Signals remote shutdown command (exit idle mode)
+    public nonisolated let effectiveRolePublisher = CurrentValueSubject<String?, Never>(nil)  // Admin-overridden role from server
 
     // MARK: - State
 
@@ -703,6 +704,9 @@ public actor TrackerService {
             assistRequested = false
             print("[TrackerService] Assist cleared by server (assist disabled for event)")
         }
+
+        // Update effective role from server (admin override)
+        effectiveRolePublisher.send(response.eRole)
 
         // Update any_assist state (for support boat alerts)
         anyAssistPublisher.send(response.isAnyAssist)

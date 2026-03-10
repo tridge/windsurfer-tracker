@@ -112,6 +112,10 @@ class MainActivity : ComponentActivity() {
                     assistEnabled.value = enabled
                 }
 
+                override fun onEffectiveRole(role: String?) {
+                    // WearOS role-based UI is handled in TrackerService
+                }
+
                 override fun onCountdownTick(secondsRemaining: Int) {
                     countdownSeconds.value = secondsRemaining
                 }

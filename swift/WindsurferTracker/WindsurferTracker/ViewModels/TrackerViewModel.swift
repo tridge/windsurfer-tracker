@@ -34,6 +34,7 @@ public class TrackerViewModel: ObservableObject {
     @Published public var eventId: Int
     @Published public var trackerBeep: Bool
     @Published public var volumeAssist: Bool
+    @Published public var effectiveRole: TrackerRole?  // Admin-overridden role from server
 
     // MARK: - HealthKit
 
@@ -256,22 +257,30 @@ public class TrackerViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Subscribe to assist enabled status — only show for sailors
-        TrackerService.shared.assistEnabledPublisher
-            .combineLatest($role)
+        // Subscribe to effective role from server
+        TrackerService.shared.effectiveRolePublisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled, role in
-                self?.assistEnabled = enabled && role == .sailor
+            .sink { [weak self] eRole in
+                self?.effectiveRole = eRole.flatMap { TrackerRole(rawValue: $0) }
             }
             .store(in: &cancellables)
 
-        // Subscribe to any_assist for support boat alarm
-        TrackerService.shared.anyAssistPublisher
-            .combineLatest($role)
+        // Subscribe to assist enabled status — only show for sailors (using effective role)
+        TrackerService.shared.assistEnabledPublisher
+            .combineLatest($effectiveRole, $role)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] anyAssist, role in
+            .sink { [weak self] enabled, effectiveRole, role in
+                self?.assistEnabled = enabled && (effectiveRole ?? role) == .sailor
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to any_assist for support boat alarm (using effective role)
+        TrackerService.shared.anyAssistPublisher
+            .combineLatest($effectiveRole, $role)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] anyAssist, effectiveRole, role in
                 guard let self = self else { return }
-                if anyAssist && role == .support {
+                if anyAssist && (effectiveRole ?? role) == .support {
                     self.startAnyAssistAlarm()
                 } else {
                     self.stopAnyAssistAlarm()
