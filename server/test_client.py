@@ -15,6 +15,7 @@ import subprocess
 import urllib.request
 import os
 import gzip
+import threading
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 from enum import Enum
@@ -766,16 +767,42 @@ class SailingSimulator:
             entity, new_lat, new_lon, distance_m)
 
 
+def generate_sailor_names(n: int) -> List[str]:
+    """Generate n sailor names like 'MaryB 72' with a mix of male and female names."""
+    male_names = [
+        "James", "John", "Robert", "David", "Michael", "William", "Richard",
+        "Thomas", "Mark", "Steven", "Andrew", "Peter", "Paul", "Daniel",
+        "Chris", "Kevin", "Brian", "Bruce", "Gary", "Craig"
+    ]
+    female_names = [
+        "Mary", "Sarah", "Emma", "Lisa", "Anna", "Karen", "Susan",
+        "Helen", "Laura", "Jenny", "Claire", "Julie", "Rachel", "Nicole",
+        "Kate", "Donna", "Wendy", "Fiona", "Megan", "Paula"
+    ]
+    names = []
+    for i in range(n):
+        if i % 2 == 0:
+            first = random.choice(female_names)
+        else:
+            first = random.choice(male_names)
+        initial = chr(random.randint(ord('A'), ord('Z')))
+        sail_num = random.randint(10, 999)
+        names.append(f"{first}{initial} {sail_num}")
+    return names
+
+
 def create_entities(num_sailors: int, num_support: int, num_spectators: int,
                     start_loc: Tuple[float, float], end_loc: Tuple[float, float],
                     course_waypoints: Optional[List[Tuple[float, float]]] = None,
                     avg_speed: float = 12.0,
-                    sailor_names: Optional[List[str]] = None) -> List[SimulatedEntity]:
-    """Create all simulated entities spread along the course.
+                    sailor_names: Optional[List[str]] = None,
+                    start_at_start: bool = False) -> List[SimulatedEntity]:
+    """Create all simulated entities, optionally spread along the course.
 
     avg_speed: Average sailor speed in knots. Individual speeds are normally
                distributed with std dev of 20% of avg_speed.
     sailor_names: Optional list of names to use as sailor IDs (e.g. ["AndrewT", "BruceK"]).
+    start_at_start: If True, all sailors start at the start position instead of being spread.
     """
     entities = []
 
@@ -828,18 +855,24 @@ def create_entities(num_sailors: int, num_support: int, num_spectators: int,
 
             return lat, lon, next_idx
 
-        # Spread sailors evenly along the entire course path
+        # Place sailors along the course or at the start
         for i in range(num_sailors):
-            # Position along course (0.0 to 1.0) with small random offset
-            progress = i / max(1, num_sailors)
-            progress += random.uniform(0, 0.8 / max(1, num_sailors))
-            progress = min(0.95, progress)  # Don't start right at finish
+            if start_at_start:
+                # All sailors start at the start position
+                lat = course_waypoints[0][0] + random.uniform(-0.0003, 0.0003)
+                lon = course_waypoints[0][1] + random.uniform(-0.0003, 0.0003)
+                next_idx = 1
+            else:
+                # Spread sailors evenly along the entire course path
+                progress = i / max(1, num_sailors)
+                progress += random.uniform(0, 0.8 / max(1, num_sailors))
+                progress = min(0.95, progress)  # Don't start right at finish
 
-            lat, lon, next_idx = position_along_course(progress)
+                lat, lon, next_idx = position_along_course(progress)
 
-            # Add small random offset perpendicular to course
-            lat += random.uniform(-0.0003, 0.0003)
-            lon += random.uniform(-0.0003, 0.0003)
+                # Add small random offset perpendicular to course
+                lat += random.uniform(-0.0003, 0.0003)
+                lon += random.uniform(-0.0003, 0.0003)
 
             target_lat, target_lon = course_waypoints[next_idx]
 
@@ -1390,6 +1423,197 @@ def run_offline_simulation(args, entities: List[SimulatedEntity], simulator: 'Sa
     print(f"  Time range: {start_dt} to {end_dt}")
 
 
+def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators=0,
+                   wind_direction=None, avg_speed=12.0, num_laps=0, delay=10.0,
+                   max_duration=3600, password="", course_file=None, course_waypoints=None,
+                   stop_event=None, status_callback=None, sailor_names=None,
+                   poor_accuracy=0, no_heartbeat=False, verbose=False, assist_id="",
+                   speedup=1.0, start_at_start=True):
+    """Run an online GPS tracking simulation.
+
+    Args:
+        host: Server hostname
+        port: Server UDP/HTTP port
+        eid: Event ID
+        num_sailors: Number of simulated sailors
+        num_support: Number of support boats
+        num_spectators: Number of spectators
+        wind_direction: Wind direction in degrees (None = auto-calculate from course)
+        avg_speed: Average sailor speed in knots
+        num_laps: Number of laps (0 = infinite)
+        delay: Seconds between update batches
+        max_duration: Maximum simulation duration in seconds (0 = unlimited)
+        password: Server password
+        course_file: Path or URL to load course from (used if course_waypoints not provided)
+        course_waypoints: Pre-loaded course waypoints as list of (lat, lon) tuples
+        stop_event: threading.Event to signal stop from another thread
+        status_callback: Called each iteration with status dict
+        sailor_names: List of names for sailors (None = auto-generate)
+        poor_accuracy: Number of sailors to simulate with poor GPS accuracy
+        no_heartbeat: Disable heart rate simulation
+        verbose: Print detailed per-entity info each iteration
+
+    Returns:
+        Dict with keys: reason (str), updates_sent (int), elapsed_s (float)
+    """
+    # Load course if not provided
+    if course_waypoints is None and course_file:
+        course_data = load_course(course_file)
+        if course_data:
+            course_waypoints = course_data.waypoints
+
+    # Determine start/end locations from course or defaults
+    if course_waypoints and len(course_waypoints) >= 2:
+        start_loc = course_waypoints[0]
+        end_loc = course_waypoints[-1]
+    else:
+        # Default Wellington harbour area
+        start_loc = (-41.2865, 174.7762)
+        end_loc = (-41.2700, 174.8050)
+
+    # Auto-calculate wind from course if not specified
+    if wind_direction is None and course_waypoints and len(course_waypoints) >= 2:
+        wind_direction = calculate_wind_from_course(course_waypoints)
+    elif wind_direction is None:
+        wind_direction = 180.0
+
+    # Generate sailor names if not provided
+    if sailor_names is None:
+        sailor_names = generate_sailor_names(num_sailors)
+
+    # Create entities
+    entities = create_entities(
+        num_sailors, num_support, num_spectators,
+        start_loc, end_loc, course_waypoints, avg_speed=avg_speed,
+        sailor_names=sailor_names, start_at_start=start_at_start
+    )
+
+    # Set assist if requested
+    if assist_id:
+        for e in entities:
+            if e.id == assist_id:
+                e.assist = True
+
+    # Set poor accuracy on some sailors
+    if poor_accuracy > 0:
+        sailors_list = [e for e in entities if e.role == "sailor"]
+        for i, s in enumerate(sailors_list):
+            if i < poor_accuracy:
+                s.poor_accuracy = True
+
+    # Disable heart rate if requested
+    if no_heartbeat:
+        for e in entities:
+            e.heart_rate = 0
+
+    # Create simulator
+    simulator = SailingSimulator(start_loc, end_loc,
+                                  wind_direction=wind_direction,
+                                  num_laps=num_laps)
+
+    # Create socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(0.5)
+
+    sailors = [e for e in entities if e.role == "sailor"]
+
+    start_time = time.time()
+    update_count = 0
+    reason = "stopped"
+
+    try:
+        while True:
+            # Check stop event
+            if stop_event is not None and stop_event.is_set():
+                reason = "stopped"
+                break
+
+            current_time = time.time()
+            elapsed = current_time - start_time
+
+            # Check duration limit
+            if max_duration > 0 and elapsed >= max_duration:
+                reason = "timeout"
+                break
+
+            # Check finish detection: all sailors completed required laps
+            if num_laps > 0:
+                all_finished = all(s.current_lap >= num_laps for s in sailors)
+                if all_finished:
+                    reason = "finished"
+                    break
+
+            # Update and accumulate positions for all entities (1Hz sub-updates)
+            # speedup multiplies the simulated time per real-time interval
+            batch_size = int(delay * speedup)
+            for step in range(batch_size):
+                ts = int(current_time - delay + step + 1)
+                for entity in entities:
+                    if entity.role == "sailor":
+                        simulator.update_sailor(entity, 1.0)
+                    elif entity.role == "support":
+                        simulator.update_support(entity, 1.0, sailors)
+                    else:
+                        simulator.update_spectator(entity, 1.0)
+
+                    entity.pos_buffer.append((ts, entity.lat, entity.lon, entity.spd))
+
+                    if entity.heart_rate > 0 and random.random() < 0.1:
+                        entity.heart_rate = max(50, min(180, entity.heart_rate + random.randint(-3, 5)))
+
+            # Common updates for all entities
+            for entity in entities:
+                if random.random() < 0.01:
+                    entity.battery = max(5, entity.battery - 1)
+                entity.signal = max(0, min(4, entity.signal + random.choice([-1, 0, 0, 0, 1])))
+
+            # Send 1Hz batch packets
+            acked = 0
+            for entity in entities:
+                if entity.pos_buffer:
+                    if send_packet_1hz(sock, host, port, entity, password, eid):
+                        acked += 1
+
+            update_count += 1
+
+            # Status callback
+            sailors_finished = sum(1 for s in sailors if num_laps > 0 and s.current_lap >= num_laps)
+            if status_callback is not None:
+                status_callback({
+                    "updates_sent": update_count,
+                    "sailors_finished": sailors_finished,
+                    "elapsed_s": time.time() - start_time
+                })
+
+            if verbose:
+                print(f"[{update_count}] Sent {len(entities)} packets, {acked} ACKed")
+                for e in entities:
+                    status = "ASSIST" if e.assist else ""
+                    hr_str = f" hr={e.heart_rate}"
+                    gps_str = " LOWGPS" if e.poor_accuracy else ""
+                    lap_info = f" lap={e.current_lap} wp={e.current_waypoint_idx}" if e.course_waypoints else ""
+                    print(f"  {e.id} ({e.role}): {e.lat:.5f}, {e.lon:.5f} "
+                          f"spd={e.spd:.1f}kn hdg={e.hdg:.0f} bat={e.battery}%{hr_str}{gps_str}{lap_info} {status}")
+            else:
+                elapsed_int = int(time.time() - start_time)
+                assist_count = sum(1 for e in entities if e.assist)
+                assist_str = f" [{assist_count} ASSIST]" if assist_count else ""
+                print(f"[{elapsed_int:4d}s] Update {update_count}: {acked}/{len(entities)} ACKed{assist_str}", end="\r")
+
+            time.sleep(delay)
+
+    except KeyboardInterrupt:
+        reason = "interrupted"
+    finally:
+        sock.close()
+
+    return {
+        "reason": reason,
+        "updates_sent": update_count,
+        "elapsed_s": time.time() - start_time
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-entity tracker simulator")
     parser.add_argument("-H", "--host", default="127.0.0.1", help="Server host")
@@ -1517,136 +1741,67 @@ def main():
         print(f"  Poor accuracy: {args.poor_accuracy} sailors")
     print()
 
-    # Create entities
-    entities = create_entities(
-        args.num_sailors, args.num_support, args.num_spectators,
-        start_loc, end_loc, course_waypoints, avg_speed=args.speed,
-        sailor_names=sailor_names_list if sailor_names_list else None
-    )
-
-    # Set assist if requested
-    if args.assist:
-        for e in entities:
-            if e.id == args.assist:
-                e.assist = True
-                print(f"*** {e.id} has ASSIST flag set ***")
-
-    # Set poor accuracy on some sailors
-    if args.poor_accuracy > 0:
-        sailors = [e for e in entities if e.role == "sailor"]
-        for i, s in enumerate(sailors):
-            if i < args.poor_accuracy:
-                s.poor_accuracy = True
-                print(f"*** {s.id} has POOR ACCURACY simulation ***")
-
-    # Disable heart rate if requested
-    if args.no_heartbeat:
-        for e in entities:
-            e.heart_rate = 0
-
-    # For offline mode with races, calculate wind from course
-    wind_direction = args.wind_direction
-    if args.offline and course_waypoints and len(course_waypoints) >= 2:
-        wind_direction = calculate_wind_from_course(course_waypoints)
-        print(f"  Wind direction (auto): {wind_direction:.0f}° (first leg into wind)")
-
-    # Create simulator
-    simulator = SailingSimulator(start_loc, end_loc,
-                                  wind_direction=wind_direction,
-                                  coastline=coastline,
-                                  num_laps=args.laps)
-
-    # Handle offline mode
+    # Handle offline mode separately (needs its own entity creation + simulator)
     if args.offline:
+        # Create entities for offline mode
+        entities = create_entities(
+            args.num_sailors, args.num_support, args.num_spectators,
+            start_loc, end_loc, course_waypoints, avg_speed=args.speed,
+            sailor_names=sailor_names_list if sailor_names_list else None
+        )
+
+        # Set assist if requested
+        if args.assist:
+            for e in entities:
+                if e.id == args.assist:
+                    e.assist = True
+                    print(f"*** {e.id} has ASSIST flag set ***")
+
+        # Set poor accuracy on some sailors
+        if args.poor_accuracy > 0:
+            sailors = [e for e in entities if e.role == "sailor"]
+            for i, s in enumerate(sailors):
+                if i < args.poor_accuracy:
+                    s.poor_accuracy = True
+                    print(f"*** {s.id} has POOR ACCURACY simulation ***")
+
+        # Disable heart rate if requested
+        if args.no_heartbeat:
+            for e in entities:
+                e.heart_rate = 0
+
+        # For offline mode, calculate wind from course
+        wind_direction = args.wind_direction
+        if course_waypoints and len(course_waypoints) >= 2:
+            wind_direction = calculate_wind_from_course(course_waypoints)
+            print(f"  Wind direction (auto): {wind_direction:.0f}° (first leg into wind)")
+
+        # Create simulator
+        simulator = SailingSimulator(start_loc, end_loc,
+                                      wind_direction=wind_direction,
+                                      coastline=coastline,
+                                      num_laps=args.laps)
+
         run_offline_simulation(args, entities, simulator, course_waypoints, mark_colors,
                                wind_direction, start_loc)
         return
 
-    # Create socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(0.5)
-
-    sailors = [e for e in entities if e.role == "sailor"]
-
-    start_time = time.time()
-    last_update = start_time
-    update_count = 0
-
-    print(f"  Entities: {len(entities)} (all 1Hz)")
-    print()
-
-    try:
-        while True:
-            current_time = time.time()
-
-            # Check duration limit
-            if args.duration > 0 and (current_time - start_time) >= args.duration:
-                print(f"\nDuration limit reached ({args.duration}s)")
-                break
-
-            # Update and accumulate positions for all entities (1Hz sub-updates)
-            batch_size = int(args.delay)  # Number of 1Hz samples to collect
-            for step in range(batch_size):
-                ts = int(current_time - args.delay + step + 1)  # Timestamps spread over interval
-                for entity in entities:
-                    # Update position with 1-second dt
-                    if entity.role == "sailor":
-                        simulator.update_sailor(entity, 1.0)
-                    elif entity.role == "support":
-                        simulator.update_support(entity, 1.0, sailors)
-                    else:
-                        simulator.update_spectator(entity, 1.0)
-
-                    # Accumulate position in buffer (ts, lat, lon, spd)
-                    entity.pos_buffer.append((ts, entity.lat, entity.lon, entity.spd))
-
-                    # Update heart rate occasionally (varies slowly)
-                    if entity.heart_rate > 0 and random.random() < 0.1:
-                        entity.heart_rate = max(50, min(180, entity.heart_rate + random.randint(-3, 5)))
-
-            # Common updates for all entities
-            for entity in entities:
-                # Simulate battery drain (very slow)
-                if random.random() < 0.01:
-                    entity.battery = max(5, entity.battery - 1)
-
-                # Simulate signal fluctuation
-                entity.signal = max(0, min(4, entity.signal + random.choice([-1, 0, 0, 0, 1])))
-
-            last_update = current_time
-
-            # Send 1Hz batch packets
-            acked = 0
-            for entity in entities:
-                if entity.pos_buffer:  # Only send if we have positions
-                    if send_packet_1hz(sock, args.host, args.port, entity, args.password, args.eid):
-                        acked += 1
-
-            update_count += 1
-
-            if args.verbose:
-                print(f"[{update_count}] Sent {len(entities)} packets, {acked} ACKed")
-                for e in entities:
-                    status = "⚠ ASSIST" if e.assist else ""
-                    hr_str = f" hr={e.heart_rate}"
-                    gps_str = " LOWGPS" if e.poor_accuracy else ""
-                    lap_info = f" lap={e.current_lap} wp={e.current_waypoint_idx}" if e.course_waypoints else ""
-                    print(f"  {e.id} ({e.role}): {e.lat:.5f}, {e.lon:.5f} "
-                          f"spd={e.spd:.1f}kn hdg={e.hdg:.0f}° bat={e.battery}%{hr_str}{gps_str}{lap_info} {status}")
-            else:
-                elapsed = int(current_time - start_time)
-                assist_count = sum(1 for e in entities if e.assist)
-                assist_str = f" [{assist_count} ASSIST]" if assist_count else ""
-                print(f"[{elapsed:4d}s] Update {update_count}: {acked}/{len(entities)} ACKed{assist_str}", end="\r")
-
-            time.sleep(args.delay)
-
-    except KeyboardInterrupt:
-        print("\n\nSimulation stopped by user")
-    finally:
-        sock.close()
-
-    print(f"\nTotal updates sent: {update_count}")
+    # Online mode - run simulation
+    result = run_simulation(
+        host=args.host, port=args.port, eid=args.eid,
+        num_sailors=args.num_sailors, num_support=args.num_support,
+        num_spectators=args.num_spectators,
+        wind_direction=args.wind_direction, avg_speed=args.speed,
+        num_laps=args.laps, delay=args.delay,
+        max_duration=args.duration, password=args.password,
+        course_waypoints=course_waypoints,
+        sailor_names=sailor_names_list if sailor_names_list else None,
+        poor_accuracy=args.poor_accuracy,
+        no_heartbeat=args.no_heartbeat,
+        verbose=args.verbose,
+        assist_id=args.assist,
+    )
+    print(f"\nSimulation ended: {result['reason']}, {result['updates_sent']} updates in {result['elapsed_s']:.0f}s")
 
 
 if __name__ == "__main__":

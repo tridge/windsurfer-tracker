@@ -2214,6 +2214,45 @@ _client_addrs: dict[str, tuple[str, int]] = {}
 # UDP socket reference so HTTP handler threads can send proactive commands
 _udp_sock: socket.socket | None = None
 
+# Simulator globals
+_active_simulations: dict[int, dict] = {}  # eid -> {thread, stop_event, config, start_time, status}
+_simulations_lock = threading.Lock()
+_server_port: int | None = None
+
+
+def _run_simulator_thread(eid: int, config: dict, stop_event: "threading.Event",
+                          course_file: str, tracker_pwd: str, udp_port: int):
+    """Thread wrapper for running a simulation for an event."""
+    from test_client import run_simulation
+
+    def status_cb(status):
+        with _simulations_lock:
+            if eid in _active_simulations:
+                _active_simulations[eid]['status'] = status
+
+    log(f"[EVENT {eid}] Simulator starting: {config}")
+    try:
+        result = run_simulation(
+            host="127.0.0.1", port=udp_port, eid=eid,
+            num_sailors=config.get('num_sailors', 5),
+            num_support=config.get('num_support', 1),
+            num_spectators=0,
+            wind_direction=config.get('wind_direction'),
+            avg_speed=config.get('speed', 12.0),
+            num_laps=config.get('laps', 0),
+            delay=10.0,
+            max_duration=config.get('max_duration', 3600),
+            password=tracker_pwd,
+            course_file=course_file,
+            stop_event=stop_event,
+            status_callback=status_cb,
+            speedup=config.get('speedup', 1.0),
+            start_at_start=config.get('start_at_start', True),
+        )
+        log(f"[EVENT {eid}] Simulator finished: {result}")
+    except Exception as e:
+        log(f"[EVENT {eid}] Simulator error: {e}")
+
 
 def queue_pending_command(key: str, cmd: str):
     """Queue a pending command for a client. Overwrites any existing command."""
@@ -2870,6 +2909,27 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"races": races})
             else:
                 self._send_json({"races": []})
+
+        elif subpath == '/admin/simulator/status':
+            # Return simulator status (admin only)
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            with _simulations_lock:
+                sim = _active_simulations.get(eid)
+                if sim:
+                    if sim['thread'].is_alive():
+                        status = dict(sim['status'])
+                        status['running'] = True
+                        status['config'] = sim['config']
+                        status['elapsed_s'] = time.time() - sim['start_time']
+                        self._send_json(status)
+                    else:
+                        # Thread died — clean up
+                        del _active_simulations[eid]
+                        self._send_json({"running": False})
+                else:
+                    self._send_json({"running": False})
 
         else:
             self._send_json({"error": "Not found"}, 404)
@@ -3707,6 +3767,69 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath == '/admin/simulator/start':
+            # Start a simulation for this event
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+                data = json.loads(body) if body else {}
+
+                with _simulations_lock:
+                    if eid in _active_simulations and _active_simulations[eid]['thread'].is_alive():
+                        self._send_json({"error": "Simulation already running for this event"}, 409)
+                        return
+
+                tracker = get_event_tracker(eid)
+                if not tracker or not tracker.course_file.exists():
+                    self._send_json({"error": "Course must be set before starting simulator"}, 400)
+                    return
+
+                course_path = str(tracker.course_file)
+                tp = event.get('tracker_password', [])
+                tracker_pwd = tp[0] if tp else ""
+
+                config = {
+                    'num_sailors': int(data.get('num_sailors', 5)),
+                    'num_support': int(data.get('num_support', 1)),
+                    'wind_direction': float(data['wind_direction']) if data.get('wind_direction') is not None else None,
+                    'speed': float(data.get('speed', 12)),
+                    'laps': int(data.get('laps', 3)),
+                    'max_duration': int(data.get('max_duration', 3600)),
+                    'speedup': max(1.0, min(50.0, float(data.get('speedup', 1)))),
+                    'start_at_start': data.get('start_type', 'from_start') == 'from_start',
+                }
+
+                stop_ev = threading.Event()
+                t = threading.Thread(
+                    target=_run_simulator_thread,
+                    args=(eid, config, stop_ev, course_path, tracker_pwd, _server_port),
+                    daemon=True
+                )
+                with _simulations_lock:
+                    _active_simulations[eid] = {
+                        'thread': t,
+                        'stop_event': stop_ev,
+                        'config': config,
+                        'start_time': time.time(),
+                        'status': {'updates_sent': 0, 'sailors_finished': 0, 'elapsed_s': 0},
+                    }
+                t.start()
+                self._send_json({"success": True})
+
+            except (json.JSONDecodeError, ValueError) as e:
+                self._send_json({"error": f"Invalid request: {e}"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath == '/admin/simulator/stop':
+            # Stop a running simulation
+            with _simulations_lock:
+                sim = _active_simulations.get(eid)
+                if sim:
+                    sim['stop_event'].set()
+                    del _active_simulations[eid]
+            self._send_json({"success": True})
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -4468,7 +4591,7 @@ def run_server(port: int, http_port: int | None = None,
     Each event has its own data directory under static_dir/{eid}/.
     Per-event admin and tracker passwords are used.
     """
-    global _static_dir, _event_manager, _udp_sock
+    global _static_dir, _event_manager, _udp_sock, _server_port
 
     if not manager_password:
         log("[ERROR] manager_password is required")
@@ -4483,6 +4606,7 @@ def run_server(port: int, http_port: int | None = None,
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", port))
     _udp_sock = sock
+    _server_port = port
 
     log(f"Tracker server listening on UDP port {port}")
     log("Waiting for packets...")

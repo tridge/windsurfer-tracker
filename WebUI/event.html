@@ -1302,6 +1302,14 @@
                 </a>
             </div>
         </div>
+
+        <div class="admin-section" id="simSection">
+            <h4>Simulator</h4>
+            <div class="admin-btn-group" id="simBtnGroup">
+                <button class="admin-action-btn primary" id="simStartBtn" onclick="showSimDialog()">Start Simulator</button>
+            </div>
+            <div id="simStatus" style="font-size:12px;color:#666;margin-top:4px;"></div>
+        </div>
     </div>
     
     <div class="drawing-mode-indicator" id="drawingIndicator">
@@ -1345,6 +1353,39 @@
             <div id="trackerInfoContent"></div>
             <div class="btn-row" style="margin-top:12px;">
                 <button class="btn-cancel" onclick="closeTrackerInfo()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Simulator dialog -->
+    <div class="edit-user-overlay" id="simOverlay" onclick="if(event.target===this)closeSimDialog()">
+        <div class="edit-user-dialog">
+            <h3>Start Simulator</h3>
+            <label for="simSailors">Number of Sailors</label>
+            <input type="number" id="simSailors" value="5" min="1" max="50">
+            <label for="simSupport">Support Boats</label>
+            <input type="number" id="simSupport" value="1" min="0" max="10">
+            <label for="simWind">Wind Direction (degrees)</label>
+            <input type="number" id="simWind" placeholder="Auto from course" min="0" max="359">
+            <label for="simSpeed">Average Speed (knots)</label>
+            <input type="number" id="simSpeed" value="12" min="1" max="40">
+            <label for="simLaps">Laps</label>
+            <input type="number" id="simLaps" value="3" min="1" max="100">
+            <label for="simSpeedup">Speedup</label>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <input type="range" id="simSpeedup" min="1" max="50" value="1" style="flex:1" oninput="document.getElementById('simSpeedupVal').textContent=this.value+'x'">
+                <span id="simSpeedupVal" style="min-width:32px;font-size:13px;">1x</span>
+            </div>
+            <label for="simStartType">Start Type</label>
+            <select id="simStartType" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="from_start">From start</option>
+                <option value="spread">Spread along course</option>
+            </select>
+            <label for="simDuration">Max Duration (minutes)</label>
+            <input type="number" id="simDuration" value="60" min="1" max="600">
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="closeSimDialog()">Cancel</button>
+                <button class="btn-save" onclick="startSimulator()">Start</button>
             </div>
         </div>
     </div>
@@ -1570,6 +1611,7 @@
         
         // Admin state
         let adminMode = false;
+        let simPollInterval = null;
         let adminPassword = '';  // Loaded per-event after EVENT_ID is defined
         let showHiddenTrackers = false;
 
@@ -1890,6 +1932,7 @@
                 document.getElementById('finishBtn').style.display = 'none';
                 document.getElementById('adminMenuBtn').style.display = 'none';
                 cancelDrawing();
+                if (simPollInterval) { clearInterval(simPollInterval); simPollInterval = null; }
                 // Refresh course display to remove edit buttons from marks
                 if (courseData) {
                     displayCourse(courseData);
@@ -1923,6 +1966,9 @@
                     if (courseData) {
                         displayCourse(courseData);
                     }
+                    // Start simulator status polling
+                    updateSimStatus();
+                    simPollInterval = setInterval(updateSimStatus, 5000);
                 } else {
                     adminPassword = '';
                     localStorage.removeItem(`adminPassword_${EVENT_ID}`);
@@ -1958,6 +2004,78 @@
             }
         }
         
+        // Simulator functions
+        function showSimDialog() {
+            document.getElementById('simOverlay').style.display = 'flex';
+        }
+        function closeSimDialog() {
+            document.getElementById('simOverlay').style.display = 'none';
+        }
+        async function startSimulator() {
+            const body = {
+                num_sailors: parseInt(document.getElementById('simSailors').value) || 5,
+                num_support: parseInt(document.getElementById('simSupport').value) || 1,
+                speed: parseFloat(document.getElementById('simSpeed').value) || 12,
+                laps: parseInt(document.getElementById('simLaps').value) || 3,
+                max_duration: (parseInt(document.getElementById('simDuration').value) || 60) * 60,
+                speedup: parseInt(document.getElementById('simSpeedup').value) || 1,
+                start_type: document.getElementById('simStartType').value,
+            };
+            const wind = document.getElementById('simWind').value;
+            if (wind !== '') body.wind_direction = parseFloat(wind);
+            try {
+                const resp = await fetch(`${EVENT_API}/admin/simulator/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    closeSimDialog();
+                    updateSimStatus();
+                } else {
+                    alert(data.error || 'Failed to start simulator');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+        async function stopSimulator() {
+            try {
+                await fetch(`${EVENT_API}/admin/simulator/stop`, {
+                    method: 'POST',
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                updateSimStatus();
+            } catch (e) { /* ignore */ }
+        }
+        async function updateSimStatus() {
+            if (!adminMode) return;
+            try {
+                const resp = await fetch(`${EVENT_API}/admin/simulator/status`, {
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const data = await resp.json();
+                const btn = document.getElementById('simStartBtn');
+                const status = document.getElementById('simStatus');
+                if (data.running) {
+                    btn.textContent = 'Stop Simulator';
+                    btn.className = 'admin-action-btn danger';
+                    btn.onclick = stopSimulator;
+                    const mins = Math.floor(data.elapsed_s / 60);
+                    const secs = Math.floor(data.elapsed_s % 60);
+                    const cfg = data.config || {};
+                    const spd = cfg.speedup > 1 ? ` @ ${cfg.speedup}x` : '';
+                    status.textContent = `Running: ${cfg.num_sailors || '?'} sailors, ${mins}m ${secs.toString().padStart(2,'0')}s, ${data.updates_sent || 0} updates${spd}`;
+                } else {
+                    btn.textContent = 'Start Simulator';
+                    btn.className = 'admin-action-btn primary';
+                    btn.onclick = showSimDialog;
+                    status.textContent = '';
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         function startDrawingCourse() {
             if (drawingMode) {
                 cancelDrawing();
