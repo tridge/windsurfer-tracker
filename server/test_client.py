@@ -87,6 +87,7 @@ class SimulatedEntity:
     pos_buffer: List[Tuple[int, float, float, float]] = field(default_factory=list)  # [(ts, lat, lon, spd), ...]
     heart_rate: int = 0
     poor_accuracy: bool = False  # Simulate poor GPS accuracy (100-500m)
+    send_offset: float = 0.0  # Random offset within delay interval for staggered sends
 
     # Race state tracking (for multi-race simulation)
     race_state: RaceState = RaceState.PRE_RACE
@@ -1517,6 +1518,10 @@ def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators
 
     sailors = [e for e in entities if e.role == "sailor"]
 
+    # Assign random send offsets to stagger packet timing like real trackers
+    for entity in entities:
+        entity.send_offset = random.uniform(0, delay * 0.9)
+
     start_time = time.time()
     update_count = 0
     reason = "stopped"
@@ -1568,9 +1573,17 @@ def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators
                     entity.battery = max(5, entity.battery - 1)
                 entity.signal = max(0, min(4, entity.signal + random.choice([-1, 0, 0, 0, 1])))
 
-            # Send 1Hz batch packets
+            # Send 1Hz batch packets staggered by each entity's send_offset
+            entities_by_offset = sorted(entities, key=lambda e: e.send_offset)
             acked = 0
-            for entity in entities:
+            last_offset = 0.0
+            for entity in entities_by_offset:
+                gap = entity.send_offset - last_offset
+                if gap > 0.05:
+                    time.sleep(gap)
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                last_offset = entity.send_offset
                 if entity.pos_buffer:
                     if send_packet_1hz(sock, host, port, entity, password, eid):
                         acked += 1
@@ -1601,7 +1614,10 @@ def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators
                 assist_str = f" [{assist_count} ASSIST]" if assist_count else ""
                 print(f"[{elapsed_int:4d}s] Update {update_count}: {acked}/{len(entities)} ACKed{assist_str}", end="\r")
 
-            time.sleep(delay)
+            # Sleep for remaining time in the interval
+            remaining = delay - last_offset
+            if remaining > 0.1:
+                time.sleep(remaining)
 
     except KeyboardInterrupt:
         reason = "interrupted"

@@ -295,32 +295,39 @@
         
         .sim-speedup-widget {
             position: fixed;
-            bottom: 15px;
-            right: 10px;
+            bottom: 70px;
+            right: 15px;
             z-index: 9999;
             background: white;
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             font-size: 12px;
             display: none;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
-        .sim-speedup-widget input[type="range"] {
-            width: 100px;
-        }
-        .sim-speedup-widget .sim-speedup-label {
+        .sim-speedup-widget .sim-speedup-input {
+            width: 48px;
+            text-align: center;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 4px 2px;
+            font-size: 14px;
             font-weight: bold;
-            min-width: 28px;
-            text-align: right;
+            -moz-appearance: textfield;
+        }
+        .sim-speedup-widget .sim-speedup-input::-webkit-inner-spin-button,
+        .sim-speedup-widget .sim-speedup-input::-webkit-outer-spin-button {
+            opacity: 1;
+            height: 24px;
         }
         .sim-speedup-widget .sim-stop-btn {
             background: #ef4444;
             color: white;
             border: none;
             border-radius: 4px;
-            padding: 3px 8px;
+            padding: 4px 8px;
             cursor: pointer;
             font-size: 11px;
         }
@@ -1175,11 +1182,11 @@
         </div>
     </div>
 
-    <!-- Simulator speedup widget (bottom-right, visible when sim running) -->
+    <!-- Simulator speedup widget (bottom-right, above menu buttons, visible when sim running) -->
     <div class="sim-speedup-widget" id="simSpeedupWidget">
         <span style="color:#666;">Sim</span>
-        <input type="range" id="simSpeedupSlider" min="1" max="50" value="1" oninput="onSimSpeedupChange(this.value)">
-        <span class="sim-speedup-label" id="simSpeedupLabel">1x</span>
+        <input type="number" class="sim-speedup-input" id="simSpeedupInput" min="1" max="50" value="1" onchange="onSimSpeedupChange(this.value)">
+        <span style="color:#666;">x</span>
         <button class="sim-stop-btn" onclick="stopSimulator()">Stop</button>
     </div>
 
@@ -2090,18 +2097,14 @@
                 updateSimStatus();
             } catch (e) { /* ignore */ }
         }
-        let simSpeedupTimer = null;
         function onSimSpeedupChange(val) {
-            document.getElementById('simSpeedupLabel').textContent = val + 'x';
-            // Debounce the server call
-            if (simSpeedupTimer) clearTimeout(simSpeedupTimer);
-            simSpeedupTimer = setTimeout(() => {
-                fetch(`${EVENT_API}/admin/simulator/speedup`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
-                    body: JSON.stringify({ speedup: parseInt(val) })
-                }).catch(() => {});
-            }, 200);
+            val = Math.max(1, Math.min(50, parseInt(val) || 1));
+            document.getElementById('simSpeedupInput').value = val;
+            fetch(`${EVENT_API}/admin/simulator/speedup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                body: JSON.stringify({ speedup: val })
+            }).catch(() => {});
         }
         async function updateSimStatus() {
             if (!adminMode) return;
@@ -2122,12 +2125,11 @@
                     const cfg = data.config || {};
                     const spd = cfg.speedup > 1 ? ` @ ${cfg.speedup}x` : '';
                     status.textContent = `Running: ${cfg.num_sailors || '?'} sailors, ${mins}m ${secs.toString().padStart(2,'0')}s, ${data.updates_sent || 0} updates${spd}`;
-                    // Show widget and sync slider (only if user isn't actively dragging)
+                    // Show widget and sync input (only if user isn't actively editing)
                     widget.style.display = 'flex';
-                    const slider = document.getElementById('simSpeedupSlider');
-                    if (document.activeElement !== slider && cfg.speedup) {
-                        slider.value = cfg.speedup;
-                        document.getElementById('simSpeedupLabel').textContent = cfg.speedup + 'x';
+                    const input = document.getElementById('simSpeedupInput');
+                    if (document.activeElement !== input && cfg.speedup) {
+                        input.value = cfg.speedup;
                     }
                 } else {
                     btn.textContent = 'Start Simulator';
