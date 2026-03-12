@@ -1172,6 +1172,12 @@
                 <span>Track Review</span>
             </a>
         </div>
+        <div class="menu-item" id="menuCourses">
+            <a href="courses.html">
+                <span>🗺</span>
+                <span>Courses Preview</span>
+            </a>
+        </div>
         <div class="menu-item" id="menuUpload" onclick="showUploadDialog()">
             <span>📁</span>
             <span>Upload Track</span>
@@ -4421,6 +4427,10 @@
         const viewUsersLink = document.getElementById('viewUsersLink');
         if (viewUsersLink) {
             viewUsersLink.href = `users.html?eid=${EVENT_ID}`;
+        }
+        const coursesLink = document.querySelector('#menuCourses a');
+        if (coursesLink) {
+            coursesLink.href = `courses.html?eid=${EVENT_ID}`;
         }
 
         let finishWindow = null;
