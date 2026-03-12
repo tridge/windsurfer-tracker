@@ -1428,7 +1428,7 @@ def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators
                    max_duration=3600, password="", course_file=None, course_waypoints=None,
                    stop_event=None, status_callback=None, sailor_names=None,
                    poor_accuracy=0, no_heartbeat=False, verbose=False, assist_id="",
-                   speedup=1.0, start_at_start=True):
+                   speedup=1.0, start_at_start=True, speedup_ref=None):
     """Run an online GPS tracking simulation.
 
     Args:
@@ -1545,7 +1545,8 @@ def run_simulation(host, port, eid, num_sailors=5, num_support=1, num_spectators
 
             # Update and accumulate positions for all entities (1Hz sub-updates)
             # speedup multiplies the simulated time per real-time interval
-            batch_size = int(delay * speedup)
+            cur_speedup = speedup_ref[0] if speedup_ref else speedup
+            batch_size = int(delay * cur_speedup)
             for step in range(batch_size):
                 ts = int(current_time - delay + step + 1)
                 for entity in entities:

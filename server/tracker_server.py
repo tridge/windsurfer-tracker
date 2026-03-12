@@ -2221,7 +2221,8 @@ _server_port: int | None = None
 
 
 def _run_simulator_thread(eid: int, config: dict, stop_event: "threading.Event",
-                          course_file: str, tracker_pwd: str, udp_port: int):
+                          course_file: str, tracker_pwd: str, udp_port: int,
+                          speedup_ref: list | None = None):
     """Thread wrapper for running a simulation for an event."""
     from test_client import run_simulation
 
@@ -2248,6 +2249,7 @@ def _run_simulator_thread(eid: int, config: dict, stop_event: "threading.Event",
             status_callback=status_cb,
             speedup=config.get('speedup', 1.0),
             start_at_start=config.get('start_at_start', True),
+            speedup_ref=speedup_ref,
         )
         log(f"[EVENT {eid}] Simulator finished: {result}")
     except Exception as e:
@@ -3800,9 +3802,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 }
 
                 stop_ev = threading.Event()
+                speedup_ref = [config['speedup']]
                 t = threading.Thread(
                     target=_run_simulator_thread,
-                    args=(eid, config, stop_ev, course_path, tracker_pwd, _server_port),
+                    args=(eid, config, stop_ev, course_path, tracker_pwd, _server_port,
+                          speedup_ref),
                     daemon=True
                 )
                 with _simulations_lock:
@@ -3812,6 +3816,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         'config': config,
                         'start_time': time.time(),
                         'status': {'updates_sent': 0, 'sailors_finished': 0, 'elapsed_s': 0},
+                        'speedup_ref': speedup_ref,
                     }
                 t.start()
                 self._send_json({"success": True})
@@ -3829,6 +3834,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     sim['stop_event'].set()
                     del _active_simulations[eid]
             self._send_json({"success": True})
+
+        elif subpath == '/admin/simulator/speedup':
+            # Update speedup of a running simulation
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+                data = json.loads(body) if body else {}
+                new_speedup = max(1.0, min(50.0, float(data.get('speedup', 1))))
+
+                with _simulations_lock:
+                    sim = _active_simulations.get(eid)
+                    if sim and sim['thread'].is_alive():
+                        sim['speedup_ref'][0] = new_speedup
+                        sim['config']['speedup'] = new_speedup
+                        self._send_json({"success": True, "speedup": new_speedup})
+                    else:
+                        self._send_json({"error": "No simulation running"}, 404)
+            except (json.JSONDecodeError, ValueError) as e:
+                self._send_json({"error": f"Invalid request: {e}"}, 400)
 
         else:
             self._send_json({"error": "Not found"}, 404)

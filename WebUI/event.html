@@ -293,6 +293,38 @@
             white-space: nowrap;
         }
         
+        .sim-speedup-widget {
+            position: fixed;
+            bottom: 15px;
+            right: 10px;
+            z-index: 9999;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            font-size: 12px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+        .sim-speedup-widget input[type="range"] {
+            width: 100px;
+        }
+        .sim-speedup-widget .sim-speedup-label {
+            font-weight: bold;
+            min-width: 28px;
+            text-align: right;
+        }
+        .sim-speedup-widget .sim-stop-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 3px 8px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
         /* Legend in panel */
         .panel-legend {
             padding: 8px 12px;
@@ -1143,6 +1175,14 @@
         </div>
     </div>
 
+    <!-- Simulator speedup widget (bottom-right, visible when sim running) -->
+    <div class="sim-speedup-widget" id="simSpeedupWidget">
+        <span style="color:#666;">Sim</span>
+        <input type="range" id="simSpeedupSlider" min="1" max="50" value="1" oninput="onSimSpeedupChange(this.value)">
+        <span class="sim-speedup-label" id="simSpeedupLabel">1x</span>
+        <button class="sim-stop-btn" onclick="stopSimulator()">Stop</button>
+    </div>
+
     <!-- Hamburger menu -->
     <button class="admin-menu-btn" id="adminMenuBtn" onclick="toggleAdminPanel()" title="Admin Controls">⚙</button>
     <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
@@ -1933,6 +1973,7 @@
                 document.getElementById('adminMenuBtn').style.display = 'none';
                 cancelDrawing();
                 if (simPollInterval) { clearInterval(simPollInterval); simPollInterval = null; }
+                document.getElementById('simSpeedupWidget').style.display = 'none';
                 // Refresh course display to remove edit buttons from marks
                 if (courseData) {
                     displayCourse(courseData);
@@ -2049,6 +2090,19 @@
                 updateSimStatus();
             } catch (e) { /* ignore */ }
         }
+        let simSpeedupTimer = null;
+        function onSimSpeedupChange(val) {
+            document.getElementById('simSpeedupLabel').textContent = val + 'x';
+            // Debounce the server call
+            if (simSpeedupTimer) clearTimeout(simSpeedupTimer);
+            simSpeedupTimer = setTimeout(() => {
+                fetch(`${EVENT_API}/admin/simulator/speedup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                    body: JSON.stringify({ speedup: parseInt(val) })
+                }).catch(() => {});
+            }, 200);
+        }
         async function updateSimStatus() {
             if (!adminMode) return;
             try {
@@ -2058,6 +2112,7 @@
                 const data = await resp.json();
                 const btn = document.getElementById('simStartBtn');
                 const status = document.getElementById('simStatus');
+                const widget = document.getElementById('simSpeedupWidget');
                 if (data.running) {
                     btn.textContent = 'Stop Simulator';
                     btn.className = 'admin-action-btn danger';
@@ -2067,11 +2122,19 @@
                     const cfg = data.config || {};
                     const spd = cfg.speedup > 1 ? ` @ ${cfg.speedup}x` : '';
                     status.textContent = `Running: ${cfg.num_sailors || '?'} sailors, ${mins}m ${secs.toString().padStart(2,'0')}s, ${data.updates_sent || 0} updates${spd}`;
+                    // Show widget and sync slider (only if user isn't actively dragging)
+                    widget.style.display = 'flex';
+                    const slider = document.getElementById('simSpeedupSlider');
+                    if (document.activeElement !== slider && cfg.speedup) {
+                        slider.value = cfg.speedup;
+                        document.getElementById('simSpeedupLabel').textContent = cfg.speedup + 'x';
+                    }
                 } else {
                     btn.textContent = 'Start Simulator';
                     btn.className = 'admin-action-btn primary';
                     btn.onclick = showSimDialog;
                     status.textContent = '';
+                    widget.style.display = 'none';
                 }
             } catch (e) { /* ignore */ }
         }
