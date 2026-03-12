@@ -128,6 +128,48 @@ def bearing_to(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (bearing + 360) % 360
 
 
+def closest_point_on_segment(plat: float, plon: float,
+                             alat: float, alon: float,
+                             blat: float, blon: float) -> Tuple[float, float]:
+    """Find the closest point on segment A-B to point P (flat-earth approx, fine for short distances)."""
+    # Work in a local flat coordinate system (meters)
+    cos_lat = math.cos(math.radians(plat))
+    ax = (alon - plon) * cos_lat
+    ay = alat - plat
+    bx = (blon - plon) * cos_lat
+    by = blat - plat
+
+    dx, dy = bx - ax, by - ay
+    len_sq = dx * dx + dy * dy
+    if len_sq < 1e-14:
+        return alat, alon
+
+    t = max(0.0, min(1.0, ((-ax) * dx + (-ay) * dy) / len_sq))
+    # Convert back to lat/lon
+    clat = plat + ay + t * dy
+    clon = plon + (ax + t * dx) / cos_lat
+    return clat, clon
+
+
+def nearest_point_on_course(lat: float, lon: float,
+                            waypoints: List[Tuple[float, float]]) -> Tuple[float, float, float]:
+    """Find the nearest point on any course leg to the given position.
+
+    Returns (nearest_lat, nearest_lon, distance_m).
+    """
+    best_dist = float('inf')
+    best_lat, best_lon = lat, lon
+    for i in range(len(waypoints) - 1):
+        clat, clon = closest_point_on_segment(
+            lat, lon, waypoints[i][0], waypoints[i][1],
+            waypoints[i+1][0], waypoints[i+1][1])
+        d = haversine_distance(lat, lon, clat, clon)
+        if d < best_dist:
+            best_dist = d
+            best_lat, best_lon = clat, clon
+    return best_lat, best_lon, best_dist
+
+
 def move_point(lat: float, lon: float, bearing: float, distance_m: float) -> Tuple[float, float]:
     """Move a point by distance in meters along bearing"""
     R = 6371000
@@ -750,9 +792,19 @@ class SailingSimulator:
         distance_m = entity.spd * 0.514444 * dt
         new_lat, new_lon = move_point(entity.lat, entity.lon, entity.hdg, distance_m)
 
-        # Check for land
-        entity.lat, entity.lon, entity.hdg = self._check_and_avoid_land(
-            entity, new_lat, new_lon, distance_m)
+        # Constrain to within 50m of the nearest course leg
+        if entity.course_waypoints and len(entity.course_waypoints) >= 2:
+            _, _, dist_to_course = nearest_point_on_course(
+                new_lat, new_lon, entity.course_waypoints)
+            if dist_to_course > 50:
+                clat, clon, _ = nearest_point_on_course(
+                    new_lat, new_lon, entity.course_waypoints)
+                # Pull back toward the course with a small offset
+                new_lat = clat + random.uniform(-0.0002, 0.0002)
+                new_lon = clon + random.uniform(-0.0002, 0.0002)
+
+        entity.lat = new_lat
+        entity.lon = new_lon
 
     def update_spectator(self, entity: SimulatedEntity, dt: float):
         """Update spectator - mostly stationary with drift"""
@@ -1047,54 +1099,67 @@ def send_packet(sock: socket.socket, host: str, port: int, entity: SimulatedEnti
 
 def send_packet_1hz(sock: socket.socket, host: str, port: int, entity: SimulatedEntity,
                     password: str = "", eid: int = 1) -> bool:
-    """Send 1Hz batch position packet with pos array and wait for ACK"""
-    entity.seq += 1
+    """Send 1Hz batch position packet with pos array and wait for ACK.
 
+    Splits large batches into multiple UDP packets to stay under 4096 bytes.
+    """
     # pos array format: [[ts, lat, lon, spd], ...]
     pos_array = [[ts, round(lat, 6), round(lon, 6), round(spd, 1)] for ts, lat, lon, spd in entity.pos_buffer]
 
-    hac = round(random.uniform(100, 500), 1) if entity.poor_accuracy else 0.5
+    # Each pos entry is ~47 bytes in JSON; keep packets well under 4096 bytes
+    # (the server's recvfrom buffer size). 50 entries ≈ 2500 bytes + overhead.
+    MAX_POS_PER_PACKET = 50
 
-    packet = {
-        "id": entity.id,
-        "eid": eid,
-        "sq": entity.seq,
-        "ts": int(time.time()),  # Current timestamp (for sorting)
-        "pos": pos_array,        # Array of [ts, lat, lon, spd] positions
-        "hac": hac,
-        "spd": round(entity.spd, 2),
-        "hdg": int(entity.hdg) % 360,
-        "ast": entity.assist,
-        "bat": entity.battery,
-        "sig": entity.signal,
-        "role": entity.role,
-        "ver": f"test_client({GIT_HASH})",
-        "hr": entity.heart_rate   # Heart rate included in 1Hz packets
-    }
-    if entity.poor_accuracy:
-        packet["nsats"] = random.randint(2, 4)  # Low sat count for poor accuracy
+    # Split into chunks
+    chunks = [pos_array[i:i + MAX_POS_PER_PACKET] for i in range(0, len(pos_array), MAX_POS_PER_PACKET)]
+    if not chunks:
+        chunks = [[]]
 
-    if password:
-        packet["pwd"] = password
+    acked = False
+    for chunk in chunks:
+        entity.seq += 1
 
-    data = json.dumps(packet).encode("utf-8")
-    sock.sendto(data, (host, port))
+        hac = round(random.uniform(100, 500), 1) if entity.poor_accuracy else 0.5
 
-    # Clear the buffer after sending
-    entity.pos_buffer.clear()
+        packet = {
+            "id": entity.id,
+            "eid": eid,
+            "sq": entity.seq,
+            "ts": int(time.time()),
+            "pos": chunk,
+            "hac": hac,
+            "spd": round(entity.spd, 2),
+            "hdg": int(entity.hdg) % 360,
+            "ast": entity.assist,
+            "bat": entity.battery,
+            "sig": entity.signal,
+            "role": entity.role,
+            "ver": f"test_client({GIT_HASH})",
+            "hr": entity.heart_rate
+        }
+        if entity.poor_accuracy:
+            packet["nsats"] = random.randint(2, 4)
 
-    try:
-        ack_data, _ = sock.recvfrom(256)
-        # Check if response contains an error
+        if password:
+            packet["pwd"] = password
+
+        data = json.dumps(packet).encode("utf-8")
+        sock.sendto(data, (host, port))
+
         try:
-            ack = json.loads(ack_data.decode('utf-8'))
-            if 'error' in ack:
-                return False  # Got error response
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            ack_data, _ = sock.recvfrom(256)
+            try:
+                ack = json.loads(ack_data.decode('utf-8'))
+                if 'error' not in ack:
+                    acked = True
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                acked = True
+        except socket.timeout:
             pass
-        return True
-    except socket.timeout:
-        return False
+
+    # Clear the buffer after sending all chunks
+    entity.pos_buffer.clear()
+    return acked
 
 
 def update_gathering_sailor(entity: SimulatedEntity, gathering_center: Tuple[float, float],

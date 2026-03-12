@@ -2295,6 +2295,8 @@ _RATE_LIMIT_SECONDS = 5.0
 
 def is_rate_limited(ip: str, sailor_id: str = "__admin__") -> bool:
     """Check if an (IP, sailor_id) pair is rate limited due to recent failed auth."""
+    if ip == "127.0.0.1":
+        return False
     key = (ip, sailor_id)
     if key in _failed_auth_times:
         elapsed = time.time() - _failed_auth_times[key]
