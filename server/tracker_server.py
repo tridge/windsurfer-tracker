@@ -2034,6 +2034,7 @@ class EventTracker:
         self.positions_file = data_dir / "current_positions.json"
         self.course_file = data_dir / "course.json"
         self.users_file = data_dir / "users.json"
+        self.courses_file = data_dir / "courses.json"
         self.log_dir = data_dir / "logs"
 
         # Ensure directories exist
@@ -2715,6 +2716,19 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"course": None})
 
+        elif subpath == '/courses':
+            # Return all named courses for this event (public)
+            tracker = get_event_tracker(eid)
+            if tracker and tracker.courses_file.exists():
+                try:
+                    with open(tracker.courses_file, 'r') as f:
+                        courses = json.load(f)
+                    self._send_json({"courses": courses})
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"courses": {}})
+
         elif subpath == '/auth/check':
             # Check admin password for this event
             if self._check_event_admin_auth(eid):
@@ -3112,6 +3126,40 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({"error": "Could not get event tracker"}, 500)
 
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath.startswith('/admin/courses/'):
+            # Save a named course
+            from urllib.parse import unquote
+            course_name = unquote(subpath[len('/admin/courses/'):])
+            if not course_name:
+                self._send_json({"error": "Course name required"}, 400)
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                course = json.loads(body)
+                course['saved'] = time.time()
+
+                tracker = get_event_tracker(eid)
+                if tracker:
+                    # Load existing courses
+                    courses = {}
+                    if tracker.courses_file.exists():
+                        with open(tracker.courses_file, 'r') as f:
+                            courses = json.load(f)
+                    courses[course_name] = course
+                    tmp_file = tracker.courses_file.with_suffix('.tmp')
+                    with open(tmp_file, 'w') as f:
+                        json.dump(courses, f, indent=2)
+                    tmp_file.rename(tracker.courses_file)
+                    log(f"[EVENT {eid}] Named course saved: '{course_name}'")
+                    self._send_json({"success": True})
+                else:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)
             except Exception as e:
@@ -3679,6 +3727,30 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 rotate_file(tracker.course_file)
                 log(f"[EVENT {eid}] Course deleted (rotated)")
             self._send_json({"success": True})
+
+        elif subpath.startswith('/admin/courses/'):
+            from urllib.parse import unquote
+            course_name = unquote(subpath[len('/admin/courses/'):])
+            if not course_name:
+                self._send_json({"error": "Course name required"}, 400)
+                return
+            tracker = get_event_tracker(eid)
+            if tracker and tracker.courses_file.exists():
+                try:
+                    with open(tracker.courses_file, 'r') as f:
+                        courses = json.load(f)
+                    if course_name in courses:
+                        del courses[course_name]
+                        tmp_file = tracker.courses_file.with_suffix('.tmp')
+                        with open(tmp_file, 'w') as f:
+                            json.dump(courses, f, indent=2)
+                        tmp_file.rename(tracker.courses_file)
+                        log(f"[EVENT {eid}] Named course deleted: '{course_name}'")
+                    self._send_json({"success": True})
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"success": True})
 
         elif subpath.startswith('/admin/user/'):
             from urllib.parse import unquote

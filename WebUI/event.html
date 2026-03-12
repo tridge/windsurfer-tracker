@@ -722,6 +722,42 @@
             border-radius: 4px;
         }
 
+        .courses-list {
+            margin-top: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+        }
+        .courses-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+        .courses-list-item:last-child {
+            border-bottom: none;
+        }
+        .courses-list-item:hover {
+            background: #e0f0ff;
+        }
+        .courses-list-item .delete-btn {
+            background: none;
+            border: none;
+            color: #c00;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        .courses-list-item .delete-btn:hover {
+            color: #f00;
+        }
+
         /* User edit dialog */
         .edit-user-overlay {
             position: fixed;
@@ -1239,7 +1275,14 @@
                 <button class="admin-action-btn danger" id="btnDeleteCourse" onclick="deleteCourse()">
                     🗑 Delete Course
                 </button>
+                <button class="admin-action-btn" id="btnNameCourse" onclick="nameCourse()" style="display:none">
+                    💾 Name Course
+                </button>
+                <button class="admin-action-btn" id="btnLoadCourse" onclick="toggleCoursesList()" style="display:none">
+                    📋 Courses ▾
+                </button>
             </div>
+            <div class="courses-list" id="coursesList" style="display:none"></div>
             <div class="course-info" id="courseInfo">
                 No course set
             </div>
@@ -1864,6 +1907,7 @@
                     document.getElementById('adminMenuBtn').style.display = 'flex';
                     document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
+                    await loadSavedCourses();
                     await loadUserOverrides();
                     // Refresh markers to show edit buttons
                     if (currentPositions?.sailors) {
@@ -2388,11 +2432,130 @@
                 }
                 updateCourseInfo();
                 updateCourseLengthDisplay();
+                if (adminMode) updateNamedCourseButtons();
             } catch (e) {
                 console.error('Error loading course:', e);
             }
         }
         
+        // Named courses
+        let savedCourses = {};
+
+        async function loadSavedCourses() {
+            try {
+                const response = await fetch(`${EVENT_API}/courses`);
+                const data = await response.json();
+                savedCourses = data.courses || {};
+            } catch (e) {
+                savedCourses = {};
+            }
+            updateNamedCourseButtons();
+        }
+
+        function updateNamedCourseButtons() {
+            const nameBtn = document.getElementById('btnNameCourse');
+            const loadBtn = document.getElementById('btnLoadCourse');
+            if (nameBtn) nameBtn.style.display = (courseData && courseData.start) ? '' : 'none';
+            if (loadBtn) loadBtn.style.display = Object.keys(savedCourses).length > 0 ? '' : 'none';
+        }
+
+        async function nameCourse() {
+            if (!courseData || !courseData.start) return;
+            const name = prompt('Course name:');
+            if (!name) return;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadSavedCourses();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error saving named course: ' + e.message);
+            }
+        }
+
+        function toggleCoursesList() {
+            const list = document.getElementById('coursesList');
+            if (list.style.display === 'none') {
+                renderCoursesList();
+                list.style.display = '';
+            } else {
+                list.style.display = 'none';
+            }
+        }
+
+        function renderCoursesList() {
+            const list = document.getElementById('coursesList');
+            list.innerHTML = '';
+            for (const name of Object.keys(savedCourses).sort()) {
+                const item = document.createElement('div');
+                item.className = 'courses-list-item';
+                const label = document.createElement('span');
+                const len = calculateCourseLength(savedCourses[name]);
+                label.textContent = len > 0 ? `${name} (${len.toFixed(1)}km)` : name;
+                label.onclick = () => loadNamedCourse(name);
+                const del = document.createElement('button');
+                del.className = 'delete-btn';
+                del.textContent = '✕';
+                del.title = 'Delete';
+                del.onclick = (e) => { e.stopPropagation(); deleteNamedCourse(name); };
+                item.appendChild(label);
+                item.appendChild(del);
+                list.appendChild(item);
+            }
+        }
+
+        async function loadNamedCourse(name) {
+            const course = savedCourses[name];
+            if (!course) return;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/course`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(course)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadCourse();
+                    document.getElementById('coursesList').style.display = 'none';
+                    updateNamedCourseButtons();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error loading course: ' + e.message);
+            }
+        }
+
+        async function deleteNamedCourse(name) {
+            if (!confirm(`Delete saved course "${name}"?`)) return;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadSavedCourses();
+                    renderCoursesList();
+                }
+            } catch (e) {
+                alert('Error deleting course: ' + e.message);
+            }
+        }
+
         function clearCourseDisplay() {
             courseMarkers.forEach(m => map.removeLayer(m));
             courseMarkers = [];
