@@ -1,0 +1,146 @@
+P7 JT808 GPS Tracker - Development Notes
+==========================================
+
+Device: P7 JT808 tracker
+IMEI: 37770201871
+Sailor ID: J201871
+Event ID: 6 (configured in jt808.json on server)
+Location: Canberra area (~35.33°S, 149.13°E)
+Firmware: ML307R-CA07 2025/06/24 15:19
+Model: P7Z
+
+Protocol: JT/T 808-2013 over TCP
+Server port: 7712 (JT808)
+
+== Hardware ==
+
+Module: China Mobile IoT ML307R-CA07 (LTE Cat-1)
+GNSS: GPS + BeiDou (0x03 from terminal attributes)
+Satellites tracked: ~32 (cannot change constellations, 0x0090 rejected)
+Terminal attributes comm byte: 0x01 ("GPRS" — lies, actually Cat-1)
+
+== SIM / Connectivity ==
+
+ICCID: 89464278206109021105
+SIM provider: Hologram (IoT MVNO)
+Underlying carrier: Telenor Connexion AB (AS49222)
+Traffic breakout: Reston, Virginia, USA (regardless of device location)
+Device IP: 185.166.245.59 / .60 (NATed via Telenor)
+Roams globally — tested in Canberra (AU) and NZ
+
+APN: Likely auto-configured by Hologram SIM
+  - Standard 0x0010 (APN param) = Fail (rejected)
+  - Vendor 0xF101 = OK (possibly vendor APN param, untested after power cycle)
+  - Vendor 0xF102 = Fail
+  - Awaiting vendor response on SMS command for APN
+  - Setting APN to "hologram" may improve carrier switching speed
+
+No cell tower data in location reports (0xEB/0xEE TLVs not included).
+
+== 1Hz ACHIEVED (2026-03-14) ==
+
+The key parameter is 0xF104 (vendor-specific, DWORD). Setting it to 1
+gives 1Hz position reports via standard 0x0200 and 0x0704 messages.
+
+IMPORTANT: The device ACKs 0xF104 with "Fail" (result=1) but DOES
+actually apply the value. Verified via query-params showing 0xF104=1
+after a "Fail" ACK. The value persists across power cycles/reconnects.
+
+Setting: set-param 0xF104=1
+
+== GPS Position Lag ==
+
+Walk test (2026-03-14) showed significant Kalman filter lag:
+  - Outbound SE: avg 3.8m offset (acceptable)
+  - Return NW after 180° turn: avg 8.6m, max 12.8m offset
+  - 14-second position freeze at turnaround point
+  - Not acceptable for mark rounding in windsurfing races
+
+Possible causes:
+  - GNSS module internal Kalman filter/position smoothing
+  - Low baud rate on GNSS serial causing data loss (0x0091 set to 115200, ACKed OK)
+  - ML307R firmware filtering — no known AT command access via JT808
+
+Attempted mitigations:
+  - 0x0090 (GNSS constellation mode) = Fail (can't change constellations)
+  - 0x0091 (GNSS baud rate) = 5 (115200) = OK (may help, needs walk test)
+  - 0x8900 passthrough (AT commands to GNSS) = silently ignored
+  - JT808 spec has NO Kalman filter / smoothing params
+
+== Device Parameters ==
+
+Query-all-params (0x8104) returns only 4 parameters:
+  0x0001 = 300     (heartbeat interval, seconds)
+  0x0048 = (zeros) (monitoring platform phone number, empty)
+  0xF104 = N       (vendor upload interval in seconds, currently 1)
+  0xF118 = N       (battery percentage, read-only)
+
+== Parameter Write Behaviour ==
+
+Parameters are sent individually via 0x8103 (one per message) because
+the device rejects the entire batch if ANY param ID is unrecognised.
+
+ACK results for individual params:
+  0x0010 = Fail   (standard APN - rejected)
+  0x0029 = OK     (standard report interval - accepted)
+  0x0090 = Fail   (GNSS positioning mode - rejected)
+  0x0091 = OK     (GNSS baud rate - accepted, set to 115200)
+  0x0092 = OK     (GNSS output freq - accepted but no effect)
+  0x0093 = Fail   (GNSS collect freq - rejected)
+  0x0094 = Fail   (GNSS upload mode enable - rejected)
+  0x0095 = OK     (GNSS upload setting - accepted but no effect)
+  0x8106 = Fail   (query specific params not supported)
+  0xF101 = OK     (vendor APN? - accepted, STRING type)
+  0xF102 = Fail   (vendor param - rejected)
+  0xF104 = Fail   (vendor upload interval - APPLIED despite Fail ACK!)
+  0xF110 = OK     (vendor param - accepted)
+
+== Report Behaviour ==
+
+- Active (0xF104=1): Reports at 1Hz via 0x0200 (single) and 0x0704 (batch)
+  - Batch type=0 (normal) when GPS has fix
+  - Batch type=1 (blind) when GPS invalid (indoors/no satellites)
+  - GPS timestamp increments by 1s per report
+- Active (0xF104=10): Reports at ~10s intervals
+- Idle: Reports at ~60s (controlled by 0x8202)
+- Stationary with no GPS fix: Still reports at configured rate but same position
+
+== Vendor Messages ==
+
+Device regularly sends these vendor-specific messages:
+  0x1007 (4 bytes): Unknown, sent before location reports
+  0x0109 (0 bytes): "Terminal upgrade" - empty, sent after 0x1007
+  0x0112 (6 bytes): "Terminal transfer" - body starts with 0x0700...
+  0x1107 (54 bytes): Contains ICCID, device model string
+
+Terminal attributes (0x0107, 76 bytes) decoded:
+  Model: P7Z
+  Firmware: ML307R-CA07 2025/06/24 15:19
+  ICCID: 89464278206109021105
+  GNSS: GPS + BeiDou (0x03)
+  Comm: 0x01 (reports GPRS, actually LTE Cat-1)
+
+Location report TLVs present:
+  0x01 (mileage), 0x30 (signal), 0x31 (satellites=~32),
+  0xE4 (battery), 0xE5, 0xE6, 0xE7 (status), 0xF5, 0xFB
+  NOT present: 0xEB (2G/3G LBS), 0xEE (4G LBS)
+
+== GNSS Detailed Data (0x0900) ==
+
+Not supported on this device. The GNSS params 0x0092-0x0095 from the
+JT808 spec are partially accepted but no 0x0900 pass-through messages
+are ever generated. The standard 0x0200/0x0704 channel at 1Hz is
+sufficient and better.
+
+== 0x8900 Downlink Pass-through ==
+
+Silently ignored — no ACK, no response. Cannot send AT commands to
+the GNSS chipset via this mechanism.
+
+== Open Questions ==
+
+1. Battery drain at 1Hz — need to test over a full day
+2. Does 0x0091=5 (115200 baud to GNSS) improve position lag? (needs walk test)
+3. Is 0xF101 actually the vendor APN param? Does it take effect after power cycle?
+4. Can APN be set via SMS command? (awaiting vendor response)
+5. What are the unknown TLVs 0xE5, 0xE6, 0xE7, 0xF5, 0xFB?

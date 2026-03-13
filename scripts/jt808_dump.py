@@ -37,6 +37,7 @@ MSG_NAMES = {
     0x0112: "TermTransfer",
     0x0200: "Location",
     0x0704: "BatchLocation",
+    0x0900: "PassThrough",
     0x1007: "Vendor1007",
     0x1107: "Vendor1107",
     # Server -> Device
@@ -44,6 +45,7 @@ MSG_NAMES = {
     0x8100: "RegistrationResp",
     0x8103: "SetParameters",
     0x8104: "QueryParameters",
+    0x8106: "QuerySpecParams",
     0x8202: "TrackingControl",
     0x8203: "AlarmConfirm",
 }
@@ -375,6 +377,27 @@ def dump_packet(ts, frame, verbose=False):
                     print(f"           0x{param_id:04X} = {param_val.hex()} (len={param_len})")
         else:
             print(f"{ts_str}  {name:<18s} body={body.hex()}{cs_tag}")
+
+    elif msg_id == 0x0900:
+        # Data uplink pass-through
+        if len(body) < 1:
+            print(f"{ts_str}  {name:<18s} [empty]{cs_tag}")
+        else:
+            pt_type = body[0]
+            pt_data = body[1:]
+            type_names = {0x00: "GNSS", 0x0B: "serial1", 0x41: "serial2"}
+            type_str = type_names.get(pt_type, f"0x{pt_type:02X}")
+            print(f"{ts_str}  {name:<18s} type={type_str} len={len(pt_data)}{cs_tag}")
+            if pt_type == 0x00 and len(pt_data) >= 28:
+                # Try parsing as standard location body
+                loc = parse_location(pt_data)
+                if loc and loc.get("gps_valid"):
+                    loc_str = dump_location(pt_data, prefix="", verbose=verbose)
+                    print(f"           GNSS: {loc_str}")
+                else:
+                    print(f"           GNSS raw: {pt_data.hex()}")
+            elif verbose:
+                print(f"           data: {pt_data.hex()}")
 
     elif msg_id == 0x0107:
         # Terminal attributes

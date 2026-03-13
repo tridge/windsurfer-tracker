@@ -301,6 +301,29 @@ def parse_location(body: bytes):
             # status: 0=charging, 1=not charging
             result["charging"] = (tlv_data[0] == 0)
             result["battery"] = min(tlv_data[1], 100)
+        elif tlv_id == 0xEE and tlv_len >= 10:
+            # 4G LBS: MCC(2) + MNC(1) + LAC(2) + CellID(4) + signal(1)
+            mcc = struct.unpack(">H", tlv_data[0:2])[0]
+            mnc = tlv_data[2]
+            lac = struct.unpack(">H", tlv_data[3:5])[0]
+            cell_id = struct.unpack(">I", tlv_data[5:9])[0]
+            cell_sig = tlv_data[9]
+            result["mcc"] = mcc
+            result["mnc"] = mnc
+            result["lac"] = lac
+            result["cell_id"] = cell_id
+            result["cell_signal"] = cell_sig
+        elif tlv_id == 0xEB and tlv_len >= 7:
+            # 2G/3G LBS: MCC(2) + MNC(1) + [CellID(2) + LAC(2) + signal(1)] x N
+            mcc = struct.unpack(">H", tlv_data[0:2])[0]
+            mnc = tlv_data[2]
+            if tlv_len >= 8:
+                cell_id = struct.unpack(">H", tlv_data[3:5])[0]
+                lac = struct.unpack(">H", tlv_data[5:7])[0]
+                result["mcc"] = mcc
+                result["mnc"] = mnc
+                result["lac"] = lac
+                result["cell_id"] = cell_id
 
         i += 2 + tlv_len
 
@@ -516,15 +539,21 @@ class JT808Listener:
             self._log(f"[JT808] Login commands sent ({'active' if not jt_conn.idle else 'idle'})")
 
             # Set vendor tracking interval and query parameters
+            # Send each param individually — device rejects entire batch if any unknown
             if not jt_conn.idle:
-                # Set 0xF104 (tracking data upload interval) to match requested interval
-                frame = build_set_parameters(
-                    jt_conn.phone_bcd, jt_conn.next_serial(),
-                    {0xF104: ("DWORD", self.interval), 0xF110: ("DWORD", self.interval), 0x0029: ("DWORD", self.interval)})
-                self._send(jt_conn, frame)
+                # 0xF104 controls actual upload interval on P7 devices (may ACK Fail but still apply)
+                for pid, pval in [(0xF104, self.interval), (0xF110, self.interval), (0x0029, self.interval)]:
+                    frame = build_set_parameters(
+                        jt_conn.phone_bcd, jt_conn.next_serial(),
+                        {pid: ("DWORD", pval)})
+                    self._send(jt_conn, frame)
 
             # Query all device parameters to understand its configuration
             frame = build_query_parameters(jt_conn.phone_bcd, jt_conn.next_serial())
+            self._send(jt_conn, frame)
+
+            # Query terminal attributes (model, ICCID, GNSS/comm capabilities)
+            frame = jt808_build_frame(0x8107, jt_conn.phone_bcd, jt_conn.next_serial(), b"")
             self._send(jt_conn, frame)
 
             # Restore sticky SOS
@@ -613,8 +642,9 @@ class JT808Listener:
                 resp_serial = struct.unpack(">H", body[0:2])[0]
                 resp_id = struct.unpack(">H", body[2:4])[0]
                 result = body[4]
+                result_str = {0: "OK", 1: "Fail", 2: "Bad msg", 3: "Unsupported"}.get(result, f"?({result})")
                 label = jt_conn.sailor_id or jt_conn.imei or "unknown"
-                self._log(f"[JT808] Device ACK from {label}: msg=0x{resp_id:04X} result={result}")
+                self._log(f"[JT808] Device ACK from {label}: msg=0x{resp_id:04X} serial={resp_serial} result={result_str}")
 
         elif msg_id == 0x0003:
             # Terminal logout
@@ -630,16 +660,35 @@ class JT808Listener:
                 jt_conn.phone_bcd = phone_bcd
             label = jt_conn.sailor_id or jt_conn.imei or "unknown"
             self._log(f"[JT808] Terminal attributes from {label} ({len(body)} bytes)")
-
-        elif msg_id == 0x0001:
-            # Terminal general response — device ACKing our commands
-            if len(body) >= 5:
-                ack_serial = struct.unpack(">H", body[0:2])[0]
-                ack_id = struct.unpack(">H", body[2:4])[0]
-                result = body[4]
-                result_str = {0: "OK", 1: "Fail", 2: "Bad msg", 3: "Unsupported"}.get(result, f"?({result})")
-                label = jt_conn.sailor_id or jt_conn.imei or "unknown"
-                self._log(f"[JT808] Device {label} ACK 0x{ack_id:04X} serial={ack_serial}: {result_str}")
+            try:
+                # Parse 0x0107: type(2) + mfr(5) + model(20) + tid(7)
+                # + iccid(10 BCD) + hw_ver_len(1) + hw + fw_ver_len(1) + fw + gnss(1) + comm(1)
+                off = 2  # skip terminal type WORD
+                mfr = body[off:off+5].decode("ascii", errors="replace").strip('\x00')
+                off += 5
+                model = body[off:off+20].decode("ascii", errors="replace").strip('\x00')
+                off += 20
+                tid = body[off:off+7].decode("ascii", errors="replace").strip('\x00')
+                off += 7
+                iccid_bcd = body[off:off+10]
+                iccid = iccid_bcd.hex()
+                off += 10
+                hw_len = body[off]; off += 1
+                off += hw_len
+                fw_len = body[off]; off += 1
+                fw = body[off:off+fw_len].decode("ascii", errors="replace").strip('\x00')
+                off += fw_len
+                gnss_attr = body[off] if off < len(body) else 0
+                comm_attr = body[off+1] if off+1 < len(body) else 0
+                gnss_names = []
+                if gnss_attr & 0x01: gnss_names.append("GPS")
+                if gnss_attr & 0x02: gnss_names.append("BeiDou")
+                if gnss_attr & 0x04: gnss_names.append("GLONASS")
+                if gnss_attr & 0x08: gnss_names.append("Galileo")
+                self._log(f"[JT808] Attrs {label}: model={model} fw={fw} ICCID={iccid} "
+                          f"GNSS={'+'.join(gnss_names) or '?'}(0x{gnss_attr:02X}) comm=0x{comm_attr:02X}")
+            except Exception as e:
+                self._log(f"[JT808] Attrs parse error: {e}")
 
         elif msg_id == 0x0104:
             # Query parameter response
@@ -670,13 +719,38 @@ class JT808Listener:
                     else:
                         self._log(f"[JT808]   0x{param_id:04X} = {param_val.hex()}")
 
+        elif msg_id == 0x0900:
+            # Data uplink pass-through
+            if jt_conn.phone_bcd is None:
+                jt_conn.phone_bcd = phone_bcd
+            self._send_general_response(jt_conn, serial, msg_id, result=0)
+            if len(body) < 2:
+                return
+            passthrough_type = body[0]
+            passthrough_data = body[1:]
+            label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+            if passthrough_type == 0x00:
+                # GNSS module detailed location data
+                self._log(f"[JT808] GNSS pass-through from {label} ({len(passthrough_data)} bytes)")
+                self._process_gnss_passthrough(jt_conn, passthrough_data)
+            else:
+                self._log(f"[JT808] Pass-through type=0x{passthrough_type:02X} from {label} ({len(passthrough_data)} bytes): {passthrough_data.hex()}")
+
         elif msg_id in (0x0109, 0x0112, 0x1007, 0x1107):
             # Vendor-specific messages — ACK and log
             if jt_conn.phone_bcd is None:
                 jt_conn.phone_bcd = phone_bcd
             self._send_general_response(jt_conn, serial, msg_id, result=0)
             label = jt_conn.sailor_id or jt_conn.imei or "unknown"
-            self._log(f"[JT808] Vendor msg 0x{msg_id:04X} from {label} ({len(body)} bytes)")
+            if msg_id == 0x1107 and len(body) > 20:
+                # Vendor 0x1107 often contains ICCID and model string
+                try:
+                    printable = body.decode("ascii", errors="replace")
+                    self._log(f"[JT808] Vendor 0x1107 from {label}: {body.hex()} text={printable}")
+                except Exception:
+                    self._log(f"[JT808] Vendor 0x1107 from {label}: {body.hex()}")
+            else:
+                self._log(f"[JT808] Vendor msg 0x{msg_id:04X} from {label} ({len(body)} bytes)")
 
         else:
             # Unknown message — send generic ACK
@@ -708,6 +782,14 @@ class JT808Listener:
             jt_conn.signal = loc["signal"]
         if "charging" in loc:
             jt_conn.charging = loc["charging"]
+
+        # Log cell info when first seen or changed
+        if "mcc" in loc:
+            cell_key = (loc["mcc"], loc["mnc"], loc.get("lac"), loc.get("cell_id"))
+            if not hasattr(jt_conn, '_last_cell') or jt_conn._last_cell != cell_key:
+                jt_conn._last_cell = cell_key
+                self._log(f"[JT808] Cell info {jt_conn.sailor_id}: MCC={loc['mcc']} MNC={loc['mnc']} "
+                          f"LAC={loc.get('lac')} CellID={loc.get('cell_id')} sig={loc.get('cell_signal')}")
 
         jt_conn.last_lat = loc["lat"]
         jt_conn.last_lon = loc["lon"]
@@ -780,16 +862,35 @@ class JT808Listener:
         if processed != count:
             self._log(f"[JT808] Batch: parsed {processed}/{count} items from {label}")
 
+    def _process_gnss_passthrough(self, jt_conn, data):
+        """Process GNSS module detailed location data from 0x0900 pass-through.
+
+        The payload format is not fully documented — try parsing as 0x0200-style
+        location body first. If that fails, log the raw hex for analysis.
+        """
+        label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+        # Try parsing as standard location body (same as 0x0200)
+        loc = parse_location(data)
+        if loc and loc["gps_valid"] and loc["lat"] != 0 and loc["lon"] != 0:
+            self._log(f"[JT808] GNSS data from {label}: lat={loc['lat']:.6f} lon={loc['lon']:.6f} spd={loc['speed_knots']:.1f}kn")
+            self._process_location(jt_conn, data)
+            return
+        # Unknown format — log hex for analysis
+        self._log(f"[JT808] GNSS data unknown format from {label}: {data.hex()}")
+
     # --- Public interface (matches GT06Listener) ---
 
     def send_command_to(self, sailor_id, cmd_str):
         """Send a command to a connected JT808 device by sailor_id.
 
         Supported commands:
-          query-params          - query all terminal parameters (0x8104)
-          query-param 0x0029    - query specific parameter(s) (0x8106)
-          set-param 0x0029=10   - set parameter (0x8103), DWORD assumed
-          set-interval 1        - set tracking interval via 0x8202
+          query-params                       - query all terminal parameters (0x8104)
+          query-param 0x0029                 - query specific parameter(s) (0x8106)
+          set-param 0x0029=10                - set parameter (0x8103), DWORD assumed
+          set-param 0x0090=1:BYTE            - set parameter with type suffix
+          set-interval 1                     - set tracking interval via 0x8202
+          passthrough 0x00 <hexdata>         - send 0x8900 downlink pass-through (raw hex)
+          passthrough-text 0x00 AT+CMD       - send 0x8900 downlink pass-through (ASCII text)
         """
         for jt_conn in self.connections.values():
             if jt_conn.sailor_id == sailor_id:
@@ -809,6 +910,12 @@ class JT808Listener:
             self._log(f"[JT808] Sent query-all-params to {jt_conn.sailor_id}")
             return True
 
+        elif cmd == "query-attrs":
+            frame = jt808_build_frame(0x8107, jt_conn.phone_bcd, jt_conn.next_serial(), b"")
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent query-attrs to {jt_conn.sailor_id}")
+            return True
+
         elif cmd == "query-param" and len(parts) >= 2:
             param_ids = [int(p, 0) for p in parts[1:]]
             frame = build_query_specific_parameters(
@@ -824,8 +931,16 @@ class JT808Listener:
                     continue
                 key, val = p.split("=", 1)
                 param_id = int(key, 0)
-                value = int(val, 0)
-                params[param_id] = ("DWORD", value)
+                # Support type suffix: 0x0094=1:BYTE, 0x0095=10:DWORD, 0x0010=hologram:STRING
+                dtype = "DWORD"
+                if ":" in val:
+                    val, dtype = val.rsplit(":", 1)
+                    dtype = dtype.upper()
+                if dtype == "STRING":
+                    value = val
+                else:
+                    value = int(val, 0)
+                params[param_id] = (dtype, value)
             if params:
                 frame = build_set_parameters(
                     jt_conn.phone_bcd, jt_conn.next_serial(), params)
@@ -838,6 +953,33 @@ class JT808Listener:
             interval = int(parts[1])
             self._send_tracking_control(jt_conn, interval)
             self._log(f"[JT808] Sent set-interval {interval}s to {jt_conn.sailor_id}")
+            return True
+
+        elif cmd == "passthrough" and len(parts) >= 2:
+            # Send 0x8900 data downlink pass-through
+            # Usage: passthrough <type_byte> <hex_data>
+            # Example: passthrough 0x00 <hex_bytes>
+            # Or: passthrough-text <type_byte> <ascii_text>
+            pt_type = int(parts[1], 0)
+            if len(parts) >= 3:
+                pt_data = bytes.fromhex(parts[2])
+            else:
+                pt_data = b""
+            body = bytes([pt_type]) + pt_data
+            frame = jt808_build_frame(0x8900, jt_conn.phone_bcd, jt_conn.next_serial(), body)
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent passthrough type=0x{pt_type:02X} ({len(pt_data)} bytes) to {jt_conn.sailor_id}")
+            return True
+
+        elif cmd == "passthrough-text" and len(parts) >= 3:
+            # Send 0x8900 with ASCII text payload (e.g. AT commands)
+            pt_type = int(parts[1], 0)
+            pt_text = " ".join(parts[2:])
+            pt_data = pt_text.encode("ascii")
+            body = bytes([pt_type]) + pt_data
+            frame = jt808_build_frame(0x8900, jt_conn.phone_bcd, jt_conn.next_serial(), body)
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent passthrough-text type=0x{pt_type:02X} '{pt_text}' to {jt_conn.sailor_id}")
             return True
 
         self._log(f"[JT808] Unknown command: {cmd_str}")
@@ -870,18 +1012,18 @@ class JT808Listener:
                 jt_conn.idle = idle
                 if idle:
                     self._send_tracking_control(jt_conn, 60)
-                    # Set vendor upload interval back to 60s
-                    frame = build_set_parameters(
-                        jt_conn.phone_bcd, jt_conn.next_serial(),
-                        {0xF104: ("DWORD", 60), 0xF110: ("DWORD", 60), 0x0029: ("DWORD", 60)})
-                    self._send(jt_conn, frame)
+                    for pid, pval in [(0xF104, 60), (0xF110, 60), (0x0029, 60)]:
+                        frame = build_set_parameters(
+                            jt_conn.phone_bcd, jt_conn.next_serial(),
+                            {pid: ("DWORD", pval)})
+                        self._send(jt_conn, frame)
                 else:
                     self._send_tracking_control(jt_conn, self.interval)
-                    # Set vendor upload interval to match
-                    frame = build_set_parameters(
-                        jt_conn.phone_bcd, jt_conn.next_serial(),
-                        {0xF104: ("DWORD", self.interval), 0xF110: ("DWORD", self.interval), 0x0029: ("DWORD", self.interval)})
-                    self._send(jt_conn, frame)
+                    for pid, pval in [(0xF104, self.interval), (0xF110, self.interval), (0x0029, self.interval)]:
+                        frame = build_set_parameters(
+                            jt_conn.phone_bcd, jt_conn.next_serial(),
+                            {pid: ("DWORD", pval)})
+                        self._send(jt_conn, frame)
                 # Immediately update tracker
                 tracker = self.get_tracker(jt_conn.eid)
                 if tracker:
