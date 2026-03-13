@@ -1208,10 +1208,10 @@
             <span>Map Type ▼</span>
         </div>
         <div class="menu-submenu" id="mapSubmenu">
-            <div class="menu-submenu-item selected" data-maptype="osm" onclick="setMapType('osm')">OpenStreetMap</div>
+            <div class="menu-submenu-item" data-maptype="osm" onclick="setMapType('osm')">OpenStreetMap</div>
             <div class="menu-submenu-item" data-maptype="roads" onclick="setMapType('roads')">Google Roads</div>
             <div class="menu-submenu-item" data-maptype="satellite" onclick="setMapType('satellite')">Google Satellite</div>
-            <div class="menu-submenu-item" data-maptype="hybrid" onclick="setMapType('hybrid')">Google Hybrid</div>
+            <div class="menu-submenu-item selected" data-maptype="hybrid" onclick="setMapType('hybrid')">Google Hybrid</div>
         </div>
         <div class="menu-item" id="menuReview">
             <a href="review.html">
@@ -1509,7 +1509,7 @@
         });
 
         let googleLayers = {};
-        let currentMapType = localStorage.getItem('mapType') || 'osm';
+        let currentMapType = localStorage.getItem('mapType') || 'hybrid';
         let currentLayer = null;
 
         // Initialize with saved preference

@@ -44,10 +44,10 @@
                 <label><input type="checkbox" id="filter-bad-gps"> Filter bad GPS</label>
                 <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
                     <label style="font-size:11px;color:#aaa;margin-bottom:3px;display:block;">Map Type</label>
-                    <label><input type="radio" name="map-type" value="osm" checked onchange="setMapType(this.value)"> OpenStreetMap</label>
+                    <label><input type="radio" name="map-type" value="osm" onchange="setMapType(this.value)"> OpenStreetMap</label>
                     <label style="display:none"><input type="radio" name="map-type" value="roads" onchange="setMapType(this.value)"> Google Roads</label>
                     <label style="display:none"><input type="radio" name="map-type" value="satellite" onchange="setMapType(this.value)"> Google Satellite</label>
-                    <label style="display:none"><input type="radio" name="map-type" value="hybrid" onchange="setMapType(this.value)"> Google Hybrid</label>
+                    <label style="display:none"><input type="radio" name="map-type" value="hybrid" checked onchange="setMapType(this.value)"> Google Hybrid</label>
                 </div>
                 <div style="border-top:1px solid #3498db;margin:5px 0;padding-top:5px;">
                     <label><input type="checkbox" id="admin-mode" onchange="toggleAdminMode(this.checked)"> Admin Mode</label>
@@ -808,7 +808,7 @@
             maxZoom: 19
         });
         let googleLayers = {};
-        let currentMapType = localStorage.getItem('mapType') || 'osm';
+        let currentMapType = localStorage.getItem('mapType') || 'hybrid';
         let currentLayer = null;
 
         // Initialize map layers after Google Maps API loads
