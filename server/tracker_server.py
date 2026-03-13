@@ -2499,6 +2499,73 @@ def send_confirmation_email(to_email: str, code: str, event_name: str = "", conf
         return False
 
 
+def send_admin_registration_notify(admin_emails: str, entry: dict, event_name: str = "") -> bool:
+    """Notify event admins of a new registration.
+
+    admin_emails is a comma-separated string of email addresses.
+    """
+    import subprocess
+    from email.mime.text import MIMEText
+
+    targets = [e.strip() for e in admin_emails.split(',') if e.strip()]
+    if not targets:
+        return False
+
+    if event_name:
+        from_local = re.sub(r'[^a-zA-Z0-9_-]', '', event_name.replace(' ', ''))
+        from_addr = f"{from_local}@wstracker.org"
+    else:
+        from_addr = "noreply@wstracker.org"
+
+    name = entry.get('name', '?')
+    email = entry.get('email', '?')
+    sail = entry.get('sail_number', '')
+    club = entry.get('club', '')
+    phone = entry.get('phone', '')
+    days = entry.get('days', '')
+
+    subject = f"{event_name or 'Windsurfer Tracker'} - New registration: {name}"
+    lines = [f"New registration for {event_name or 'event'}:", ""]
+    lines.append(f"  Name:        {name}")
+    lines.append(f"  Email:       {email}")
+    if phone:
+        lines.append(f"  Phone:       {phone}")
+    if sail:
+        lines.append(f"  Sail Number: {sail}")
+    if club:
+        lines.append(f"  Club:        {club}")
+    if days:
+        lines.append(f"  Days:        {days}")
+    lines.append("")
+    lines.append("They have been sent a confirmation email.")
+    lines.append(f"\n— {event_name or 'Windsurfer Tracker'}")
+    body = '\n'.join(lines)
+
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = f"{event_name or 'Windsurfer Tracker'} <{from_addr}>"
+    msg['To'] = ', '.join(targets)
+
+    try:
+        proc = subprocess.run(
+            ['/usr/sbin/sendmail', '-t', '-f', from_addr],
+            input=msg.as_string().encode('utf-8'),
+            capture_output=True, timeout=10
+        )
+        if proc.returncode == 0:
+            log(f"[REGISTRATION] Admin notification sent to {targets} for {email}")
+            return True
+        else:
+            log(f"[REGISTRATION] Admin notify sendmail failed (rc={proc.returncode}): {proc.stderr.decode()}")
+            return False
+    except FileNotFoundError:
+        log(f"[REGISTRATION] sendmail not found. Admin notification skipped for {email}")
+        return True
+    except Exception as e:
+        log(f"[REGISTRATION] Failed to notify admins for {email}: {e}")
+        return False
+
+
 def update_postfix_virtual_aliases():
     """Regenerate /etc/postfix/virtual from event admin_emails and reload postfix.
 
@@ -4207,6 +4274,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             f.write(json.dumps(new_entry) + '\n')
         confirm_url = f"{page_url}?confirm={quote(email_addr)}&code={code}" if page_url else ""
         send_confirmation_email(email_addr, code, event_name, confirm_url)
+        admin_emails = event.get('admin_emails', '') if event else ''
+        if admin_emails:
+            send_admin_registration_notify(admin_emails, new_entry, event_name)
         log(f"[EVENT {eid}] New registration for {name} ({email_addr})")
         self._send_json({"success": True, "message": "Confirmation code sent to your email"})
 
