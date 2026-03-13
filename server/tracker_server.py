@@ -4405,7 +4405,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "No registrations found"}, 404)
                 return
             entries = []
-            removed = False
+            removed_entries = []
             with open(reg_file, 'r') as f:
                 for line in f:
                     line = line.strip()
@@ -4416,10 +4416,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     except json.JSONDecodeError:
                         continue
                     if entry.get('email', '').lower() == email.lower():
-                        removed = True
+                        entry['deleted_at'] = time.time()
+                        entry['deleted_at_iso'] = datetime.now().isoformat()
+                        removed_entries.append(entry)
                         continue
                     entries.append(entry)
-            if removed:
+            if removed_entries:
+                # Append to deleted log
+                deleted_file = tracker.data_dir / 'registrations_deleted.jsonl'
+                with open(deleted_file, 'a') as f:
+                    for entry in removed_entries:
+                        f.write(json.dumps(entry) + '\n')
+                # Rewrite active registrations
                 tmp_file = reg_file.with_suffix('.tmp')
                 with open(tmp_file, 'w') as f:
                     for entry in entries:
