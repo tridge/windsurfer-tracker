@@ -2248,6 +2248,30 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "GT06 listener not running"}, 404)
 
+        elif subpath.startswith('/admin/jt808-cmd/'):
+            # Send a command to a JT808 device
+            # URL: /api/event/{eid}/admin/jt808-cmd/{user_id}?cmd=query-params
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/jt808-cmd/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+            params = parse_qs(urlparse(self.path).query)
+            cmd_str = params.get("cmd", [None])[0]
+            if not cmd_str:
+                self._send_json({"error": "cmd parameter required"}, 400)
+                return
+            for listener in _protocol_listeners:
+                if isinstance(listener, JT808Listener):
+                    sent = listener.send_command_to(user_id, cmd_str)
+                    if sent:
+                        self._send_json({"success": True, "user_id": user_id, "cmd": cmd_str})
+                        return
+            self._send_json({"error": f"JT808 device {user_id} not connected"}, 404)
+
         elif subpath == '/races':
             # Return all races for this event (public)
             tracker = get_event_tracker(eid)

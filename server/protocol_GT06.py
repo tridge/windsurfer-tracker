@@ -788,8 +788,9 @@ class GT06Listener:
                         self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
                 self._log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}")
                 return True
-        # No active connection, but state is saved for reconnection
-        self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
+        # Only log if this sailor_id has been seen by this listener before
+        if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+            self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return False
 
     def _on_readable(self, fd):

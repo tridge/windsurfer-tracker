@@ -179,6 +179,44 @@ def build_tracking_control(phone_bcd: bytes, serial: int,
     return jt808_build_frame(0x8202, phone_bcd, serial, body)
 
 
+def build_set_parameters(phone_bcd: bytes, serial: int,
+                         params: dict) -> bytes:
+    """Build terminal parameter setting message (0x8103).
+
+    Args:
+        params: dict of {param_id: (data_type, value)} where data_type is
+                'DWORD', 'WORD', 'BYTE', or 'STRING'.
+    """
+    body = struct.pack(">B", len(params))
+    for param_id, (dtype, value) in params.items():
+        if dtype == "DWORD":
+            val_bytes = struct.pack(">I", value)
+        elif dtype == "WORD":
+            val_bytes = struct.pack(">H", value)
+        elif dtype == "BYTE":
+            val_bytes = struct.pack(">B", value)
+        elif dtype == "STRING":
+            val_bytes = value.encode("ascii") if isinstance(value, str) else value
+        else:
+            raise ValueError(f"Unknown dtype {dtype}")
+        body += struct.pack(">IB", param_id, len(val_bytes)) + val_bytes
+    return jt808_build_frame(0x8103, phone_bcd, serial, body)
+
+
+def build_query_parameters(phone_bcd: bytes, serial: int) -> bytes:
+    """Build query all terminal parameters (0x8104). Empty body."""
+    return jt808_build_frame(0x8104, phone_bcd, serial, b"")
+
+
+def build_query_specific_parameters(phone_bcd: bytes, serial: int,
+                                     param_ids: list) -> bytes:
+    """Build query specific terminal parameters (0x8106)."""
+    body = struct.pack(">B", len(param_ids))
+    for pid in param_ids:
+        body += struct.pack(">I", pid)
+    return jt808_build_frame(0x8106, phone_bcd, serial, body)
+
+
 # --- Location parsing ---
 
 def parse_location(body: bytes):
@@ -477,6 +515,18 @@ class JT808Listener:
                 self._send_tracking_control(jt_conn, 60)
             self._log(f"[JT808] Login commands sent ({'active' if not jt_conn.idle else 'idle'})")
 
+            # Set vendor tracking interval and query parameters
+            if not jt_conn.idle:
+                # Set 0xF104 (tracking data upload interval) to match requested interval
+                frame = build_set_parameters(
+                    jt_conn.phone_bcd, jt_conn.next_serial(),
+                    {0xF104: ("DWORD", self.interval), 0xF110: ("DWORD", self.interval), 0x0029: ("DWORD", self.interval)})
+                self._send(jt_conn, frame)
+
+            # Query all device parameters to understand its configuration
+            frame = build_query_parameters(jt_conn.phone_bcd, jt_conn.next_serial())
+            self._send(jt_conn, frame)
+
             # Restore sticky SOS
             if jt_conn.imei in self._sticky_assist:
                 jt_conn.assist_active = True
@@ -580,6 +630,45 @@ class JT808Listener:
                 jt_conn.phone_bcd = phone_bcd
             label = jt_conn.sailor_id or jt_conn.imei or "unknown"
             self._log(f"[JT808] Terminal attributes from {label} ({len(body)} bytes)")
+
+        elif msg_id == 0x0001:
+            # Terminal general response — device ACKing our commands
+            if len(body) >= 5:
+                ack_serial = struct.unpack(">H", body[0:2])[0]
+                ack_id = struct.unpack(">H", body[2:4])[0]
+                result = body[4]
+                result_str = {0: "OK", 1: "Fail", 2: "Bad msg", 3: "Unsupported"}.get(result, f"?({result})")
+                label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+                self._log(f"[JT808] Device {label} ACK 0x{ack_id:04X} serial={ack_serial}: {result_str}")
+
+        elif msg_id == 0x0104:
+            # Query parameter response
+            label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+            if len(body) >= 3:
+                resp_serial = struct.unpack(">H", body[0:2])[0]
+                param_count = body[2]
+                self._log(f"[JT808] Parameter response from {label}: {param_count} params")
+                offset = 3
+                for _ in range(param_count):
+                    if offset + 5 > len(body):
+                        break
+                    param_id = struct.unpack(">I", body[offset:offset + 4])[0]
+                    param_len = body[offset + 4]
+                    offset += 5
+                    if offset + param_len > len(body):
+                        break
+                    param_val = body[offset:offset + param_len]
+                    offset += param_len
+                    if param_len == 4:
+                        val = struct.unpack(">I", param_val)[0]
+                        self._log(f"[JT808]   0x{param_id:04X} = {val}")
+                    elif param_len == 2:
+                        val = struct.unpack(">H", param_val)[0]
+                        self._log(f"[JT808]   0x{param_id:04X} = {val}")
+                    elif param_len == 1:
+                        self._log(f"[JT808]   0x{param_id:04X} = {param_val[0]}")
+                    else:
+                        self._log(f"[JT808]   0x{param_id:04X} = {param_val.hex()}")
 
         elif msg_id in (0x0109, 0x0112, 0x1007, 0x1107):
             # Vendor-specific messages — ACK and log
@@ -696,9 +785,62 @@ class JT808Listener:
     def send_command_to(self, sailor_id, cmd_str):
         """Send a command to a connected JT808 device by sailor_id.
 
-        For JT808, raw command strings aren't meaningful like GT06.
-        This is a placeholder for protocol-specific commands.
+        Supported commands:
+          query-params          - query all terminal parameters (0x8104)
+          query-param 0x0029    - query specific parameter(s) (0x8106)
+          set-param 0x0029=10   - set parameter (0x8103), DWORD assumed
+          set-interval 1        - set tracking interval via 0x8202
         """
+        for jt_conn in self.connections.values():
+            if jt_conn.sailor_id == sailor_id:
+                return self._exec_command(jt_conn, cmd_str)
+        return False
+
+    def _exec_command(self, jt_conn, cmd_str):
+        """Execute a command string on a JT808 connection."""
+        parts = cmd_str.strip().split()
+        if not parts:
+            return False
+        cmd = parts[0].lower()
+
+        if cmd == "query-params":
+            frame = build_query_parameters(jt_conn.phone_bcd, jt_conn.next_serial())
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent query-all-params to {jt_conn.sailor_id}")
+            return True
+
+        elif cmd == "query-param" and len(parts) >= 2:
+            param_ids = [int(p, 0) for p in parts[1:]]
+            frame = build_query_specific_parameters(
+                jt_conn.phone_bcd, jt_conn.next_serial(), param_ids)
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent query params {[f'0x{p:04X}' for p in param_ids]} to {jt_conn.sailor_id}")
+            return True
+
+        elif cmd == "set-param" and len(parts) >= 2:
+            params = {}
+            for p in parts[1:]:
+                if "=" not in p:
+                    continue
+                key, val = p.split("=", 1)
+                param_id = int(key, 0)
+                value = int(val, 0)
+                params[param_id] = ("DWORD", value)
+            if params:
+                frame = build_set_parameters(
+                    jt_conn.phone_bcd, jt_conn.next_serial(), params)
+                self._send(jt_conn, frame)
+                self._log(f"[JT808] Sent set-params to {jt_conn.sailor_id}: "
+                          f"{', '.join(f'0x{k:04X}={v[1]}' for k, v in params.items())}")
+                return True
+
+        elif cmd == "set-interval" and len(parts) >= 2:
+            interval = int(parts[1])
+            self._send_tracking_control(jt_conn, interval)
+            self._log(f"[JT808] Sent set-interval {interval}s to {jt_conn.sailor_id}")
+            return True
+
+        self._log(f"[JT808] Unknown command: {cmd_str}")
         return False
 
     def cancel_assist(self, sailor_id):
@@ -728,8 +870,18 @@ class JT808Listener:
                 jt_conn.idle = idle
                 if idle:
                     self._send_tracking_control(jt_conn, 60)
+                    # Set vendor upload interval back to 60s
+                    frame = build_set_parameters(
+                        jt_conn.phone_bcd, jt_conn.next_serial(),
+                        {0xF104: ("DWORD", 60), 0xF110: ("DWORD", 60), 0x0029: ("DWORD", 60)})
+                    self._send(jt_conn, frame)
                 else:
                     self._send_tracking_control(jt_conn, self.interval)
+                    # Set vendor upload interval to match
+                    frame = build_set_parameters(
+                        jt_conn.phone_bcd, jt_conn.next_serial(),
+                        {0xF104: ("DWORD", self.interval), 0xF110: ("DWORD", self.interval), 0x0029: ("DWORD", self.interval)})
+                    self._send(jt_conn, frame)
                 # Immediately update tracker
                 tracker = self.get_tracker(jt_conn.eid)
                 if tracker:
@@ -747,7 +899,8 @@ class JT808Listener:
                         self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
                 self._log(f"[JT808] {'Idle' if idle else 'Active'} mode for {sailor_id}")
                 return True
-        self._log(f"[JT808] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
+        if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+            self._log(f"[JT808] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return False
 
     # --- TCP / selector plumbing ---
@@ -793,7 +946,7 @@ class JT808Listener:
             frame_raw = jt_conn.buf[1:end]  # between delimiters
             jt_conn.buf = jt_conn.buf[end:]  # keep from end delimiter
 
-            self._log_packet(jt_conn.buf[:end + 1])  # log the raw frame including delimiters
+            self._log_packet(b"\x7e" + frame_raw + b"\x7e")  # log the raw frame including delimiters
 
             # Unescape
             data = jt808_unescape(frame_raw)
