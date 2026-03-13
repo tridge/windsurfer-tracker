@@ -360,6 +360,11 @@
                     <small>Required - tracker apps must send this password to connect</small>
                 </div>
                 <div class="form-group">
+                    <label for="adminEmails">Admin Emails</label>
+                    <input type="text" id="adminEmails" placeholder="e.g., admin1@example.com, admin2@example.com">
+                    <small>Comma-separated list of admin email addresses. Registration emails come from EventName@wstracker.org and replies are forwarded to these addresses.</small>
+                </div>
+                <div class="form-group">
                     <label for="eventTimezone">Timezone</label>
                     <select id="eventTimezone" onchange="onTimezoneChange()">
                         <optgroup label="Pacific / Oceania">
@@ -654,6 +659,7 @@
                             <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
                             <span style="${event.assist_enabled === false ? 'color:#c00;font-weight:bold' : ''}">Assist: ${event.assist_enabled === false ? 'Disabled' : 'Enabled'}</span>
                             <span style="${event.idle_interval ? 'color:#2563eb;font-weight:bold' : ''}">Idle: ${event.idle_interval ? event.idle_interval + 's' : 'Off'}</span>
+                            ${event.admin_emails ? `<span>Emails: ${escapeHtml(event.admin_emails)}</span>` : ''}
                         </div>
                         <div class="event-actions">
                             <a href="event.html?eid=${event.eid}" class="btn btn-primary" target="_blank">View</a>
@@ -704,6 +710,7 @@
                 document.getElementById('eventDescription').value = event.description || '';
                 document.getElementById('adminPassword').value = event.admin_password || '';
                 document.getElementById('trackerPassword').value = Array.isArray(event.tracker_password) ? event.tracker_password.join(', ') : (event.tracker_password || '');
+                document.getElementById('adminEmails').value = event.admin_emails || '';
                 document.getElementById('eventTimezone').value = event.timezone || 'Australia/Sydney';
                 document.getElementById('homeLocation').value = event.home_location || '';
                 document.getElementById('homeLat').value = event.home_lat || '';
@@ -753,6 +760,7 @@
                 description: document.getElementById('eventDescription').value,
                 admin_password: adminPassword,
                 tracker_password: trackerPassword.split(',').map(p => p.trim()).filter(p => p),
+                admin_emails: document.getElementById('adminEmails').value.trim(),
                 timezone: document.getElementById('eventTimezone').value,
                 home_location: document.getElementById('homeLocation').value,
                 home_lat: homeLat ? parseFloat(homeLat) : null,

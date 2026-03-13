@@ -1350,6 +1350,15 @@
             </div>
         </div>
 
+        <div class="admin-section" id="registrationSection" style="display:none">
+            <h4>Registration</h4>
+            <div class="admin-btn-group">
+                <a class="admin-action-btn primary" id="viewRegistrationsLink" href="registrations.html" target="_blank" style="text-decoration:none;display:block;">
+                    📋 View Registrations
+                </a>
+            </div>
+        </div>
+
         <div class="admin-section" id="simSection">
             <h4>Simulator</h4>
             <div class="admin-btn-group" id="simBtnGroup">
@@ -1978,6 +1987,7 @@
                 document.getElementById('menuImportCourse').style.display = 'none';
                 document.getElementById('finishBtn').style.display = 'none';
                 document.getElementById('adminMenuBtn').style.display = 'none';
+                document.getElementById('registrationSection').style.display = 'none';
                 cancelDrawing();
                 if (simPollInterval) { clearInterval(simPollInterval); simPollInterval = null; }
                 document.getElementById('simSpeedupWidget').style.display = 'none';
@@ -2013,6 +2023,11 @@
                     // Refresh course display to show edit buttons on marks
                     if (courseData) {
                         displayCourse(courseData);
+                    }
+                    // Show registration section if event has admin_emails
+                    if (currentEventInfo && currentEventInfo.has_registration) {
+                        document.getElementById('registrationSection').style.display = '';
+                        document.getElementById('viewRegistrationsLink').href = `registrations.html?eid=${EVENT_ID}`;
                     }
                     // Start simulator status polling
                     updateSimStatus();

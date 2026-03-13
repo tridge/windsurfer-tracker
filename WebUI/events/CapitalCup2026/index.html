@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="../../favicon.svg">
+    <title>Capital Cup 2026 - Windsurfer Tracker</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a237e 0%, #1565c0 50%, #0288d1 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header img { height: 60px; margin-bottom: 12px; }
+        .header h1 { font-size: 2.2em; font-weight: 700; margin-bottom: 6px; }
+        .header .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .header .date-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 20px;
+            margin-top: 12px;
+            font-weight: 600;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 28px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .section h2 {
+            color: #1565c0;
+            font-size: 1.4em;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e3f2fd;
+        }
+        .section p { margin-bottom: 12px; }
+        .highlight {
+            background: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 14px 18px;
+            border-radius: 0 8px 8px 0;
+            margin: 12px 0;
+        }
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        .schedule-table th {
+            background: #1565c0;
+            color: white;
+            padding: 10px 14px;
+            text-align: left;
+        }
+        .schedule-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .schedule-table tr:last-child td { border-bottom: none; }
+        .schedule-table tbody tr:hover { background: #f5f9ff; }
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 14px;
+            margin-top: 8px;
+        }
+        .link-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #f5f9ff;
+            border: 1px solid #e3f2fd;
+            border-radius: 10px;
+            text-decoration: none;
+            color: #333;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .link-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .link-card .icon { font-size: 1.8em; }
+        .link-card .label { font-weight: 600; font-size: 0.95em; }
+        .link-card .desc { font-size: 0.8em; color: #666; }
+
+        /* Registration form */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full-width { grid-column: 1 / -1; }
+        .form-group label { font-weight: 600; font-size: 0.9em; margin-bottom: 4px; color: #555; }
+        .form-group input, .form-group select {
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 0.95em;
+            font-family: inherit;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #2196F3;
+            box-shadow: 0 0 0 3px rgba(33,150,243,0.15);
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            background: #e67e22;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-family: inherit;
+        }
+        .btn:hover { background: #d35400; }
+        .btn:disabled { background: #bbb; cursor: not-allowed; }
+        .btn-secondary { background: #1565c0; }
+        .btn-secondary:hover { background: #0d47a1; }
+        .form-message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 14px;
+            display: none;
+        }
+        .form-message.success { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .form-message.error { display: block; background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .form-message.info { display: block; background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+
+        /* Confirmation step */
+        #confirm-section { display: none; }
+        #confirm-section .confirm-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+        }
+        #confirm-section input {
+            padding: 10px 14px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 1.1em;
+            letter-spacing: 4px;
+            text-align: center;
+            width: 180px;
+            font-family: inherit;
+        }
+
+        /* Entrants table */
+        .entrants-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        .entrants-table th {
+            background: #f5f9ff;
+            padding: 10px 14px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e3f2fd;
+        }
+        .entrants-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .entrants-table tr:hover { background: #f5f9ff; }
+        .entrant-count { color: #888; font-weight: normal; font-size: 0.8em; }
+
+        .footer {
+            text-align: center;
+            padding: 24px 20px;
+            color: #888;
+            font-size: 0.85em;
+        }
+        .footer a { color: #1565c0; text-decoration: none; }
+
+        @media (max-width: 600px) {
+            .header h1 { font-size: 1.6em; }
+            .container { padding: 12px; }
+            .section { padding: 20px 16px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .links-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <img src="../../logo.svg" alt="Windsurfer Tracker">
+    <h1>Capital Cup 2026</h1>
+    <div class="subtitle">Lake Burley Griffin, Canberra, Australia</div>
+    <div class="date-badge">Saturday 11 & Sunday 12 April 2026</div>
+</div>
+
+<div class="container">
+
+    <div class="section">
+        <h2>About</h2>
+        <p>The Capital Cup is a windsurfing regatta featuring marathon-style racing around landmarks on Lake Burley Griffin. Compete over two optional days with 2 races each day (4 races total). Your best 2 results count &mdash; drop your 2 worst.</p>
+        <div class="highlight">
+            <strong>Entry is free.</strong> Prizes include a trophy and medals for top finishers.
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Schedule</h2>
+        <table class="schedule-table">
+            <thead>
+                <tr><th>Time</th><th>Saturday 11 April</th><th>Sunday 12 April</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>10:30 am</td><td>Briefing</td><td>Briefing</td></tr>
+                <tr><td>~11:00 am</td><td>Race 1</td><td>Race 3</td></tr>
+                <tr><td>Afternoon</td><td>Race 2</td><td>Race 4</td></tr>
+            </tbody>
+        </table>
+        <p style="margin-top: 10px; color: #666; font-size: 0.9em;">Race times may be adjusted depending on wind conditions.</p>
+    </div>
+
+    <div class="section">
+        <h2>Start Procedure</h2>
+        <p>All sails in the water near the police buoy in Yarralumla Bay. On the whistle, raise your sail and go!</p>
+    </div>
+
+    <div class="section">
+        <h2>Register</h2>
+        <div id="reg-form-section">
+            <p>Fill out the form below to register for the Capital Cup 2026.</p>
+            <form id="reg-form" class="form-grid" onsubmit="return submitRegistration(event)">
+                <div class="form-group">
+                    <label for="reg-name">Name *</label>
+                    <input type="text" id="reg-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">Email *</label>
+                    <input type="email" id="reg-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-phone">Phone</label>
+                    <input type="tel" id="reg-phone">
+                </div>
+                <div class="form-group">
+                    <label for="reg-sail">Sail Number</label>
+                    <input type="text" id="reg-sail">
+                </div>
+                <div class="form-group">
+                    <label for="reg-club">Club</label>
+                    <input type="text" id="reg-club">
+                </div>
+                <div class="form-group">
+                    <label for="reg-gender">Gender</label>
+                    <select id="reg-gender">
+                        <option value="">-- Select --</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-binary">Non-binary</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-weight">Weight (kg)</label>
+                    <input type="number" id="reg-weight" min="20" max="200" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="reg-dob">Date of Birth</label>
+                    <input type="date" id="reg-dob">
+                </div>
+                <div class="form-group">
+                    <label for="reg-days">Days Racing</label>
+                    <select id="reg-days">
+                        <option value="Both">Both days</option>
+                        <option value="Saturday">Saturday only</option>
+                        <option value="Sunday">Sunday only</option>
+                    </select>
+                </div>
+                <div class="form-group full-width" style="margin-top: 8px;">
+                    <button type="submit" class="btn" id="reg-submit-btn">Register</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="confirm-section">
+            <p>A 6-digit confirmation code has been sent to <strong id="confirm-email"></strong>.</p>
+            <div class="confirm-input">
+                <input type="text" id="confirm-code" maxlength="6" pattern="\d{6}" placeholder="000000" inputmode="numeric">
+                <button class="btn btn-secondary" onclick="submitConfirmation()">Confirm</button>
+            </div>
+            <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
+                <a href="#" onclick="showRegForm(); return false;">Go back to registration form</a>
+            </p>
+        </div>
+
+        <div id="reg-message" class="form-message"></div>
+    </div>
+
+    <div class="section">
+        <h2>Links</h2>
+        <div class="links-grid">
+            <a class="link-card" href="../../courses.html?eid=6">
+                <div class="icon">&#x1f5fa;</div>
+                <div><div class="label">Proposed Courses</div><div class="desc">View race courses on the map</div></div>
+            </a>
+            <a class="link-card" href="../../event.html?eid=6">
+                <div class="icon">&#x1f4e1;</div>
+                <div><div class="label">Live Tracking</div><div class="desc">Active during racing</div></div>
+            </a>
+            <a class="link-card" href="#">
+                <div class="icon">&#x1f4c4;</div>
+                <div><div class="label">Notice of Race</div><div class="desc">Coming soon</div></div>
+            </a>
+            <a class="link-card" href="#">
+                <div class="icon">&#x1f4cb;</div>
+                <div><div class="label">Sailing Instructions</div><div class="desc">Coming soon</div></div>
+            </a>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Entrants <span class="entrant-count" id="entrant-count"></span></h2>
+        <table class="entrants-table" id="entrants-table">
+            <thead>
+                <tr><th>#</th><th>Name</th><th>Sail No.</th><th>Club</th><th>Days</th></tr>
+            </thead>
+            <tbody id="entrants-body">
+                <tr><td colspan="5" style="text-align:center; color:#888;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<div class="footer">
+    Powered by <a href="../../">wstracker.org</a>
+</div>
+
+<script>
+const EVENT_ID = 6;
+const API_BASE = `/api/event/${EVENT_ID}`;
+
+function showMessage(text, type) {
+    const el = document.getElementById('reg-message');
+    el.textContent = text;
+    el.className = 'form-message ' + type;
+}
+
+function clearMessage() {
+    const el = document.getElementById('reg-message');
+    el.className = 'form-message';
+    el.textContent = '';
+}
+
+function showRegForm() {
+    document.getElementById('reg-form-section').style.display = '';
+    document.getElementById('confirm-section').style.display = 'none';
+    clearMessage();
+}
+
+async function submitRegistration(e) {
+    e.preventDefault();
+    clearMessage();
+    const btn = document.getElementById('reg-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    const data = {
+        name: document.getElementById('reg-name').value.trim(),
+        email: document.getElementById('reg-email').value.trim(),
+        phone: document.getElementById('reg-phone').value.trim(),
+        sail_number: document.getElementById('reg-sail').value.trim(),
+        club: document.getElementById('reg-club').value.trim(),
+        gender: document.getElementById('reg-gender').value,
+        weight: document.getElementById('reg-weight').value ? parseFloat(document.getElementById('reg-weight').value) : null,
+        dob: document.getElementById('reg-dob').value,
+        days: document.getElementById('reg-days').value,
+    };
+
+    if (!data.name || !data.email) {
+        showMessage('Name and email are required.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Register';
+        return false;
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE}/register`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        if (resp.ok && result.success) {
+            if (result.already_confirmed) {
+                showMessage('Registration updated successfully!', 'success');
+                btn.disabled = false;
+                btn.textContent = 'Register';
+                loadEntrants();
+            } else {
+                document.getElementById('reg-form-section').style.display = 'none';
+                document.getElementById('confirm-section').style.display = '';
+                document.getElementById('confirm-email').textContent = data.email;
+                showMessage(result.message || 'Confirmation code sent to your email.', 'info');
+            }
+        } else {
+            showMessage(result.error || 'Registration failed.', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Register';
+        }
+    } catch (err) {
+        showMessage('Network error. Please try again.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Register';
+    }
+    return false;
+}
+
+async function submitConfirmation() {
+    clearMessage();
+    const email = document.getElementById('confirm-email').textContent;
+    const code = document.getElementById('confirm-code').value.trim();
+    if (!code || code.length !== 6) {
+        showMessage('Please enter the 6-digit code.', 'error');
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE}/register/confirm`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email: email, code: code})
+        });
+        const result = await resp.json();
+        if (resp.ok && result.success) {
+            document.getElementById('confirm-section').style.display = 'none';
+            document.getElementById('reg-form-section').style.display = '';
+            document.getElementById('reg-form').reset();
+            document.getElementById('reg-submit-btn').disabled = false;
+            document.getElementById('reg-submit-btn').textContent = 'Register';
+            showMessage('Registration confirmed!', 'success');
+            loadEntrants();
+        } else {
+            showMessage(result.error || 'Confirmation failed.', 'error');
+        }
+    } catch (err) {
+        showMessage('Network error. Please try again.', 'error');
+    }
+}
+
+async function loadEntrants() {
+    try {
+        const resp = await fetch(`${API_BASE}/registrations`);
+        const data = await resp.json();
+        const regs = data.registrations || [];
+        const tbody = document.getElementById('entrants-body');
+        const countEl = document.getElementById('entrant-count');
+        countEl.textContent = `(${regs.length})`;
+        if (regs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">No entrants yet. Be the first to register!</td></tr>';
+            return;
+        }
+        tbody.innerHTML = regs.map((r, i) =>
+            `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.sail_number || '')}</td><td>${esc(r.club || '')}</td><td>${esc(r.days || '')}</td></tr>`
+        ).join('');
+    } catch (err) {
+        document.getElementById('entrants-body').innerHTML = '<tr><td colspan="5" style="text-align:center; color:#c62828;">Failed to load entrants.</td></tr>';
+    }
+}
+
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// Enter key on code input triggers confirm
+document.getElementById('confirm-code').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') submitConfirmation();
+});
+
+loadEntrants();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>Registrations - Windsurfer Tracker</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 { font-size: 1.3em; }
+        .header a {
+            color: white;
+            text-decoration: none;
+            padding: 6px 14px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .header a:hover { background: rgba(255,255,255,0.3); }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .stats {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            min-width: 120px;
+        }
+        .stat-card .num { font-size: 1.8em; font-weight: 700; color: #1e40af; }
+        .stat-card .label { font-size: 0.85em; color: #666; }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .toolbar input {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.9em;
+            width: 250px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .btn-export { background: #059669; color: white; }
+        .btn-export:hover { background: #047857; }
+        .btn-danger { background: #dc2626; color: white; font-size: 0.8em; padding: 4px 10px; }
+        .btn-danger:hover { background: #b91c1c; }
+        .table-wrap {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+        th {
+            background: #f8fafc;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e2e8f0;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover { background: #eef2ff; }
+        th .sort-arrow { font-size: 0.7em; margin-left: 4px; opacity: 0.4; }
+        th.sorted .sort-arrow { opacity: 1; }
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        tr:hover { background: #f8fafc; }
+        tr.unconfirmed { opacity: 0.5; }
+        .status-confirmed { color: #059669; font-weight: 600; }
+        .status-pending { color: #d97706; font-weight: 600; }
+        .empty { text-align: center; padding: 40px; color: #888; }
+        .error { text-align: center; padding: 40px; color: #dc2626; }
+        @media (max-width: 700px) {
+            .container { padding: 12px; }
+            .toolbar input { width: 100%; }
+            table { font-size: 0.8em; }
+            th, td { padding: 6px 8px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1 id="pageTitle">Registrations</h1>
+    <a id="backLink" href="event.html">Back to Event</a>
+</div>
+
+<div class="container">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+        <input type="text" id="searchInput" placeholder="Search by name, email, club..." oninput="renderTable()">
+        <button class="btn btn-export" onclick="exportCSV()">Export CSV</button>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr id="tableHead"></tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr><td colspan="12" class="empty">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+    const EVENT_API = `/api/event/${EVENT_ID}`;
+
+    document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
+
+    let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+    let registrations = [];
+    let sortCol = 'name';
+    let sortAsc = true;
+
+    const columns = [
+        { key: '#', label: '#', nosort: true },
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'sail_number', label: 'Sail No.' },
+        { key: 'club', label: 'Club' },
+        { key: 'gender', label: 'Gender' },
+        { key: 'weight', label: 'Weight' },
+        { key: 'dob', label: 'DOB' },
+        { key: 'days', label: 'Days' },
+        { key: 'confirmed', label: 'Status' },
+        { key: '_actions', label: '', nosort: true },
+    ];
+
+    // Fetch event name
+    (async function() {
+        try {
+            const resp = await fetch('/api/events');
+            if (resp.ok) {
+                const data = await resp.json();
+                const event = data.events.find(e => e.eid === EVENT_ID);
+                if (event && event.name) {
+                    document.getElementById('pageTitle').textContent = `${event.name} — Registrations`;
+                    document.title = `Registrations — ${event.name}`;
+                }
+            }
+        } catch (e) {}
+    })();
+
+    function renderHeader() {
+        const tr = document.getElementById('tableHead');
+        tr.innerHTML = columns.map(col => {
+            if (col.nosort) return `<th>${esc(col.label)}</th>`;
+            const sorted = sortCol === col.key;
+            const arrow = sorted ? (sortAsc ? '▲' : '▼') : '▲';
+            return `<th class="${sorted ? 'sorted' : ''}" onclick="toggleSort('${col.key}')">${esc(col.label)}<span class="sort-arrow">${arrow}</span></th>`;
+        }).join('');
+    }
+
+    function toggleSort(key) {
+        if (sortCol === key) {
+            sortAsc = !sortAsc;
+        } else {
+            sortCol = key;
+            sortAsc = true;
+        }
+        renderHeader();
+        renderTable();
+    }
+
+    function renderTable() {
+        const query = document.getElementById('searchInput').value.toLowerCase();
+        let filtered = registrations;
+        if (query) {
+            filtered = registrations.filter(r =>
+                (r.name || '').toLowerCase().includes(query) ||
+                (r.email || '').toLowerCase().includes(query) ||
+                (r.club || '').toLowerCase().includes(query) ||
+                (r.sail_number || '').toLowerCase().includes(query) ||
+                (r.phone || '').toLowerCase().includes(query)
+            );
+        }
+
+        // Sort
+        const sorted = [...filtered].sort((a, b) => {
+            let va = a[sortCol], vb = b[sortCol];
+            if (sortCol === 'confirmed') {
+                va = va ? 1 : 0;
+                vb = vb ? 1 : 0;
+            }
+            if (sortCol === 'weight') {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+            }
+            if (typeof va === 'string') va = va.toLowerCase();
+            if (typeof vb === 'string') vb = vb.toLowerCase();
+            if (va < vb) return sortAsc ? -1 : 1;
+            if (va > vb) return sortAsc ? 1 : -1;
+            return 0;
+        });
+
+        const tbody = document.getElementById('tableBody');
+        if (sorted.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${columns.length}" class="empty">${query ? 'No matches' : 'No registrations yet'}</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = sorted.map((r, i) => {
+            const cls = r.confirmed ? '' : ' class="unconfirmed"';
+            const status = r.confirmed
+                ? '<span class="status-confirmed">Confirmed</span>'
+                : '<span class="status-pending">Pending</span>';
+            return `<tr${cls}>
+                <td>${i + 1}</td>
+                <td>${esc(r.name || '')}</td>
+                <td>${esc(r.email || '')}</td>
+                <td>${esc(r.phone || '')}</td>
+                <td>${esc(r.sail_number || '')}</td>
+                <td>${esc(r.club || '')}</td>
+                <td>${esc(r.gender || '')}</td>
+                <td>${r.weight || ''}</td>
+                <td>${esc(r.dob || '')}</td>
+                <td>${esc(r.days || '')}</td>
+                <td>${status}</td>
+                <td><button class="btn btn-danger" onclick="deleteReg('${esc(r.email)}')">Delete</button></td>
+            </tr>`;
+        }).join('');
+
+        // Stats
+        const confirmed = registrations.filter(r => r.confirmed).length;
+        const pending = registrations.filter(r => !r.confirmed).length;
+        document.getElementById('stats').innerHTML = `
+            <div class="stat-card"><div class="num">${registrations.length}</div><div class="label">Total</div></div>
+            <div class="stat-card"><div class="num">${confirmed}</div><div class="label">Confirmed</div></div>
+            <div class="stat-card"><div class="num">${pending}</div><div class="label">Pending</div></div>
+        `;
+    }
+
+    async function loadRegistrations() {
+        if (!adminPassword) {
+            adminPassword = prompt('Enter admin password:');
+            if (!adminPassword) {
+                document.getElementById('tableBody').innerHTML = `<tr><td colspan="${columns.length}" class="error">Admin password required</td></tr>`;
+                return;
+            }
+        }
+
+        try {
+            const resp = await fetch(`${EVENT_API}/registrations/full`, {
+                headers: { 'X-Admin-Password': adminPassword }
+            });
+            if (resp.status === 401) {
+                adminPassword = '';
+                localStorage.removeItem(`adminPassword_${EVENT_ID}`);
+                document.getElementById('tableBody').innerHTML = `<tr><td colspan="${columns.length}" class="error">Invalid admin password. <a href="javascript:loadRegistrations()">Retry</a></td></tr>`;
+                return;
+            }
+            const data = await resp.json();
+            registrations = data.registrations || [];
+            renderHeader();
+            renderTable();
+        } catch (e) {
+            document.getElementById('tableBody').innerHTML = `<tr><td colspan="${columns.length}" class="error">Error: ${esc(e.message)}</td></tr>`;
+        }
+    }
+
+    async function deleteReg(email) {
+        if (!confirm(`Delete registration for ${email}?`)) return;
+        try {
+            const resp = await fetch(`${EVENT_API}/admin/registration/${encodeURIComponent(email)}`, {
+                method: 'DELETE',
+                headers: { 'X-Admin-Password': adminPassword }
+            });
+            if (resp.ok) {
+                loadRegistrations();
+            } else {
+                const data = await resp.json();
+                alert(data.error || 'Delete failed');
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    function exportCSV() {
+        const headers = ['Name', 'Email', 'Phone', 'Sail Number', 'Club', 'Gender', 'Weight', 'DOB', 'Days', 'Status'];
+        const rows = registrations.map(r => [
+            r.name || '', r.email || '', r.phone || '', r.sail_number || '',
+            r.club || '', r.gender || '', r.weight || '', r.dob || '',
+            r.days || '', r.confirmed ? 'Confirmed' : 'Pending'
+        ]);
+        const csv = [headers, ...rows].map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `registrations_event${EVENT_ID}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    loadRegistrations();
+</script>
+
+</body>
+</html>
