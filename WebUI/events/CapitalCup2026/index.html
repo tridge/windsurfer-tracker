@@ -291,10 +291,15 @@
                     <button type="submit" class="btn" id="reg-submit-btn">Register</button>
                 </div>
             </form>
+            <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
+                <a href="#" onclick="showConfirmForm(); return false;">Already have a confirmation code?</a>
+            </p>
         </div>
 
         <div id="confirm-section">
-            <p>A 6-digit confirmation code has been sent to <strong id="confirm-email"></strong>.</p>
+            <p id="confirm-sent-msg">A 6-digit confirmation code has been sent to <strong id="confirm-email-display"></strong>.</p>
+            <p id="confirm-manual-msg" style="display:none;">Enter your email and confirmation code:</p>
+            <input type="email" id="confirm-email" placeholder="Email address" style="display:none; width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; font-size:1em;">
             <div class="confirm-input">
                 <input type="text" id="confirm-code" maxlength="6" pattern="\d{6}" placeholder="000000" inputmode="numeric">
                 <button class="btn btn-secondary" onclick="submitConfirmation()">Confirm</button>
@@ -369,6 +374,17 @@ function showRegForm() {
     clearMessage();
 }
 
+function showConfirmForm() {
+    document.getElementById('reg-form-section').style.display = 'none';
+    document.getElementById('confirm-section').style.display = '';
+    document.getElementById('confirm-sent-msg').style.display = 'none';
+    document.getElementById('confirm-manual-msg').style.display = '';
+    document.getElementById('confirm-email').style.display = '';
+    document.getElementById('confirm-email').value = '';
+    document.getElementById('confirm-code').value = '';
+    clearMessage();
+}
+
 async function submitRegistration(e) {
     e.preventDefault();
     clearMessage();
@@ -411,7 +427,11 @@ async function submitRegistration(e) {
             } else {
                 document.getElementById('reg-form-section').style.display = 'none';
                 document.getElementById('confirm-section').style.display = '';
-                document.getElementById('confirm-email').textContent = data.email;
+                document.getElementById('confirm-sent-msg').style.display = '';
+                document.getElementById('confirm-manual-msg').style.display = 'none';
+                document.getElementById('confirm-email-display').textContent = data.email;
+                document.getElementById('confirm-email').value = data.email;
+                document.getElementById('confirm-email').style.display = 'none';
                 showMessage(result.message || 'Confirmation code sent to your email.', 'info');
             }
         } else {
@@ -429,8 +449,12 @@ async function submitRegistration(e) {
 
 async function submitConfirmation() {
     clearMessage();
-    const email = document.getElementById('confirm-email').textContent;
+    const email = document.getElementById('confirm-email').value.trim();
     const code = document.getElementById('confirm-code').value.trim();
+    if (!email) {
+        showMessage('Please enter your email address.', 'error');
+        return;
+    }
     if (!code || code.length !== 6) {
         showMessage('Please enter the 6-digit code.', 'error');
         return;
@@ -488,6 +512,24 @@ function esc(s) {
 document.getElementById('confirm-code').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') submitConfirmation();
 });
+
+// Auto-confirm from email link: ?confirm=email&code=123456
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    const confirmEmail = params.get('confirm');
+    const confirmCode = params.get('code');
+    if (confirmEmail && confirmCode) {
+        // Hide registration form, show confirm section with auto-submit
+        document.getElementById('reg-form-section').style.display = 'none';
+        document.getElementById('confirm-section').style.display = '';
+        document.getElementById('confirm-email').value = confirmEmail;
+        document.getElementById('confirm-code').value = confirmCode;
+        showMessage('Confirming your registration...', 'info');
+        // Clean URL params without reload
+        window.history.replaceState({}, '', window.location.pathname);
+        submitConfirmation();
+    }
+})();
 
 loadEntrants();
 </script>

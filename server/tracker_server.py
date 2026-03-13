@@ -2444,7 +2444,7 @@ def _resolve_did_overrides(user_overrides: dict, current_positions: dict) -> dic
 
 _static_dir: Path | None = None
 
-def send_confirmation_email(to_email: str, code: str, event_name: str = "") -> bool:
+def send_confirmation_email(to_email: str, code: str, event_name: str = "", confirm_url: str = "") -> bool:
     """Send a registration confirmation email with the 6-digit code.
 
     Uses local sendmail (postfix) to send from {eventname}@wstracker.org.
@@ -2461,12 +2461,19 @@ def send_confirmation_email(to_email: str, code: str, event_name: str = "") -> b
         from_addr = "noreply@wstracker.org"
 
     subject = f"{event_name or 'Windsurfer Tracker'} - Registration Confirmation"
-    body = (
-        f"Your registration confirmation code is:\n\n"
-        f"    {code}\n\n"
-        f"Enter this code on the registration page to confirm your entry.\n\n"
-        f"— {event_name or 'Windsurfer Tracker'}"
-    )
+    if confirm_url:
+        body = (
+            f"Click below to confirm your registration:\n\n"
+            f"    {confirm_url}\n\n"
+            f"— {event_name or 'Windsurfer Tracker'}"
+        )
+    else:
+        body = (
+            f"Your registration confirmation code is:\n\n"
+            f"    {code}\n\n"
+            f"Enter this code on the registration page to confirm your entry.\n\n"
+            f"— {event_name or 'Windsurfer Tracker'}"
+        )
     msg = MIMEText(body)
     msg['Subject'] = subject
     msg['From'] = f"{event_name or 'Windsurfer Tracker'} <{from_addr}>"
@@ -3492,6 +3499,63 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif subpath.startswith('/admin/registration/'):
+            # Update registration fields (email is the key, cannot be changed)
+            from urllib.parse import unquote
+            email_key = unquote(subpath[len('/admin/registration/'):]).lower()
+            if not email_key:
+                self._send_json({"error": "Email required"}, 400)
+                return
+
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
+
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": "Could not get event tracker"}, 500)
+                return
+
+            reg_file = tracker.data_dir / 'registrations.jsonl'
+            if not reg_file.exists():
+                self._send_json({"error": "Registration not found"}, 404)
+                return
+
+            editable_fields = ('name', 'phone', 'sail_number', 'club', 'gender', 'weight', 'dob', 'days')
+            entries = []
+            found = False
+            with open(reg_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get('email', '').lower() == email_key and not found:
+                        for field in editable_fields:
+                            if field in data:
+                                entry[field] = data[field]
+                        found = True
+                    entries.append(entry)
+
+            if not found:
+                self._send_json({"error": "Registration not found"}, 404)
+                return
+
+            tmp_file = reg_file.with_suffix('.tmp')
+            with open(tmp_file, 'w') as f:
+                for entry in entries:
+                    f.write(json.dumps(entry) + '\n')
+            tmp_file.rename(reg_file)
+            log(f"[EVENT {eid}] Registration updated by admin for {email_key}")
+            self._send_json({"success": True, "message": "Registration updated"})
+
         elif subpath == '/admin/stop-all':
             # Send remote stop command to all active trackers
             tracker = get_event_tracker(eid)
@@ -4060,6 +4124,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         event = _event_manager.get_event(eid) if _event_manager else None
         event_name = event.get('name', '') if event else ''
 
+        # Build confirmation URL from Referer or Origin header
+        from urllib.parse import urlencode, quote
+        referer = self.headers.get('Referer', '')
+        if referer:
+            # Strip any existing query/fragment from the referer
+            page_url = referer.split('?')[0].split('#')[0]
+        else:
+            origin = self.headers.get('Origin', '')
+            page_url = origin  # fallback; may be empty
+
         reg_file = tracker.data_dir / 'registrations.jsonl'
 
         # Build new entry from submitted data
@@ -4119,7 +4193,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     for entry in entries:
                         f.write(json.dumps(entry) + '\n')
                 tmp_file.rename(reg_file)
-                send_confirmation_email(email_addr, code, event_name)
+                confirm_url = f"{page_url}?confirm={quote(email_addr)}&code={code}" if page_url else ""
+                send_confirmation_email(email_addr, code, event_name, confirm_url)
                 log(f"[EVENT {eid}] Registration re-submitted for {email_addr}")
                 self._send_json({"success": True, "message": "Confirmation code sent to your email"})
                 return
@@ -4130,7 +4205,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         new_entry['code'] = code
         with open(reg_file, 'a') as f:
             f.write(json.dumps(new_entry) + '\n')
-        send_confirmation_email(email_addr, code, event_name)
+        confirm_url = f"{page_url}?confirm={quote(email_addr)}&code={code}" if page_url else ""
+        send_confirmation_email(email_addr, code, event_name, confirm_url)
         log(f"[EVENT {eid}] New registration for {name} ({email_addr})")
         self._send_json({"success": True, "message": "Confirmation code sent to your email"})
 
