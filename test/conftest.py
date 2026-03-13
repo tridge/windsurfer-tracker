@@ -36,7 +36,7 @@ _ts_counter = int(time.time())
 class ServerInfo:
     """Holds connection details for the running server."""
     def __init__(self, host, port, data_dir, manager_password, process, log_file,
-                 gt06_port=None):
+                 gt06_port=None, jt808_port=None):
         self.host = host
         self.port = port
         self.data_dir = data_dir
@@ -44,6 +44,7 @@ class ServerInfo:
         self.process = process
         self.log_file = log_file
         self.gt06_port = gt06_port
+        self.jt808_port = jt808_port
 
 
 class UDPClient:
@@ -426,6 +427,212 @@ def gt06_client(server):
     client.close()
 
 
+# Add path so we can import protocol modules
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
+from protocol_JT808 import (jt808_escape, jt808_unescape, jt808_checksum,
+                              jt808_build_frame, jt808_parse_header,
+                              phone_bcd_to_imei, imei_to_phone_bcd,
+                              parse_location as jt808_parse_location)
+
+
+class JT808Client:
+    """TCP client emulator for JT808 GPS tracker protocol.
+
+    Builds and sends binary JT808 frames (registration, auth, location, heartbeat)
+    and receives/parses server responses.
+    """
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.sock = None
+        self._serial = 0
+        self.phone_bcd = None
+        self.auth_code = None
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(3.0)
+        self.sock.connect((self.host, self.port))
+
+    def close(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+
+    def _next_serial(self):
+        self._serial += 1
+        return self._serial
+
+    def _recv_frames(self, timeout=0.5):
+        """Receive all available JT808 frames from the server within timeout."""
+        frames = []
+        buf = b""
+        self.sock.settimeout(timeout)
+        try:
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                # Extract complete frames
+                while True:
+                    start = buf.find(b"\x7e")
+                    if start < 0:
+                        buf = b""
+                        break
+                    if start > 0:
+                        buf = buf[start:]
+                    end = buf.find(b"\x7e", 1)
+                    if end < 0:
+                        break
+                    if end == 1:
+                        buf = buf[1:]
+                        continue
+                    frame_raw = buf[1:end]
+                    buf = buf[end:]
+                    # Decode the frame
+                    data = jt808_unescape(frame_raw)
+                    if len(data) >= 13:
+                        cs = data[-1]
+                        if jt808_checksum(data[:-1]) == cs:
+                            frames.append(data[:-1])  # header + body without checksum
+                    # Continue to see if there's another frame after the delimiter
+        except socket.timeout:
+            pass
+        return frames
+
+    def _parse_frame(self, data):
+        """Parse a decoded frame into (msg_id, phone_bcd, serial, body)."""
+        parsed = jt808_parse_header(data)
+        if parsed is None:
+            return None
+        msg_id, attributes, phone_bcd, serial, body_offset = parsed
+        body_len = attributes & 0x03FF
+        body = data[body_offset:body_offset + body_len]
+        return msg_id, phone_bcd, serial, body
+
+    def send_registration(self, imei="862831041694915"):
+        """Send terminal registration (0x0100) and return received frames.
+
+        Sends a minimal registration body.
+        """
+        self.phone_bcd = imei_to_phone_bcd(imei)
+        # Minimal registration body:
+        # province(2) + city(2) + manufacturer(5) + terminal_type(20) + terminal_id(7) + plate_color(1)
+        body = b"\x00\x00"  # province
+        body += b"\x00\x00"  # city
+        body += b"TRACK"    # manufacturer (5 bytes)
+        body += b"\x00" * 20  # terminal type (20 bytes)
+        body += b"TRACKER"   # terminal ID (7 bytes)
+        body += b"\x00"      # plate color
+        frame = jt808_build_frame(0x0100, self.phone_bcd, self._next_serial(), body)
+        self.sock.sendall(frame)
+        frames = self._recv_frames()
+        # Extract auth_code from registration response
+        for f in frames:
+            parsed = self._parse_frame(f)
+            if parsed and parsed[0] == 0x8100:
+                resp_body = parsed[3]
+                if len(resp_body) >= 3 and resp_body[2] == 0:  # result == success
+                    self.auth_code = resp_body[3:].decode("ascii", errors="replace")
+        return frames
+
+    def send_auth(self, auth_code=None):
+        """Send terminal authentication (0x0102) and return received frames."""
+        code = auth_code or self.auth_code or ""
+        body = code.encode("ascii")
+        frame = jt808_build_frame(0x0102, self.phone_bcd, self._next_serial(), body)
+        self.sock.sendall(frame)
+        return self._recv_frames()
+
+    def send_login(self, imei="862831041694915"):
+        """Full login: registration + authentication. Returns all frames."""
+        reg_frames = self.send_registration(imei)
+        auth_frames = self.send_auth()
+        return reg_frames + auth_frames
+
+    def build_location_body(self, lat=-35.2999, lon=149.1003, speed_kmh_10=0,
+                             heading=180, alarm_flags=0,
+                             gps_valid=True, satellites=8,
+                             year=26, month=2, day=21, hour=4, minute=0, second=0,
+                             battery=None, signal=None, charging=None):
+        """Build a 0x0200 location report body.
+
+        speed_kmh_10: speed in 1/10 km/h units
+        """
+        # Status bits
+        status = 0
+        if gps_valid:
+            status |= (1 << 1)   # bit 1: positioning
+        if lat < 0:
+            status |= (1 << 2)   # bit 2: south
+        if lon < 0:
+            status |= (1 << 3)   # bit 3: west
+
+        lat_raw = int(abs(lat) * 1_000_000)
+        lon_raw = int(abs(lon) * 1_000_000)
+
+        # BCD time (GMT+8 — we pass the time in GMT+8 from test)
+        def to_bcd(val):
+            return ((val // 10) << 4) | (val % 10)
+
+        body = struct.pack(">I", alarm_flags)
+        body += struct.pack(">I", status)
+        body += struct.pack(">I", lat_raw)
+        body += struct.pack(">I", lon_raw)
+        body += struct.pack(">H", 0)  # altitude
+        body += struct.pack(">H", speed_kmh_10)
+        body += struct.pack(">H", heading)
+        body += bytes([to_bcd(year), to_bcd(month), to_bcd(day),
+                        to_bcd(hour), to_bcd(minute), to_bcd(second)])
+
+        # Optional TLVs
+        if signal is not None:
+            body += bytes([0x30, 0x01, signal])
+        if satellites is not None:
+            body += bytes([0x31, 0x01, satellites])
+        if battery is not None:
+            chg_byte = 0 if charging else 1
+            body += bytes([0xE4, 0x02, chg_byte, battery])
+
+        return body
+
+    def send_location(self, **kwargs):
+        """Send a location packet. Returns list of received frames."""
+        body = self.build_location_body(**kwargs)
+        frame = jt808_build_frame(0x0200, self.phone_bcd, self._next_serial(), body)
+        self.sock.sendall(frame)
+        return self._recv_frames(timeout=0.1)
+
+    def send_heartbeat(self):
+        """Send heartbeat (0x0002). Returns list of received frames."""
+        frame = jt808_build_frame(0x0002, self.phone_bcd, self._next_serial())
+        self.sock.sendall(frame)
+        return self._recv_frames()
+
+    def drain(self, timeout=0.1):
+        """Read and discard any pending data from the socket."""
+        self.sock.settimeout(timeout)
+        try:
+            while self.sock.recv(4096):
+                pass
+        except socket.timeout:
+            pass
+
+
+@pytest.fixture
+def jt808_client(server):
+    """Function-scoped JT808 TCP client."""
+    client = JT808Client(server.host, server.jt808_port)
+    client.connect()
+    yield client
+    client.close()
+
+
 def _find_free_port(tcp=False):
     """Find a free port by binding to port 0."""
     sock_type = socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM
@@ -469,6 +676,7 @@ def server(tmp_path_factory):
 
     port = _find_free_port()
     gt06_port = _find_free_port(tcp=True)
+    jt808_port = _find_free_port(tcp=True)
 
     # Pre-write events.json with manager password and a default event
     events_data = {
@@ -502,6 +710,9 @@ def server(tmp_path_factory):
             "--gt06-port", str(gt06_port),
             "--gt06-interval", "10",
             "--gt06-id-prefix", "G",
+            "--jt808-port", str(jt808_port),
+            "--jt808-interval", "10",
+            "--jt808-id-prefix", "J",
         ],
         stdout=log_fh,
         stderr=subprocess.STDOUT,
@@ -524,6 +735,7 @@ def server(tmp_path_factory):
         process=proc,
         log_file=log_path,
         gt06_port=gt06_port,
+        jt808_port=jt808_port,
     )
 
     yield info
