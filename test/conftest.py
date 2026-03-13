@@ -608,6 +608,21 @@ class JT808Client:
         self.sock.sendall(frame)
         return self._recv_frames(timeout=0.1)
 
+    def send_batch_location(self, locations, loc_type=0):
+        """Send batch location upload (0x0704).
+
+        locations: list of dicts, each passed as kwargs to build_location_body()
+        loc_type: 0=normal, 1=blind area
+        """
+        items = []
+        for loc_kwargs in locations:
+            loc_body = self.build_location_body(**loc_kwargs)
+            items.append(struct.pack(">H", len(loc_body)) + loc_body)
+        body = struct.pack(">HB", len(locations), loc_type) + b"".join(items)
+        frame = jt808_build_frame(0x0704, self.phone_bcd, self._next_serial(), body)
+        self.sock.sendall(frame)
+        return self._recv_frames(timeout=0.2)
+
     def send_heartbeat(self):
         """Send heartbeat (0x0002). Returns list of received frames."""
         frame = jt808_build_frame(0x0002, self.phone_bcd, self._next_serial())

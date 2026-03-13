@@ -548,66 +548,14 @@ class JT808Listener:
             if jt_conn.phone_bcd is None:
                 jt_conn.phone_bcd = phone_bcd
             self._send_general_response(jt_conn, serial, msg_id, result=0)
+            self._process_location(jt_conn, body)
 
-            loc = parse_location(body)
-            if not loc:
-                self._log(f"[JT808] Location too short from {jt_conn.sailor_id}")
-                return
-            if not jt_conn.sailor_id:
-                self._log(f"[JT808] Location before login from {jt_conn.addr}")
-                return
-
-            if not loc["gps_valid"]:
-                return
-
-            # Update battery/signal from TLVs if present
-            if "battery" in loc:
-                jt_conn.battery = loc["battery"]
-            if "signal" in loc:
-                jt_conn.signal = loc["signal"]
-            if "charging" in loc:
-                jt_conn.charging = loc["charging"]
-
-            jt_conn.last_lat = loc["lat"]
-            jt_conn.last_lon = loc["lon"]
-            jt_conn.last_ts = loc["ts"]
-
-            # SOS handling
-            if loc["is_sos"]:
-                imei = jt_conn.imei
-                if imei and imei not in self._sticky_assist:
-                    jt_conn.assist_active = True
-                    self._sticky_assist.add(imei)
-                    self._log(f"[JT808] SOS activated (sticky) from {jt_conn.sailor_id}")
-                    if jt_conn.idle:
-                        self.set_idle(jt_conn.sailor_id, False)
-                        self._log(f"[JT808] Exited idle due to SOS from {jt_conn.sailor_id}")
-
-            tracker = self.get_tracker(jt_conn.eid)
-            if tracker is None:
-                return
-
-            tracker.process_position(
-                sailor_id=jt_conn.sailor_id,
-                lat=loc["lat"],
-                lon=loc["lon"],
-                speed=loc["speed_knots"],
-                heading=loc["heading"],
-                ts=loc["ts"],
-                assist=jt_conn.assist_active,
-                battery=jt_conn.battery,
-                signal=jt_conn.signal,
-                role="sailor",
-                version="jt808",
-                flags={},
-                src_ip=jt_conn.addr[0],
-                source="JT808",
-                nsats=loc.get("satellites", 0),
-                charging=jt_conn.charging,
-                stopped=jt_conn.idle,
-                idle=jt_conn.idle,
-                did=jt_conn.imei,
-            )
+        elif msg_id == 0x0704:
+            # Batch location upload
+            if jt_conn.phone_bcd is None:
+                jt_conn.phone_bcd = phone_bcd
+            self._send_general_response(jt_conn, serial, msg_id, result=0)
+            self._process_batch_location(jt_conn, body)
 
         elif msg_id == 0x0001:
             # Terminal general response (ACK from device to our commands)
@@ -626,6 +574,21 @@ class JT808Listener:
             label = jt_conn.sailor_id or jt_conn.imei or "unknown"
             self._log(f"[JT808] Logout from {label}")
 
+        elif msg_id == 0x0107:
+            # Terminal attribute response — contains manufacturer, model, ID, ICCID etc.
+            if jt_conn.phone_bcd is None:
+                jt_conn.phone_bcd = phone_bcd
+            label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+            self._log(f"[JT808] Terminal attributes from {label} ({len(body)} bytes)")
+
+        elif msg_id in (0x0109, 0x0112, 0x1007, 0x1107):
+            # Vendor-specific messages — ACK and log
+            if jt_conn.phone_bcd is None:
+                jt_conn.phone_bcd = phone_bcd
+            self._send_general_response(jt_conn, serial, msg_id, result=0)
+            label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+            self._log(f"[JT808] Vendor msg 0x{msg_id:04X} from {label} ({len(body)} bytes)")
+
         else:
             # Unknown message — send generic ACK
             if jt_conn.phone_bcd is None:
@@ -633,6 +596,100 @@ class JT808Listener:
             self._send_general_response(jt_conn, serial, msg_id, result=0)
             label = jt_conn.sailor_id or jt_conn.imei or "unknown"
             self._log(f"[JT808] Unknown msg 0x{msg_id:04X} from {label} ({len(body)} bytes)")
+
+    # --- Location processing ---
+
+    def _process_location(self, jt_conn, loc_body):
+        """Process a single location report body (shared by 0x0200 and 0x0704)."""
+        loc = parse_location(loc_body)
+        if not loc:
+            self._log(f"[JT808] Location too short from {jt_conn.sailor_id}")
+            return
+        if not jt_conn.sailor_id:
+            self._log(f"[JT808] Location before login from {jt_conn.addr}")
+            return
+
+        if not loc["gps_valid"]:
+            return
+
+        # Update battery/signal from TLVs if present
+        if "battery" in loc:
+            jt_conn.battery = loc["battery"]
+        if "signal" in loc:
+            jt_conn.signal = loc["signal"]
+        if "charging" in loc:
+            jt_conn.charging = loc["charging"]
+
+        jt_conn.last_lat = loc["lat"]
+        jt_conn.last_lon = loc["lon"]
+        jt_conn.last_ts = loc["ts"]
+
+        # SOS handling
+        if loc["is_sos"]:
+            imei = jt_conn.imei
+            if imei and imei not in self._sticky_assist:
+                jt_conn.assist_active = True
+                self._sticky_assist.add(imei)
+                self._log(f"[JT808] SOS activated (sticky) from {jt_conn.sailor_id}")
+                if jt_conn.idle:
+                    self.set_idle(jt_conn.sailor_id, False)
+                    self._log(f"[JT808] Exited idle due to SOS from {jt_conn.sailor_id}")
+
+        tracker = self.get_tracker(jt_conn.eid)
+        if tracker is None:
+            return
+
+        tracker.process_position(
+            sailor_id=jt_conn.sailor_id,
+            lat=loc["lat"],
+            lon=loc["lon"],
+            speed=loc["speed_knots"],
+            heading=loc["heading"],
+            ts=loc["ts"],
+            assist=jt_conn.assist_active,
+            battery=jt_conn.battery,
+            signal=jt_conn.signal,
+            role="sailor",
+            version="jt808",
+            flags={},
+            src_ip=jt_conn.addr[0],
+            source="JT808",
+            nsats=loc.get("satellites", 0),
+            charging=jt_conn.charging,
+            stopped=jt_conn.idle,
+            idle=jt_conn.idle,
+            did=jt_conn.imei,
+        )
+
+    def _process_batch_location(self, jt_conn, body):
+        """Process batch location upload (0x0704).
+
+        Body: count(WORD) + type(BYTE) + items...
+        Each item: length(WORD) + location_body(length bytes)
+        """
+        if len(body) < 3:
+            return
+        count = struct.unpack(">H", body[0:2])[0]
+        loc_type = body[2]  # 0=normal, 1=blind area
+        label = jt_conn.sailor_id or jt_conn.imei or "unknown"
+        self._log(f"[JT808] Batch location from {label}: {count} items (type={loc_type})")
+
+        offset = 3
+        processed = 0
+        for _ in range(count):
+            if offset + 2 > len(body):
+                break
+            item_len = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            if offset + item_len > len(body):
+                break
+            loc_body = body[offset:offset + item_len]
+            offset += item_len
+            self._process_location(jt_conn, loc_body)
+            processed += 1
+
+        if processed != count:
+            self._log(f"[JT808] Batch: parsed {processed}/{count} items from {label}")
 
     # --- Public interface (matches GT06Listener) ---
 

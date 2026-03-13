@@ -163,6 +163,31 @@ def test_invalid_gps_ignored(jt808_client, server):
 
 
 # ---------------------------------------------------------------------------
+# Batch location (0x0704)
+# ---------------------------------------------------------------------------
+
+def test_batch_location(jt808_client, http_client, server):
+    """Batch location upload (0x0704) should process multiple positions."""
+    imei = "862831041455555"
+    _start_device(jt808_client, http_client, imei, "J455555")
+
+    # Send 3 positions in a batch
+    locations = [
+        {"lat": -36.80, "lon": 174.70, "speed_kmh_10": 100, "heading": 90, "second": 10},
+        {"lat": -36.81, "lon": 174.71, "speed_kmh_10": 120, "heading": 95, "second": 20},
+        {"lat": -36.82, "lon": 174.72, "speed_kmh_10": 80, "heading": 100, "second": 30},
+    ]
+    jt808_client.send_batch_location(locations)
+    time.sleep(0.2)
+
+    positions = _read_positions(server, eid=1)
+    pos = positions["J455555"]
+    # Should have the last position from the batch
+    assert abs(pos["lat"] - (-36.82)) < 0.01
+    assert abs(pos["lon"] - 174.72) < 0.01
+
+
+# ---------------------------------------------------------------------------
 # Heartbeat
 # ---------------------------------------------------------------------------
 
