@@ -181,7 +181,7 @@
                 <tr id="tableHead"></tr>
             </thead>
             <tbody id="tableBody">
-                <tr><td colspan="12" class="empty">Loading...</td></tr>
+                <tr><td colspan="13" class="empty">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -206,6 +206,10 @@
                 <input type="text" id="edit-sail">
             </div>
             <div class="form-group">
+                <label for="edit-wcaa">WCAA Number</label>
+                <input type="text" id="edit-wcaa" maxlength="6">
+            </div>
+            <div class="form-group">
                 <label for="edit-club">Club</label>
                 <input type="text" id="edit-club">
             </div>
@@ -224,7 +228,7 @@
             </div>
             <div class="form-group">
                 <label for="edit-dob">Date of Birth</label>
-                <input type="date" id="edit-dob">
+                <input type="text" id="edit-dob" placeholder="DD/MM/YYYY">
             </div>
             <div class="form-group">
                 <label for="edit-days">Days Racing</label>
@@ -260,6 +264,7 @@
         { key: 'email', label: 'Email' },
         { key: 'phone', label: 'Phone' },
         { key: 'sail_number', label: 'Sail No.' },
+        { key: 'wcaa', label: 'WCAA' },
         { key: 'club', label: 'Club' },
         { key: 'gender', label: 'Gender' },
         { key: 'weight', label: 'Weight' },
@@ -354,6 +359,7 @@
                 <td>${emailEsc}</td>
                 <td>${esc(r.phone || '')}</td>
                 <td>${esc(r.sail_number || '')}</td>
+                <td>${esc(r.wcaa || '')}</td>
                 <td>${esc(r.club || '')}</td>
                 <td>${esc(r.gender || '')}</td>
                 <td>${r.weight || ''}</td>
@@ -428,6 +434,7 @@
         document.getElementById('edit-name').value = reg.name || '';
         document.getElementById('edit-phone').value = reg.phone || '';
         document.getElementById('edit-sail').value = reg.sail_number || '';
+        document.getElementById('edit-wcaa').value = reg.wcaa || '';
         document.getElementById('edit-club').value = reg.club || '';
         document.getElementById('edit-gender').value = reg.gender || '';
         document.getElementById('edit-weight').value = reg.weight || '';
@@ -451,6 +458,7 @@
             name: document.getElementById('edit-name').value,
             phone: document.getElementById('edit-phone').value,
             sail_number: document.getElementById('edit-sail').value,
+            wcaa: document.getElementById('edit-wcaa').value,
             club: document.getElementById('edit-club').value,
             gender: document.getElementById('edit-gender').value,
             weight: document.getElementById('edit-weight').value ? parseFloat(document.getElementById('edit-weight').value) : null,
@@ -476,10 +484,10 @@
     }
 
     function exportCSV() {
-        const headers = ['Name', 'Email', 'Phone', 'Sail Number', 'Club', 'Gender', 'Weight', 'DOB', 'Days', 'Status'];
+        const headers = ['Name', 'Email', 'Phone', 'Sail Number', 'WCAA', 'Club', 'Gender', 'Weight', 'DOB', 'Days', 'Status'];
         const rows = registrations.map(r => [
             r.name || '', r.email || '', r.phone || '', r.sail_number || '',
-            r.club || '', r.gender || '', r.weight || '', r.dob || '',
+            r.wcaa || '', r.club || '', r.gender || '', r.weight || '', r.dob || '',
             r.days || '', r.confirmed ? 'Confirmed' : 'Pending'
         ]);
         const csv = [headers, ...rows].map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');

@@ -228,12 +228,18 @@
         being organised quite late you should not expect a perfectly
         polished event. Come along and have fun in the spirit of
         windsurfing, 50% racing, 50% fun!
+        <h2>Eligible Boards</h2>
+        Elegible boards are Windsurfer LT or Windsurfer one-design
+        with 5.7m regatta sail or the new 5m class sail.
         <h2>Tracking</h2>
         We will be supplying GPS trackers for entrants which will make
         scoring simpler. You can also optionally use your own phone
         for tracking -
         see <a href="https://wstracker.org">https://wstracker.org</a>
         for details and how to install the tracker on your own device.
+        <br>Spectators (both local and remote) will be able to view
+        the races in real-time. See links below for the proposed
+        courses and live tracking web interface.
     </div>
 
     <div class="section">
@@ -278,6 +284,10 @@
                     <input type="text" id="reg-sail">
                 </div>
                 <div class="form-group">
+                    <label for="reg-wcaa"><a href="https://theclubspot.com/login?next=https%3A%2F%2Ftheclubspot.com%2Fjoin%2FzZHVJ2nboi%2F&success_button_copy=Go%20to%20Windsurfer%20Class%20Association%20of%20Australia" target="_blank" title="Windsurfer Class Association of Australia — click to join">WCAA</a> Number</label>
+                    <input type="text" id="reg-wcaa" maxlength="6">
+                </div>
+                <div class="form-group">
                     <label for="reg-club">Club</label>
                     <input type="text" id="reg-club">
                 </div>
@@ -296,7 +306,7 @@
                 </div>
                 <div class="form-group">
                     <label for="reg-dob">Date of Birth</label>
-                    <input type="date" id="reg-dob">
+                    <input type="text" id="reg-dob" placeholder="DD/MM/YYYY">
                 </div>
                 <div class="form-group">
                     <label for="reg-days">Days Racing</label>
@@ -357,7 +367,7 @@
         <h2>Entrants <span class="entrant-count" id="entrant-count"></span></h2>
         <table class="entrants-table" id="entrants-table">
             <thead>
-                <tr><th>#</th><th>Name</th><th>Sail No.</th><th>Club</th><th>Days</th></tr>
+                <tr><th>#</th><th>Name</th><th>Sail No.</th><th>WCAA</th><th>Club</th><th>Days</th></tr>
             </thead>
             <tbody id="entrants-body">
                 <tr><td colspan="5" style="text-align:center; color:#888;">Loading...</td></tr>
@@ -404,6 +414,17 @@ function showConfirmForm() {
     clearMessage();
 }
 
+function validateDOB(s) {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return false;
+    const day = parseInt(m[1]), month = parseInt(m[2]), year = parseInt(m[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+    if (year < 1920 || year > 2026) return false;
+    const maxDay = new Date(year, month, 0).getDate();
+    if (day > maxDay) return false;
+    return true;
+}
+
 async function submitRegistration(e) {
     e.preventDefault();
     clearMessage();
@@ -416,6 +437,7 @@ async function submitRegistration(e) {
         email: document.getElementById('reg-email').value.trim(),
         phone: document.getElementById('reg-phone').value.trim(),
         sail_number: document.getElementById('reg-sail').value.trim(),
+        wcaa: document.getElementById('reg-wcaa').value.trim(),
         club: document.getElementById('reg-club').value.trim(),
         gender: document.getElementById('reg-gender').value,
         weight: document.getElementById('reg-weight').value ? parseFloat(document.getElementById('reg-weight').value) : null,
@@ -425,6 +447,13 @@ async function submitRegistration(e) {
 
     if (!data.name || !data.email) {
         showMessage('Name and email are required.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Register';
+        return false;
+    }
+
+    if (data.dob && !validateDOB(data.dob)) {
+        showMessage('Date of birth must be DD/MM/YYYY with valid day (1-31), month (1-12), year (1920-2026).', 'error');
         btn.disabled = false;
         btn.textContent = 'Register';
         return false;
@@ -510,14 +539,14 @@ async function loadEntrants() {
         const countEl = document.getElementById('entrant-count');
         countEl.textContent = `(${regs.length})`;
         if (regs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">No entrants yet. Be the first to register!</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#888;">No entrants yet. Be the first to register!</td></tr>';
             return;
         }
         tbody.innerHTML = regs.map((r, i) =>
-            `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.sail_number || '')}</td><td>${esc(r.club || '')}</td><td>${esc(r.days || '')}</td></tr>`
+            `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.sail_number || '')}</td><td>${esc(r.wcaa || '')}</td><td>${esc(r.club || '')}</td><td>${esc(r.days || '')}</td></tr>`
         ).join('');
     } catch (err) {
-        document.getElementById('entrants-body').innerHTML = '<tr><td colspan="5" style="text-align:center; color:#c62828;">Failed to load entrants.</td></tr>';
+        document.getElementById('entrants-body').innerHTML = '<tr><td colspan="6" style="text-align:center; color:#c62828;">Failed to load entrants.</td></tr>';
     }
 }
 

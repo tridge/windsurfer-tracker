@@ -2520,6 +2520,7 @@ def send_admin_registration_notify(admin_emails: str, entry: dict, event_name: s
     name = entry.get('name', '?')
     email = entry.get('email', '?')
     sail = entry.get('sail_number', '')
+    wcaa = entry.get('wcaa', '')
     club = entry.get('club', '')
     phone = entry.get('phone', '')
     days = entry.get('days', '')
@@ -2532,6 +2533,8 @@ def send_admin_registration_notify(admin_emails: str, entry: dict, event_name: s
         lines.append(f"  Phone:       {phone}")
     if sail:
         lines.append(f"  Sail Number: {sail}")
+    if wcaa:
+        lines.append(f"  WCAA Number: {wcaa}")
     if club:
         lines.append(f"  Club:        {club}")
     if days:
@@ -3143,6 +3146,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             registrations.append({
                                 'name': entry.get('name', ''),
                                 'sail_number': entry.get('sail_number', ''),
+                                'wcaa': entry.get('wcaa', ''),
                                 'club': entry.get('club', ''),
                                 'gender': entry.get('gender', ''),
                                 'days': entry.get('days', ''),
@@ -3592,7 +3596,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Registration not found"}, 404)
                 return
 
-            editable_fields = ('name', 'phone', 'sail_number', 'club', 'gender', 'weight', 'dob', 'days')
+            editable_fields = ('name', 'phone', 'sail_number', 'wcaa', 'club', 'gender', 'weight', 'dob', 'days')
             entries = []
             found = False
             with open(reg_file, 'r') as f:
@@ -4209,14 +4213,32 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             'email': email_addr,
             'phone': str(data.get('phone', '')).strip(),
             'sail_number': str(data.get('sail_number', '')).strip(),
+            'wcaa': str(data.get('wcaa', '')).strip(),
             'club': str(data.get('club', '')).strip(),
             'gender': str(data.get('gender', '')).strip(),
             'weight': data.get('weight'),
             'dob': str(data.get('dob', '')).strip(),
             'days': str(data.get('days', 'Both')).strip(),
-            'registered': time.time(),
-            'registered_iso': datetime.now().isoformat(),
         }
+
+        # Validate DOB if provided
+        dob = new_entry['dob']
+        if dob:
+            m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', dob)
+            if not m:
+                self._send_json({"error": "Date of birth must be DD/MM/YYYY"}, 400)
+                return
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if month < 1 or month > 12 or day < 1 or day > 31 or year < 1920 or year > 2026:
+                self._send_json({"error": "Date of birth out of range"}, 400)
+                return
+            import calendar
+            if day > calendar.monthrange(year, month)[1]:
+                self._send_json({"error": "Invalid day for that month"}, 400)
+                return
+
+        new_entry['registered'] = time.time()
+        new_entry['registered_iso'] = datetime.now().isoformat()
 
         # Check if email already exists
         entries = []
