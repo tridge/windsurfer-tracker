@@ -982,6 +982,19 @@ class JT808Listener:
             self._log(f"[JT808] Sent passthrough-text type=0x{pt_type:02X} '{pt_text}' to {jt_conn.sailor_id}")
             return True
 
+        elif cmd == "text" and len(parts) >= 2:
+            # Send 0x8300 text information
+            # Usage: text <message>
+            # Flags: bit0=emergency, bit2=display, bit3=TTS
+            flags = 0x0D  # emergency + display + TTS
+            text = " ".join(parts[1:])
+            text_bytes = text.encode("gbk", errors="replace")
+            body = bytes([flags]) + text_bytes
+            frame = jt808_build_frame(0x8300, jt_conn.phone_bcd, jt_conn.next_serial(), body)
+            self._send(jt_conn, frame)
+            self._log(f"[JT808] Sent text (flags=0x{flags:02X}) '{text}' to {jt_conn.sailor_id}")
+            return True
+
         self._log(f"[JT808] Unknown command: {cmd_str}")
         return False
 
