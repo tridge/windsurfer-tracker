@@ -282,10 +282,12 @@ def parse_location(body: bytes):
 
     # Parse additional info TLVs after the 28-byte base
     extra = body[28:]
+    tlv_ids = []
     i = 0
     while i + 1 < len(extra):
         tlv_id = extra[i]
         tlv_len = extra[i + 1]
+        tlv_ids.append(f"0x{tlv_id:02X}({tlv_len})")
         if i + 2 + tlv_len > len(extra):
             break
         tlv_data = extra[i + 2:i + 2 + tlv_len]
@@ -301,6 +303,9 @@ def parse_location(body: bytes):
             # status: 0=charging, 1=not charging
             result["charging"] = (tlv_data[0] == 0)
             result["battery"] = min(tlv_data[1], 100)
+        elif tlv_id == 0xE4:
+            # Unexpected 0xE4 length — log for debugging
+            result["_e4_raw"] = tlv_data[:tlv_len].hex()
         elif tlv_id == 0xEE and tlv_len >= 10:
             # 4G LBS: MCC(2) + MNC(1) + LAC(2) + CellID(4) + signal(1)
             mcc = struct.unpack(">H", tlv_data[0:2])[0]
@@ -327,6 +332,7 @@ def parse_location(body: bytes):
 
         i += 2 + tlv_len
 
+    result["_tlv_ids"] = " ".join(tlv_ids)
     return result
 
 
@@ -528,25 +534,42 @@ class JT808Listener:
             self._log(f"[JT808] Authenticated: {jt_conn.sailor_id}")
             self._send_general_response(jt_conn, serial, msg_id, result=0)
 
+            # Close any stale connections for the same device
+            my_fd = jt_conn.sock.fileno()
+            stale_fds = [fd for fd, c in self.connections.items()
+                         if c.sailor_id == jt_conn.sailor_id and fd != my_fd]
+            for fd in stale_fds:
+                self._log(f"[JT808] Closing stale connection for {jt_conn.sailor_id}")
+                self._disconnect(fd)
+
             # Set initial idle/active state and send tracking interval
             if jt_conn.sailor_id in self.active_sailors:
                 jt_conn.idle = False
-                self._send_tracking_control(jt_conn, self.interval)
-            else:
-                jt_conn.idle = True
-                self.idle_sailors.add(jt_conn.sailor_id)
-                self._send_tracking_control(jt_conn, 60)
-            self._log(f"[JT808] Login commands sent ({'active' if not jt_conn.idle else 'idle'})")
-
-            # Set vendor tracking interval and query parameters
-            # Send each param individually — device rejects entire batch if any unknown
-            if not jt_conn.idle:
-                # 0xF104 controls actual upload interval on P7 devices (may ACK Fail but still apply)
-                for pid, pval in [(0xF104, self.interval), (0xF110, self.interval), (0x0029, self.interval)]:
+                report_interval = self.interval
+                self._send_tracking_control(jt_conn, report_interval)
+                # Send vendor params to match — 0xF104 controls actual rate on P7 devices
+                for pid, pval in [(0xF104, report_interval), (0xF110, report_interval), (0x0029, report_interval)]:
                     frame = build_set_parameters(
                         jt_conn.phone_bcd, jt_conn.next_serial(),
                         {pid: ("DWORD", pval)})
                     self._send(jt_conn, frame)
+            else:
+                jt_conn.idle = True
+                self.idle_sailors.add(jt_conn.sailor_id)
+                # Stop GPS tracking to save power — heartbeat keeps device visible
+                self._send_tracking_control(jt_conn, 0)
+                for pid in [0xF104, 0xF110, 0x0029]:
+                    frame = build_set_parameters(
+                        jt_conn.phone_bcd, jt_conn.next_serial(),
+                        {pid: ("DWORD", 0)})
+                    self._send(jt_conn, frame)
+            self._log(f"[JT808] Login commands sent ({'active' if not jt_conn.idle else 'idle'}, interval={report_interval if not jt_conn.idle else 0}s)")
+
+            # Set heartbeat interval to 15s so device stays visible even when idle/stationary
+            frame = build_set_parameters(
+                jt_conn.phone_bcd, jt_conn.next_serial(),
+                {0x0001: ("DWORD", 15)})
+            self._send(jt_conn, frame)
 
             # Query all device parameters to understand its configuration
             frame = build_query_parameters(jt_conn.phone_bcd, jt_conn.next_serial())
@@ -777,6 +800,9 @@ class JT808Listener:
 
         # Update battery/signal from TLVs if present
         if "battery" in loc:
+            if jt_conn.battery >= 0 and abs(loc["battery"] - jt_conn.battery) > 20:
+                self._log(f"[JT808] Battery jump {jt_conn.sailor_id}: {jt_conn.battery}%→{loc['battery']}% "
+                          f"e4_raw={loc.get('_e4_raw', 'n/a')} tlvs={loc.get('_tlv_ids', '')}")
             jt_conn.battery = loc["battery"]
         if "signal" in loc:
             jt_conn.signal = loc["signal"]
@@ -1024,11 +1050,12 @@ class JT808Listener:
             if jt_conn.sailor_id == sailor_id:
                 jt_conn.idle = idle
                 if idle:
-                    self._send_tracking_control(jt_conn, 60)
-                    for pid, pval in [(0xF104, 60), (0xF110, 60), (0x0029, 60)]:
+                    # Stop GPS tracking to save power — heartbeat keeps device visible
+                    self._send_tracking_control(jt_conn, 0)
+                    for pid in [0xF104, 0xF110, 0x0029]:
                         frame = build_set_parameters(
                             jt_conn.phone_bcd, jt_conn.next_serial(),
-                            {pid: ("DWORD", pval)})
+                            {pid: ("DWORD", 0)})
                         self._send(jt_conn, frame)
                 else:
                     self._send_tracking_control(jt_conn, self.interval)
