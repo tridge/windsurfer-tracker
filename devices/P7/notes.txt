@@ -137,6 +137,17 @@ sufficient and better.
 Silently ignored — no ACK, no response. Cannot send AT commands to
 the GNSS chipset via this mechanism.
 
+== Buzzer / Audio / LED ==
+
+No buzzer or audio output capability found:
+- 0x8300 text message (flags=0x0D emergency+display+TTS): silently ignored, no ACK
+- 0xF107 param: ACKed OK but is "Terminal tracking way settings", not buzzer
+- 0xF111 param ("terminal LED control 1-on 0-off"): silently ignored, no ACK
+- 0x8900 downlink passthrough: silently ignored
+- No dedicated buzzer command in JT808 standard or vendor extensions
+
+Conclusion: P7 device has no controllable audio/LED output via protocol.
+
 == Open Questions ==
 
 1. Battery drain at 1Hz — need to test over a full day
