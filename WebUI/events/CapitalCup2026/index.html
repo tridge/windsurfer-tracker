@@ -99,27 +99,6 @@
         .link-card .label { font-weight: 600; font-size: 0.95em; }
         .link-card .desc { font-size: 0.8em; color: #666; }
 
-        /* Registration form */
-        .form-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 14px;
-        }
-        .form-group { display: flex; flex-direction: column; }
-        .form-group.full-width { grid-column: 1 / -1; }
-        .form-group label { font-weight: 600; font-size: 0.9em; margin-bottom: 4px; color: #555; }
-        .form-group input, .form-group select {
-            padding: 10px 12px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-size: 0.95em;
-            font-family: inherit;
-        }
-        .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: #2196F3;
-            box-shadow: 0 0 0 3px rgba(33,150,243,0.15);
-        }
         .btn {
             display: inline-block;
             padding: 12px 28px;
@@ -132,60 +111,11 @@
             cursor: pointer;
             transition: background 0.15s;
             font-family: inherit;
+            text-decoration: none;
         }
         .btn:hover { background: #d35400; }
-        .btn:disabled { background: #bbb; cursor: not-allowed; }
         .btn-secondary { background: #1565c0; }
         .btn-secondary:hover { background: #0d47a1; }
-        .form-message {
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-top: 14px;
-            display: none;
-        }
-        .form-message.success { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
-        .form-message.error { display: block; background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
-        .form-message.info { display: block; background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
-
-        /* Confirmation step */
-        #confirm-section { display: none; }
-        #confirm-section .confirm-input {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-top: 10px;
-        }
-        #confirm-section input {
-            padding: 10px 14px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-size: 1.1em;
-            letter-spacing: 4px;
-            text-align: center;
-            width: 180px;
-            font-family: inherit;
-        }
-
-        /* Entrants table */
-        .entrants-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 8px;
-        }
-        .entrants-table th {
-            background: #f5f9ff;
-            padding: 10px 14px;
-            text-align: left;
-            font-weight: 600;
-            color: #555;
-            border-bottom: 2px solid #e3f2fd;
-        }
-        .entrants-table td {
-            padding: 10px 14px;
-            border-bottom: 1px solid #eee;
-        }
-        .entrants-table tr:hover { background: #f5f9ff; }
-        .entrant-count { color: #888; font-weight: normal; font-size: 0.8em; }
 
         .footer {
             text-align: center;
@@ -199,7 +129,6 @@
             .header h1 { font-size: 1.6em; }
             .container { padding: 12px; }
             .section { padding: 20px 16px; }
-            .form-grid { grid-template-columns: 1fr; }
             .links-grid { grid-template-columns: 1fr; }
         }
     </style>
@@ -231,6 +160,12 @@
         <h2>Eligible Boards</h2>
         Elegible boards are Windsurfer LT or Windsurfer one-design
         with 5.7m regatta sail or the new 5m class sail.
+        <h2>Eligible Sailors</h2>
+        You need to get a WCAA member with
+        insurance. See <a href="https://www.windsurfer-class-aus.com/">https://www.windsurfer-class-aus.com/</a>
+        and click the "Join the Windsurfer Class" if you aren't
+        already a member. The clubspot registration link below should
+        only allow you to register if you are a member.
         <h2>Tracking</h2>
         We will be supplying GPS trackers for entrants which will make
         scoring simpler. You can also optionally use your own phone
@@ -240,6 +175,29 @@
         <br>Spectators (both local and remote) will be able to view
         the races in real-time. See links below for the proposed
         courses and live tracking web interface.
+        <h2>Water Quality</h2>
+        There can sometimes be issues with algae in the lake. See
+        <a href="https://www.nca.gov.au/environment/lake-burley-griffin/water-quality">https://www.nca.gov.au/environment/lake-burley-griffin/water-quality</a>
+        for the latest information. There are some areas closed to
+        swimming at the moment but open to sailing.
+        <h2>WhatsApp Chat</h2>
+        We have a Windsurfer LT Canberra WhatsApp group. Message
+        Andrew Tridgell on 0412 666 929 to ask to be added. Please
+        join that group if you plan on attending as we will be doing
+        updates there.
+        <h2>Still baking ...</h2>
+        This event is being organised quite late (only 1 month to
+        go). I haven't locked in a support boat yet, but hope to get
+        that organised. It's a free event, and you should expect to
+        get your moneys worth!<br>
+        <h2>Canberra Marathon Festival</h2>
+        Also note that
+        the <a href="https://solemotive.com/pages/canberra-times-marathon-festival">Canberra
+        Marathon Festival</a> is the same weekend, there could be
+        crowds and some of them may be cheering the runners instead of
+        us windsurfers. It may be tricky with parking on Sunday
+        morning in particular. More on the WhatsApp chat when we know
+        it.
     </div>
 
     <div class="section">
@@ -264,81 +222,10 @@
 
     <div class="section">
         <h2>Register</h2>
-        <div id="reg-form-section">
-            <p>Fill out the form below to register for the Capital Cup 2026.</p>
-            <form id="reg-form" class="form-grid" onsubmit="return submitRegistration(event)">
-                <div class="form-group">
-                    <label for="reg-name">Name *</label>
-                    <input type="text" id="reg-name" required>
-                </div>
-                <div class="form-group">
-                    <label for="reg-email">Email *</label>
-                    <input type="email" id="reg-email" required>
-                </div>
-                <div class="form-group">
-                    <label for="reg-phone">Phone</label>
-                    <input type="tel" id="reg-phone">
-                </div>
-                <div class="form-group">
-                    <label for="reg-sail">Sail Number</label>
-                    <input type="text" id="reg-sail">
-                </div>
-                <div class="form-group">
-                    <label for="reg-wcaa"><a href="https://theclubspot.com/login?next=https%3A%2F%2Ftheclubspot.com%2Fjoin%2FzZHVJ2nboi%2F&success_button_copy=Go%20to%20Windsurfer%20Class%20Association%20of%20Australia" target="_blank" title="Windsurfer Class Association of Australia — click to join">WCAA</a> Number</label>
-                    <input type="text" id="reg-wcaa" maxlength="6">
-                </div>
-                <div class="form-group">
-                    <label for="reg-club">Club</label>
-                    <input type="text" id="reg-club">
-                </div>
-                <div class="form-group">
-                    <label for="reg-gender">Gender</label>
-                    <select id="reg-gender">
-                        <option value="">-- Select --</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Non-binary">Non-binary</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="reg-weight">Weight (kg)</label>
-                    <input type="number" id="reg-weight" min="20" max="200" step="0.1">
-                </div>
-                <div class="form-group">
-                    <label for="reg-dob">Date of Birth</label>
-                    <input type="text" id="reg-dob" placeholder="DD/MM/YYYY">
-                </div>
-                <div class="form-group">
-                    <label for="reg-days">Days Racing</label>
-                    <select id="reg-days">
-                        <option value="Both">Both days</option>
-                        <option value="Saturday">Saturday only</option>
-                        <option value="Sunday">Sunday only</option>
-                    </select>
-                </div>
-                <div class="form-group full-width" style="margin-top: 8px;">
-                    <button type="submit" class="btn" id="reg-submit-btn">Register</button>
-                </div>
-            </form>
-            <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
-                <a href="#" onclick="showConfirmForm(); return false;">Already have a confirmation code?</a>
-            </p>
-        </div>
-
-        <div id="confirm-section">
-            <p id="confirm-sent-msg">A 6-digit confirmation code has been sent to <strong id="confirm-email-display"></strong>.</p>
-            <p id="confirm-manual-msg" style="display:none;">Enter your email and confirmation code:</p>
-            <input type="email" id="confirm-email" placeholder="Email address" style="display:none; width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; font-size:1em;">
-            <div class="confirm-input">
-                <input type="text" id="confirm-code" maxlength="6" pattern="\d{6}" placeholder="000000" inputmode="numeric">
-                <button class="btn btn-secondary" onclick="submitConfirmation()">Confirm</button>
-            </div>
-            <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
-                <a href="#" onclick="showRegForm(); return false;">Go back to registration form</a>
-            </p>
-        </div>
-
-        <div id="reg-message" class="form-message"></div>
+        <p>Registration is handled through ClubSpot. Entry is free!</p>
+        <p style="margin-top: 14px;">
+            <a class="btn" href="https://theclubspot.com/register/regatta/ji2NBpKH5G/class" target="_blank">Register on ClubSpot</a>
+        </p>
     </div>
 
     <div class="section">
@@ -364,15 +251,11 @@
     </div>
 
     <div class="section">
-        <h2>Entrants <span class="entrant-count" id="entrant-count"></span></h2>
-        <table class="entrants-table" id="entrants-table">
-            <thead>
-                <tr><th>#</th><th>Name</th><th>Sail No.</th><th>WCAA</th><th>Club</th><th>Days</th></tr>
-            </thead>
-            <tbody id="entrants-body">
-                <tr><td colspan="5" style="text-align:center; color:#888;">Loading...</td></tr>
-            </tbody>
-        </table>
+        <h2>Entrants</h2>
+        <p>View the current entry list on ClubSpot:</p>
+        <p style="margin-top: 14px;">
+            <a class="btn btn-secondary" href="https://theclubspot.com/regatta/ji2NBpKH5G/#entry-list" target="_blank">View Entry List</a>
+        </p>
     </div>
 
 </div>
@@ -381,206 +264,6 @@
     Powered by <a href="../../">wstracker.org</a>
 </div>
 
-<script>
-const EVENT_ID = 6;
-const API_BASE = `/api/event/${EVENT_ID}`;
-
-function showMessage(text, type) {
-    const el = document.getElementById('reg-message');
-    el.textContent = text;
-    el.className = 'form-message ' + type;
-}
-
-function clearMessage() {
-    const el = document.getElementById('reg-message');
-    el.className = 'form-message';
-    el.textContent = '';
-}
-
-function showRegForm() {
-    document.getElementById('reg-form-section').style.display = '';
-    document.getElementById('confirm-section').style.display = 'none';
-    clearMessage();
-}
-
-function showConfirmForm() {
-    document.getElementById('reg-form-section').style.display = 'none';
-    document.getElementById('confirm-section').style.display = '';
-    document.getElementById('confirm-sent-msg').style.display = 'none';
-    document.getElementById('confirm-manual-msg').style.display = '';
-    document.getElementById('confirm-email').style.display = '';
-    document.getElementById('confirm-email').value = '';
-    document.getElementById('confirm-code').value = '';
-    clearMessage();
-}
-
-function validateDOB(s) {
-    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (!m) return false;
-    const day = parseInt(m[1]), month = parseInt(m[2]), year = parseInt(m[3]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
-    if (year < 1920 || year > 2026) return false;
-    const maxDay = new Date(year, month, 0).getDate();
-    if (day > maxDay) return false;
-    return true;
-}
-
-async function submitRegistration(e) {
-    e.preventDefault();
-    clearMessage();
-    const btn = document.getElementById('reg-submit-btn');
-    btn.disabled = true;
-    btn.textContent = 'Submitting...';
-
-    const data = {
-        name: document.getElementById('reg-name').value.trim(),
-        email: document.getElementById('reg-email').value.trim(),
-        phone: document.getElementById('reg-phone').value.trim(),
-        sail_number: document.getElementById('reg-sail').value.trim(),
-        wcaa: document.getElementById('reg-wcaa').value.trim(),
-        club: document.getElementById('reg-club').value.trim(),
-        gender: document.getElementById('reg-gender').value,
-        weight: document.getElementById('reg-weight').value ? parseFloat(document.getElementById('reg-weight').value) : null,
-        dob: document.getElementById('reg-dob').value,
-        days: document.getElementById('reg-days').value,
-    };
-
-    if (!data.name || !data.email) {
-        showMessage('Name and email are required.', 'error');
-        btn.disabled = false;
-        btn.textContent = 'Register';
-        return false;
-    }
-
-    if (data.dob && !validateDOB(data.dob)) {
-        showMessage('Date of birth must be DD/MM/YYYY with valid day (1-31), month (1-12), year (1920-2026).', 'error');
-        btn.disabled = false;
-        btn.textContent = 'Register';
-        return false;
-    }
-
-    try {
-        const resp = await fetch(`${API_BASE}/register`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        });
-        const result = await resp.json();
-        if (resp.ok && result.success) {
-            if (result.already_confirmed) {
-                showMessage('Registration updated successfully!', 'success');
-                btn.disabled = false;
-                btn.textContent = 'Register';
-                loadEntrants();
-            } else {
-                document.getElementById('reg-form-section').style.display = 'none';
-                document.getElementById('confirm-section').style.display = '';
-                document.getElementById('confirm-sent-msg').style.display = '';
-                document.getElementById('confirm-manual-msg').style.display = 'none';
-                document.getElementById('confirm-email-display').textContent = data.email;
-                document.getElementById('confirm-email').value = data.email;
-                document.getElementById('confirm-email').style.display = 'none';
-                showMessage(result.message || 'Confirmation code sent to your email.', 'info');
-            }
-        } else {
-            showMessage(result.error || 'Registration failed.', 'error');
-            btn.disabled = false;
-            btn.textContent = 'Register';
-        }
-    } catch (err) {
-        showMessage('Network error. Please try again.', 'error');
-        btn.disabled = false;
-        btn.textContent = 'Register';
-    }
-    return false;
-}
-
-async function submitConfirmation() {
-    clearMessage();
-    const email = document.getElementById('confirm-email').value.trim();
-    const code = document.getElementById('confirm-code').value.trim();
-    if (!email) {
-        showMessage('Please enter your email address.', 'error');
-        return;
-    }
-    if (!code || code.length !== 6) {
-        showMessage('Please enter the 6-digit code.', 'error');
-        return;
-    }
-    try {
-        const resp = await fetch(`${API_BASE}/register/confirm`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({email: email, code: code})
-        });
-        const result = await resp.json();
-        if (resp.ok && result.success) {
-            document.getElementById('confirm-section').style.display = 'none';
-            document.getElementById('reg-form-section').style.display = '';
-            document.getElementById('reg-form').reset();
-            document.getElementById('reg-submit-btn').disabled = false;
-            document.getElementById('reg-submit-btn').textContent = 'Register';
-            showMessage('Registration confirmed!', 'success');
-            loadEntrants();
-        } else {
-            showMessage(result.error || 'Confirmation failed.', 'error');
-        }
-    } catch (err) {
-        showMessage('Network error. Please try again.', 'error');
-    }
-}
-
-async function loadEntrants() {
-    try {
-        const resp = await fetch(`${API_BASE}/registrations`);
-        const data = await resp.json();
-        const regs = data.registrations || [];
-        const tbody = document.getElementById('entrants-body');
-        const countEl = document.getElementById('entrant-count');
-        countEl.textContent = `(${regs.length})`;
-        if (regs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#888;">No entrants yet. Be the first to register!</td></tr>';
-            return;
-        }
-        tbody.innerHTML = regs.map((r, i) =>
-            `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.sail_number || '')}</td><td>${esc(r.wcaa || '')}</td><td>${esc(r.club || '')}</td><td>${esc(r.days || '')}</td></tr>`
-        ).join('');
-    } catch (err) {
-        document.getElementById('entrants-body').innerHTML = '<tr><td colspan="6" style="text-align:center; color:#c62828;">Failed to load entrants.</td></tr>';
-    }
-}
-
-function esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
-
-// Enter key on code input triggers confirm
-document.getElementById('confirm-code').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') submitConfirmation();
-});
-
-// Auto-confirm from email link: ?confirm=email&code=123456
-(function() {
-    const params = new URLSearchParams(window.location.search);
-    const confirmEmail = params.get('confirm');
-    const confirmCode = params.get('code');
-    if (confirmEmail && confirmCode) {
-        // Hide registration form, show confirm section with auto-submit
-        document.getElementById('reg-form-section').style.display = 'none';
-        document.getElementById('confirm-section').style.display = '';
-        document.getElementById('confirm-email').value = confirmEmail;
-        document.getElementById('confirm-code').value = confirmCode;
-        showMessage('Confirming your registration...', 'info');
-        // Clean URL params without reload
-        window.history.replaceState({}, '', window.location.pathname);
-        submitConfirmation();
-    }
-})();
-
-loadEntrants();
-</script>
 
 </body>
 </html>
