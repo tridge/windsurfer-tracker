@@ -2372,6 +2372,9 @@
                             .setContent(content)
                             .openOn(map);
                     }
+
+                    // Show cursor on graphs at this timestamp
+                    showMapHoverGraphCursor(closest.ts);
                 };
 
                 // Desktop: mousemove for live tracking
@@ -2388,6 +2391,7 @@
                         map.closePopup(trackHoverPopup);
                         trackHoverPopup = null;
                     }
+                    clearMapHoverGraphCursor();
                 });
 
                 // Add current position marker
@@ -3759,6 +3763,87 @@
 
             // Redraw graphs with highlight line
             drawGraphsWithHighlight(mouseX, ratio);
+        }
+
+        // Map hover → graph cursor: draw a vertical line on all visible graphs
+        let mapHoverCursorActive = false;
+        let pendingMapCursorUpdate = null;
+
+        function showMapHoverGraphCursor(timestamp) {
+            // Debounce with requestAnimationFrame
+            if (pendingMapCursorUpdate) {
+                cancelAnimationFrame(pendingMapCursorUpdate);
+            }
+            pendingMapCursorUpdate = requestAnimationFrame(() => {
+                pendingMapCursorUpdate = null;
+                showMapHoverGraphCursorImmediate(timestamp);
+            });
+        }
+
+        function showMapHoverGraphCursorImmediate(timestamp) {
+            if (rangeEndTime <= rangeStartTime) return;
+            const ratio = (timestamp - rangeStartTime) / (rangeEndTime - rangeStartTime);
+            if (ratio < 0 || ratio > 1) {
+                clearMapHoverGraphCursor();
+                return;
+            }
+            mapHoverCursorActive = true;
+
+            // Redraw graphs then overlay cursor line
+            const graphIds = [
+                ['show-speed-graph', 'speed-graph', drawSpeedGraph],
+                ['show-battery-graph', 'battery-graph', drawBatteryGraph],
+                ['show-signal-graph', 'signal-graph', drawSignalGraph],
+                ['show-latency-graph', 'latency-graph', drawLatencyGraph],
+                ['show-heartrate-graph', 'heartrate-graph', drawHeartRateGraph],
+                ['show-accuracy-graph', 'accuracy-graph', drawAccuracyGraph],
+                ['show-satellites-graph', 'satellites-graph', drawSatellitesGraph],
+                ['show-distance-graph', 'distance-graph', drawDistanceGraph],
+            ];
+
+            for (const [checkboxId, canvasId, drawFn] of graphIds) {
+                if (!document.getElementById(checkboxId).checked) continue;
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) continue;
+
+                // Redraw the graph cleanly first
+                drawFn();
+
+                const ctx = canvas.getContext('2d');
+                const rect = canvas.getBoundingClientRect();
+                const x = ratio * rect.width;
+
+                // Draw cursor line on top
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 200, 0, 0.85)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, rect.height);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+        }
+
+        function clearMapHoverGraphCursor() {
+            if (pendingMapCursorUpdate) {
+                cancelAnimationFrame(pendingMapCursorUpdate);
+                pendingMapCursorUpdate = null;
+            }
+            if (!mapHoverCursorActive) return;
+            mapHoverCursorActive = false;
+
+            // Redraw all visible graphs to clear the cursor overlay
+            if (document.getElementById('show-speed-graph').checked) drawSpeedGraph();
+            if (document.getElementById('show-battery-graph').checked) drawBatteryGraph();
+            if (document.getElementById('show-signal-graph').checked) drawSignalGraph();
+            if (document.getElementById('show-latency-graph').checked) drawLatencyGraph();
+            if (document.getElementById('show-heartrate-graph').checked) drawHeartRateGraph();
+            if (document.getElementById('show-accuracy-graph').checked) drawAccuracyGraph();
+            if (document.getElementById('show-satellites-graph').checked) drawSatellitesGraph();
+            if (document.getElementById('show-distance-graph').checked) drawDistanceGraph();
         }
 
         function drawGraphsWithHighlight(highlightX, ratio) {
