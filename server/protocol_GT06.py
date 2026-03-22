@@ -473,6 +473,14 @@ class GT06Listener:
             self._log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
             self._send(gt_conn, gt06_make_response(protocol, serial))
 
+            # Close any stale connections for the same device
+            my_fd = gt_conn.sock.fileno()
+            stale_fds = [fd for fd, c in self.connections.items()
+                         if c.sailor_id == gt_conn.sailor_id and fd != my_fd]
+            for fd in stale_fds:
+                self._log(f"[GT06] Closing stale connection for {gt_conn.sailor_id}")
+                self._disconnect(fd)
+
             # Apply device name from gt06.json if configured (keyed by did:IMEI)
             dev_name = dev_cfg.get("name")
             if dev_name:
@@ -757,6 +765,7 @@ class GT06Listener:
             self.idle_sailors.discard(sailor_id)
             self.active_sailors.add(sailor_id)
 
+        found = False
         for gt_conn in self.connections.values():
             if gt_conn.sailor_id == sailor_id:
                 gt_conn.idle = idle
@@ -787,11 +796,12 @@ class GT06Listener:
                         overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
                         self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
                 self._log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}")
-                return True
-        # Only log if this sailor_id has been seen by this listener before
-        if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
-            self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
-        return False
+                found = True
+        if not found:
+            # Only log if this sailor_id has been seen by this listener before
+            if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+                self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
+        return found
 
     def _on_readable(self, fd):
         """Handle readable event on a GT06 connection."""

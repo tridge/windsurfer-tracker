@@ -1046,6 +1046,7 @@ class JT808Listener:
             self.idle_sailors.discard(sailor_id)
             self.active_sailors.add(sailor_id)
 
+        found = False
         for jt_conn in self.connections.values():
             if jt_conn.sailor_id == sailor_id:
                 jt_conn.idle = idle
@@ -1080,10 +1081,11 @@ class JT808Listener:
                         overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
                         self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
                 self._log(f"[JT808] {'Idle' if idle else 'Active'} mode for {sailor_id}")
-                return True
-        if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
-            self._log(f"[JT808] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
-        return False
+                found = True
+        if not found:
+            if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+                self._log(f"[JT808] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
+        return found
 
     # --- TCP / selector plumbing ---
 
