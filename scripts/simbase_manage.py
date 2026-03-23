@@ -144,7 +144,7 @@ def cmd_status(session, sims):
 
 def cmd_enable(session, sims, dry_run=False):
     '''Activate all inactive/suspended SIMs.'''
-    targets = [s for s in sims if get_sim_state(s) != 'enabled']
+    targets = [s for s in sims if get_sim_state(s) not in ('enabled', 'enabling')]
     already = len(sims) - len(targets)
 
     if not targets:
@@ -162,9 +162,9 @@ def cmd_enable(session, sims, dry_run=False):
 
     def activate_one(s):
         try:
-            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/activate')
+            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/state', json={'state': 'enabled'})
             resp.raise_for_status()
-            print(f'  activated {get_sim_label(s)}')
+            print(f'  enabled {get_sim_label(s)}')
             ok[0] += 1
         except requests.RequestException as e:
             print(f'  ERROR activating {get_sim_label(s)}: {e}', file=sys.stderr)
@@ -178,7 +178,7 @@ def cmd_enable(session, sims, dry_run=False):
 
 def cmd_disable(session, sims, dry_run=False):
     '''Deactivate all active SIMs.'''
-    targets = [s for s in sims if get_sim_state(s) == 'enabled']
+    targets = [s for s in sims if get_sim_state(s) in ('enabled', 'enabling')]
     already = len(sims) - len(targets)
 
     if not targets:
@@ -196,9 +196,9 @@ def cmd_disable(session, sims, dry_run=False):
 
     def deactivate_one(s):
         try:
-            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/deactivate')
+            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/state', json={'state': 'disabled'})
             resp.raise_for_status()
-            print(f'  deactivated {get_sim_label(s)}')
+            print(f'  disabled {get_sim_label(s)}')
             ok[0] += 1
         except requests.RequestException as e:
             print(f'  ERROR deactivating {get_sim_label(s)}: {e}', file=sys.stderr)
