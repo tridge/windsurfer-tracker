@@ -8,6 +8,7 @@ All server interactions happen through callbacks passed to GT06Listener.
 import fcntl
 import json
 import math
+import re
 import selectors
 import socket
 import struct
@@ -207,6 +208,8 @@ class GT06Connection:
         self.battery = -1
         self.signal = -1
         self.charging = None
+        self.battery_voltage = None             # actual voltage from STATUS (float)
+        self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
         self.cmd_serial = 0
         self.assist_active = False
         self.idle = False
@@ -610,6 +613,7 @@ class GT06Listener:
                 stopped=gt_conn.idle,
                 idle=gt_conn.idle,
                 did=gt_conn.imei,
+                battery_voltage=gt_conn.battery_voltage,
             )
 
         elif protocol == 0x13:
@@ -626,6 +630,8 @@ class GT06Listener:
             gt_conn.last_hbt_time = time.monotonic()
 
             bat_str = f"{gt_conn.battery}%" if gt_conn.battery >= 0 else "?"
+            if gt_conn.battery_voltage is not None:
+                bat_str += f"/{gt_conn.battery_voltage}V"
             if gt_conn.charging:
                 bat_str += "+"
             sig_str = f"{gt_conn.signal}/4" if gt_conn.signal >= 0 else "?"
@@ -660,6 +666,7 @@ class GT06Listener:
                         stopped=gt_conn.idle,
                         idle=gt_conn.idle,
                         did=gt_conn.imei,
+                        battery_voltage=gt_conn.battery_voltage,
                     )
 
         elif protocol in (0x16, 0x23):
@@ -718,6 +725,7 @@ class GT06Listener:
                         nsats=loc["satellites"],
                         charging=gt_conn.charging,
                         did=gt_conn.imei,
+                        battery_voltage=gt_conn.battery_voltage,
                     )
 
         elif protocol == 0x15:
@@ -727,6 +735,11 @@ class GT06Listener:
             if len(data) >= 5:
                 text = " " + data[5:].decode("ascii", errors="replace")
             self._log(f"[GT06] Command ACK from {label}:{text}")
+            # Parse battery voltage from STATUS response
+            vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
+            if vmatch:
+                gt_conn.battery_voltage = float(vmatch.group(1))
+                self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V")
             gt_conn.cmd_pending = None
             gt_conn.cmd_pending_frame = None
             self._send_next_cmd(gt_conn)
@@ -890,3 +903,7 @@ class GT06Listener:
                     self._check_cmd_delivery(fd, gt_conn, now)
                 # Check LOC/HBT rates
                 self._check_rates(fd, gt_conn, now)
+                # Poll STATUS for battery voltage
+                if now - gt_conn.last_status_time >= 60:
+                    self._queue_commands(gt_conn, ["STATUS#"])
+                    gt_conn.last_status_time = now

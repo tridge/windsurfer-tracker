@@ -885,7 +885,8 @@ class PositionTracker:
                          skip_log: bool = False, stopped: bool = False,
                          pos_array: list | None = None, user_overrides: dict | None = None,
                          idle: bool = False, charging: bool | None = None,
-                         sq: int = 0, did: str | None = None) -> bool:
+                         sq: int = 0, did: str | None = None,
+                         battery_voltage: float | None = None) -> bool:
         """
         Process a position update from any source (UDP or HTTP).
         Returns True if this was a new position, False if duplicate.
@@ -920,6 +921,8 @@ class PositionTracker:
                     pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
+                if battery_voltage is not None:
+                    pos_data["bat_v"] = battery_voltage
                 if os_version:
                     pos_data["os"] = os_version
                 # Preserve existing lat/lon if user previously tracked
@@ -929,6 +932,8 @@ class PositionTracker:
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
+            if battery_voltage is not None:
+                bat_str += f"/{battery_voltage}V"
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
@@ -973,6 +978,8 @@ class PositionTracker:
                     pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
+                if battery_voltage is not None:
+                    pos_data["bat_v"] = battery_voltage
                 if os_version:
                     pos_data["os"] = os_version
                 # Preserve existing lat/lon if user previously tracked
@@ -982,6 +989,8 @@ class PositionTracker:
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
+            if battery_voltage is not None:
+                bat_str += f"/{battery_voltage}V"
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
@@ -1011,6 +1020,8 @@ class PositionTracker:
                     track_entry["did"] = did
                 if charging is not None:
                     track_entry["chg"] = charging
+                if battery_voltage is not None:
+                    track_entry["bat_v"] = battery_voltage
                 if battery_drain_rate is not None:
                     track_entry["bdr"] = battery_drain_rate
                 if os_version:
@@ -1049,6 +1060,8 @@ class PositionTracker:
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
         stopped_marker = " [STOPPED]" if stopped else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
+        if battery_voltage is not None:
+            bat_str += f"/{battery_voltage}V"
         if charging:
             bat_str += "+"
         sig_str = f"{signal}/4" if signal >= 0 else "?"
@@ -1109,6 +1122,8 @@ class PositionTracker:
                     pos_data["did"] = did
                 if charging is not None:
                     pos_data["chg"] = charging
+                if battery_voltage is not None:
+                    pos_data["bat_v"] = battery_voltage
                 if battery_drain_rate is not None:
                     pos_data["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
@@ -1165,6 +1180,8 @@ class PositionTracker:
                     track_entry["did"] = did
                 if charging is not None:
                     track_entry["chg"] = charging
+                if battery_voltage is not None:
+                    track_entry["bat_v"] = battery_voltage
                 if battery_drain_rate is not None:
                     track_entry["bdr"] = battery_drain_rate
                 if heart_rate is not None and heart_rate > 0:
@@ -1225,7 +1242,8 @@ class EventTracker:
                          skip_log: bool = False, pos_array: list | None = None,
                          stopped: bool = False, idle: bool = False,
                          charging: bool | None = None, sq: int = 0,
-                         did: str | None = None) -> bool:
+                         did: str | None = None,
+                         battery_voltage: float | None = None) -> bool:
         """Process a position update for this event."""
         recv_time = time.time()
 
@@ -1238,7 +1256,8 @@ class EventTracker:
                 src_ip=src_ip, source=f"[E{self.eid}]{source}",
                 os_version=os_version, idle=True,
                 user_overrides=self.user_overrides,
-                charging=charging, sq=sq, did=did
+                charging=charging, sq=sq, did=did,
+                battery_voltage=battery_voltage
             )
 
         # If 1Hz array format, log as single entry with pos array (more compact)
@@ -1262,6 +1281,8 @@ class EventTracker:
                 track_entry["did"] = did
             if charging is not None:
                 track_entry["chg"] = charging
+            if battery_voltage is not None:
+                track_entry["bat_v"] = battery_voltage
             if battery_drain_rate is not None:
                 track_entry["bdr"] = battery_drain_rate
             if heart_rate is not None and heart_rate > 0:
@@ -1305,7 +1326,8 @@ class EventTracker:
             user_overrides=self.user_overrides,
             charging=charging,
             sq=sq,
-            did=did
+            did=did,
+            battery_voltage=battery_voltage
         )
 
         # Write positions with event-specific user overrides
