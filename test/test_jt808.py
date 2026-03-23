@@ -72,7 +72,7 @@ def test_authentication(jt808_client):
 
 
 def test_login_defaults_to_idle(jt808_client):
-    """First-ever login should default to idle (60s interval tracking control)."""
+    """First-ever login should default to idle (interval=0 tracking control)."""
     frames = jt808_client.send_login()
     # Look for 0x8202 (tracking control) in responses
     found_tracking = False
@@ -81,7 +81,7 @@ def test_login_defaults_to_idle(jt808_client):
         if parsed and parsed[0] == 0x8202:
             body = parsed[3]
             interval = struct.unpack(">H", body[0:2])[0]
-            assert interval == 60, f"Expected idle interval 60, got {interval}"
+            assert interval == 0, f"Expected idle interval 0, got {interval}"
             found_tracking = True
     assert found_tracking, "Expected 0x8202 tracking control after login"
 
@@ -208,7 +208,7 @@ def test_heartbeat_ack(jt808_client):
 # ---------------------------------------------------------------------------
 
 def test_stop_sets_idle(jt808_client, http_client, server):
-    """Admin stop should send idle tracking control (60s) to JT808 device."""
+    """Admin stop should send idle tracking control (interval=0) to JT808 device."""
     imei = "862831041555555"
     _start_device(jt808_client, http_client, imei, "J555555")
 
@@ -224,7 +224,7 @@ def test_stop_sets_idle(jt808_client, http_client, server):
         parsed = jt808_client._parse_frame(f)
         if parsed and parsed[0] == 0x8202:
             interval = struct.unpack(">H", parsed[3][0:2])[0]
-            assert interval == 60, f"Expected idle interval 60, got {interval}"
+            assert interval == 0, f"Expected idle interval 0, got {interval}"
             found = True
     assert found, f"Expected 0x8202 tracking control, got: {[jt808_client._parse_frame(f)[0] if jt808_client._parse_frame(f) else None for f in frames]}"
 
@@ -410,7 +410,7 @@ def test_reconnect_stays_idle(jt808_client, server):
         parsed = jt808_client._parse_frame(f)
         if parsed and parsed[0] == 0x8202:
             interval = struct.unpack(">H", parsed[3][0:2])[0]
-            if interval == 60:
+            if interval == 0:
                 found_idle = True
     assert found_idle, "Expected idle 0x8202 on reconnect"
 
@@ -460,7 +460,7 @@ def test_stop_all_includes_jt808(jt808_client, http_client, server):
         parsed = jt808_client._parse_frame(f)
         if parsed and parsed[0] == 0x8202:
             interval = struct.unpack(">H", parsed[3][0:2])[0]
-            if interval == 60:
+            if interval == 0:
                 found = True
     assert found, "Expected idle 0x8202 from stop-all"
 
