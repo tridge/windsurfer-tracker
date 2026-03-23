@@ -414,9 +414,9 @@ class GT06Listener:
             if gt_conn.rate_retry_count < 2:
                 gt_conn.rate_retry_count += 1
                 if gt_conn.idle:
-                    cmds = ["TIMER,60,60#", "SUP,60#"]
+                    cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
                 else:
-                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#"]
                 self._log(f"[GT06] Rate mismatch for {label}: "
                     f"expected {expected_loc_rate:.3f}/s, actual {actual_loc_rate:.3f}/s "
                     f"({gt_conn.loc_count} LOC in {elapsed:.0f}s) — "
@@ -502,14 +502,14 @@ class GT06Listener:
             if gt_conn.sailor_id in self.active_sailors:
                 # Admin explicitly started this device — resume active tracking
                 gt_conn.idle = False
-                cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#", "HBT,15,15#"]
+                cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#", "HBT,15,15#"]
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 # Default to idle (including first-ever connection)
                 gt_conn.idle = True
                 self.idle_sailors.add(gt_conn.sailor_id)
-                cmds = ["TIMER,60,60#", "SUP,60#", "HBT,15,15#"]
-                self._reset_rate_monitoring(gt_conn, 60)
+                cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#", "HBT,15,15#"]
+                self._reset_rate_monitoring(gt_conn, 1800)
             self._queue_commands(gt_conn, cmds)
             self._log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
 
@@ -754,9 +754,9 @@ class GT06Listener:
     def set_idle(self, sailor_id, idle):
         """Set idle state for a GT06 device by sailor_id.
 
-        When idle=True: set SUP,60# (60-min static interval) + TIMER,60,60# (max GPS
-        interval) so stationary devices barely report.  Heartbeats still arrive every minute.
-        When idle=False: restore normal TIMER + SUP,1# so the device reports frequently.
+        When idle=True: use SENDS,1# (GPS sleeps after 1 min no vibration) + long TIMER T2
+        (1800s) + disable motion alarms so device only sends heartbeats.
+        When idle=False: restore normal TIMER + SENDS,0# (GPS always on).
         """
         if idle:
             self.idle_sailors.add(sailor_id)
@@ -773,10 +773,10 @@ class GT06Listener:
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
                 if idle:
-                    cmds = ["TIMER,60,60#", "SUP,60#"]
-                    self._reset_rate_monitoring(gt_conn, 60)
+                    cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
+                    self._reset_rate_monitoring(gt_conn, 1800)
                 else:
-                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SUP,1#"]
+                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#"]
                     self._reset_rate_monitoring(gt_conn, self.interval)
                 self._queue_commands(gt_conn, cmds)
                 # Immediately update tracker so UI reflects idle/active state
