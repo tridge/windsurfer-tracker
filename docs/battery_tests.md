@@ -72,3 +72,19 @@ Same 14 trackers left idle for 9h 38m after tracking ended (20:58 → 06:36+1d).
 | Tracker12   |  90%  | 75% |  15%  | 1.6%/hr |       64h |
 | Tracker13   |  87%  | 63% |  24%  | 2.5%/hr |       40h |
 | Tracker14   |  89%  | 62% |  27%  | 2.8%/hr |       36h |
+
+## W07C Continuous Tracking (2026-03-24)
+
+W07C device (3000mAh battery) on a turntable with continuous GPS tracking for 24 hours.
+
+| Parameter     | Value  |
+|---------------|--------|
+| Battery       | 3000mAh |
+| Start voltage | 4.10V  |
+| End voltage   | 3.30V  |
+| Duration      | 24h    |
+| Mode          | Continuous tracking |
+
+**Notes:** Voltage readings show frequent single-sample downward spikes (0.02–0.14V)
+caused by voltage sag during cellular TX. A median(9) filter on the STATUS voltage
+readings cleanly removes these spikes without distorting the underlying discharge curve.

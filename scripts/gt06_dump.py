@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 # Add server dir to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
-from tracker_server import (
+from protocol_GT06 import (
     gt06_parse_login,
     gt06_parse_location,
     gt06_parse_heartbeat,
