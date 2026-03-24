@@ -24,7 +24,7 @@ def voltage_to_percent(voltage):
     table = _W07C_DISCHARGE
     if voltage >= table[0][0]:
         return 100.0
-    if voltage <= table[-1][0]:
+    if voltage < table[-1][0]:
         return 0.0
     for i in range(len(table) - 1):
         v_hi, p_hi = table[i]

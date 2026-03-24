@@ -21,6 +21,31 @@ from pathlib import Path
 # Battery level mapping: GT06 reports 0-6, server expects 0-100
 _GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
 
+# Empirical discharge curve for W07C (3000mAh), derived from 24h turntable test.
+# Pairs of (voltage, percentage), descending voltage, evenly spaced in time.
+_W07C_DISCHARGE = [
+    (4.14, 100), (4.03, 95), (3.99, 90), (3.97, 85), (3.93, 80),
+    (3.89, 75),  (3.86, 70), (3.82, 65), (3.77, 60), (3.72, 55),
+    (3.67, 50),  (3.65, 45), (3.62, 40), (3.60, 35), (3.58, 30),
+    (3.55, 25),  (3.52, 20), (3.47, 15), (3.44, 10), (3.37, 5),
+]
+
+
+def voltage_to_percent(voltage):
+    """Convert voltage to battery percentage using linear interpolation."""
+    table = _W07C_DISCHARGE
+    if voltage >= table[0][0]:
+        return 100
+    if voltage < table[-1][0]:
+        return 0
+    for i in range(len(table) - 1):
+        v_hi, p_hi = table[i]
+        v_lo, p_lo = table[i + 1]
+        if voltage >= v_lo:
+            frac = (voltage - v_lo) / (v_hi - v_lo)
+            return round(p_lo + frac * (p_hi - p_lo))
+    return 0
+
 
 def _default_log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -739,7 +764,8 @@ class GT06Listener:
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
                 gt_conn.battery_voltage = float(vmatch.group(1))
-                self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V")
+                gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
+                self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
             gt_conn.cmd_pending = None
             gt_conn.cmd_pending_frame = None
             self._send_next_cmd(gt_conn)
