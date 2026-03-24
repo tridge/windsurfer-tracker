@@ -246,6 +246,7 @@ class GT06Connection:
         self.charging = None
         self.battery_voltage = None             # actual voltage from STATUS (float)
         self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
+        self.status_miss_count = 0
         self.cmd_serial = 0
         self.assist_active = False
         self.idle = False
@@ -429,6 +430,11 @@ class GT06Listener:
         """Check LOC/HBT rates and retry or disconnect if device ignores commands."""
         if gt_conn.rate_check_time == 0:
             return
+        # Don't check rates while commands are still being delivered
+        if gt_conn.cmd_queue or gt_conn.cmd_pending is not None:
+            gt_conn.rate_check_time = now  # reset grace period
+            gt_conn.loc_count = 0
+            return
 
         elapsed = now - gt_conn.rate_check_time
         if elapsed < 30:
@@ -467,9 +473,15 @@ class GT06Listener:
                 gt_conn.loc_count = 0
                 gt_conn.hbt_count = 0
             else:
-                self._log(f"[GT06] Rate mismatch for {label} after 2 retries — disconnecting")
-                self._disconnect(fd)
-                return
+                if not gt_conn.idle:
+                    self._log(f"[GT06] Rate mismatch for {label} after 2 retries — disconnecting")
+                    self._disconnect(fd)
+                    return
+                else:
+                    self._log(f"[GT06] Rate mismatch for {label} after 2 retries (idle, not disconnecting)")
+                    gt_conn.rate_retry_count = 0
+                    gt_conn.rate_check_time = now
+                    gt_conn.loc_count = 0
 
         # Check HBT rate — if no heartbeat for > 3x expected interval and we're getting LOC
         if gt_conn.last_hbt_time > 0 and gt_conn.loc_count > 0:
@@ -778,6 +790,7 @@ class GT06Listener:
             if vmatch:
                 gt_conn.battery_voltage = float(vmatch.group(1))
                 gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
+                gt_conn.status_miss_count = 0
                 self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
             # Detect GPS still active during idle — re-send power-off commands
             if gt_conn.idle and 'GPS:Fail positioning' in text:
@@ -948,5 +961,11 @@ class GT06Listener:
                 self._check_rates(fd, gt_conn, now)
                 # Poll STATUS for battery voltage
                 if now - gt_conn.last_status_time >= 60:
+                    gt_conn.status_miss_count += 1
+                    if gt_conn.status_miss_count >= 3:
+                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                        self._log(f"[GT06] No STATUS reply from {label} after 3 attempts — disconnecting")
+                        self._disconnect(fd)
+                        continue
                     self._queue_commands(gt_conn, ["STATUS#"])
                     gt_conn.last_status_time = now
