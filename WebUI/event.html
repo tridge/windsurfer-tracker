@@ -1313,9 +1313,6 @@
                 <button class="admin-action-btn primary" onclick="startAllIdleUsers()">
                     ▶ All START
                 </button>
-                <button class="admin-action-btn danger" onclick="shutdownAllIdleUsers()">
-                    ⏻ All SHUTDOWN
-                </button>
             </div>
         </div>
         
@@ -3048,33 +3045,6 @@
             }
         }
 
-        // Send remote shutdown command to all idle trackers
-        async function shutdownAllIdleUsers() {
-            const confirmation = prompt('This will SHUTDOWN the tracker app on all idle devices.\n\nType "shutdown" to confirm:');
-            if (confirmation !== 'shutdown') {
-                if (confirmation !== null) alert('Shutdown cancelled. You must type "shutdown" exactly.');
-                return;
-            }
-
-            try {
-                const response = await fetch(`${EVENT_API}/admin/shutdown-all`, {
-                    method: 'POST',
-                    headers: {
-                        'X-Admin-Password': adminPassword
-                    }
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert(`Shutdown command sent to ${result.shutdown_count} idle tracker(s).`);
-                } else {
-                    alert(`Failed to send shutdown-all command: ${result.error || 'Unknown error'}`);
-                }
-            } catch (error) {
-                console.error('Error sending shutdown-all command:', error);
-                alert(`Error sending shutdown-all command: ${error.message}`);
-            }
-        }
-
         // Send remote start command to a single idle user
         async function startUser(userId) {
             if (!confirm(`Send start command to ${userId}? Their tracker will restart within 90 seconds.`)) {
@@ -3098,34 +3068,6 @@
             } catch (error) {
                 console.error('Error sending start command:', error);
                 alert(`Error sending start command: ${error.message}`);
-            }
-        }
-
-        // Send remote shutdown command to a single user
-        async function shutdownUser(userId) {
-            const confirmation = prompt(`Shutdown tracker for ${userId}? Their app will close.\n\nType "yes" to confirm:`);
-            if (confirmation !== 'yes') {
-                if (confirmation !== null) alert('Shutdown cancelled. You must type "yes" exactly.');
-                return;
-            }
-
-            try {
-                const response = await fetch(`${EVENT_API}/admin/shutdown/${encodeURIComponent(userId)}`, {
-                    method: 'POST',
-                    headers: {
-                        'X-Admin-Password': adminPassword
-                    }
-                });
-                const result = await response.json();
-                if (result.success) {
-                    map.closePopup();
-                    alert(`Shutdown command sent to ${userId}.`);
-                } else {
-                    alert(`Failed to send shutdown command: ${result.error || 'Unknown error'}`);
-                }
-            } catch (error) {
-                console.error('Error sending shutdown command:', error);
-                alert(`Error sending shutdown command: ${error.message}`);
             }
         }
 
@@ -4267,7 +4209,6 @@
             const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser('${id}')">Edit</button>` : '';
             const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser('${id}')">Stop</button>` : '';
             const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser('${id}')">Start</button>` : '';
-            const shutdownBtn = (adminMode && sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();shutdownUser('${id}')">Shutdown</button>` : '';
             const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser('${id}')">Cancel Assist</button>` : '';
 
             const flg = sailor.flg || {};
@@ -4296,7 +4237,7 @@
 
             const content = `
                 <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>
-                ${editBtn}${stopBtn}${startBtn}${shutdownBtn}
+                ${editBtn}${stopBtn}${startBtn}
                 ${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}
                 ${infoLine}<br>
                 Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
@@ -4447,8 +4388,6 @@
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
                 const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
                 const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="startUser('${id}')">Start</button>` : '';
-                const shutdownBtn = (adminMode && sailor.idle) ? `<button class="popup-stop-btn" onclick="shutdownUser('${id}')">Shutdown</button>` : '';
-
                 const versionStr = sailor.ver || 'Unknown';
                 const osStr = sailor.os || '';
                 const osLine = (adminMode && osStr) ? `<br>OS: <span style="color:#666;font-size:11px">${osStr}</span>` : '';
@@ -4483,7 +4422,7 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${startBtn}${shutdownBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${startBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
                     ${sailor.spd !== undefined ? `Speed: ${sailor.spd.toFixed(1)} kn<br>` : ''}
                     ${sailor.hdg !== undefined ? `Heading: ${sailor.hdg}°<br>` : ''}
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>
