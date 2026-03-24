@@ -162,7 +162,7 @@ def gt06_parse_heartbeat(data):
     result = {}
     if len(data) >= 1:
         info = data[0]
-        result["charging"] = bool(info & 0x08)
+        result["charging"] = bool(info & 0x04)
     if len(data) >= 2:
         vlevel = data[1]
         result["battery"] = _GT06_BATTERY_MAP.get(vlevel, 0)
