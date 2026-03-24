@@ -31,6 +31,15 @@ _W07C_DISCHARGE = [
 ]
 
 
+# Commands to send when entering idle mode
+_IDLE_CMDS = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
+
+
+def _active_cmds(interval):
+    """Commands to send when entering active tracking mode."""
+    return [f"TIMER,{interval},{interval}#", "SENDS,0#"]
+
+
 def voltage_to_percent(voltage):
     """Convert voltage to battery percentage using linear interpolation."""
     table = _W07C_DISCHARGE
@@ -442,9 +451,9 @@ class GT06Listener:
             if gt_conn.rate_retry_count < 2:
                 gt_conn.rate_retry_count += 1
                 if gt_conn.idle:
-                    cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
+                    cmds = list(_IDLE_CMDS)
                 else:
-                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#"]
+                    cmds = _active_cmds(self.interval)
                 self._log(f"[GT06] Rate mismatch for {label}: "
                     f"expected {expected_loc_rate:.3f}/s, actual {actual_loc_rate:.3f}/s "
                     f"({gt_conn.loc_count} LOC in {elapsed:.0f}s) — "
@@ -530,13 +539,13 @@ class GT06Listener:
             if gt_conn.sailor_id in self.active_sailors:
                 # Admin explicitly started this device — resume active tracking
                 gt_conn.idle = False
-                cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#", "HBT,15,15#"]
+                cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 # Default to idle (including first-ever connection)
                 gt_conn.idle = True
                 self.idle_sailors.add(gt_conn.sailor_id)
-                cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#", "HBT,15,15#"]
+                cmds = list(_IDLE_CMDS) + ["HBT,15,15#"]
                 self._reset_rate_monitoring(gt_conn, 1800)
             self._queue_commands(gt_conn, cmds)
             self._log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
@@ -814,10 +823,10 @@ class GT06Listener:
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
                 if idle:
-                    cmds = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
+                    cmds = list(_IDLE_CMDS)
                     self._reset_rate_monitoring(gt_conn, 1800)
                 else:
-                    cmds = [f"TIMER,{self.interval},{self.interval}#", "SENDS,0#"]
+                    cmds = _active_cmds(self.interval)
                     self._reset_rate_monitoring(gt_conn, self.interval)
                 self._queue_commands(gt_conn, cmds)
                 # Immediately update tracker so UI reflects idle/active state
