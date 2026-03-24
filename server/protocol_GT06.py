@@ -644,7 +644,9 @@ class GT06Listener:
         elif protocol == 0x13:
             # Heartbeat
             hb = gt06_parse_heartbeat(data)
-            if "battery" in hb:
+            if "battery" in hb and gt_conn.battery_voltage is None:
+                # Only use coarse heartbeat level if we don't have a
+                # voltage-based percentage from STATUS
                 gt_conn.battery = hb["battery"]
             if "signal" in hb:
                 gt_conn.signal = hb["signal"]
