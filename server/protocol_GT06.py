@@ -32,12 +32,14 @@ _W07C_DISCHARGE = [
 
 
 # Commands to send when entering idle mode
-_IDLE_CMDS = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#"]
+_IDLE_CMDS = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
+              "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
 
 
 def _active_cmds(interval):
     """Commands to send when entering active tracking mode."""
-    return [f"TIMER,{interval},{interval}#", "SENDS,0#"]
+    return [f"TIMER,{interval},{interval}#", "SENDS,0#",
+            "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
 
 
 def voltage_to_percent(voltage):
@@ -777,6 +779,10 @@ class GT06Listener:
                 gt_conn.battery_voltage = float(vmatch.group(1))
                 gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
                 self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
+            # Detect GPS still active during idle — re-send power-off commands
+            if gt_conn.idle and 'GPS:Fail positioning' in text:
+                self._log(f"[GT06] {label} idle but GPS active — re-sending GPS power-off commands")
+                self._queue_commands(gt_conn, ["SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"])
             gt_conn.cmd_pending = None
             gt_conn.cmd_pending_frame = None
             self._send_next_cmd(gt_conn)
