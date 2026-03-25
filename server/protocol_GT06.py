@@ -222,6 +222,7 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             cfg = json.load(f)
         result = {
             "default_eid": cfg.get("default_eid", 1),
+            "idle_hbt_interval": cfg.get("idle_hbt_interval", 15),
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
@@ -297,7 +298,8 @@ class GT06Listener:
         self.interval = interval
         self.id_prefix = id_prefix
         self.get_tracker = get_tracker_func
-        self.gt06_config = gt06_config or {"default_eid": 1, "devices": {}}
+        self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
+        self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
         self.connections = {}  # fd -> GT06Connection
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
@@ -487,8 +489,9 @@ class GT06Listener:
         if gt_conn.last_hbt_time > 0 and gt_conn.loc_count > 0:
             hbt_gap = now - gt_conn.last_hbt_time
             if hbt_gap > gt_conn.expected_hbt_interval * 3:
+                hbt_int = self.idle_hbt_interval if gt_conn.idle else 15
                 self._log(f"[GT06] No heartbeat from {label} for {hbt_gap:.0f}s — re-queuing HBT")
-                self._queue_commands(gt_conn, ["HBT,15,15#"])
+                self._queue_commands(gt_conn, [f"HBT,{hbt_int},{hbt_int}#"])
                 gt_conn.last_hbt_time = now  # prevent repeated re-queuing
 
     def _process_frame(self, fd, frame):
@@ -554,12 +557,14 @@ class GT06Listener:
                 # Admin explicitly started this device — resume active tracking
                 gt_conn.idle = False
                 cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
+                gt_conn.expected_hbt_interval = 15
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 # Default to idle (including first-ever connection)
                 gt_conn.idle = True
                 self.idle_sailors.add(gt_conn.sailor_id)
-                cmds = list(_IDLE_CMDS) + ["HBT,15,15#"]
+                cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]
+                gt_conn.expected_hbt_interval = self.idle_hbt_interval
                 self._reset_rate_monitoring(gt_conn, 1800)
             self._queue_commands(gt_conn, cmds)
             self._log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
@@ -842,10 +847,12 @@ class GT06Listener:
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
                 if idle:
-                    cmds = list(_IDLE_CMDS)
+                    cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]
+                    gt_conn.expected_hbt_interval = self.idle_hbt_interval
                     self._reset_rate_monitoring(gt_conn, 1800)
                 else:
-                    cmds = _active_cmds(self.interval)
+                    cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
+                    gt_conn.expected_hbt_interval = 15
                     self._reset_rate_monitoring(gt_conn, self.interval)
                 self._queue_commands(gt_conn, cmds)
                 # Immediately update tracker so UI reflects idle/active state
