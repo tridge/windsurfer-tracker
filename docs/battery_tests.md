@@ -82,9 +82,13 @@ W07C device (3000mAh battery) on a turntable with continuous GPS tracking for 24
 | Battery       | 3000mAh |
 | Start voltage | 4.10V  |
 | End voltage   | 3.30V  |
-| Duration      | 24h    |
+| Duration      | 23h    |
 | Mode          | Continuous tracking |
 
 **Notes:** Voltage readings show frequent single-sample downward spikes (0.02–0.14V)
 caused by voltage sag during cellular TX. A median(9) filter on the STATUS voltage
 readings cleanly removes these spikes without distorting the underlying discharge curve.
+
+## W07C Charging (2026-03-26)
+
+W07C (3000mAh): 5 hours from flat to full charge.
