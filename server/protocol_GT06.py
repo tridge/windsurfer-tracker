@@ -273,6 +273,10 @@ class GT06Connection:
         self.expected_hbt_interval = 15  # expected HBT interval
         self.rate_retry_count = 0     # how many times we've re-sent commands for wrong rate
 
+        # Slow-mode LOC rate — reduce TX when speed is below threshold
+        self.slow_mode = False        # currently in slow LOC mode
+        self.slow_since = 0           # monotonic time speed first dropped below threshold
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -300,6 +304,9 @@ class GT06Listener:
         self.get_tracker = get_tracker_func
         self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
         self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
+        self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
+        self.slow_speed_seconds = self.gt06_config.get("slow_speed_seconds", 20)
+        self.slow_loc_interval = self.gt06_config.get("slow_loc_interval", 3)
         self.connections = {}  # fd -> GT06Connection
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
@@ -463,7 +470,7 @@ class GT06Listener:
                 if gt_conn.idle:
                     cmds = list(_IDLE_CMDS)
                 else:
-                    cmds = _active_cmds(self.interval)
+                    cmds = _active_cmds(self.slow_loc_interval if gt_conn.slow_mode else self.interval)
                 self._log(f"[GT06] Rate mismatch for {label}: "
                     f"expected {expected_loc_rate:.3f}/s, actual {actual_loc_rate:.3f}/s "
                     f"({gt_conn.loc_count} LOC in {elapsed:.0f}s) — "
@@ -637,6 +644,27 @@ class GT06Listener:
             if len(gt_conn.pos_history) > 3:
                 gt_conn.pos_history.pop(0)
 
+            # Adaptive LOC rate: reduce interval when moving slowly
+            if not gt_conn.idle:
+                now_mono = time.monotonic()
+                if speed_knots < self.slow_speed_knots:
+                    if gt_conn.slow_since == 0:
+                        gt_conn.slow_since = now_mono
+                    elif not gt_conn.slow_mode and (now_mono - gt_conn.slow_since >= self.slow_speed_seconds):
+                        gt_conn.slow_mode = True
+                        self._queue_commands(gt_conn, [f"TIMER,{self.slow_loc_interval},{self.slow_loc_interval}#"])
+                        self._reset_rate_monitoring(gt_conn, self.slow_loc_interval)
+                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                        self._log(f"[GT06] {label} slow ({speed_knots:.1f}kn) — LOC interval {self.slow_loc_interval}s")
+                else:
+                    gt_conn.slow_since = 0
+                    if gt_conn.slow_mode:
+                        gt_conn.slow_mode = False
+                        self._queue_commands(gt_conn, [f"TIMER,{self.interval},{self.interval}#"])
+                        self._reset_rate_monitoring(gt_conn, self.interval)
+                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                        self._log(f"[GT06] {label} fast ({speed_knots:.1f}kn) — LOC interval {self.interval}s")
+
             # Save last known position for idle heartbeat updates
             gt_conn.last_lat = loc["lat"]
             gt_conn.last_lon = loc["lon"]
@@ -693,6 +721,18 @@ class GT06Listener:
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
             self._log(f"[GT06] Heartbeat {label}: bat={bat_str} sig={sig_str}{' (idle)' if gt_conn.idle else ''}")
             self._send(gt_conn, gt06_make_response(protocol, serial))
+
+            # Queue STATUS# on heartbeat, but no more than once per 60s
+            now_mono = time.monotonic()
+            if now_mono - gt_conn.last_status_time >= 60:
+                gt_conn.status_miss_count += 1
+                if gt_conn.status_miss_count >= 3:
+                    label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                    self._log(f"[GT06] No STATUS reply from {label} after 3 heartbeats — disconnecting")
+                    self._disconnect(fd)
+                    return
+                self._queue_commands(gt_conn, ["STATUS#"])
+                gt_conn.last_status_time = now_mono
 
             # Update tracker on heartbeat only when GPS is stale (no LOC for 15s+)
             # to avoid overwriting satellite/position data from recent LOC packets
@@ -843,6 +883,8 @@ class GT06Listener:
         for gt_conn in self.connections.values():
             if gt_conn.sailor_id == sailor_id:
                 gt_conn.idle = idle
+                gt_conn.slow_mode = False
+                gt_conn.slow_since = 0
                 # Clear any pending commands from previous state
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
@@ -966,13 +1008,13 @@ class GT06Listener:
                     self._check_cmd_delivery(fd, gt_conn, now)
                 # Check LOC/HBT rates
                 self._check_rates(fd, gt_conn, now)
-                # Poll STATUS for battery voltage
-                if now - gt_conn.last_status_time >= 60:
-                    gt_conn.status_miss_count += 1
-                    if gt_conn.status_miss_count >= 3:
+                # (STATUS# is now sent from heartbeat handler)
+
+                # Disconnect if no heartbeat received for too long
+                if gt_conn.last_hbt_time > 0:
+                    hbt_gap = now - gt_conn.last_hbt_time
+                    if hbt_gap > gt_conn.expected_hbt_interval * 3 + 30:
                         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-                        self._log(f"[GT06] No STATUS reply from {label} after 3 attempts — disconnecting")
+                        self._log(f"[GT06] No heartbeat from {label} for {hbt_gap:.0f}s — disconnecting")
                         self._disconnect(fd)
                         continue
-                    self._queue_commands(gt_conn, ["STATUS#"])
-                    gt_conn.last_status_time = now
