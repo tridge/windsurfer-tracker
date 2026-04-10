@@ -454,6 +454,12 @@
         let courseMarkers = [];
         let courseLines = [];
         let allCourses = {};
+        let selectedCourseName = null;
+        let lastCoursesJSON = null;
+        let userInteracted = false;  // True once the user has manually panned/zoomed the map
+        let programmaticMove = false;  // Set while we call fitBounds/setView, to ignore self-triggered events
+        map.on('dragstart', () => { if (!programmaticMove) userInteracted = true; });
+        map.on('zoomstart', () => { if (!programmaticMove) userInteracted = true; });
 
         // --- Utility functions (from event.html) ---
 
@@ -628,11 +634,16 @@
 
             // Auto-zoom to fit course
             if (points.length > 0) {
+                programmaticMove = true;
                 map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+                setTimeout(() => { programmaticMove = false; }, 300);
             }
         }
 
-        function selectCourse(name, course) {
+        function selectCourse(name, course, fromUser) {
+            selectedCourseName = name;
+            if (fromUser) userInteracted = true;
+
             // Update sidebar selection
             document.querySelectorAll('.course-item').forEach(el => {
                 el.classList.toggle('selected', el.dataset.name === name);
@@ -656,23 +667,34 @@
         function onCourseDropdownChange() {
             const name = document.getElementById('courseDropdown').value;
             if (name && allCourses[name]) {
-                selectCourse(name, allCourses[name]);
+                selectCourse(name, allCourses[name], true);
             }
         }
 
-        async function loadCourses() {
+        async function loadCourses(isRefresh) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
             try {
-                const response = await fetch(`${EVENT_API}/courses`);
+                const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
-                allCourses = data.courses || {};
+                const newCourses = data.courses || {};
+
+                // Skip UI rebuild if nothing has changed
+                const newJSON = JSON.stringify(newCourses);
+                if (isRefresh && newJSON === lastCoursesJSON) {
+                    return;
+                }
+                lastCoursesJSON = newJSON;
+                allCourses = newCourses;
+
                 const names = Object.keys(allCourses).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
                 if (names.length === 0) {
                     listEl.innerHTML = '<div class="no-courses">No courses available</div>';
                     dropdown.innerHTML = '<option value="">No courses available</option>';
                     document.getElementById('courseInfoBox').style.display = 'none';
+                    clearCourseDisplay();
+                    selectedCourseName = null;
                     return;
                 }
 
@@ -688,7 +710,7 @@
                         <div class="course-name">${name}</div>
                         <div class="course-meta">${length.toFixed(1)} km</div>
                     `;
-                    item.addEventListener('click', () => selectCourse(name, course));
+                    item.addEventListener('click', () => selectCourse(name, course, true));
                     listEl.appendChild(item);
                 });
 
@@ -703,16 +725,30 @@
                     dropdown.appendChild(opt);
                 });
 
-                // Auto-select first course
-                selectCourse(names[0], allCourses[names[0]]);
+                // Preserve previous selection if it still exists, otherwise auto-select first
+                const selectName = selectedCourseName && allCourses[selectedCourseName] ? selectedCourseName : names[0];
+                // On a background refresh where the user has panned/zoomed, don't yank the view back
+                const suppressFit = isRefresh && userInteracted;
+                const prevFitBounds = map.fitBounds;
+                if (suppressFit) {
+                    map.fitBounds = function() {};
+                }
+                selectCourse(selectName, allCourses[selectName], false);
+                if (suppressFit) {
+                    map.fitBounds = prevFitBounds;
+                }
             } catch (e) {
                 console.error('Error loading courses:', e);
-                listEl.innerHTML = '<div class="no-courses">Error loading courses</div>';
-                dropdown.innerHTML = '<option value="">Error loading courses</option>';
+                if (!isRefresh) {
+                    listEl.innerHTML = '<div class="no-courses">Error loading courses</div>';
+                    dropdown.innerHTML = '<option value="">Error loading courses</option>';
+                }
             }
         }
 
-        loadCourses();
+        loadCourses(false);
+        // Poll for course changes once a minute
+        setInterval(() => loadCourses(true), 60000);
     </script>
 </body>
 </html>
