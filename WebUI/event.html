@@ -4442,7 +4442,8 @@
             // Auto-fit bounds if we have sailors (only before user interaction)
             // Don't include device position - ISP-based geolocation is often inaccurate
             if (Object.keys(sailors).length > 0 && !map._userPanned) {
-                const bounds = Object.values(sailors).filter(s => s.lat !== undefined && s.lon !== undefined).map(s => [s.lat, s.lon]);
+                // Exclude (0,0) — trackers without a GPS fix report that and would drag bounds to null island
+                const bounds = Object.values(sailors).filter(s => s.lat !== undefined && s.lon !== undefined && !(s.lat === 0 && s.lon === 0)).map(s => [s.lat, s.lon]);
                 if (bounds.length > 0) {
                     map._fitting = true;
                     map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
