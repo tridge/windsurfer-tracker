@@ -796,6 +796,27 @@
         .courses-list-item .delete-btn:hover {
             color: #f00;
         }
+        .courses-list-item .update-btn {
+            background: none;
+            border: none;
+            color: #2563eb;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        .courses-list-item .update-btn:hover {
+            color: #1d4ed8;
+        }
+        .courses-list-item .update-btn:disabled {
+            color: #aaa;
+            cursor: not-allowed;
+        }
+        .courses-list-item .item-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
 
         /* User edit dialog */
         .edit-user-overlay {
@@ -2697,6 +2718,7 @@
         function renderCoursesList() {
             const list = document.getElementById('coursesList');
             list.innerHTML = '';
+            const haveCurrent = !!(courseData && courseData.start);
             for (const name of Object.keys(savedCourses).sort()) {
                 const item = document.createElement('div');
                 item.className = 'courses-list-item';
@@ -2704,14 +2726,57 @@
                 const len = calculateCourseLength(savedCourses[name]);
                 label.textContent = len > 0 ? `${name} (${len.toFixed(1)}km)` : name;
                 label.onclick = () => loadNamedCourse(name);
+
+                const actions = document.createElement('span');
+                actions.className = 'item-actions';
+
+                const upd = document.createElement('button');
+                upd.className = 'update-btn';
+                upd.textContent = '💾';
+                upd.title = haveCurrent
+                    ? `Update "${name}" with the current course`
+                    : 'No current course to save';
+                upd.disabled = !haveCurrent;
+                upd.onclick = (e) => { e.stopPropagation(); updateNamedCourse(name); };
+
                 const del = document.createElement('button');
                 del.className = 'delete-btn';
                 del.textContent = '✕';
                 del.title = 'Delete';
                 del.onclick = (e) => { e.stopPropagation(); deleteNamedCourse(name); };
+
+                actions.appendChild(upd);
+                actions.appendChild(del);
                 item.appendChild(label);
-                item.appendChild(del);
+                item.appendChild(actions);
                 list.appendChild(item);
+            }
+        }
+
+        async function updateNamedCourse(name) {
+            if (!courseData || !courseData.start) {
+                alert('No current course to save');
+                return;
+            }
+            if (!confirm(`Overwrite saved course "${name}" with the current course?`)) return;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await loadSavedCourses();
+                    renderCoursesList();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error updating course: ' + e.message);
             }
         }
 
@@ -2741,7 +2806,7 @@
         }
 
         async function deleteNamedCourse(name) {
-            if (!confirm(`Delete saved course "${name}"?`)) return;
+            if (!confirm(`Permanently delete saved course "${name}"?\n\nThis cannot be undone.`)) return;
             try {
                 const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
                     method: 'DELETE',
