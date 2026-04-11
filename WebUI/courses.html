@@ -350,6 +350,10 @@
         .admin-toolbar .btn-draw { background: #0066cc; color: white; }
         .admin-toolbar .btn-draw:hover { background: #0055aa; }
         .admin-toolbar .btn-draw.active { background: #dc2626; }
+        .admin-toolbar .btn-rename { background: #6366f1; color: white; }
+        .admin-toolbar .btn-rename:hover { background: #4f46e5; }
+        .admin-toolbar .btn-copy { background: #8b5cf6; color: white; }
+        .admin-toolbar .btn-copy:hover { background: #7c3aed; }
         .admin-toolbar .btn-delete-course { background: #dc2626; color: white; }
         .admin-toolbar .btn-delete-course:hover { background: #b91c1c; }
         .admin-toolbar .btn-new { background: #059669; color: white; }
@@ -435,7 +439,10 @@
                 left: 10px;
             }
             .admin-toolbar {
-                right: 70px;
+                top: 50px;
+                left: 10px;
+                right: auto;
+                flex-wrap: wrap;
             }
         }
     </style>
@@ -473,6 +480,8 @@
     <div class="admin-toolbar" id="adminToolbar">
         <button class="btn-new" onclick="newCourse()">+ New</button>
         <button class="btn-draw" id="btnDrawCourse" onclick="startDrawingCourse()">✏️ Draw</button>
+        <button class="btn-rename" onclick="renameCourse()">✎ Rename</button>
+        <button class="btn-copy" onclick="copyCourse()">⧉ Copy</button>
         <button class="btn-delete-course" onclick="deleteSelectedCourse()">🗑 Delete</button>
     </div>
 
@@ -1258,6 +1267,61 @@
                 }
             } catch (e) {
                 alert('Error deleting course: ' + e.message);
+            }
+        }
+
+        async function renameCourse() {
+            if (!selectedCourseName || !courseData) return;
+            const newName = prompt(`Rename "${selectedCourseName}" to:`, selectedCourseName);
+            if (!newName || newName === selectedCourseName) return;
+            if (allCourses[newName]) {
+                alert(`Course "${newName}" already exists.`);
+                return;
+            }
+            try {
+                // Create under new name
+                const createResp = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(newName)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                    body: JSON.stringify(courseData)
+                });
+                const createData = await createResp.json();
+                if (!createData.success) { alert('Error: ' + (createData.error || 'Unknown error')); return; }
+                // Delete old name
+                await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                selectedCourseName = newName;
+                await reloadAndReselect();
+            } catch (e) {
+                alert('Error renaming course: ' + e.message);
+            }
+        }
+
+        async function copyCourse() {
+            if (!selectedCourseName || !courseData) return;
+            const newName = prompt(`Copy "${selectedCourseName}" to new name:`, selectedCourseName + ' copy');
+            if (!newName) return;
+            if (allCourses[newName]) {
+                alert(`Course "${newName}" already exists.`);
+                return;
+            }
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(newName)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    selectedCourseName = newName;
+                    await reloadAndReselect();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error copying course: ' + e.message);
             }
         }
 
