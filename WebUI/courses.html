@@ -262,6 +262,109 @@
             text-decoration: none;
         }
 
+        .drawing-mode-indicator {
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            background: #0066cc;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            display: none;
+        }
+        .drawing-mode-indicator.visible {
+            display: block;
+        }
+        .edit-user-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .edit-user-overlay.visible {
+            display: flex;
+        }
+        .edit-user-dialog {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            width: 300px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .edit-user-dialog h3 { margin: 0 0 16px 0; font-size: 16px; }
+        .edit-user-dialog label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .edit-user-dialog input,
+        .edit-user-dialog select {
+            width: 100%; padding: 8px 10px; border: 1px solid #ddd;
+            border-radius: 6px; font-size: 14px; margin-bottom: 12px;
+        }
+        .edit-user-dialog .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+        .edit-user-dialog button {
+            flex: 1; padding: 10px; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 14px;
+        }
+        .edit-user-dialog .btn-cancel { background: #eee; color: #333; }
+        .edit-user-dialog .btn-save { background: #0066cc; color: white; }
+        .popup-edit-btn {
+            display: inline-block; margin-left: 8px; padding: 2px 8px;
+            font-size: 11px; background: #0066cc; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
+        .popup-edit-btn:hover { background: #0055aa; }
+        .popup-move-btn {
+            display: inline-block; margin-left: 4px; padding: 2px 8px;
+            font-size: 11px; background: #059669; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
+        .popup-move-btn:hover { background: #047857; }
+        .popup-delete-btn {
+            display: inline-block; margin-left: 4px; padding: 2px 8px;
+            font-size: 11px; background: #dc2626; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
+        .popup-delete-btn:hover { background: #b91c1c; }
+        .popup-split-btn {
+            display: inline-block; margin-left: 4px; padding: 2px 8px;
+            font-size: 11px; background: #7c3aed; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
+        .popup-split-btn:hover { background: #6d28d9; }
+        .admin-toolbar {
+            position: absolute;
+            top: 10px; right: 180px; z-index: 1000;
+            display: none; gap: 6px;
+        }
+        .admin-toolbar.visible { display: flex; }
+        .admin-toolbar button {
+            padding: 6px 12px; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 13px; font-weight: 600;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .admin-toolbar .btn-draw { background: #0066cc; color: white; }
+        .admin-toolbar .btn-draw:hover { background: #0055aa; }
+        .admin-toolbar .btn-draw.active { background: #dc2626; }
+        .admin-toolbar .btn-delete-course { background: #dc2626; color: white; }
+        .admin-toolbar .btn-delete-course:hover { background: #b91c1c; }
+        .admin-toolbar .btn-new { background: #059669; color: white; }
+        .admin-toolbar .btn-new:hover { background: #047857; }
+        .move-status {
+            position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);
+            z-index: 9999; background: #f59e0b; color: #333;
+            padding: 8px 16px; border-radius: 20px;
+            font-size: 14px; font-weight: 600;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            display: none;
+        }
+        .move-status.visible { display: block; }
+        .menu-item.active { background: #e3f2fd; color: #1976d2; }
+
         .custom-scale {
             position: fixed;
             bottom: 15px;
@@ -331,6 +434,9 @@
             .custom-scale {
                 left: 10px;
             }
+            .admin-toolbar {
+                right: 70px;
+            }
         }
     </style>
 </head>
@@ -360,8 +466,48 @@
         <div class="info-detail" id="infoLength"></div>
     </div>
 
+    <div class="drawing-mode-indicator" id="drawingIndicator">
+        🎯 Tap map: Start → Marks → Finish (long-press to save)
+    </div>
+
+    <div class="admin-toolbar" id="adminToolbar">
+        <button class="btn-new" onclick="newCourse()">+ New</button>
+        <button class="btn-draw" id="btnDrawCourse" onclick="startDrawingCourse()">✏️ Draw</button>
+        <button class="btn-delete-course" onclick="deleteSelectedCourse()">🗑 Delete</button>
+    </div>
+
+    <div class="move-status" id="moveStatus">Click to place marker, Esc to cancel</div>
+
+    <!-- Mark edit overlay -->
+    <div class="edit-user-overlay" id="editMarkOverlay" onclick="if(event.target===this)closeEditMark()">
+        <div class="edit-user-dialog">
+            <h3>Edit <span id="editMarkNumber"></span></h3>
+            <div id="colorRow">
+                <label for="editMarkColor">Color</label>
+                <select id="editMarkColor">
+                    <option value="">Default (Orange)</option>
+                    <option value="#f97316">Orange</option>
+                    <option value="#ef4444">Red (Port)</option>
+                    <option value="#22c55e">Green (Starboard)</option>
+                    <option value="#3b82f6">Blue</option>
+                    <option value="#8b5cf6">Purple</option>
+                </select>
+            </div>
+            <label for="editMarkComment">Comment</label>
+            <textarea id="editMarkComment" placeholder="e.g., Port rounding" rows="2" style="width:100%;resize:vertical;"></textarea>
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
+                <button class="btn-save" onclick="saveEditMark()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
     <div class="menu-panel" id="menuPanel">
+        <div class="menu-item" id="menuAdmin" onclick="toggleAdminMode()">
+            <span>🔒</span>
+            <span>Admin</span>
+        </div>
         <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
             <span>🗺️</span>
             <span>Map Type ▼</span>
@@ -496,16 +642,40 @@
         map.on('moveend', () => updateScale(map));
         updateScale(map);
 
+        // Admin state
+        let adminMode = false;
+        let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+
         // Course display state
         let courseMarkers = [];
         let courseLines = [];
         let allCourses = {};
         let selectedCourseName = null;
+        let courseData = null;          // Deep copy of selected course for editing
         let lastCoursesJSON = null;
-        let userInteracted = false;  // True once the user has manually panned/zoomed the map
-        let programmaticMove = false;  // Set while we call fitBounds/setView, to ignore self-triggered events
+        let userInteracted = false;
+        let programmaticMove = false;
         map.on('dragstart', () => { if (!programmaticMove) userInteracted = true; });
         map.on('zoomstart', () => { if (!programmaticMove) userInteracted = true; });
+
+        // Drawing state
+        let drawingMode = false;
+        let drawingPoints = [];
+        let drawingMarkers = [];
+        let drawingLine = null;
+        let lastTapTime = 0;
+        let lastTapLatLng = null;
+        let longPressTimer = null;
+        let longPressStartPos = null;
+        let drawingCourseName = null;   // Name to save drawn course under
+
+        // Moving state
+        let movingMarkIndex = null;
+        let movingPreviewMarker = null;
+        let movingPreviewLines = [];
+
+        // Mark editing state
+        let editingMarkIndex = null;
 
         // --- Utility functions (from event.html) ---
 
@@ -624,6 +794,11 @@
                     popup += `<br><em>${course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.start.lat.toFixed(6)}<br>Lon: ${course.start.lon.toFixed(6)}</small>`;
+                if (adminMode) {
+                    popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
+                    popup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
+                    popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start')">Del</button>`;
+                }
                 popup += '</div>';
                 marker.bindPopup(popup);
                 courseMarkers.push(marker);
@@ -643,6 +818,12 @@
                         popup += `<br><em>${mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
+                    if (adminMode) {
+                        popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
+                        popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
+                        popup += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
+                        popup += `<button class="popup-delete-btn" onclick="deleteCourseMark(${idx})">Del</button>`;
+                    }
                     popup += '</div>';
                     marker.bindPopup(popup);
                     courseMarkers.push(marker);
@@ -661,6 +842,12 @@
                     popup += `<br><em>${course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
+                if (adminMode) {
+                    popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
+                    popup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
+                    popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
+                    popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish')">Del</button>`;
+                }
                 popup += '</div>';
                 marker.bindPopup(popup);
                 courseMarkers.push(marker);
@@ -688,6 +875,7 @@
 
         function selectCourse(name, course, fromUser) {
             selectedCourseName = name;
+            courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
             if (fromUser) userInteracted = true;
 
             // Update sidebar selection
@@ -715,6 +903,588 @@
             if (name && allCourses[name]) {
                 selectCourse(name, allCourses[name], true);
             }
+        }
+
+        // --- Admin functions ---
+
+        async function checkAdminAuth() {
+            try {
+                const response = await fetch(`${EVENT_API}/auth/check`, {
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const data = await response.json();
+                return data.authenticated;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function toggleAdminMode() {
+            document.getElementById('menuPanel').classList.remove('visible');
+
+            if (adminMode) {
+                adminMode = false;
+                document.getElementById('menuAdmin').classList.remove('active');
+                document.getElementById('adminToolbar').classList.remove('visible');
+                cancelDrawing();
+                cancelMoveMark();
+                // Refresh display to remove edit buttons
+                if (courseData) displayCourse(courseData);
+            } else {
+                if (!adminPassword) {
+                    adminPassword = prompt('Enter admin password:');
+                    if (!adminPassword) return;
+                }
+                const authenticated = await checkAdminAuth();
+                if (authenticated) {
+                    adminMode = true;
+                    localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
+                    document.getElementById('menuAdmin').classList.add('active');
+                    document.getElementById('adminToolbar').classList.add('visible');
+                    // Refresh display to show edit buttons
+                    if (courseData) displayCourse(courseData);
+                } else {
+                    adminPassword = '';
+                    localStorage.removeItem(`adminPassword_${EVENT_ID}`);
+                    alert('Invalid password');
+                }
+            }
+        }
+
+        // Save courseData back to the selected named course
+        async function saveSelectedCourse() {
+            if (!selectedCourseName || !courseData) return false;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify(courseData)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    // Also update the live course
+                    await fetch(`${EVENT_API}/admin/course`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Admin-Password': adminPassword
+                        },
+                        body: JSON.stringify(courseData)
+                    });
+                    await reloadAndReselect();
+                    return true;
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    return false;
+                }
+            } catch (e) {
+                alert('Error saving course: ' + e.message);
+                return false;
+            }
+        }
+
+        async function reloadAndReselect() {
+            // Reload courses list while preserving selection
+            const prevName = selectedCourseName;
+            lastCoursesJSON = null;  // Force rebuild
+            await loadCourses(false);
+            // loadCourses will re-select prevName if it still exists
+        }
+
+        // --- Drawing functions ---
+
+        function startDrawingCourse() {
+            if (drawingMode) {
+                cancelDrawing();
+                return;
+            }
+            if (!selectedCourseName) {
+                alert('No course selected');
+                return;
+            }
+            drawingCourseName = selectedCourseName;
+            drawingMode = true;
+            drawingPoints = [];
+            drawingMarkers = [];
+            lastTapTime = 0;
+            lastTapLatLng = null;
+            document.getElementById('btnDrawCourse').textContent = '❌ Cancel';
+            document.getElementById('btnDrawCourse').classList.add('active');
+            document.getElementById('drawingIndicator').classList.add('visible');
+
+            map.on('click', onDrawingClick);
+            map.on('dblclick', onDrawingComplete);
+
+            const container = map.getContainer();
+            container.addEventListener('touchstart', onDrawingTouchStart, { passive: false });
+            container.addEventListener('touchend', onDrawingTouchEnd);
+            container.addEventListener('touchmove', onDrawingTouchMove);
+            container.addEventListener('mousedown', onDrawingMouseDown);
+            container.addEventListener('mouseup', onDrawingMouseUp);
+            container.addEventListener('mousemove', onDrawingMouseMove);
+            container.style.cursor = 'crosshair';
+        }
+
+        function onDrawingTouchStart(e) {
+            if (!drawingMode || drawingPoints.length < 2) return;
+            longPressStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            longPressTimer = setTimeout(() => {
+                if (longPressTimer) {
+                    e.preventDefault();
+                    onDrawingComplete(null, true);
+                }
+            }, 600);
+        }
+
+        function onDrawingTouchMove(e) {
+            if (!longPressTimer || !longPressStartPos) return;
+            const dx = e.touches[0].clientX - longPressStartPos.x;
+            const dy = e.touches[0].clientY - longPressStartPos.y;
+            if (Math.sqrt(dx*dx + dy*dy) > 20) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        }
+
+        function onDrawingTouchEnd() {
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        }
+
+        function onDrawingMouseDown(e) {
+            if (!drawingMode || drawingPoints.length < 2) return;
+            if (e.button !== 0) return;
+            longPressStartPos = { x: e.clientX, y: e.clientY };
+            longPressTimer = setTimeout(() => {
+                if (longPressTimer) onDrawingComplete(null, true);
+            }, 600);
+        }
+
+        function onDrawingMouseMove(e) {
+            if (!longPressTimer || !longPressStartPos) return;
+            const dx = e.clientX - longPressStartPos.x;
+            const dy = e.clientY - longPressStartPos.y;
+            if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        }
+
+        function onDrawingMouseUp() {
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        }
+
+        function cancelDrawing() {
+            drawingMode = false;
+            drawingPoints = [];
+            drawingCourseName = null;
+            document.getElementById('btnDrawCourse').textContent = '✏️ Draw';
+            document.getElementById('btnDrawCourse').classList.remove('active');
+            document.getElementById('drawingIndicator').classList.remove('visible');
+
+            drawingMarkers.forEach(m => map.removeLayer(m));
+            drawingMarkers = [];
+            if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
+
+            map.off('click', onDrawingClick);
+            map.off('dblclick', onDrawingComplete);
+            const container = map.getContainer();
+            container.removeEventListener('touchstart', onDrawingTouchStart);
+            container.removeEventListener('touchend', onDrawingTouchEnd);
+            container.removeEventListener('touchmove', onDrawingTouchMove);
+            container.removeEventListener('mousedown', onDrawingMouseDown);
+            container.removeEventListener('mouseup', onDrawingMouseUp);
+            container.removeEventListener('mousemove', onDrawingMouseMove);
+            container.style.cursor = '';
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        }
+
+        function onDrawingClick(e) {
+            const now = Date.now();
+            const isTouchDevice = 'ontouchstart' in window;
+            if (isTouchDevice && lastTapLatLng && drawingPoints.length >= 2) {
+                const timeDiff = now - lastTapTime;
+                const dist = map.distance(e.latlng, lastTapLatLng);
+                if (timeDiff < 400 && dist < 50) {
+                    lastTapTime = 0;
+                    lastTapLatLng = null;
+                    onDrawingComplete(e, true);
+                    return;
+                }
+            }
+            lastTapTime = now;
+            lastTapLatLng = e.latlng;
+
+            const point = { lat: e.latlng.lat, lon: e.latlng.lng };
+            drawingPoints.push(point);
+
+            let icon;
+            if (drawingPoints.length === 1) {
+                icon = createStartIcon();
+            } else {
+                icon = createMarkIcon(drawingPoints.length - 1);
+            }
+
+            const marker = L.marker([point.lat, point.lon], { icon, draggable: true }).addTo(map);
+            marker.on('drag', () => updateDrawingLine());
+            marker.on('dragend', () => {
+                const idx = drawingMarkers.indexOf(marker);
+                if (idx >= 0) {
+                    const pos = marker.getLatLng();
+                    drawingPoints[idx] = { lat: pos.lat, lon: pos.lng };
+                }
+            });
+            drawingMarkers.push(marker);
+            updateDrawingLine();
+        }
+
+        function onDrawingComplete(e, fromDoubleTap = false) {
+            if (e && e.originalEvent) e.originalEvent.preventDefault();
+
+            if (!fromDoubleTap && drawingPoints.length > 0) {
+                drawingPoints.pop();
+                const extraMarker = drawingMarkers.pop();
+                if (extraMarker) map.removeLayer(extraMarker);
+                updateDrawingLine();
+            }
+
+            if (drawingPoints.length < 2) {
+                alert('Need at least a start and finish point');
+                return;
+            }
+
+            // Replace last marker with finish icon
+            const lastMarker = drawingMarkers[drawingMarkers.length - 1];
+            lastMarker.setIcon(createFinishIcon());
+
+            const courseName = drawingCourseName;
+            drawingMode = false;
+            document.getElementById('btnDrawCourse').textContent = '✏️ Draw';
+            document.getElementById('btnDrawCourse').classList.remove('active');
+            document.getElementById('drawingIndicator').classList.remove('visible');
+
+            map.off('click', onDrawingClick);
+            map.off('dblclick', onDrawingComplete);
+            const container = map.getContainer();
+            container.removeEventListener('touchstart', onDrawingTouchStart);
+            container.removeEventListener('touchend', onDrawingTouchEnd);
+            container.removeEventListener('touchmove', onDrawingTouchMove);
+            container.removeEventListener('mousedown', onDrawingMouseDown);
+            container.removeEventListener('mouseup', onDrawingMouseUp);
+            container.removeEventListener('mousemove', onDrawingMouseMove);
+            container.style.cursor = '';
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+
+            // Build course and save
+            courseData = {
+                start: drawingPoints[0],
+                marks: drawingPoints.slice(1, -1),
+                finish: drawingPoints[drawingPoints.length - 1]
+            };
+            selectedCourseName = courseName;
+            drawingCourseName = null;
+
+            // Clean up drawing artifacts
+            drawingMarkers.forEach(m => map.removeLayer(m));
+            drawingMarkers = [];
+            if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
+            drawingPoints = [];
+
+            saveSelectedCourse();
+        }
+
+        function updateDrawingLine() {
+            const latlngs = drawingMarkers.map(m => m.getLatLng());
+            if (drawingLine) {
+                drawingLine.setLatLngs(latlngs);
+            } else if (latlngs.length >= 2) {
+                drawingLine = L.polyline(latlngs, {
+                    color: '#ff6600',
+                    weight: 3,
+                    dashArray: '10, 10'
+                }).addTo(map);
+            }
+        }
+
+        async function newCourse() {
+            const name = prompt('New course name:');
+            if (!name) return;
+            if (allCourses[name]) {
+                alert(`Course "${name}" already exists. Select it to edit.`);
+                return;
+            }
+            drawingCourseName = name;
+            selectedCourseName = name;
+            // Enter drawing mode immediately
+            drawingMode = true;
+            drawingPoints = [];
+            drawingMarkers = [];
+            lastTapTime = 0;
+            lastTapLatLng = null;
+            document.getElementById('btnDrawCourse').textContent = '❌ Cancel';
+            document.getElementById('btnDrawCourse').classList.add('active');
+            document.getElementById('drawingIndicator').classList.add('visible');
+            clearCourseDisplay();
+
+            map.on('click', onDrawingClick);
+            map.on('dblclick', onDrawingComplete);
+            const container = map.getContainer();
+            container.addEventListener('touchstart', onDrawingTouchStart, { passive: false });
+            container.addEventListener('touchend', onDrawingTouchEnd);
+            container.addEventListener('touchmove', onDrawingTouchMove);
+            container.addEventListener('mousedown', onDrawingMouseDown);
+            container.addEventListener('mouseup', onDrawingMouseUp);
+            container.addEventListener('mousemove', onDrawingMouseMove);
+            container.style.cursor = 'crosshair';
+        }
+
+        async function deleteSelectedCourse() {
+            if (!selectedCourseName) return;
+            if (!confirm(`Permanently delete course "${selectedCourseName}"?\n\nThis cannot be undone.`)) return;
+            try {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    selectedCourseName = null;
+                    courseData = null;
+                    clearCourseDisplay();
+                    document.getElementById('courseInfoBox').style.display = 'none';
+                    await reloadAndReselect();
+                }
+            } catch (e) {
+                alert('Error deleting course: ' + e.message);
+            }
+        }
+
+        // --- Mark editing ---
+
+        function showEditMark(markIndex) {
+            if (!courseData) return;
+            const colorRow = document.getElementById('colorRow');
+
+            if (markIndex === 'start') {
+                if (!courseData.start) return;
+                editingMarkIndex = 'start';
+                document.getElementById('editMarkNumber').textContent = 'Start';
+                document.getElementById('editMarkComment').value = courseData.start.comment || '';
+                colorRow.style.display = 'none';
+            } else if (markIndex === 'finish') {
+                if (!courseData.finish) return;
+                editingMarkIndex = 'finish';
+                document.getElementById('editMarkNumber').textContent = 'Finish';
+                document.getElementById('editMarkComment').value = courseData.finish.comment || '';
+                colorRow.style.display = 'none';
+            } else {
+                if (!courseData.marks || markIndex >= courseData.marks.length) return;
+                editingMarkIndex = markIndex;
+                const mark = courseData.marks[markIndex];
+                document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
+                document.getElementById('editMarkColor').value = mark.color || '';
+                document.getElementById('editMarkComment').value = mark.comment || '';
+                colorRow.style.display = '';
+            }
+            document.getElementById('editMarkOverlay').classList.add('visible');
+        }
+
+        function closeEditMark() {
+            editingMarkIndex = null;
+            document.getElementById('editMarkOverlay').classList.remove('visible');
+        }
+
+        async function saveEditMark() {
+            if (editingMarkIndex === null || !courseData) return;
+            const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
+
+            if (editingMarkIndex === 'start') {
+                if (comment) { courseData.start.comment = comment; } else { delete courseData.start.comment; }
+            } else if (editingMarkIndex === 'finish') {
+                if (comment) { courseData.finish.comment = comment; } else { delete courseData.finish.comment; }
+            } else {
+                if (!courseData.marks) return;
+                const color = document.getElementById('editMarkColor').value;
+                if (color) { courseData.marks[editingMarkIndex].color = color; } else { delete courseData.marks[editingMarkIndex].color; }
+                if (comment) { courseData.marks[editingMarkIndex].comment = comment; } else { delete courseData.marks[editingMarkIndex].comment; }
+            }
+
+            closeEditMark();
+            await saveSelectedCourse();
+        }
+
+        async function deleteCourseMark(markIndex) {
+            if (!courseData) return;
+            map.closePopup();
+
+            const markCount = courseData.marks ? courseData.marks.length : 0;
+            const totalPoints = (courseData.start ? 1 : 0) + markCount + (courseData.finish ? 1 : 0);
+
+            if (totalPoints <= 2) {
+                if (confirm('Deleting this mark will remove the entire course. Continue?')) {
+                    await deleteSelectedCourse();
+                }
+                return;
+            }
+
+            if (markIndex === 'start') {
+                if (markCount > 0) { courseData.start = courseData.marks.shift(); }
+                else { courseData.start = courseData.finish; courseData.finish = null; }
+            } else if (markIndex === 'finish') {
+                if (markCount > 0) { courseData.finish = courseData.marks.pop(); }
+                else { courseData.finish = null; }
+            } else {
+                if (!courseData.marks) return;
+                courseData.marks.splice(markIndex, 1);
+            }
+
+            await saveSelectedCourse();
+        }
+
+        async function splitCourseMark(markIndex) {
+            if (!courseData) return;
+            map.closePopup();
+
+            if (markIndex === 'start') {
+                alert('Cannot split before the start marker');
+                return;
+            }
+
+            let currentLat, currentLon, prevLat, prevLon, insertIndex;
+
+            if (markIndex === 'finish') {
+                currentLat = courseData.finish.lat;
+                currentLon = courseData.finish.lon;
+                if (courseData.marks && courseData.marks.length > 0) {
+                    const lastMark = courseData.marks[courseData.marks.length - 1];
+                    prevLat = lastMark.lat; prevLon = lastMark.lon;
+                } else {
+                    prevLat = courseData.start.lat; prevLon = courseData.start.lon;
+                }
+                insertIndex = courseData.marks ? courseData.marks.length : 0;
+            } else {
+                if (!courseData.marks) return;
+                const mark = courseData.marks[markIndex];
+                currentLat = mark.lat; currentLon = mark.lon;
+                if (markIndex === 0) {
+                    prevLat = courseData.start.lat; prevLon = courseData.start.lon;
+                } else {
+                    prevLat = courseData.marks[markIndex - 1].lat;
+                    prevLon = courseData.marks[markIndex - 1].lon;
+                }
+                insertIndex = markIndex;
+            }
+
+            const newMark = {
+                lat: (currentLat + prevLat) / 2,
+                lon: (currentLon + prevLon) / 2
+            };
+            if (!courseData.marks) courseData.marks = [];
+            courseData.marks.splice(insertIndex, 0, newMark);
+
+            await saveSelectedCourse();
+        }
+
+        // --- Move mark ---
+
+        function startMoveMark(index) {
+            if (!courseData) return;
+            map.closePopup();
+            movingMarkIndex = index;
+
+            document.getElementById('map').style.cursor = 'crosshair';
+            document.getElementById('moveStatus').classList.add('visible');
+
+            map.on('mousemove', updateMovePreview);
+            map.on('click', finishMoveMark);
+            document.addEventListener('keydown', handleMoveKeydown);
+        }
+
+        function getAdjacentCoursePoints(index) {
+            const result = { prev: null, next: null };
+            if (!courseData) return result;
+            const marksCount = courseData.marks ? courseData.marks.length : 0;
+
+            if (index === -1) {
+                if (marksCount > 0) result.next = [courseData.marks[0].lat, courseData.marks[0].lon];
+                else if (courseData.finish) result.next = [courseData.finish.lat, courseData.finish.lon];
+            } else if (index === 'finish') {
+                if (marksCount > 0) result.prev = [courseData.marks[marksCount - 1].lat, courseData.marks[marksCount - 1].lon];
+                else if (courseData.start) result.prev = [courseData.start.lat, courseData.start.lon];
+            } else {
+                if (index === 0) {
+                    if (courseData.start) result.prev = [courseData.start.lat, courseData.start.lon];
+                } else {
+                    result.prev = [courseData.marks[index - 1].lat, courseData.marks[index - 1].lon];
+                }
+                if (index === marksCount - 1) {
+                    if (courseData.finish) result.next = [courseData.finish.lat, courseData.finish.lon];
+                } else {
+                    result.next = [courseData.marks[index + 1].lat, courseData.marks[index + 1].lon];
+                }
+            }
+            return result;
+        }
+
+        function updateMovePreview(e) {
+            const latlng = e.latlng;
+            if (!movingPreviewMarker) {
+                movingPreviewMarker = L.circleMarker(latlng, {
+                    radius: 10, color: '#0066cc', fillColor: '#0066cc',
+                    fillOpacity: 0.5, weight: 2
+                }).addTo(map);
+            } else {
+                movingPreviewMarker.setLatLng(latlng);
+            }
+
+            const adjacent = getAdjacentCoursePoints(movingMarkIndex);
+            movingPreviewLines.forEach(line => map.removeLayer(line));
+            movingPreviewLines = [];
+
+            if (adjacent.prev) {
+                movingPreviewLines.push(L.polyline([adjacent.prev, [latlng.lat, latlng.lng]], {
+                    color: '#0066cc', weight: 2, opacity: 0.7, dashArray: '5, 5'
+                }).addTo(map));
+            }
+            if (adjacent.next) {
+                movingPreviewLines.push(L.polyline([[latlng.lat, latlng.lng], adjacent.next], {
+                    color: '#0066cc', weight: 2, opacity: 0.7, dashArray: '5, 5'
+                }).addTo(map));
+            }
+        }
+
+        async function finishMoveMark(e) {
+            const latlng = e.latlng;
+            if (movingMarkIndex === -1) {
+                courseData.start.lat = latlng.lat; courseData.start.lon = latlng.lng;
+            } else if (movingMarkIndex === 'finish') {
+                courseData.finish.lat = latlng.lat; courseData.finish.lon = latlng.lng;
+            } else {
+                courseData.marks[movingMarkIndex].lat = latlng.lat;
+                courseData.marks[movingMarkIndex].lon = latlng.lng;
+            }
+            cancelMoveMark();
+            await saveSelectedCourse();
+        }
+
+        function cancelMoveMark() {
+            map.off('mousemove', updateMovePreview);
+            map.off('click', finishMoveMark);
+            document.removeEventListener('keydown', handleMoveKeydown);
+
+            if (movingPreviewMarker) { map.removeLayer(movingPreviewMarker); movingPreviewMarker = null; }
+            movingPreviewLines.forEach(line => map.removeLayer(line));
+            movingPreviewLines = [];
+            movingMarkIndex = null;
+
+            document.getElementById('map').style.cursor = '';
+            document.getElementById('moveStatus').classList.remove('visible');
+        }
+
+        function handleMoveKeydown(e) {
+            if (e.key === 'Escape' && movingMarkIndex !== null) cancelMoveMark();
         }
 
         async function loadCourses(isRefresh) {
@@ -793,8 +1563,8 @@
         }
 
         loadCourses(false);
-        // Poll for course changes once a minute
-        setInterval(() => loadCourses(true), 60000);
+        // Poll for course changes every 20 seconds
+        setInterval(() => loadCourses(true), 20000);
     </script>
 </body>
 </html>
