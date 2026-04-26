@@ -9,13 +9,25 @@
     android:background="#FFFFFF"
     tools:context=".MainActivity">
 
+    <ScrollView
+        android:id="@+id/contentScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:fillViewport="false"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/btnAssist">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
     <!-- Configuration Group (shown when not tracking) - High contrast -->
     <LinearLayout
         android:id="@+id/configGroup"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        app:layout_constraintTop_toTopOf="parent">
+        android:orientation="vertical">
 
         <!-- Add significant spacing at top -->
         <Space
@@ -112,8 +124,7 @@
         android:orientation="vertical"
         android:visibility="gone"
         android:background="#FFFFFF"
-        android:padding="8dp"
-        app:layout_constraintTop_toTopOf="parent">
+        android:padding="8dp">
 
         <!-- Top spacing to prevent text cutoff -->
         <Space
@@ -187,12 +198,17 @@
 
                 <TextView
                     android:id="@+id/tvSpeed"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="-- kn"
                     android:textSize="28sp"
                     android:textColor="#000000"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="14sp"
+                    android:autoSizeMaxTextSize="28sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -211,12 +227,17 @@
 
                 <TextView
                     android:id="@+id/tvHeading"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="---°"
                     android:textSize="28sp"
                     android:textColor="#000000"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="14sp"
+                    android:autoSizeMaxTextSize="28sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -235,12 +256,17 @@
 
                 <TextView
                     android:id="@+id/tvDistance"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="-- km"
                     android:textSize="28sp"
                     android:textColor="#000000"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="14sp"
+                    android:autoSizeMaxTextSize="28sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -266,11 +292,16 @@
 
                 <TextView
                     android:id="@+id/tvAckRate"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="--%"
                     android:textSize="22sp"
-                    android:textColor="#008800" />
+                    android:textColor="#008800"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="12sp"
+                    android:autoSizeMaxTextSize="22sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -289,11 +320,16 @@
 
                 <TextView
                     android:id="@+id/tvLastAck"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="--"
                     android:textSize="18sp"
-                    android:textColor="#000000" />
+                    android:textColor="#000000"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="12sp"
+                    android:autoSizeMaxTextSize="18sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -312,12 +348,17 @@
 
                 <TextView
                     android:id="@+id/tvLastUpdate"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="--:--:--"
                     android:textSize="18sp"
                     android:textColor="#000000"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="12sp"
+                    android:autoSizeMaxTextSize="18sp"
+                    android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -345,27 +386,22 @@
 
     </LinearLayout>
 
-    <!-- Barrier below both config and status groups -->
-    <androidx.constraintlayout.widget.Barrier
-        android:id="@+id/barrierBelowContent"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        app:barrierDirection="bottom"
-        app:constraint_referenced_ids="configGroup,statusGroup" />
+    </LinearLayout>
+    </ScrollView>
 
     <!-- Big Assist Button - High contrast for outdoor use -->
     <Button
         android:id="@+id/btnAssist"
         android:layout_width="match_parent"
         android:layout_height="120dp"
-        android:layout_marginTop="24dp"
         android:text="REQUEST ASSISTANCE\n\nLong press to activate"
         android:textSize="20sp"
         android:textStyle="bold"
         android:textColor="#000000"
         android:backgroundTint="#00AA00"
         android:gravity="center"
-        app:layout_constraintTop_toBottomOf="@id/barrierBelowContent" />
+        android:layout_marginBottom="8dp"
+        app:layout_constraintBottom_toTopOf="@id/btnStartStop" />
 
     <!-- Start/Stop Button - High contrast for outdoor use -->
     <Button
