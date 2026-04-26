@@ -1828,7 +1828,7 @@ class TrackerService : LifecycleService() {
         } catch (e: Exception) { -1 }
 
         val speedKnots = if (location.hasSpeed() && location.speed > 0) {
-            String.format("%.2f", location.speed * 1.94384).toDouble()
+            Math.round(location.speed * 1.94384 * 100.0) / 100.0
         } else 0.0
         val heading = if (location.hasBearing()) location.bearing.toInt() else 0
 
@@ -1840,7 +1840,7 @@ class TrackerService : LifecycleService() {
             put("ts", System.currentTimeMillis() / 1000)
             put("lat", location.latitude)
             put("lon", location.longitude)
-            put("hac", String.format("%.2f", location.accuracy).toDouble())
+            put("hac", Math.round(location.accuracy * 100.0) / 100.0)
             if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
             put("spd", speedKnots)
             put("hdg", heading)
@@ -2006,15 +2006,15 @@ class TrackerService : LifecycleService() {
             put("lat", location.latitude)
             put("lon", location.longitude)
             if (location.hasAccuracy()) {
-                put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
+                put("hac", Math.round(location.accuracy * 100.0) / 100.0)  // Horizontal accuracy in meters
             }
             if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
-            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
+            put("spd", Math.round(speedMs * 1.94384 * 100.0) / 100.0)  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
             put("chg", isCharging)
-            drainRate?.let { put("bdr", String.format("%.1f", it).toDouble()) }
+            drainRate?.let { put("bdr", Math.round(it * 10.0) / 10.0) }
             put("sig", signalLevel)
             put("role", getCurrentRole())
             put("flg", flags)  // Status flags
@@ -2172,15 +2172,15 @@ class TrackerService : LifecycleService() {
             put("ts", System.currentTimeMillis() / 1000)
             put("pos", posArray)  // Position array instead of lat/lon
             if (location.hasAccuracy()) {
-                put("hac", String.format("%.2f", location.accuracy).toDouble())  // Horizontal accuracy in meters
+                put("hac", Math.round(location.accuracy * 100.0) / 100.0)  // Horizontal accuracy in meters
             }
             if (lastSatelliteCount > 0) put("nsats", lastSatelliteCount)
-            put("spd", String.format("%.2f", speedMs * 1.94384).toDouble())  // Convert m/s to knots
+            put("spd", Math.round(speedMs * 1.94384 * 100.0) / 100.0)  // Convert m/s to knots
             put("hdg", bearing.toInt())
             put("ast", assistRequested.get())
             put("bat", batteryPercent)
             put("chg", isCharging)
-            drainRate?.let { put("bdr", String.format("%.1f", it).toDouble()) }
+            drainRate?.let { put("bdr", Math.round(it * 10.0) / 10.0) }
             put("sig", signalLevel)
             put("role", getCurrentRole())
             put("flg", flags)
