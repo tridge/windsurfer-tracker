@@ -527,6 +527,10 @@
             <div class="menu-submenu-item" data-maptype="satellite" onclick="setMapType('satellite')">Google Satellite</div>
             <div class="menu-submenu-item selected" data-maptype="hybrid" onclick="setMapType('hybrid')">Google Hybrid</div>
         </div>
+        <div class="menu-item" onclick="refreshCourses()">
+            <span>🔄</span>
+            <span>Refresh</span>
+        </div>
         <div class="menu-item" onclick="showAbout()">
             <span>ℹ️</span>
             <span>About</span>
@@ -611,6 +615,12 @@
             if (!isInit) {
                 document.getElementById('mapSubmenu').classList.remove('visible');
             }
+        }
+
+        function refreshCourses() {
+            document.getElementById('menuPanel').classList.remove('visible');
+            lastCoursesJSON = null;  // Force rebuild
+            loadCourses(false);
         }
 
         function showAbout() {
