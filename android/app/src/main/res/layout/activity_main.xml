@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout 
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:padding="16dp"
     android:background="#FFFFFF"
     tools:context=".MainActivity">
@@ -13,9 +14,8 @@
         android:id="@+id/contentScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:fillViewport="false"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/btnAssist">
+        android:layout_weight="1"
+        android:fillViewport="false">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -403,8 +403,7 @@
         android:insetTop="0dp"
         android:insetBottom="0dp"
         android:layout_marginBottom="8dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintBottom_toTopOf="@id/btnStartStop" />
+        app:cornerRadius="12dp" />
 
     <!-- Start/Stop Button - High contrast for outdoor use -->
     <com.google.android.material.button.MaterialButton
@@ -420,8 +419,8 @@
         android:backgroundTint="#DDDDDD"
         android:insetTop="0dp"
         android:insetBottom="0dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintBottom_toTopOf="@id/btnSettings" />
+        android:layout_marginBottom="4dp"
+        app:cornerRadius="12dp" />
 
     <!-- Settings Button -->
     <com.google.android.material.button.MaterialButton
@@ -430,14 +429,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:minHeight="56dp"
-        android:layout_marginBottom="48dp"
+        android:layout_marginBottom="32dp"
         android:text="Settings"
         android:textSize="16sp"
         android:textColor="#000000"
         android:backgroundTint="#BBBBBB"
         android:insetTop="0dp"
         android:insetBottom="0dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintBottom_toBottomOf="parent" />
+        app:cornerRadius="12dp" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+</LinearLayout>
