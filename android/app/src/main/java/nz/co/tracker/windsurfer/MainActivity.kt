@@ -830,15 +830,15 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         val lonDir = if (location.longitude < 0) "W" else "E"
 
         binding.tvPosition.text = String.format(
-            "%.5f°%s %.5f°%s",
+            "%.5f°%s\n%.5f°%s",
             Math.abs(location.latitude), latDir,
             Math.abs(location.longitude), lonDir
         )
 
         val speedKnots = location.speed * 1.94384
-        binding.tvSpeed.text = String.format("%.1f kn", speedKnots)
+        binding.tvSpeed.text = String.format("%.1f", speedKnots)
         binding.tvHeading.text = String.format("%03d°", location.bearing.toInt())
-        binding.tvDistance.text = String.format("%.1f km", totalDistanceMeters / 1000f)
+        binding.tvDistance.text = String.format("%.1f", totalDistanceMeters / 1000f)
 
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         binding.tvLastUpdate.text = sdf.format(Date())

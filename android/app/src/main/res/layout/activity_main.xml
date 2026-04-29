@@ -169,12 +169,12 @@
 
         <TextView
             android:id="@+id/tvPosition"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="---.-----° ---.-----°"
-            android:textSize="20sp"
+            android:text="---.-----°\n---.-----°"
+            android:textSize="18sp"
             android:textColor="#000000"
-            android:fontFamily="monospace" />
+            android:maxLines="2" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -191,7 +191,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Speed"
+                    android:text="Speed (kn)"
                     android:textSize="14sp"
                     android:textColor="#444444"
                     android:textStyle="bold" />
@@ -200,7 +200,7 @@
                     android:id="@+id/tvSpeed"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="-- kn"
+                    android:text="--"
                     android:textSize="28sp"
                     android:textColor="#000000"
                     android:fontFamily="monospace"
@@ -249,7 +249,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Dist"
+                    android:text="Dist (km)"
                     android:textSize="14sp"
                     android:textColor="#444444"
                     android:textStyle="bold" />
@@ -258,7 +258,7 @@
                     android:id="@+id/tvDistance"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="-- km"
+                    android:text="--"
                     android:textSize="28sp"
                     android:textColor="#000000"
                     android:fontFamily="monospace"
@@ -323,12 +323,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="--"
-                    android:textSize="18sp"
+                    android:textSize="15sp"
                     android:textColor="#000000"
                     android:maxLines="1"
                     android:autoSizeTextType="uniform"
-                    android:autoSizeMinTextSize="12sp"
-                    android:autoSizeMaxTextSize="18sp"
+                    android:autoSizeMinTextSize="10sp"
+                    android:autoSizeMaxTextSize="15sp"
                     android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
@@ -351,13 +351,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="--:--:--"
-                    android:textSize="18sp"
+                    android:textSize="15sp"
                     android:textColor="#000000"
-                    android:fontFamily="monospace"
                     android:maxLines="1"
                     android:autoSizeTextType="uniform"
-                    android:autoSizeMinTextSize="12sp"
-                    android:autoSizeMaxTextSize="18sp"
+                    android:autoSizeMinTextSize="10sp"
+                    android:autoSizeMaxTextSize="15sp"
                     android:autoSizeStepGranularity="1sp" />
             </LinearLayout>
         </LinearLayout>
@@ -390,8 +389,9 @@
     </ScrollView>
 
     <!-- Big Assist Button - High contrast for outdoor use -->
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnAssist"
+        style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
         android:layout_width="match_parent"
         android:layout_height="120dp"
         android:text="REQUEST ASSISTANCE\n\nLong press to activate"
@@ -400,31 +400,44 @@
         android:textColor="#000000"
         android:backgroundTint="#00AA00"
         android:gravity="center"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
         android:layout_marginBottom="8dp"
+        app:cornerRadius="12dp"
         app:layout_constraintBottom_toTopOf="@id/btnStartStop" />
 
     <!-- Start/Stop Button - High contrast for outdoor use -->
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnStartStop"
+        style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:minHeight="56dp"
         android:text="Start Tracking"
         android:textSize="18sp"
         android:textStyle="bold"
         android:textColor="#000000"
         android:backgroundTint="#DDDDDD"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="12dp"
         app:layout_constraintBottom_toTopOf="@id/btnSettings" />
 
     <!-- Settings Button -->
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSettings"
+        style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:minHeight="56dp"
         android:layout_marginBottom="48dp"
         android:text="Settings"
         android:textSize="16sp"
         android:textColor="#000000"
         android:backgroundTint="#BBBBBB"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:cornerRadius="12dp"
         app:layout_constraintBottom_toBottomOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
