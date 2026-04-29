@@ -792,9 +792,10 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
     }
     
     private fun assistButtonText(primary: String, secondary: String): CharSequence {
-        val full = "$primary\n\n$secondary"
+        val primaryUpper = primary.uppercase(Locale.getDefault())
+        val full = "$primaryUpper\n$secondary"
         return SpannableString(full).apply {
-            setSpan(RelativeSizeSpan(0.6f), primary.length, full.length,
+            setSpan(RelativeSizeSpan(0.7f), primaryUpper.length, full.length,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
     }
