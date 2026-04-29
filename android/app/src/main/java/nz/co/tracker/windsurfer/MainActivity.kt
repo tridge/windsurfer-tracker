@@ -9,6 +9,9 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.View
 import android.widget.Toast
@@ -788,9 +791,17 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
         }
     }
     
+    private fun assistButtonText(primary: String, secondary: String): CharSequence {
+        val full = "$primary\n\n$secondary"
+        return SpannableString(full).apply {
+            setSpan(RelativeSizeSpan(0.6f), primary.length, full.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
     private fun updateAssistButton(active: Boolean) {
         if (active) {
-            binding.btnAssist.text = "ASSISTANCE REQUESTED\n\nLong press to cancel"
+            binding.btnAssist.text = assistButtonText("ASSISTANCE REQUESTED", "Long press to cancel")
             binding.btnAssist.setBackgroundColor(0xFFFF0000.toInt())  // Bright red
             binding.btnAssist.setTextColor(0xFFFFFFFF.toInt())        // White text
             
@@ -814,7 +825,7 @@ class MainActivity : AppCompatActivity(), TrackerService.StatusListener {
                 })
                 .start()
         } else {
-            binding.btnAssist.text = "REQUEST ASSISTANCE\n\nLong press to activate"
+            binding.btnAssist.text = assistButtonText("REQUEST ASSISTANCE", "Long press to activate")
             binding.btnAssist.setBackgroundColor(0xFF00AA00.toInt())  // Bright green
             binding.btnAssist.setTextColor(0xFF000000.toInt())        // Black text
             binding.btnAssist.alpha = 1.0f
