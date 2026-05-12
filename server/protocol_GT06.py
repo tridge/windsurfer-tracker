@@ -223,6 +223,9 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
         result = {
             "default_eid": cfg.get("default_eid", 1),
             "idle_hbt_interval": cfg.get("idle_hbt_interval", 15),
+            "slow_speed_knots": cfg.get("slow_speed_knots", 2),
+            "slow_speed_seconds": cfg.get("slow_speed_seconds", 20),
+            "slow_loc_interval": cfg.get("slow_loc_interval", 3),
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
