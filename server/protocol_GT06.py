@@ -1047,6 +1047,31 @@ class GT06Listener:
             self._log_fd.flush()
         self._log(f"[GT06] Packet logging to {path} (v2 format)")
 
+    def rotate_log_to(self, archive_path):
+        """Move the current packet log to archive_path and open a fresh log.
+
+        Safe to call from any thread: rename of an open file keeps the old fd
+        pointing to the archived inode; the new fd is opened atomically and
+        swapped in, so concurrent _log_packet calls may write to either file
+        across the swap but never lose or corrupt frames.
+        """
+        if not self.log_file:
+            return
+        path = Path(self.log_file) if not isinstance(self.log_file, Path) else self.log_file
+        old_fd = self._log_fd
+        try:
+            if path.exists():
+                path.rename(archive_path)
+            self._log_fd = None
+            self._open_log_v2(path)
+        finally:
+            if old_fd is not None:
+                try:
+                    old_fd.flush()
+                    old_fd.close()
+                except Exception:
+                    pass
+
     def run(self):
         """Main loop — runs in a daemon thread."""
         if self.log_file:

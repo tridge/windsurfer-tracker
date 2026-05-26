@@ -433,6 +433,29 @@ class JT808Listener:
         except Exception as e:
             self._log(f"[JT808] Packet log write error: {e}")
 
+    def rotate_log_to(self, archive_path):
+        """Move the current packet log to archive_path and open a fresh log."""
+        if not self.log_file:
+            return
+        path = Path(self.log_file) if not isinstance(self.log_file, Path) else self.log_file
+        old_fd = self._log_fd
+        try:
+            if path.exists():
+                path.rename(archive_path)
+            try:
+                self._log_fd = open(path, "ab")
+                self._log(f"[JT808] Rotated packet log to {archive_path}, new log at {path}")
+            except Exception as e:
+                self._log(f"[JT808] Warning: Could not reopen log {path} after rotation: {e}")
+                self._log_fd = None
+        finally:
+            if old_fd is not None:
+                try:
+                    old_fd.flush()
+                    old_fd.close()
+                except Exception:
+                    pass
+
     def _imei_to_sailor_id(self, imei):
         return self.id_prefix + imei[-6:]
 

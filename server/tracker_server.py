@@ -64,6 +64,84 @@ def rotate_file(filepath: Path) -> Path | None:
     return new_path
 
 
+def _unique_archive_path(parent: Path, base_name: str, date_str: str) -> Path:
+    """Return parent/old_logs/<base>.<date>[.<N>] picking the first non-existing N."""
+    old_dir = parent / "old_logs"
+    old_dir.mkdir(exist_ok=True)
+    candidate = old_dir / f"{base_name}.{date_str}"
+    if not candidate.exists():
+        return candidate
+    n = 1
+    while True:
+        candidate = old_dir / f"{base_name}.{date_str}.{n}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def rotate_copytruncate(path: Path, archive_path: Path) -> bool:
+    """Copy `path` to `archive_path` and truncate the original in place.
+
+    Used for log files we don't own the fd for (e.g. tracker.log, redirected
+    from systemd stdout). Because systemd opened the file in append mode, new
+    writes after truncation start at offset 0. A tiny window between copy and
+    truncate may drop a write, which is acceptable for a daily rotator.
+    """
+    import shutil
+    if not path.exists():
+        return False
+    try:
+        shutil.copy2(path, archive_path)
+        with open(path, "r+b") as f:
+            f.truncate(0)
+        return True
+    except Exception as e:
+        log(f"[ROTATE] copytruncate failed for {path}: {e}")
+        return False
+
+
+class LogRotator:
+    """Daily log rotation at server-local midnight.
+
+    Each registered handler is a callable(date_str) that performs one
+    rotation. date_str is the YYYY-MM-DD label for the day that just ended.
+    Runs in a daemon thread.
+    """
+
+    def __init__(self):
+        self._handlers: list = []
+        self._stop = threading.Event()
+
+    def register(self, handler):
+        """Register a rotation handler — callable(date_str) -> None."""
+        self._handlers.append(handler)
+
+    def stop(self):
+        self._stop.set()
+
+    def _seconds_until_next_midnight(self) -> float:
+        from datetime import timedelta
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).date()
+        next_midnight = datetime.combine(tomorrow, datetime.min.time())
+        return max(1.0, (next_midnight - now).total_seconds())
+
+    def run(self):
+        from datetime import timedelta
+        log("[ROTATE] Daily log rotator started")
+        while not self._stop.is_set():
+            sleep_s = self._seconds_until_next_midnight()
+            if self._stop.wait(sleep_s):
+                return
+            # Label the rotated logs with yesterday's date (the day that just ended)
+            date_str = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d")
+            for handler in self._handlers:
+                try:
+                    handler(date_str)
+                except Exception as e:
+                    log(f"[ROTATE] Handler error: {e}")
+
+
 def sanitize_tracker_packet(packet: dict) -> dict:
     """Sanitize tracker packet inputs to prevent HTML injection and ensure type safety.
 
@@ -4432,6 +4510,7 @@ def run_server(port: int, http_port: int | None = None,
                gt06_config_path: Path | None = None, gt06_log_path: Path | None = None,
                jt808_port: int | None = None, jt808_interval: int = 10, jt808_id_prefix: str = "J",
                jt808_config_path: Path | None = None, jt808_log_path: Path | None = None,
+               tracker_log_path: Path | None = None,
 ):
     """Main server loop (multi-event mode).
 
@@ -4515,6 +4594,32 @@ def run_server(port: int, http_port: int | None = None,
         _protocol_listeners.append(jt808_listener)
         jt808_thread = threading.Thread(target=jt808_listener.run, daemon=True, name="jt808-listener")
         jt808_thread.start()
+
+    # Daily log rotation at server-local midnight. Rotated files land in
+    # old_logs/ alongside the source file, named "<base>.<YYYY-MM-DD>".
+    rotator = LogRotator()
+    if tracker_log_path:
+        tlp = Path(tracker_log_path)
+        def _rotate_tracker(date_str, _p=tlp):
+            archive = _unique_archive_path(_p.parent, _p.name, date_str)
+            if rotate_copytruncate(_p, archive):
+                log(f"[ROTATE] {_p} -> {archive}")
+        rotator.register(_rotate_tracker)
+    if gt06_port and gt06_log_path:
+        glp = Path(gt06_log_path)
+        def _rotate_gt06(date_str, _p=glp, _l=gt06_listener):
+            archive = _unique_archive_path(_p.parent, _p.name, date_str)
+            _l.rotate_log_to(archive)
+            log(f"[ROTATE] {_p} -> {archive}")
+        rotator.register(_rotate_gt06)
+    if jt808_port and jt808_log_path:
+        jlp = Path(jt808_log_path)
+        def _rotate_jt808(date_str, _p=jlp, _l=jt808_listener):
+            archive = _unique_archive_path(_p.parent, _p.name, date_str)
+            _l.rotate_log_to(archive)
+            log(f"[ROTATE] {_p} -> {archive}")
+        rotator.register(_rotate_jt808)
+    threading.Thread(target=rotator.run, daemon=True, name="log-rotator").start()
 
     # Start background summary/compressor for each event
     for eid in _event_manager.list_events():
@@ -4744,6 +4849,7 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
         "gt06_id_prefix": "G",
         "gt06_config": "gt06.json",
         "gt06_log": "gt06.log",
+        "tracker_log": None,
     }
 
     if settings_file.exists():
@@ -4862,6 +4968,13 @@ def main():
         default=None,
         help="JT808 binary packet log file (default: jt808.log)"
     )
+    parser.add_argument(
+        "--tracker-log",
+        type=Path,
+        default=None,
+        help="Path to tracker.log (systemd stdout redirect target). If set, "
+             "it is rotated daily via copytruncate alongside the protocol logs."
+    )
 
     args = parser.parse_args()
 
@@ -4894,6 +5007,8 @@ def main():
     jt808_id_prefix = args.jt808_id_prefix if args.jt808_id_prefix is not None else settings.get('jt808_id_prefix', 'J')
     jt808_config_path = args.jt808_config if args.jt808_config is not None else Path(settings.get('jt808_config', 'jt808.json'))
     jt808_log_path = args.jt808_log if args.jt808_log is not None else Path(settings.get('jt808_log', 'jt808.log'))
+    _tracker_log_setting = args.tracker_log if args.tracker_log is not None else settings.get('tracker_log')
+    tracker_log_path = Path(_tracker_log_setting) if _tracker_log_setting else None
 
     run_server(port,
                http_port=http_port,
@@ -4907,7 +5022,8 @@ def main():
                jt808_port=jt808_port, jt808_interval=jt808_interval,
                jt808_id_prefix=jt808_id_prefix,
                jt808_config_path=jt808_config_path,
-               jt808_log_path=jt808_log_path)
+               jt808_log_path=jt808_log_path,
+               tracker_log_path=tracker_log_path)
 
 
 if __name__ == "__main__":
