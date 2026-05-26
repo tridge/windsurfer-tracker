@@ -19,8 +19,14 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 
-# Add server dir to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
+# Locate protocol_GT06.py — try the project layout (../server) first, then
+# fall back to a flat layout (../, e.g. the deployed wstracker tree where the
+# server modules sit next to the data files).
+_here = Path(__file__).resolve().parent
+for _candidate in (_here.parent / "server", _here.parent, _here):
+    if (_candidate / "protocol_GT06.py").exists():
+        sys.path.insert(0, str(_candidate))
+        break
 from protocol_GT06 import (
     gt06_parse_login,
     gt06_parse_location,
