@@ -586,23 +586,30 @@ class GT06Listener:
                             self._save_overrides(tracker.users_file, overrides)
                         self._log(f"[GT06] Set display name for {gt_conn.sailor_id} (did:{imei}): {dev_name}")
 
-            # Determine idle/active state for this device:
-            #   1. In-session per-sailor admin override (active_sailors /
-            #      idle_sailors set by set_idle) wins.
-            #   2. Otherwise, persisted per-sailor state from current_positions
-            #      (survives server restart). If the sailor was last seen idle,
-            #      stay idle; if last seen active, go active.
-            #   3. Otherwise, fall back to the event-scope state
-            #      (event_state="tracking" → active default).
-            #   4. Otherwise, default to idle.
-            event_state = "idle"
+            # Determine idle/active state for this device. Precedence:
+            #   1. In-session per-sailor explicit override (active_sailors /
+            #      idle_sailors) — only populated by set_idle() calls, i.e.
+            #      explicit operator actions during this server run.
+            #   2. Explicit event-scope state (set via /admin/start-all,
+            #      /admin/stop-all, or /admin/state). This represents the
+            #      current operator intent for the whole event and overrides
+            #      any per-sailor state that wasn't explicitly chosen.
+            #   3. Persisted per-sailor idle from current_positions (a fallback
+            #      for trackers seen before any event-level intent was set).
+            #   4. Default: idle.
+            #
+            # Note: we intentionally do NOT auto-add this sailor to
+            # idle_sailors/active_sailors. Those sets represent explicit
+            # operator choices; auto-population would block event_state from
+            # taking effect on later reconnects of the same tracker.
+            event_state = None
             if self.get_event_state:
                 try:
-                    event_state = self.get_event_state(gt_conn.eid) or "idle"
+                    event_state = self.get_event_state(gt_conn.eid)
                 except Exception:
-                    event_state = "idle"
+                    event_state = None
 
-            saved_idle = None  # None = no saved state, True/False = explicit
+            saved_idle = None
             tracker_for_lookup = self.get_tracker(gt_conn.eid)
             if tracker_for_lookup is not None:
                 pt = (tracker_for_lookup.position_tracker
@@ -612,20 +619,20 @@ class GT06Listener:
                     existing_pos = pt.current_positions.get(gt_conn.sailor_id)
                 if existing_pos is not None and "idle" in existing_pos:
                     saved_idle = bool(existing_pos["idle"])
-                    # Seed listener's per-sailor sets so they reflect persisted state
-                    if saved_idle:
-                        self.idle_sailors.add(gt_conn.sailor_id)
-                    else:
-                        self.active_sailors.add(gt_conn.sailor_id)
 
             if gt_conn.sailor_id in self.active_sailors:
                 use_active = True
             elif gt_conn.sailor_id in self.idle_sailors:
                 use_active = False
+            elif event_state == "tracking":
+                use_active = True
+            elif event_state == "idle":
+                use_active = False
             elif saved_idle is not None:
                 use_active = not saved_idle
             else:
-                use_active = (event_state == "tracking")
+                use_active = False  # default: idle
+
             if use_active:
                 gt_conn.idle = False
                 cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
@@ -633,7 +640,6 @@ class GT06Listener:
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                self.idle_sailors.add(gt_conn.sailor_id)
                 cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]
                 gt_conn.expected_hbt_interval = self.idle_hbt_interval
                 self._reset_rate_monitoring(gt_conn, 1800)

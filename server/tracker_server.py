@@ -698,17 +698,20 @@ class EventManager:
             self._ensure_event_dir(eid)
         return event_dir
 
-    def get_event_state(self, eid: int) -> str:
-        """Return the event-scope tracking state: "tracking" or "idle".
+    def get_event_state(self, eid: int) -> str | None:
+        """Return the explicit event-scope tracking state, or None if unset.
 
-        This is the default state new trackers inherit when they connect.
-        Per-sailor overrides (set_idle) take precedence over this default.
+        Distinguishing "explicitly idle" from "never set" matters for the
+        login handler: an explicit choice (made via /admin/start-all,
+        /admin/stop-all, or /admin/state) must override any per-sailor
+        persisted state, while an unset event falls through to the
+        persisted-per-sailor signal.
         """
         with self._lock:
             event = self.events.get(eid)
             if not event:
-                return "idle"
-            return event.get("event_state", "idle")
+                return None
+            return event.get("event_state")
 
     def set_event_state(self, eid: int, state: str) -> bool:
         """Set the event-scope tracking state ("tracking" or "idle"). Persisted to events.json."""
