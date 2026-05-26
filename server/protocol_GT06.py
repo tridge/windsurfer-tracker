@@ -304,6 +304,11 @@ class GT06Connection:
         # active probe the connection would die at the no-traffic timeout.
         self.last_idle_poll_time = 0
 
+        # Firmware version string reported by the device in response to
+        # VERSION# (e.g. "NT19D_MG133_10F8G_B53_V667 2026-04-13"). Captured
+        # at login and exposed for the device-management UI.
+        self.firmware = None
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -658,12 +663,12 @@ class GT06Listener:
 
             if use_active:
                 gt_conn.idle = False
-                cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
+                cmds = _active_cmds(self.interval) + ["HBT,15,15#", "VERSION#"]
                 gt_conn.expected_hbt_interval = 15
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]
+                cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "VERSION#"]
                 gt_conn.expected_hbt_interval = self.idle_hbt_interval
                 self._reset_rate_monitoring(gt_conn, 1800)
             self._queue_commands(gt_conn, cmds)
@@ -936,6 +941,12 @@ class GT06Listener:
             if len(data) >= 5:
                 text = " " + data[5:].decode("ascii", errors="replace")
             self._log(f"[GT06] Command ACK from {label}:{text}")
+            # Capture firmware version from VERSION# response, e.g.
+            #   "NT19D_MG133_10F8G_B53_V667 2026-04-13"
+            fwmatch = re.search(r'([A-Z0-9]+(?:_[A-Z0-9]+)*_V\d+)\s+(\d{4}-\d{2}-\d{2})', text)
+            if fwmatch and gt_conn.firmware != fwmatch.group(0):
+                gt_conn.firmware = fwmatch.group(0)
+                self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
