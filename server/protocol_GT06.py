@@ -21,6 +21,13 @@ from pathlib import Path
 # Battery level mapping: GT06 reports 0-6, server expects 0-100
 _GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
 
+# gt06.log binary format v2: 8-byte file magic, then 14-byte per-record header
+# (8B float64 ts LE + 4B uint32 conn_id LE + 2B uint16 length LE) + frame bytes.
+# Bit 31 of conn_id is the direction flag: 1 = server→device, 0 = device→server.
+# Format v1 (legacy): no magic, 10-byte per-record header (8B ts + 2B length).
+GT06_LOG_MAGIC_V2 = b"GT06LOG2"
+GT06_LOG_DIR_OUT = 0x80000000  # OR'd into conn_id for server→device packets
+
 # Empirical discharge curve for W07C (3000mAh), derived from 24h turntable test.
 # Pairs of (voltage, percentage), descending voltage, evenly spaced in time.
 _W07C_DISCHARGE = [
@@ -238,9 +245,10 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
 class GT06Connection:
     """State for one GT06 TCP connection."""
 
-    def __init__(self, sock, addr):
+    def __init__(self, sock, addr, conn_id=0):
         self.sock = sock
         self.addr = addr
+        self.conn_id = conn_id   # unique per-connection ID for gt06.log v2 format
         self.buf = b""
         self.imei = None
         self.sailor_id = None
@@ -319,6 +327,7 @@ class GT06Listener:
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
         self._log_fd = None
+        self._next_conn_id = 1   # monotonic per-connection ID for gt06.log v2 format
         self.idle_sailors = set()    # sailor_ids currently idle
         self.active_sailors = set()  # sailor_ids explicitly started by admin
         self._sticky_assist: set = set()  # IMEIs with sticky SOS active
@@ -326,12 +335,18 @@ class GT06Listener:
         self._save_overrides = save_overrides_func
         self._write_positions = write_positions_func
 
-    def _log_packet(self, frame):
-        """Log a raw GT06 frame with timestamp+length header."""
+    def _log_packet(self, gt_conn, frame, outgoing=False):
+        """Log a raw GT06 frame with v2 header (ts + conn_id + length).
+
+        conn_id high bit indicates direction (1 = server→device, 0 = device→server).
+        """
         if self._log_fd is None:
             return
         ts = time.time()
-        header = struct.pack("<dH", ts, len(frame))
+        conn_id = (gt_conn.conn_id if gt_conn else 0)
+        if outgoing:
+            conn_id |= GT06_LOG_DIR_OUT
+        header = struct.pack("<dIH", ts, conn_id & 0xFFFFFFFF, len(frame))
         try:
             self._log_fd.write(header + frame)
             self._log_fd.flush()
@@ -347,10 +362,14 @@ class GT06Listener:
         conn, addr = server_sock.accept()
         conn.setblocking(False)
         fd = conn.fileno()
-        gt_conn = GT06Connection(conn, addr)
+        conn_id = self._next_conn_id & 0x7FFFFFFF  # keep below 2^31 (bit 31 = direction)
+        self._next_conn_id = (self._next_conn_id + 1) & 0x7FFFFFFF
+        if self._next_conn_id == 0:
+            self._next_conn_id = 1  # never reuse 0 (reserved for "no connection")
+        gt_conn = GT06Connection(conn, addr, conn_id=conn_id)
         self.connections[fd] = gt_conn
         self.sel.register(conn, selectors.EVENT_READ, data=fd)
-        self._log(f"[GT06] Connection from {addr[0]}:{addr[1]}")
+        self._log(f"[GT06] Connection from {addr[0]}:{addr[1]} (conn_id={conn_id})")
 
     def _disconnect(self, fd):
         """Clean up a disconnected GT06 connection."""
@@ -372,7 +391,7 @@ class GT06Listener:
         """Best-effort send to a GT06 connection."""
         try:
             gt_conn.sock.sendall(data)
-            self._log_packet(data)
+            self._log_packet(gt_conn, data, outgoing=True)
         except Exception as e:
             self._log(f"[GT06] Send error to {gt_conn.addr}: {e}")
             self._disconnect(gt_conn.sock.fileno())
@@ -988,7 +1007,7 @@ class GT06Listener:
 
             frame = gt_conn.buf[:frame_size]
             gt_conn.buf = gt_conn.buf[frame_size:]
-            self._log_packet(frame)
+            self._log_packet(gt_conn, frame, outgoing=False)
 
             try:
                 self._process_frame(fd, frame)
@@ -996,12 +1015,43 @@ class GT06Listener:
                 label = gt_conn.sailor_id or gt_conn.imei or "unknown"
                 self._log(f"[GT06] Frame error from {label}: {e}")
 
+    def _archive_legacy_log(self, path):
+        """Rename a legacy v1 gt06.log to gt06.log.preformat2.<n> so we don't overwrite."""
+        for n in range(1, 1000):
+            candidate = path.with_name(f"{path.name}.preformat2.{n}")
+            if not candidate.exists():
+                path.rename(candidate)
+                return candidate
+        # Fallback: timestamp-based name
+        candidate = path.with_name(f"{path.name}.preformat2.{int(time.time())}")
+        path.rename(candidate)
+        return candidate
+
+    def _open_log_v2(self, log_path):
+        """Open the packet log in v2 format.
+
+        - New (empty) file: write magic header, then start appending.
+        - Existing v2 file: append without rewriting magic.
+        - Existing v1 file: rename to .preformat2.<N> and start fresh.
+        """
+        path = Path(log_path) if not isinstance(log_path, Path) else log_path
+        if path.exists() and path.stat().st_size > 0:
+            with open(path, "rb") as f:
+                head = f.read(len(GT06_LOG_MAGIC_V2))
+            if head != GT06_LOG_MAGIC_V2:
+                archived = self._archive_legacy_log(path)
+                self._log(f"[GT06] Archived legacy v1 log {path} -> {archived}")
+        self._log_fd = open(path, "ab")
+        if path.stat().st_size == 0:
+            self._log_fd.write(GT06_LOG_MAGIC_V2)
+            self._log_fd.flush()
+        self._log(f"[GT06] Packet logging to {path} (v2 format)")
+
     def run(self):
         """Main loop — runs in a daemon thread."""
         if self.log_file:
             try:
-                self._log_fd = open(self.log_file, "ab")
-                self._log(f"[GT06] Packet logging to {self.log_file}")
+                self._open_log_v2(self.log_file)
             except Exception as e:
                 self._log(f"[GT06] Warning: Could not open packet log {self.log_file}: {e}")
 

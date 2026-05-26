@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Dump GT06 binary packet log.
 
-Reads the binary log file written by the GT06 listener (each record is a
-10-byte header followed by the raw GT06 frame) and prints decoded packets.
+Reads the binary log file written by the GT06 listener and prints decoded
+packets. Auto-detects format:
+
+  v1 (legacy): 10-byte record header (8B ts + 2B length) + frame
+  v2:          8-byte file magic "GT06LOG2", then 14-byte record header
+               (8B ts + 4B conn_id-with-dir-bit + 2B length) + frame
+
+Pass --imei to filter to a single device's stream (v2 logs only — v1 has no
+stream IDs to filter on).
 """
 
 import sys
@@ -19,9 +26,13 @@ from protocol_GT06 import (
     gt06_parse_location,
     gt06_parse_heartbeat,
     gt06_crc_itu,
+    GT06_LOG_MAGIC_V2,
+    GT06_LOG_DIR_OUT,
 )
 
-HEADER_SIZE = 10  # 8 (float64) + 2 (uint16)
+V1_HEADER_SIZE = 10  # 8 (float64) + 2 (uint16)
+V2_HEADER_SIZE = 14  # 8 (float64) + 4 (uint32 conn_id) + 2 (uint16 length)
+HEADER_SIZE = V1_HEADER_SIZE  # retained for backward compat with anything importing this
 
 _GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
 
@@ -29,17 +40,43 @@ ALARM_TYPES = {0: "Normal", 1: "SOS", 2: "Power Cut", 3: "Shock", 4: "Fence In",
 TERMINAL_ALARM = {0: "Normal", 1: "Shock", 2: "Power Cut", 3: "Low Battery", 4: "SOS"}
 
 
-def read_packets(f):
-    """Yield (timestamp, frame) tuples from log file."""
-    while True:
-        header = f.read(HEADER_SIZE)
-        if len(header) < HEADER_SIZE:
-            return
-        ts, frame_len = struct.unpack("<dH", header)
-        frame = f.read(frame_len)
-        if len(frame) < frame_len:
-            return
-        yield ts, frame
+def detect_format(f):
+    """Return "v2" if file starts with magic, "v1" otherwise. Leaves file pointer
+    positioned past the magic (v2) or at start (v1)."""
+    head = f.read(len(GT06_LOG_MAGIC_V2))
+    if head == GT06_LOG_MAGIC_V2:
+        return "v2"
+    f.seek(0)
+    return "v1"
+
+
+def read_packets(f, fmt="v1"):
+    """Yield (timestamp, conn_id, outgoing, frame) tuples.
+
+    For v1 logs, conn_id is always 0 and outgoing is always False (unknown).
+    """
+    if fmt == "v2":
+        while True:
+            header = f.read(V2_HEADER_SIZE)
+            if len(header) < V2_HEADER_SIZE:
+                return
+            ts, raw_conn, frame_len = struct.unpack("<dIH", header)
+            outgoing = bool(raw_conn & GT06_LOG_DIR_OUT)
+            conn_id = raw_conn & 0x7FFFFFFF
+            frame = f.read(frame_len)
+            if len(frame) < frame_len:
+                return
+            yield ts, conn_id, outgoing, frame
+    else:
+        while True:
+            header = f.read(V1_HEADER_SIZE)
+            if len(header) < V1_HEADER_SIZE:
+                return
+            ts, frame_len = struct.unpack("<dH", header)
+            frame = f.read(frame_len)
+            if len(frame) < frame_len:
+                return
+            yield ts, 0, False, frame
 
 
 def fmt_time(ts):
@@ -107,16 +144,21 @@ def decode_terminal_info(info_byte):
     }
 
 
-def dump_packet(ts, frame, verbose=False):
+def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False):
     """Format and print one packet."""
     result = validate_frame(frame)
+    # Prefix shows direction + conn_id when available (v2 format)
+    if conn_id:
+        prefix = f"c{conn_id:<4d} {'OUT' if outgoing else 'IN '}  "
+    else:
+        prefix = ""
     if result is None:
-        print(f"{fmt_time(ts)}  ???     Bad frame: {frame.hex()}")
+        print(f"{fmt_time(ts)}  {prefix}???     Bad frame: {frame.hex()}")
         return
 
     protocol, data, serial, crc_ok = result
     crc_tag = "" if crc_ok else " [CRC BAD]"
-    ts_str = fmt_time(ts)
+    ts_str = fmt_time(ts) + ("  " + prefix if prefix else "")
 
     if protocol == 0x01:
         # Login
@@ -266,6 +308,20 @@ def dump_packet(ts, frame, verbose=False):
             print(f"           serial={serial}")
 
 
+def _imei_matches(target, imei):
+    """Match user-supplied IMEI string against a parsed IMEI.
+
+    Accepts full IMEI (e.g. 866557081304307), trailing digits (304307),
+    or "G304307"-style sailor IDs (strip non-digit prefix).
+    """
+    if not target or not imei:
+        return False
+    digits = ''.join(c for c in target if c.isdigit())
+    if not digits:
+        return False
+    return imei.endswith(digits) or imei == digits
+
+
 def main():
     parser = argparse.ArgumentParser(description="Dump GT06 binary packet log")
     parser.add_argument("logfile", nargs="?", default="gt06.log",
@@ -274,6 +330,11 @@ def main():
                         help="Show all decoded fields")
     parser.add_argument("-f", "--follow", action="store_true",
                         help="Tail mode — keep reading as new packets arrive")
+    parser.add_argument("--imei", default=None,
+                        help="Filter to one device's stream(s) (v2 logs). "
+                             "Match by full IMEI, trailing digits, or G-prefixed sailor ID.")
+    parser.add_argument("--list-streams", action="store_true",
+                        help="List all connection streams (conn_id → IMEI) and exit")
     args = parser.parse_args()
 
     logpath = Path(args.logfile)
@@ -281,20 +342,55 @@ def main():
         print(f"Error: {logpath} not found", file=sys.stderr)
         sys.exit(1)
 
+    # First pass for v2 logs when --imei or --list-streams is requested: build
+    # conn_id → IMEI map by scanning LOGIN packets.
+    matching_conn_ids = None
+    conn_to_imei = {}
+    if args.imei or args.list_streams:
+        with open(logpath, "rb") as f:
+            fmt = detect_format(f)
+            if fmt == "v1":
+                print("Error: --imei / --list-streams require a v2 log "
+                      "(no per-packet stream IDs in v1).", file=sys.stderr)
+                sys.exit(2)
+            for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
+                if outgoing or not conn_id:
+                    continue
+                result = validate_frame(frame)
+                if result is None:
+                    continue
+                protocol, data, _serial, _crc_ok = result
+                if protocol == 0x01:
+                    imei = gt06_parse_login(data)
+                    if imei and conn_id not in conn_to_imei:
+                        conn_to_imei[conn_id] = imei
+        if args.list_streams:
+            for cid in sorted(conn_to_imei):
+                print(f"conn_id={cid}  IMEI={conn_to_imei[cid]}")
+            return
+        matching_conn_ids = {cid for cid, imei in conn_to_imei.items()
+                              if _imei_matches(args.imei, imei)}
+        if not matching_conn_ids:
+            print(f"No streams matched IMEI {args.imei!r}", file=sys.stderr)
+            sys.exit(0)
+
+    def _emit(f, fmt):
+        for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
+            if matching_conn_ids is not None and conn_id not in matching_conn_ids:
+                continue
+            dump_packet(ts, frame, verbose=args.verbose,
+                        conn_id=conn_id, outgoing=outgoing)
+
     try:
         with open(logpath, "rb") as f:
+            fmt = detect_format(f)
             if args.follow:
-                # Print existing packets first, then tail
-                for ts, frame in read_packets(f):
-                    dump_packet(ts, frame, verbose=args.verbose)
-                # Now poll for new data
+                _emit(f, fmt)
                 while True:
-                    for ts, frame in read_packets(f):
-                        dump_packet(ts, frame, verbose=args.verbose)
+                    _emit(f, fmt)
                     time.sleep(0.5)
             else:
-                for ts, frame in read_packets(f):
-                    dump_packet(ts, frame, verbose=args.verbose)
+                _emit(f, fmt)
     except KeyboardInterrupt:
         pass
 
