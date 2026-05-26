@@ -455,11 +455,21 @@ class GT06Listener:
                 self._send_next_cmd(gt_conn)
 
     def _reset_rate_monitoring(self, gt_conn, expected_loc_interval):
-        """Reset rate monitoring counters after a state transition."""
-        gt_conn.rate_check_time = time.monotonic()
+        """Reset rate monitoring counters after a state transition.
+
+        Also resets last_hbt_time so the periodic HBT-gap check uses a fresh
+        grace period after the transition. Without this, switching from idle
+        (expected_hbt_interval=300) to active (expected_hbt_interval=15) would
+        instantly trip the "no heartbeat for N seconds — disconnecting" check
+        because the last HB arrived correctly per the old idle interval but is
+        now compared against the much shorter active threshold.
+        """
+        now = time.monotonic()
+        gt_conn.rate_check_time = now
         gt_conn.loc_count = 0
         gt_conn.hbt_count = 0
         gt_conn.expected_loc_interval = expected_loc_interval
+        gt_conn.last_hbt_time = now
         gt_conn.rate_retry_count = 0
 
     def _check_rates(self, fd, gt_conn, now):
