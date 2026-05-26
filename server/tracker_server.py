@@ -2971,6 +2971,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Event {eid} not found"}, 404)
                 return
 
+            # Set event-scope state so trackers joining *after* this call also
+            # default to idle.
+            if _event_manager:
+                _event_manager.set_event_state(eid, "idle")
+
             stopped_ids = []
             for user_id, pos in tracker.position_tracker.current_positions.items():
                 if not pos.get("stopped", False):
@@ -3019,6 +3024,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not tracker:
                 self._send_json({"error": f"Event {eid} not found"}, 404)
                 return
+
+            # Set event-scope state so trackers joining *after* this call also
+            # default to active tracking.
+            if _event_manager:
+                _event_manager.set_event_state(eid, "tracking")
 
             started_ids = []
             for user_id, pos in tracker.position_tracker.current_positions.items():

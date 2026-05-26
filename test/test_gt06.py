@@ -3,7 +3,26 @@
 import json
 import time
 
-from conftest import GT06Client, create_event
+import pytest
+
+from conftest import GT06Client, HTTPClient, create_event
+
+
+@pytest.fixture(autouse=True)
+def _reset_event_state(server):
+    """Reset event 1's event_state to 'idle' before each test.
+
+    /admin/start-all and /admin/stop-all now flip the event-scope default;
+    without this reset, a prior test's start-all would leak 'tracking'
+    into the next test, breaking the implicit 'login defaults to idle'
+    precondition.
+    """
+    http = HTTPClient(f"http://{server.host}:{server.port}")
+    http.post(
+        "/api/event/1/admin/state",
+        data=json.dumps({"state": "idle"}),
+        headers={"X-Admin-Password": "admin123", "Content-Type": "application/json"},
+    )
 
 
 # ---------------------------------------------------------------------------
