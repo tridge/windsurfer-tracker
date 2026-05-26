@@ -298,6 +298,12 @@ class GT06Connection:
         # scheduler is broken/asleep.
         self.last_alive_time = 0
 
+        # Last time the periodic loop sent an idle-mode keepalive probe
+        # (STATUS#) to this device. Some W07C firmware revisions ACK the
+        # HBT command but never actually emit heartbeats — without an
+        # active probe the connection would die at the no-traffic timeout.
+        self.last_idle_poll_time = 0
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -1165,7 +1171,27 @@ class GT06Listener:
                     self._check_cmd_delivery(fd, gt_conn, now)
                 # Check LOC/HBT rates
                 self._check_rates(fd, gt_conn, now)
-                # (STATUS# is now sent from heartbeat handler)
+                # (STATUS# is also sent from heartbeat handler when HB arrives;
+                # this block additionally polls idle connections that have
+                # gone silent, since some new-firmware devices ACK HBT but
+                # never actually emit heartbeats.)
+
+                # Idle-mode keepalive probe. If an idle device has gone quiet
+                # for more than 2/3 of the no-traffic disconnect threshold and
+                # we haven't probed it recently, send STATUS#. The device's
+                # response updates last_alive_time and prevents the connection
+                # being torn down by the no-traffic check below.
+                if (gt_conn.idle
+                        and gt_conn.cmd_pending is None
+                        and not gt_conn.cmd_queue
+                        and gt_conn.last_alive_time > 0):
+                    disconnect_threshold = gt_conn.expected_hbt_interval * 3 + 30
+                    poll_interval = max(60, int(disconnect_threshold * 2 / 3))
+                    alive_gap = now - gt_conn.last_alive_time
+                    poll_gap = now - gt_conn.last_idle_poll_time
+                    if alive_gap >= poll_interval and poll_gap >= poll_interval:
+                        gt_conn.last_idle_poll_time = now
+                        self._queue_commands(gt_conn, ["STATUS#"])
 
                 # Disconnect if no frame received from the device for too long.
                 # We use last_alive_time (any received frame) rather than
