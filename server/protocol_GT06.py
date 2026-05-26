@@ -292,6 +292,12 @@ class GT06Connection:
         # when they have a real fix. Track whether we've logged the workaround.
         self.stale_fix_warned = False
 
+        # Last time we received ANY frame from the device. Used as the
+        # liveness signal for the no-HBT-disconnect check, so a device that
+        # responds to commands or sends LOCs counts as alive even if its HB
+        # scheduler is broken/asleep.
+        self.last_alive_time = 0
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -470,6 +476,7 @@ class GT06Listener:
         gt_conn.hbt_count = 0
         gt_conn.expected_loc_interval = expected_loc_interval
         gt_conn.last_hbt_time = now
+        gt_conn.last_alive_time = now
         gt_conn.rate_retry_count = 0
 
     def _check_rates(self, fd, gt_conn, now):
@@ -1052,6 +1059,7 @@ class GT06Listener:
             frame = gt_conn.buf[:frame_size]
             gt_conn.buf = gt_conn.buf[frame_size:]
             self._log_packet(gt_conn, frame, outgoing=False)
+            gt_conn.last_alive_time = time.monotonic()
 
             try:
                 self._process_frame(fd, frame)
@@ -1159,11 +1167,17 @@ class GT06Listener:
                 self._check_rates(fd, gt_conn, now)
                 # (STATUS# is now sent from heartbeat handler)
 
-                # Disconnect if no heartbeat received for too long
-                if gt_conn.last_hbt_time > 0:
-                    hbt_gap = now - gt_conn.last_hbt_time
-                    if hbt_gap > gt_conn.expected_hbt_interval * 3 + 30:
+                # Disconnect if no frame received from the device for too long.
+                # We use last_alive_time (any received frame) rather than
+                # last_hbt_time so a device responding to STATUS#/commands or
+                # sending LOC counts as alive even if its HB scheduler is
+                # broken or asleep. Observed on W07C new firmware: after a
+                # natural ACC-OFF reconnect, the device ACKs HBT,15,15# but
+                # never actually emits HB packets.
+                if gt_conn.last_alive_time > 0:
+                    alive_gap = now - gt_conn.last_alive_time
+                    if alive_gap > gt_conn.expected_hbt_interval * 3 + 30:
                         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-                        self._log(f"[GT06] No heartbeat from {label} for {hbt_gap:.0f}s — disconnecting")
+                        self._log(f"[GT06] No traffic from {label} for {alive_gap:.0f}s — disconnecting")
                         self._disconnect(fd)
                         continue
