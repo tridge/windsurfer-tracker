@@ -304,11 +304,12 @@ class GT06Listener:
 
     def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None,
                  log_file=None, log_func=None, save_overrides_func=None,
-                 write_positions_func=None):
+                 write_positions_func=None, get_event_state_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
         self.get_tracker = get_tracker_func
+        self.get_event_state = get_event_state_func  # callable(eid) -> "tracking" | "idle"
         self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
         self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
         self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
@@ -566,15 +567,24 @@ class GT06Listener:
                             self._save_overrides(tracker.users_file, overrides)
                         self._log(f"[GT06] Set display name for {gt_conn.sailor_id} (did:{imei}): {dev_name}")
 
-            # Determine idle/active state for this device
-            if gt_conn.sailor_id in self.active_sailors:
-                # Admin explicitly started this device — resume active tracking
+            # Determine idle/active state for this device:
+            #   1. Per-sailor admin override (active_sailors) wins.
+            #   2. Otherwise, fall back to the event-scope state set by the
+            #      operator (event_state="tracking" → active default).
+            #   3. Otherwise, default to idle.
+            event_state = "idle"
+            if self.get_event_state:
+                try:
+                    event_state = self.get_event_state(gt_conn.eid) or "idle"
+                except Exception:
+                    event_state = "idle"
+            use_active = (gt_conn.sailor_id in self.active_sailors) or (event_state == "tracking")
+            if use_active:
                 gt_conn.idle = False
                 cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
                 gt_conn.expected_hbt_interval = 15
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
-                # Default to idle (including first-ever connection)
                 gt_conn.idle = True
                 self.idle_sailors.add(gt_conn.sailor_id)
                 cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]

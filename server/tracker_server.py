@@ -620,6 +620,31 @@ class EventManager:
             self._ensure_event_dir(eid)
         return event_dir
 
+    def get_event_state(self, eid: int) -> str:
+        """Return the event-scope tracking state: "tracking" or "idle".
+
+        This is the default state new trackers inherit when they connect.
+        Per-sailor overrides (set_idle) take precedence over this default.
+        """
+        with self._lock:
+            event = self.events.get(eid)
+            if not event:
+                return "idle"
+            return event.get("event_state", "idle")
+
+    def set_event_state(self, eid: int, state: str) -> bool:
+        """Set the event-scope tracking state ("tracking" or "idle"). Persisted to events.json."""
+        if state not in ("tracking", "idle"):
+            return False
+        with self._lock:
+            if eid not in self.events:
+                return False
+            self.events[eid]["event_state"] = state
+            self.events[eid]["event_state_updated"] = time.time()
+            self._save_events()
+            log(f"[EVENTS] Event {eid} state set to '{state}'")
+            return True
+
 
 def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None, position_tails: dict | None = None):
     """Write current positions to a JSON file for web UI consumption."""
@@ -2303,6 +2328,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"races": []})
 
+        elif subpath == '/admin/state':
+            # Return event-scope tracking state (admin only)
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            state = _event_manager.get_event_state(eid) if _event_manager else "idle"
+            self._send_json({"event_id": eid, "state": state})
+
         elif subpath == '/admin/simulator/status':
             # Return simulator status (admin only)
             if not self._check_event_admin_auth(eid):
@@ -2826,6 +2859,27 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             tmp_file.rename(reg_file)
             log(f"[EVENT {eid}] Registration updated by admin for {email_key}")
             self._send_json({"success": True, "message": "Registration updated"})
+
+        elif subpath == '/admin/state':
+            # Set the event-scope tracking state. Body: {"state": "tracking"|"idle"}
+            if not _event_manager:
+                self._send_json({"error": "Multi-event mode required"}, 400)
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body_raw = self.rfile.read(content_length).decode('utf-8')
+                body = json.loads(body_raw) if body_raw else {}
+            except (json.JSONDecodeError, ValueError):
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
+            new_state = body.get("state")
+            if new_state not in ("tracking", "idle"):
+                self._send_json({"error": "state must be 'tracking' or 'idle'"}, 400)
+                return
+            if not _event_manager.set_event_state(eid, new_state):
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+            self._send_json({"success": True, "event_id": eid, "state": new_state})
 
         elif subpath == '/admin/stop-all':
             # Send remote stop command to all active trackers
@@ -4435,11 +4489,14 @@ def run_server(port: int, http_port: int | None = None,
 
         def _gt06_get_tracker(eid):
             return get_event_tracker(eid)
+        def _gt06_get_event_state(eid):
+            return _event_manager.get_event_state(eid) if _event_manager else "idle"
         global _gt06_listener
         gt06_listener = GT06Listener(gt06_port, gt06_interval, gt06_id_prefix, _gt06_get_tracker, gt06_config,
                                       log_file=gt06_log_path, log_func=log,
                                       save_overrides_func=save_user_overrides,
-                                      write_positions_func=write_current_positions)
+                                      write_positions_func=write_current_positions,
+                                      get_event_state_func=_gt06_get_event_state)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
