@@ -957,10 +957,15 @@ class PositionTracker:
                         "last_seen_iso": pos.get("last_seen_iso", ""),
                         "src_ip": pos.get("src_ip", "")
                     }
+                    # Preserve idle/stopped/charging/bat_v across restart so
+                    # admin overrides (set_idle) and start-all/stop-all see the
+                    # correct state, and reconnecting trackers inherit it via
+                    # the login handler.
+                    for k in ("idle", "stopped", "chg", "bat_v"):
+                        if k in pos:
+                            self.current_positions[sailor_id][k] = pos[k]
                     if "did" in pos:
                         self.current_positions[sailor_id]["did"] = pos["did"]
-                    if "chg" in pos:
-                        self.current_positions[sailor_id]["chg"] = pos["chg"]
                     # Restore timestamp and sq tracking for duplicate detection
                     if pos.get("ts"):
                         self.last_timestamp[sailor_id] = pos["ts"]

@@ -587,17 +587,45 @@ class GT06Listener:
                         self._log(f"[GT06] Set display name for {gt_conn.sailor_id} (did:{imei}): {dev_name}")
 
             # Determine idle/active state for this device:
-            #   1. Per-sailor admin override (active_sailors) wins.
-            #   2. Otherwise, fall back to the event-scope state set by the
-            #      operator (event_state="tracking" → active default).
-            #   3. Otherwise, default to idle.
+            #   1. In-session per-sailor admin override (active_sailors /
+            #      idle_sailors set by set_idle) wins.
+            #   2. Otherwise, persisted per-sailor state from current_positions
+            #      (survives server restart). If the sailor was last seen idle,
+            #      stay idle; if last seen active, go active.
+            #   3. Otherwise, fall back to the event-scope state
+            #      (event_state="tracking" → active default).
+            #   4. Otherwise, default to idle.
             event_state = "idle"
             if self.get_event_state:
                 try:
                     event_state = self.get_event_state(gt_conn.eid) or "idle"
                 except Exception:
                     event_state = "idle"
-            use_active = (gt_conn.sailor_id in self.active_sailors) or (event_state == "tracking")
+
+            saved_idle = None  # None = no saved state, True/False = explicit
+            tracker_for_lookup = self.get_tracker(gt_conn.eid)
+            if tracker_for_lookup is not None:
+                pt = (tracker_for_lookup.position_tracker
+                      if hasattr(tracker_for_lookup, "position_tracker")
+                      else tracker_for_lookup)
+                with pt._lock:
+                    existing_pos = pt.current_positions.get(gt_conn.sailor_id)
+                if existing_pos is not None and "idle" in existing_pos:
+                    saved_idle = bool(existing_pos["idle"])
+                    # Seed listener's per-sailor sets so they reflect persisted state
+                    if saved_idle:
+                        self.idle_sailors.add(gt_conn.sailor_id)
+                    else:
+                        self.active_sailors.add(gt_conn.sailor_id)
+
+            if gt_conn.sailor_id in self.active_sailors:
+                use_active = True
+            elif gt_conn.sailor_id in self.idle_sailors:
+                use_active = False
+            elif saved_idle is not None:
+                use_active = not saved_idle
+            else:
+                use_active = (event_state == "tracking")
             if use_active:
                 gt_conn.idle = False
                 cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
