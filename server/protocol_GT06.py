@@ -280,6 +280,10 @@ class GT06Connection:
         self.slow_mode = False        # currently in slow LOC mode
         self.slow_since = 0           # monotonic time speed first dropped below threshold
 
+        # Some W07C firmware revisions send LOC with course_status=0x0000 even
+        # when they have a real fix. Track whether we've logged the workaround.
+        self.stale_fix_warned = False
+
     def next_cmd_serial(self):
         self.cmd_serial += 1
         return self.cmd_serial
@@ -623,7 +627,20 @@ class GT06Listener:
                 return
 
             if not loc["gps_valid"]:
-                return
+                # Some W07C firmware revisions send LOC with course_status=0x0000
+                # (all status bits cleared) even when they have a real fix.
+                # Accept the packet if the embedded data looks internally
+                # consistent: non-zero lat/lon, enough satellites, and gps_time
+                # near server time.
+                if not (loc["lat"] != 0 and loc["lon"] != 0
+                        and loc["satellites"] >= 4
+                        and abs(loc["ts"] - time.time()) <= 300):
+                    return
+                if not gt_conn.stale_fix_warned:
+                    label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                    self._log(f"[GT06] {label}: accepting LOC with cleared status bits "
+                              f"(sats={loc['satellites']}) — firmware quirk")
+                    gt_conn.stale_fix_warned = True
 
             gt_conn.loc_count += 1
 
