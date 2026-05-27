@@ -566,7 +566,8 @@ class JT808Listener:
                 self._disconnect(fd)
 
             # Set initial idle/active state and send tracking interval
-            if jt_conn.sailor_id in self.active_sailors:
+            jt_key = (jt_conn.eid, jt_conn.sailor_id)
+            if jt_key in self.active_sailors:
                 jt_conn.idle = False
                 report_interval = self.interval
                 self._send_tracking_control(jt_conn, report_interval)
@@ -578,7 +579,7 @@ class JT808Listener:
                     self._send(jt_conn, frame)
             else:
                 jt_conn.idle = True
-                self.idle_sailors.add(jt_conn.sailor_id)
+                self.idle_sailors.add(jt_key)
                 # Stop GPS tracking to save power — heartbeat keeps device visible
                 self._send_tracking_control(jt_conn, 0)
                 for pid in [0xF104, 0xF110, 0x0029]:
@@ -606,7 +607,7 @@ class JT808Listener:
             if jt_conn.imei in self._sticky_assist:
                 jt_conn.assist_active = True
                 if jt_conn.idle:
-                    self.set_idle(jt_conn.sailor_id, False)
+                    self.set_idle(jt_conn.eid, jt_conn.sailor_id, False)
                 self._log(f"[JT808] Restored sticky SOS after reconnect for {jt_conn.sailor_id}")
 
             # Restore last known position
@@ -852,7 +853,7 @@ class JT808Listener:
                 self._sticky_assist.add(imei)
                 self._log(f"[JT808] SOS activated (sticky) from {jt_conn.sailor_id}")
                 if jt_conn.idle:
-                    self.set_idle(jt_conn.sailor_id, False)
+                    self.set_idle(jt_conn.eid, jt_conn.sailor_id, False)
                     self._log(f"[JT808] Exited idle due to SOS from {jt_conn.sailor_id}")
 
         tracker = self.get_tracker(jt_conn.eid)
@@ -929,8 +930,8 @@ class JT808Listener:
 
     # --- Public interface (matches GT06Listener) ---
 
-    def send_command_to(self, sailor_id, cmd_str):
-        """Send a command to a connected JT808 device by sailor_id.
+    def send_command_to(self, eid, sailor_id, cmd_str):
+        """Send a command to a connected JT808 device matching (eid, sailor_id).
 
         Supported commands:
           query-params                       - query all terminal parameters (0x8104)
@@ -942,7 +943,7 @@ class JT808Listener:
           passthrough-text 0x00 AT+CMD       - send 0x8900 downlink pass-through (ASCII text)
         """
         for jt_conn in self.connections.values():
-            if jt_conn.sailor_id == sailor_id:
+            if jt_conn.eid == eid and jt_conn.sailor_id == sailor_id:
                 return self._exec_command(jt_conn, cmd_str)
         return False
 
@@ -1047,10 +1048,11 @@ class JT808Listener:
         self._log(f"[JT808] Unknown command: {cmd_str}")
         return False
 
-    def cancel_assist(self, sailor_id):
-        """Cancel SOS assist for a JT808 device."""
+    def cancel_assist(self, eid, sailor_id):
+        """Cancel SOS assist for a JT808 device matching (eid, sailor_id)."""
         for jt_conn in self.connections.values():
-            if jt_conn.sailor_id == sailor_id and jt_conn.assist_active:
+            if (jt_conn.eid == eid and jt_conn.sailor_id == sailor_id
+                    and jt_conn.assist_active):
                 jt_conn.assist_active = False
                 if jt_conn.imei:
                     self._sticky_assist.discard(jt_conn.imei)
@@ -1060,18 +1062,19 @@ class JT808Listener:
                 return True
         return False
 
-    def set_idle(self, sailor_id, idle):
-        """Set idle state for a JT808 device."""
+    def set_idle(self, eid, sailor_id, idle):
+        """Set idle state for the JT808 device matching (eid, sailor_id)."""
+        key = (eid, sailor_id)
         if idle:
-            self.idle_sailors.add(sailor_id)
-            self.active_sailors.discard(sailor_id)
+            self.idle_sailors.add(key)
+            self.active_sailors.discard(key)
         else:
-            self.idle_sailors.discard(sailor_id)
-            self.active_sailors.add(sailor_id)
+            self.idle_sailors.discard(key)
+            self.active_sailors.add(key)
 
         found = False
         for jt_conn in self.connections.values():
-            if jt_conn.sailor_id == sailor_id:
+            if jt_conn.eid == eid and jt_conn.sailor_id == sailor_id:
                 jt_conn.idle = idle
                 if idle:
                     # Stop GPS tracking to save power — heartbeat keeps device visible
@@ -1106,7 +1109,7 @@ class JT808Listener:
                 self._log(f"[JT808] {'Idle' if idle else 'Active'} mode for {sailor_id}")
                 found = True
         if not found:
-            if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+            if key in self.idle_sailors or key in self.active_sailors:
                 self._log(f"[JT808] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return found
 

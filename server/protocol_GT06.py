@@ -380,8 +380,11 @@ class GT06Listener:
         self.log_file = log_file
         self._log_fd = None
         self._next_conn_id = 1   # monotonic per-connection ID for gt06.log v2 format
-        self.idle_sailors = set()    # sailor_ids currently idle
-        self.active_sailors = set()  # sailor_ids explicitly started by admin
+        # Keyed by (eid, sailor_id) tuples — eid scoping matters because
+        # sailor_id is just prefix + last-6 IMEI digits and a collision
+        # across events is possible at 250+ trackers (codex review #7).
+        self.idle_sailors = set()    # {(eid, sailor_id), ...}
+        self.active_sailors = set()  # {(eid, sailor_id), ...}
         self._sticky_assist: set = set()  # IMEIs with sticky SOS active
         self._log = log_func or _default_log
         self._save_overrides = save_overrides_func
@@ -683,9 +686,10 @@ class GT06Listener:
                 if existing_pos is not None and "idle" in existing_pos:
                     saved_idle = bool(existing_pos["idle"])
 
-            if gt_conn.sailor_id in self.active_sailors:
+            sailor_key = (gt_conn.eid, gt_conn.sailor_id)
+            if sailor_key in self.active_sailors:
                 use_active = True
-            elif gt_conn.sailor_id in self.idle_sailors:
+            elif sailor_key in self.idle_sailors:
                 use_active = False
             elif event_state == "tracking":
                 use_active = True
@@ -720,7 +724,7 @@ class GT06Listener:
             if imei in self._sticky_assist:
                 gt_conn.assist_active = True
                 if gt_conn.idle:
-                    self.set_idle(gt_conn.sailor_id, False)
+                    self.set_idle(gt_conn.eid, gt_conn.sailor_id, False)
                 self._log(f"[GT06] Restored sticky SOS after reconnect for {gt_conn.sailor_id}")
 
             # Restore last known position from tracker and immediately update
@@ -946,7 +950,7 @@ class GT06Listener:
                     self._log(f"[GT06] SOS activated (sticky) from {label}")
                     # Come out of idle so we get full GPS tracking
                     if gt_conn.idle:
-                        self.set_idle(gt_conn.sailor_id, False)
+                        self.set_idle(gt_conn.eid, gt_conn.sailor_id, False)
                         self._log(f"[GT06] Exited idle due to SOS from {label}")
                 else:
                     self._log(f"[GT06] SOS already active, ignoring repeat press from {label}")
@@ -1026,18 +1030,19 @@ class GT06Listener:
             gt_conn.cmd_pending_frame = None
             self._send_next_cmd(gt_conn)
 
-    def send_command_to(self, sailor_id, cmd_str):
-        """Send a command to a connected GT06 device by sailor_id."""
+    def send_command_to(self, eid, sailor_id, cmd_str):
+        """Send a command to a connected GT06 device matching (eid, sailor_id)."""
         for gt_conn in self.connections.values():
-            if gt_conn.sailor_id == sailor_id:
+            if gt_conn.eid == eid and gt_conn.sailor_id == sailor_id:
                 self._queue_commands(gt_conn, [cmd_str])
                 return True
         return False
 
-    def cancel_assist(self, sailor_id):
-        """Cancel SOS assist for a GT06 device."""
+    def cancel_assist(self, eid, sailor_id):
+        """Cancel SOS assist for a GT06 device matching (eid, sailor_id)."""
         for gt_conn in self.connections.values():
-            if gt_conn.sailor_id == sailor_id and gt_conn.assist_active:
+            if (gt_conn.eid == eid and gt_conn.sailor_id == sailor_id
+                    and gt_conn.assist_active):
                 gt_conn.assist_active = False
                 self._queue_commands(gt_conn, ["SENALM,OFF#"])
                 if gt_conn.imei:
@@ -1046,23 +1051,23 @@ class GT06Listener:
                 return True
         return False
 
-    def set_idle(self, sailor_id, idle):
-        """Set idle state for a GT06 device by sailor_id.
+    def set_idle(self, eid, sailor_id, idle):
+        """Set idle state for the GT06 device matching (eid, sailor_id).
 
-        When idle=True: use SENDS,1# (GPS sleeps after 1 min no vibration) + long TIMER T2
-        (1800s) + disable motion alarms so device only sends heartbeats.
-        When idle=False: restore normal TIMER + SENDS,0# (GPS always on).
+        When idle=True: send IDLE command set (long TIMER + HBT + SENDS,1).
+        When idle=False: restore active command set (short TIMER + HBT 15s).
         """
+        key = (eid, sailor_id)
         if idle:
-            self.idle_sailors.add(sailor_id)
-            self.active_sailors.discard(sailor_id)
+            self.idle_sailors.add(key)
+            self.active_sailors.discard(key)
         else:
-            self.idle_sailors.discard(sailor_id)
-            self.active_sailors.add(sailor_id)
+            self.idle_sailors.discard(key)
+            self.active_sailors.add(key)
 
         found = False
         for gt_conn in self.connections.values():
-            if gt_conn.sailor_id == sailor_id:
+            if gt_conn.eid == eid and gt_conn.sailor_id == sailor_id:
                 gt_conn.idle = idle
                 gt_conn.slow_mode = False
                 gt_conn.slow_since = 0
@@ -1098,8 +1103,10 @@ class GT06Listener:
                 self._log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}")
                 found = True
         if not found:
-            # Only log if this sailor_id has been seen by this listener before
-            if sailor_id in self.idle_sailors or sailor_id in self.active_sailors:
+            # Only log if this (eid, sailor_id) has been touched by set_idle
+            # at least once (which the .add above always does, so this always
+            # holds — but keep the gate for symmetry with prior behaviour).
+            if key in self.idle_sailors or key in self.active_sailors:
                 self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return found
 

@@ -2373,7 +2373,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "cmd parameter required"}, 400)
                 return
             if _gt06_listener:
-                sent = _gt06_listener.send_command_to(user_id, cmd_str)
+                sent = _gt06_listener.send_command_to(eid, user_id, cmd_str)
                 if sent:
                     self._send_json({"success": True, "user_id": user_id, "cmd": cmd_str})
                 else:
@@ -2399,7 +2399,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
             for listener in _protocol_listeners:
                 if isinstance(listener, JT808Listener):
-                    sent = listener.send_command_to(user_id, cmd_str)
+                    sent = listener.send_command_to(eid, user_id, cmd_str)
                     if sent:
                         self._send_json({"success": True, "user_id": user_id, "cmd": cmd_str})
                         return
@@ -2985,7 +2985,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     queue_pending_command(f"{eid}:{user_id}", "stop")
                     send_proactive_command(f"{eid}:{user_id}", "stop")
                     for listener in _protocol_listeners:
-                        listener.set_idle(user_id, True)
+                        listener.set_idle(eid, user_id, True)
                     stopped_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
@@ -3002,7 +3002,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             queue_pending_command(f"{eid}:{user_id}", "stop")
             send_proactive_command(f"{eid}:{user_id}", "stop")
             for listener in _protocol_listeners:
-                listener.set_idle(user_id, True)
+                listener.set_idle(eid, user_id, True)
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -3017,7 +3017,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             queue_pending_command(f"{eid}:{user_id}", "cancel_assist")
             send_proactive_command(f"{eid}:{user_id}", "cancel_assist")
             for listener in _protocol_listeners:
-                listener.cancel_assist(user_id)
+                listener.cancel_assist(eid, user_id)
             log(f"[EVENT {eid}] Remote cancel assist queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -3039,7 +3039,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     queue_pending_command(f"{eid}:{user_id}", "start")
                     send_proactive_command(f"{eid}:{user_id}", "start")
                     for listener in _protocol_listeners:
-                        listener.set_idle(user_id, False)
+                        listener.set_idle(eid, user_id, False)
                     started_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote start-all queued for {len(started_ids)} idle trackers: {started_ids}")
@@ -3073,7 +3073,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             queue_pending_command(f"{eid}:{user_id}", "start")
             send_proactive_command(f"{eid}:{user_id}", "start")
             for listener in _protocol_listeners:
-                listener.set_idle(user_id, False)
+                listener.set_idle(eid, user_id, False)
             log(f"[EVENT {eid}] Remote start queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
