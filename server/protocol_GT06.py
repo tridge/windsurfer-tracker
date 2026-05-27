@@ -348,6 +348,13 @@ class GT06Connection:
         # when they have a real fix. Track whether we've logged the workaround.
         self.stale_fix_warned = False
 
+        # Mode the server intends this device to be in (1 = MODE1 race-day /
+        # active, 5 = MODE5 overnight scheduled-wake). Set by the login
+        # handler and set_idle(); enforced in the cxzt# response handler so
+        # that a stale device-side mode (e.g. MODE5 left over from sleep
+        # before a /admin/start-all) gets corrected via a MODE1/MODE5 push.
+        self.desired_mode = 1
+
         # Last time we received ANY frame from the device. Used as the
         # liveness signal for the no-HBT-disconnect check, so a device that
         # responds to commands or sends LOCs counts as alive even if its HB
@@ -731,6 +738,7 @@ class GT06Listener:
 
             if use_active:
                 gt_conn.idle = False
+                gt_conn.desired_mode = 1
                 # cxzt# first so we detect the mode early — V667 devices in
                 # MODE4 default die fast, so if we don't trigger the MODE1
                 # switch within the first few seconds of login we miss the
@@ -751,10 +759,12 @@ class GT06Listener:
                     except Exception:
                         idle_submode = "race"
                 if idle_submode == "overnight":
+                    gt_conn.desired_mode = 5
                     cmds = ["cxzt#"] + _overnight_cmds(self.overnight_interval_min)
                     gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
                     self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
                 else:
+                    gt_conn.desired_mode = 1
                     # cxzt# first — see comment in active branch above
                     cmds = (["cxzt#"]
                             + _idle_cmds(self.idle_hbt_interval)
@@ -1050,17 +1060,22 @@ class GT06Listener:
                 mode_match = re.search(r'\*M:(\d+)', text)
                 if mode_match:
                     mode = int(mode_match.group(1))
-                    # Acceptable modes: 1 (race-day periodic), 2/5 (overnight
-                    # scheduled wake). Auto-revert from anything else (most
-                    # importantly MODE4, the V667 default that breaks the
-                    # HB scheduler) back to MODE1. The submode plumbing
-                    # (forthcoming) will pick the *right* target between
-                    # MODE1 and MODE2/5; until then, treat any of {1,2,5}
-                    # as intentional.
-                    if mode not in (1, 2, 5):
-                        self._log(f"[GT06] {label} reports MODE={mode}, switching to MODE1 (one-shot, clearing queue)")
+                    # Enforce gt_conn.desired_mode (set by login handler /
+                    # set_idle from event_state + idle_submode). If the
+                    # device reports a different mode, push the right
+                    # MODE command — this is the only way to recover from
+                    # e.g. MODE5 stuck after a previous overnight period
+                    # when the operator clicks All Start.
+                    desired = gt_conn.desired_mode
+                    if mode != desired:
+                        if desired == 5:
+                            push = f"MODE5,{self.overnight_interval_min}#"
+                        else:
+                            push = "MODE1,30,300#"
+                        self._log(f"[GT06] {label} reports MODE={mode}, "
+                                  f"desired MODE={desired} — pushing {push}")
                         gt_conn.cmd_queue.clear()
-                        self._queue_commands(gt_conn, ["MODE1,30,300#"])
+                        self._queue_commands(gt_conn, [push])
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
@@ -1124,16 +1139,19 @@ class GT06Listener:
                 gt_conn.cmd_pending = None
                 if idle:
                     if submode == "overnight":
+                        gt_conn.desired_mode = 5
                         cmds = _overnight_cmds(self.overnight_interval_min)
                         # No HBT for overnight — MODE5 controls cadence itself
                         gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
                         self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
                     else:
+                        gt_conn.desired_mode = 1
                         cmds = (_idle_cmds(self.idle_hbt_interval)
                                 + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
                         gt_conn.expected_hbt_interval = self.idle_hbt_interval
                         self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
                 else:
+                    gt_conn.desired_mode = 1
                     cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
                     gt_conn.expected_hbt_interval = 15
                     self._reset_rate_monitoring(gt_conn, self.interval)

@@ -2996,9 +2996,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             # Set event-scope state so trackers joining *after* this call also
-            # default to idle.
+            # default to race-day idle. Pass idle_submode="race" explicitly —
+            # set_event_state() leaves submode untouched when omitted, which
+            # would let a stale "overnight" from an earlier /admin/sleep-all
+            # leak into future reconnects.
             if _event_manager:
-                _event_manager.set_event_state(eid, "idle")
+                _event_manager.set_event_state(eid, "idle", idle_submode="race")
 
             stopped_ids = []
             for user_id, pos in tracker.position_tracker.current_positions.items():
@@ -4687,10 +4690,16 @@ def run_server(port: int, http_port: int | None = None,
 
         def _jt808_get_tracker(eid):
             return get_event_tracker(eid)
+        def _jt808_get_event_state(eid):
+            return _event_manager.get_event_state(eid) if _event_manager else None
+        def _jt808_get_event_idle_submode(eid):
+            return _event_manager.get_event_idle_submode(eid) if _event_manager else "race"
         jt808_listener = JT808Listener(jt808_port, jt808_interval, jt808_id_prefix, _jt808_get_tracker, jt808_config,
                                         log_file=jt808_log_path, log_func=log,
                                         save_overrides_func=save_user_overrides,
-                                        write_positions_func=write_current_positions)
+                                        write_positions_func=write_current_positions,
+                                        get_event_state_func=_jt808_get_event_state,
+                                        get_event_idle_submode_func=_jt808_get_event_idle_submode)
         _protocol_listeners.append(jt808_listener)
         jt808_thread = threading.Thread(target=jt808_listener.run, daemon=True, name="jt808-listener")
         jt808_thread.start()

@@ -404,11 +404,19 @@ class JT808Listener:
 
     def __init__(self, port, interval, id_prefix, get_tracker_func, config=None,
                  log_file=None, log_func=None, save_overrides_func=None,
-                 write_positions_func=None):
+                 write_positions_func=None,
+                 get_event_state_func=None,
+                 get_event_idle_submode_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
         self.get_tracker = get_tracker_func
+        # Same precedence chain as GT06: in-session sets > event_state >
+        # default idle. JT808 doesn't yet use overnight submode (no equiv
+        # of MODE5), but we accept the callback for parity in case future
+        # JT808 devices grow a deep-sleep mode.
+        self.get_event_state = get_event_state_func
+        self.get_event_idle_submode = get_event_idle_submode_func
         self.config = config or {"default_eid": 1, "devices": {}}
         self.connections = {}  # fd -> JT808Connection
         self.sel = selectors.DefaultSelector()
@@ -565,9 +573,29 @@ class JT808Listener:
                 self._log(f"[JT808] Closing stale connection for {jt_conn.sailor_id}")
                 self._disconnect(fd)
 
-            # Set initial idle/active state and send tracking interval
+            # Decide idle vs active using the same precedence chain as
+            # GT06: in-session sets > event_state > default idle. Without
+            # this, a JT808 device reconnecting to a "tracking" event after
+            # a server restart would incorrectly fall back to idle.
             jt_key = (jt_conn.eid, jt_conn.sailor_id)
+            event_state = None
+            if self.get_event_state:
+                try:
+                    event_state = self.get_event_state(jt_conn.eid)
+                except Exception:
+                    event_state = None
             if jt_key in self.active_sailors:
+                use_active = True
+            elif jt_key in self.idle_sailors:
+                use_active = False
+            elif event_state == "tracking":
+                use_active = True
+            elif event_state == "idle":
+                use_active = False
+            else:
+                use_active = False  # default: idle
+
+            if use_active:
                 jt_conn.idle = False
                 report_interval = self.interval
                 self._send_tracking_control(jt_conn, report_interval)
