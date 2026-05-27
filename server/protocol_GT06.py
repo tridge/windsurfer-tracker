@@ -38,9 +38,17 @@ _W07C_DISCHARGE = [
 ]
 
 
-# Commands to send when entering idle mode
-_IDLE_CMDS = ["TIMER,60,1800#", "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
-              "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
+# Commands to send when entering idle mode.
+# TIMER ACC ON/OFF intervals are deliberately equal — vehicle-tracker "ACC"
+# detection on the W07C is vibration-driven, so we don't want behavior to
+# depend on whether the device thinks it's "stopped" or "running". With both
+# intervals equal, every idle device uploads at the same cadence regardless.
+# The interval is matched to idle_hbt_interval so the rate monitor doesn't
+# get confused.
+def _idle_cmds(interval):
+    return [f"TIMER,{interval},{interval}#",
+            "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
+            "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
 
 
 def _active_cmds(interval):
@@ -523,7 +531,7 @@ class GT06Listener:
             if gt_conn.rate_retry_count < 2:
                 gt_conn.rate_retry_count += 1
                 if gt_conn.idle:
-                    cmds = list(_IDLE_CMDS)
+                    cmds = _idle_cmds(self.idle_hbt_interval)
                 else:
                     cmds = _active_cmds(self.slow_loc_interval if gt_conn.slow_mode else self.interval)
                 self._log(f"[GT06] Rate mismatch for {label}: "
@@ -668,9 +676,10 @@ class GT06Listener:
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "VERSION#"]
+                cmds = (_idle_cmds(self.idle_hbt_interval)
+                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "VERSION#"])
                 gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                self._reset_rate_monitoring(gt_conn, 1800)
+                self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
             self._queue_commands(gt_conn, cmds)
             self._log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
 
@@ -1006,9 +1015,10 @@ class GT06Listener:
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
                 if idle:
-                    cmds = list(_IDLE_CMDS) + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"]
+                    cmds = (_idle_cmds(self.idle_hbt_interval)
+                            + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
                     gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                    self._reset_rate_monitoring(gt_conn, 1800)
+                    self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
                 else:
                     cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
                     gt_conn.expected_hbt_interval = 15
