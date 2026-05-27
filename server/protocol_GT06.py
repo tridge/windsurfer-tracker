@@ -693,13 +693,19 @@ class GT06Listener:
 
             if use_active:
                 gt_conn.idle = False
-                cmds = _active_cmds(self.interval) + ["HBT,15,15#", "cxzt#"]
+                # cxzt# first so we detect the mode early — V667 devices in
+                # MODE4 default die fast, so if we don't trigger the MODE1
+                # switch within the first few seconds of login we miss the
+                # window entirely.
+                cmds = ["cxzt#"] + _active_cmds(self.interval) + ["HBT,15,15#"]
                 gt_conn.expected_hbt_interval = 15
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                cmds = (_idle_cmds(self.idle_hbt_interval)
-                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "cxzt#"])
+                # cxzt# first — see comment in active branch above
+                cmds = (["cxzt#"]
+                        + _idle_cmds(self.idle_hbt_interval)
+                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
                 gt_conn.expected_hbt_interval = self.idle_hbt_interval
                 self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
             self._queue_commands(gt_conn, cmds)
@@ -992,7 +998,13 @@ class GT06Listener:
                 if mode_match:
                     mode = int(mode_match.group(1))
                     if mode != 1:
-                        self._log(f"[GT06] {label} reports MODE={mode}, switching to MODE1 (one-shot)")
+                        # Send MODE1 NOW — clear the rest of the login queue
+                        # because MODE1 will tear down the TCP and a fresh
+                        # login will re-issue everything anyway. Otherwise
+                        # the remaining queued commands risk dying with the
+                        # connection before they're useful.
+                        self._log(f"[GT06] {label} reports MODE={mode}, switching to MODE1 (one-shot, clearing queue)")
+                        gt_conn.cmd_queue.clear()
                         self._queue_commands(gt_conn, ["MODE1,30,300#"])
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
