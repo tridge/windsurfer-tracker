@@ -1,0 +1,16 @@
+[
+  {"name": "morning_check", "state": "tracking", "duration_s": 600},
+  {"name": "warm_up_idle", "state": "idle",     "duration_s": 600},
+  {"name": "heat1_race",   "state": "tracking", "duration_s": 1800},
+  {"name": "between_1_2",  "state": "idle",     "duration_s": 900},
+  {"name": "heat2_race",   "state": "tracking", "duration_s": 1800},
+  {"name": "between_2_3",  "state": "idle",     "duration_s": 900},
+  {"name": "heat3_race",   "state": "tracking", "duration_s": 1800},
+  {"name": "lunch_idle",   "state": "idle",     "duration_s": 3600},
+  {"name": "heat4_race",   "state": "tracking", "duration_s": 1800},
+  {"name": "between_4_5",  "state": "idle",     "duration_s": 900},
+  {"name": "heat5_race",   "state": "tracking", "duration_s": 1800},
+  {"name": "evening_idle", "state": "idle",     "duration_s": 7200},
+  {"name": "overnight_1",  "state": "idle",     "duration_s": 21600},
+  {"name": "overnight_2",  "state": "idle",     "duration_s": 21600}
+]
