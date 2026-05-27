@@ -238,6 +238,7 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
         result = {
             "default_eid": cfg.get("default_eid", 1),
             "idle_hbt_interval": cfg.get("idle_hbt_interval", 15),
+            "idle_poll_interval": cfg.get("idle_poll_interval", 60),
             "slow_speed_knots": cfg.get("slow_speed_knots", 2),
             "slow_speed_seconds": cfg.get("slow_speed_seconds", 20),
             "slow_loc_interval": cfg.get("slow_loc_interval", 3),
@@ -345,6 +346,7 @@ class GT06Listener:
         self.get_event_state = get_event_state_func  # callable(eid) -> "tracking" | "idle"
         self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
         self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
+        self.idle_poll_interval = self.gt06_config.get("idle_poll_interval", 60)
         self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
         self.slow_speed_seconds = self.gt06_config.get("slow_speed_seconds", 20)
         self.slow_loc_interval = self.gt06_config.get("slow_loc_interval", 3)
@@ -1197,20 +1199,21 @@ class GT06Listener:
                 # gone silent, since some new-firmware devices ACK HBT but
                 # never actually emit heartbeats.)
 
-                # Idle-mode keepalive probe. If an idle device has gone quiet
-                # for more than 2/3 of the no-traffic disconnect threshold and
-                # we haven't probed it recently, send STATUS#. The device's
-                # response updates last_alive_time and prevents the connection
-                # being torn down by the no-traffic check below.
+                # Idle-mode keepalive probe. V667 firmware's cellular modem
+                # appears to enter a deep sleep when nothing is happening,
+                # after which the TCP connection becomes unreachable. To keep
+                # race-day idle reachable for snappy operator control, poll
+                # STATUS# aggressively (default every 60s). The device's
+                # response keeps the modem awake (and the carrier NAT
+                # mapping alive) and updates last_alive_time so the
+                # disconnect check below stays satisfied.
                 if (gt_conn.idle
                         and gt_conn.cmd_pending is None
                         and not gt_conn.cmd_queue
                         and gt_conn.last_alive_time > 0):
-                    disconnect_threshold = gt_conn.expected_hbt_interval * 3 + 30
-                    poll_interval = max(60, int(disconnect_threshold * 2 / 3))
                     alive_gap = now - gt_conn.last_alive_time
                     poll_gap = now - gt_conn.last_idle_poll_time
-                    if alive_gap >= poll_interval and poll_gap >= poll_interval:
+                    if alive_gap >= self.idle_poll_interval and poll_gap >= self.idle_poll_interval:
                         gt_conn.last_idle_poll_time = now
                         self._queue_commands(gt_conn, ["STATUS#"])
 
