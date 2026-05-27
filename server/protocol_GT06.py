@@ -1006,12 +1006,14 @@ class GT06Listener:
                 mode_match = re.search(r'\*M:(\d+)', text)
                 if mode_match:
                     mode = int(mode_match.group(1))
-                    if mode != 1:
-                        # Send MODE1 NOW — clear the rest of the login queue
-                        # because MODE1 will tear down the TCP and a fresh
-                        # login will re-issue everything anyway. Otherwise
-                        # the remaining queued commands risk dying with the
-                        # connection before they're useful.
+                    # Acceptable modes: 1 (race-day periodic), 2/5 (overnight
+                    # scheduled wake). Auto-revert from anything else (most
+                    # importantly MODE4, the V667 default that breaks the
+                    # HB scheduler) back to MODE1. The submode plumbing
+                    # (forthcoming) will pick the *right* target between
+                    # MODE1 and MODE2/5; until then, treat any of {1,2,5}
+                    # as intentional.
+                    if mode not in (1, 2, 5):
                         self._log(f"[GT06] {label} reports MODE={mode}, switching to MODE1 (one-shot, clearing queue)")
                         gt_conn.cmd_queue.clear()
                         self._queue_commands(gt_conn, ["MODE1,30,300#"])
