@@ -693,13 +693,13 @@ class GT06Listener:
 
             if use_active:
                 gt_conn.idle = False
-                cmds = _active_cmds(self.interval) + ["HBT,15,15#", "VERSION#"]
+                cmds = _active_cmds(self.interval) + ["HBT,15,15#", "cxzt#"]
                 gt_conn.expected_hbt_interval = 15
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
                 cmds = (_idle_cmds(self.idle_hbt_interval)
-                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "VERSION#"])
+                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#", "cxzt#"])
                 gt_conn.expected_hbt_interval = self.idle_hbt_interval
                 self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
             self._queue_commands(gt_conn, cmds)
@@ -978,6 +978,22 @@ class GT06Listener:
             if fwmatch and gt_conn.firmware != fwmatch.group(0):
                 gt_conn.firmware = fwmatch.group(0)
                 self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
+            # Parse cxzt# response (rich device-info, *-delimited fields).
+            # Detect by presence of "MCU:" and "ID:" within the response.
+            # If the device is not in MODE1, queue MODE1 once — this is the
+            # one-shot mechanism (next cxzt# after the resulting reconnect
+            # will see M=1 and not re-send, so no storm).
+            if 'MCU:' in text and 'ID:' in text and '*' in text:
+                fw_cxzt = re.match(r'\s*(\S+)-GT06', text)
+                if fw_cxzt and gt_conn.firmware != fw_cxzt.group(1):
+                    gt_conn.firmware = fw_cxzt.group(1)
+                    self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
+                mode_match = re.search(r'\*M:(\d+)', text)
+                if mode_match:
+                    mode = int(mode_match.group(1))
+                    if mode != 1:
+                        self._log(f"[GT06] {label} reports MODE={mode}, switching to MODE1 (one-shot)")
+                        self._queue_commands(gt_conn, ["MODE1,30,300#"])
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
