@@ -1061,6 +1061,12 @@ class PositionTracker:
                 if "lat" in existing and "lon" in existing:
                     pos_data["lat"] = existing["lat"]
                     pos_data["lon"] = existing["lon"]
+                # Preserve per-sailor SLEEP (overnight) flag — set by
+                # /admin/sleep, persisted to current_positions.json so
+                # the state survives server restart and isn't clobbered
+                # by MODE5 wake-cycle heartbeats.
+                if existing.get("sleep"):
+                    pos_data["sleep"] = True
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1118,6 +1124,10 @@ class PositionTracker:
                 if "lat" in existing and "lon" in existing:
                     pos_data["lat"] = existing["lat"]
                     pos_data["lon"] = existing["lon"]
+                # Preserve per-sailor SLEEP flag — see comment on the
+                # idle branch above for rationale.
+                if existing.get("sleep"):
+                    pos_data["sleep"] = True
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"

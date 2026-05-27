@@ -1076,13 +1076,17 @@ class GT06Listener:
                     desired = gt_conn.desired_mode
                     if mode != desired:
                         if desired == 5:
-                            push = f"MODE5,{self.overnight_interval_min}#"
+                            # Push full overnight setup (SLPDISCONNECT,
+                            # ACCLINE, MODE5) — bare MODE5 without ACCLINE=1
+                            # leaves vibration-wake enabled and the device
+                            # wakes uselessly on wave motion at night.
+                            push_cmds = _overnight_cmds(self.overnight_interval_min)
                         else:
-                            push = "MODE1,30,300#"
+                            push_cmds = ["MODE1,30,300#"]
                         self._log(f"[GT06] {label} reports MODE={mode}, "
-                                  f"desired MODE={desired} — pushing {push}")
+                                  f"desired MODE={desired} — pushing {' '.join(push_cmds)}")
                         gt_conn.cmd_queue.clear()
-                        self._queue_commands(gt_conn, [push])
+                        self._queue_commands(gt_conn, push_cmds)
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
