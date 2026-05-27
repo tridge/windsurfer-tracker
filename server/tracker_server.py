@@ -4040,6 +4040,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         try:
             content_length = int(self.headers.get('Content-Length', 0))
+            # Tracker JSON packets are tiny; cap at 64 KB so a hostile or
+            # broken client can't make us slurp arbitrary bytes into memory.
+            MAX_TRACKER_BODY = 64 * 1024
+            if content_length > MAX_TRACKER_BODY:
+                log(f"[HTTP] /api/tracker oversized body ({content_length} bytes) from {client_ip}")
+                self._send_json({"error": "Payload too large"}, 413)
+                return
             body = self.rfile.read(content_length).decode('utf-8')
             packet = json.loads(body)
 
@@ -4211,6 +4218,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         try:
             content_length = int(self.headers.get('Content-Length', 0))
+            # iOS UDID plist (signed PKCS#7 envelope) is a few KB; cap at
+            # 256 KB so a hostile client can't make us slurp arbitrary bytes.
+            MAX_UDID_BODY = 256 * 1024
+            if content_length > MAX_UDID_BODY:
+                client_ip = self.client_address[0] if self.client_address else "?"
+                log(f"[UDID] oversized body ({content_length} bytes) from {client_ip}")
+                self.send_response(413)
+                self.end_headers()
+                return
             body = self.rfile.read(content_length)
             content_type = self.headers.get('Content-Type', 'unknown')
 

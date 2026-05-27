@@ -317,6 +317,11 @@ class GT06Connection:
         self.slow_mode = False        # currently in slow LOC mode
         self.slow_since = 0           # monotonic time speed first dropped below threshold
 
+        # Monotonic time of the accept(); used to expire connections that
+        # accept a TCP socket but never send a LOGIN frame, holding a
+        # file descriptor indefinitely.
+        self.connected_at = time.monotonic()
+
         # Some W07C firmware revisions send LOC with course_status=0x0000 even
         # when they have a real fix. Track whether we've logged the workaround.
         self.stale_fix_warned = False
@@ -1213,7 +1218,10 @@ class GT06Listener:
         server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_sock.setblocking(False)
         server_sock.bind(("0.0.0.0", self.port))
-        server_sock.listen(16)
+        # Backlog sized well above the expected fleet — at the 250-tracker
+        # target a server restart or mobile-network flap can trigger that
+        # many simultaneous connect attempts and listen(16) would drop most.
+        server_sock.listen(512)
         self.sel.register(server_sock, selectors.EVENT_READ, data="server")
         self._log(f"[GT06] Listening on TCP port {self.port} (interval={self.interval}s, prefix={self.id_prefix})")
 
@@ -1233,9 +1241,19 @@ class GT06Listener:
 
             # Periodic checks on all connections
             now = time.monotonic()
+            PRELOGIN_DEADLINE_S = 30  # accept→LOGIN must complete within this
             for fd in list(self.connections):
                 gt_conn = self.connections.get(fd)
-                if gt_conn is None or gt_conn.sailor_id is None:
+                if gt_conn is None:
+                    continue
+                # Expire pre-login connections that never sent a LOGIN frame.
+                # Without this a client can accept a socket and sit there
+                # forever, holding an fd and a slot in self.connections.
+                if gt_conn.sailor_id is None:
+                    if now - gt_conn.connected_at > PRELOGIN_DEADLINE_S:
+                        self._log(f"[GT06] Pre-login timeout ({PRELOGIN_DEADLINE_S}s) "
+                                  f"for {gt_conn.addr[0]}:{gt_conn.addr[1]} (conn_id={gt_conn.conn_id})")
+                        self._disconnect(fd)
                     continue
                 # Check SIOCOUTQ for pending commands
                 if gt_conn.cmd_pending:
