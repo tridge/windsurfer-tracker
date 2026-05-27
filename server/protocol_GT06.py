@@ -77,6 +77,27 @@ def _active_cmds(interval):
             "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
 
 
+def _overnight_cmds(interval_min):
+    """Commands to send when entering OVERNIGHT idle (deep sleep, MODE5).
+
+    The device wakes every `interval_min` minutes, opens a TCP connection,
+    locates, reports, then powers off the MCU and modem until the next
+    scheduled wake. Vendor (gt06/General commands for wireless devices
+    updated.xlsx): "MODE5 OK Freq:N-DW:?" — same scheduled-wake behaviour
+    as MODE2 but with MCU also off between wakes for max energy efficiency.
+
+    SZCS#ACCLINE=1 stops the device treating vibration as ACC-ON, so
+    boats rocking with wind/wave overnight don't trigger spurious wakes.
+
+    SZCS#SLPDISCONNECT=0 ("long connection" — don't drop TCP on sleep)
+    is harmless in MODE5 since the device tears down its TCP every cycle
+    anyway, but kept for parity with the race-day idle command set.
+    """
+    return ["SZCS#SLPDISCONNECT=0",
+            "SZCS#ACCLINE=1",
+            f"MODE5,{interval_min}#"]
+
+
 def voltage_to_percent(voltage):
     """Convert voltage to battery percentage using linear interpolation."""
     table = _W07C_DISCHARGE
@@ -259,6 +280,7 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "default_eid": cfg.get("default_eid", 1),
             "idle_hbt_interval": cfg.get("idle_hbt_interval", 15),
             "idle_poll_interval": cfg.get("idle_poll_interval", 60),
+            "overnight_interval_min": cfg.get("overnight_interval_min", 15),
             "slow_speed_knots": cfg.get("slow_speed_knots", 2),
             "slow_speed_seconds": cfg.get("slow_speed_seconds", 20),
             "slow_loc_interval": cfg.get("slow_loc_interval", 3),
@@ -363,15 +385,22 @@ class GT06Listener:
 
     def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None,
                  log_file=None, log_func=None, save_overrides_func=None,
-                 write_positions_func=None, get_event_state_func=None):
+                 write_positions_func=None, get_event_state_func=None,
+                 get_event_idle_submode_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
         self.get_tracker = get_tracker_func
         self.get_event_state = get_event_state_func  # callable(eid) -> "tracking" | "idle"
+        # callable(eid) -> "race" | "overnight" — when an idle tracker
+        # reconnects, picks the command set. Default "race" if unset.
+        self.get_event_idle_submode = get_event_idle_submode_func
         self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
         self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
         self.idle_poll_interval = self.gt06_config.get("idle_poll_interval", 60)
+        # Overnight (deep-sleep) wake interval in MINUTES. Used by MODE5
+        # via _overnight_cmds(). Min 5 (vendor spec); default 15.
+        self.overnight_interval_min = self.gt06_config.get("overnight_interval_min", 15)
         self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
         self.slow_speed_seconds = self.gt06_config.get("slow_speed_seconds", 20)
         self.slow_loc_interval = self.gt06_config.get("slow_loc_interval", 3)
@@ -711,12 +740,27 @@ class GT06Listener:
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                # cxzt# first — see comment in active branch above
-                cmds = (["cxzt#"]
-                        + _idle_cmds(self.idle_hbt_interval)
-                        + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
-                gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
+                # Pick race-day idle vs overnight idle based on event's
+                # idle_submode (default "race"). Overnight uses MODE5 +
+                # ACCLINE=1 for deep sleep; race-day keeps TCP alive with
+                # periodic HBs at idle_hbt_interval seconds.
+                idle_submode = "race"
+                if self.get_event_idle_submode:
+                    try:
+                        idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
+                    except Exception:
+                        idle_submode = "race"
+                if idle_submode == "overnight":
+                    cmds = ["cxzt#"] + _overnight_cmds(self.overnight_interval_min)
+                    gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
+                    self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
+                else:
+                    # cxzt# first — see comment in active branch above
+                    cmds = (["cxzt#"]
+                            + _idle_cmds(self.idle_hbt_interval)
+                            + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
+                    gt_conn.expected_hbt_interval = self.idle_hbt_interval
+                    self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
             self._queue_commands(gt_conn, cmds)
             self._log(f"[GT06] Login commands queued ({'active' if not gt_conn.idle else 'idle'})")
 
@@ -1053,11 +1097,13 @@ class GT06Listener:
                 return True
         return False
 
-    def set_idle(self, eid, sailor_id, idle):
+    def set_idle(self, eid, sailor_id, idle, submode="race"):
         """Set idle state for the GT06 device matching (eid, sailor_id).
 
-        When idle=True: send IDLE command set (long TIMER + HBT + SENDS,1).
-        When idle=False: restore active command set (short TIMER + HBT 15s).
+        When idle=True:
+          submode="race"      → race-day idle (long TIMER + HBT + SENDS,1)
+          submode="overnight" → MODE5 deep sleep with scheduled wake
+        When idle=False: restore active command set.
         """
         key = (eid, sailor_id)
         if idle:
@@ -1077,10 +1123,16 @@ class GT06Listener:
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
                 if idle:
-                    cmds = (_idle_cmds(self.idle_hbt_interval)
-                            + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
-                    gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                    self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
+                    if submode == "overnight":
+                        cmds = _overnight_cmds(self.overnight_interval_min)
+                        # No HBT for overnight — MODE5 controls cadence itself
+                        gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
+                        self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
+                    else:
+                        cmds = (_idle_cmds(self.idle_hbt_interval)
+                                + [f"HBT,{self.idle_hbt_interval},{self.idle_hbt_interval}#"])
+                        gt_conn.expected_hbt_interval = self.idle_hbt_interval
+                        self._reset_rate_monitoring(gt_conn, self.idle_hbt_interval)
                 else:
                     cmds = _active_cmds(self.interval) + ["HBT,15,15#"]
                     gt_conn.expected_hbt_interval = 15
@@ -1102,7 +1154,9 @@ class GT06Listener:
                     if pt.positions_file and self._write_positions:
                         overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
                         self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
-                self._log(f"[GT06] {'Idle' if idle else 'Active'} mode for {sailor_id}")
+                mode_label = ("Overnight idle" if (idle and submode == "overnight")
+                              else "Idle" if idle else "Active")
+                self._log(f"[GT06] {mode_label} mode for {sailor_id}")
                 found = True
         if not found:
             # Only log if this (eid, sailor_id) has been touched by set_idle

@@ -75,6 +75,21 @@
             font-size: 12px;
             color: #666;
         }
+
+        .tracking-controls-btn {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0 6px;
+            margin-left: auto;
+            margin-right: 6px;
+            line-height: 1;
+        }
+        .tracking-controls-btn:hover {
+            color: #000;
+        }
         
         .panel-content {
             overflow-y: auto;
@@ -1103,6 +1118,9 @@
     <div class="info-panel">
         <div class="panel-header" onclick="togglePanel()">
             <h3 id="panelTitle">Tracking (0)</h3>
+            <button class="tracking-controls-btn" id="trackingControlsBtn"
+                    onclick="event.stopPropagation(); showTrackingControls()"
+                    title="Sort / filter">⚙</button>
             <span class="panel-toggle" id="panelToggle">▼</span>
         </div>
         <div class="assist-alerts" id="assistAlerts" style="display:none"></div>
@@ -1181,6 +1199,32 @@
             </div>
             <div class="event-modal-footer">
                 <a href="index.html">← Back to Events List</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tracking sort/filter controls dialog -->
+    <div class="event-modal-overlay" id="trackingControlsOverlay" onclick="hideTrackingControls(event)">
+        <div class="event-modal" style="max-width:360px;" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <h2>Tracking — Sort &amp; Filter</h2>
+                <button class="event-modal-close" onclick="hideTrackingControls()">&times;</button>
+            </div>
+            <div class="event-modal-body" style="padding:20px;">
+                <div style="margin-bottom:14px;font-weight:600;color:#333;">Sort by</div>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="radio" name="trackingSort" value="name"> Name (A→Z, default)
+                </label>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="radio" name="trackingSort" value="recent_desc"> Last updated — most recent first
+                </label>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="radio" name="trackingSort" value="recent_asc"> Last updated — oldest first
+                </label>
+                <p style="font-size:12px;color:#888;margin-top:14px;">More filtering options coming later.</p>
+            </div>
+            <div class="event-modal-footer" style="text-align:right;padding:12px 20px;">
+                <button class="admin-action-btn primary" onclick="applyTrackingSort()">Apply</button>
             </div>
         </div>
     </div>
@@ -1330,6 +1374,9 @@
                 </button>
                 <button class="admin-action-btn danger" onclick="stopAllUsers()">
                     ⏹ All IDLE
+                </button>
+                <button class="admin-action-btn danger" onclick="sleepAllUsers()" title="Overnight SLEEP — MODE5 deep sleep, wakes every ~15 min">
+                    💤 All SLEEP
                 </button>
                 <button class="admin-action-btn primary" onclick="startAllIdleUsers()">
                     ▶ All START
@@ -3085,6 +3132,51 @@
             }
         }
 
+        // Send per-tracker SLEEP (overnight idle = MODE5 deep sleep)
+        async function sleepUser(userId) {
+            if (!confirm(`Send ${userId} into OVERNIGHT SLEEP (deep sleep / MODE5)? It will wake briefly every ~15 min, then sleep.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`${EVENT_API}/admin/sleep/${encodeURIComponent(userId)}`, {
+                    method: 'POST',
+                    headers: {'X-Admin-Password': adminPassword}
+                });
+                const result = await response.json();
+                if (result.success) {
+                    map.closePopup();
+                    alert(`Sleep (MODE5 overnight) command sent to ${userId}.`);
+                } else {
+                    alert(`Failed to send sleep command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending sleep command:', error);
+                alert(`Error sending sleep command: ${error.message}`);
+            }
+        }
+
+        // Send all trackers into overnight SLEEP
+        async function sleepAllUsers() {
+            if (!confirm('Send ALL trackers into OVERNIGHT SLEEP (deep sleep / MODE5)? Each device will wake briefly every ~15 min then sleep until you switch back to Start.')) {
+                return;
+            }
+            try {
+                const response = await fetch(`${EVENT_API}/admin/sleep-all`, {
+                    method: 'POST',
+                    headers: {'X-Admin-Password': adminPassword}
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Overnight SLEEP command sent to ${result.sleep_count} tracker(s).`);
+                } else {
+                    alert(`Failed to send sleep-all command: ${result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error sending sleep-all command:', error);
+                alert(`Error sending sleep-all command: ${error.message}`);
+            }
+        }
+
         // Send remote start command to all idle trackers
         async function startAllIdleUsers() {
             if (!confirm('START all idle trackers? They will begin GPS tracking.')) {
@@ -3681,7 +3773,38 @@
             document.getElementById('panelContent').classList.toggle('collapsed', panelCollapsed);
             document.getElementById('panelToggle').textContent = panelCollapsed ? '▶' : '▼';
         }
-        
+
+        // Tracking sidebar sort/filter — persisted per-event in localStorage.
+        // Currently just the sort axis; the dialog has room to grow filtering
+        // options without re-plumbing.
+        let trackingSort = localStorage.getItem('trackingSort_' + EVENT_ID) || 'name';
+
+        function showTrackingControls() {
+            // Reflect current selection on the radios
+            document.querySelectorAll('input[name="trackingSort"]').forEach(r => {
+                r.checked = (r.value === trackingSort);
+            });
+            document.getElementById('trackingControlsOverlay').classList.add('visible');
+        }
+        function hideTrackingControls(ev) {
+            // Only dismiss when overlay (not inner content) is clicked
+            if (ev && ev.target !== ev.currentTarget) return;
+            document.getElementById('trackingControlsOverlay').classList.remove('visible');
+        }
+        function applyTrackingSort() {
+            const chosen = document.querySelector('input[name="trackingSort"]:checked');
+            if (chosen) {
+                trackingSort = chosen.value;
+                localStorage.setItem('trackingSort_' + EVENT_ID, trackingSort);
+            }
+            hideTrackingControls();
+            // Trigger a re-render. updatePositions() (the polling loop) will
+            // pick up the new sort on its next tick; force one now too.
+            if (typeof updatePositions === 'function') {
+                updatePositions();
+            }
+        }
+
         function toggleCategory(category) {
             categoryCollapsed[category] = !categoryCollapsed[category];
             document.getElementById(category + 'List').classList.toggle('collapsed', categoryCollapsed[category]);
@@ -4189,9 +4312,16 @@
             // Render function for each list
             const renderList = (items) => {
                 return items.sort((a, b) => {
+                    // ASSIST always floats to top regardless of chosen sort
                     if (a.ast && !b.ast) return -1;
                     if (!a.ast && b.ast) return 1;
-                    // Sort by display name if available, otherwise ID
+                    if (trackingSort === 'recent_desc') {
+                        return (b.last_seen || 0) - (a.last_seen || 0);
+                    }
+                    if (trackingSort === 'recent_asc') {
+                        return (a.last_seen || 0) - (b.last_seen || 0);
+                    }
+                    // Default: by display name (numeric-aware)
                     const nameA = a.name || a.id;
                     const nameB = b.name || b.id;
                     return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
@@ -4273,6 +4403,7 @@
 
             const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser('${id}')">Edit</button>` : '';
             const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser('${id}')">Stop</button>` : '';
+            const sleepBtn = adminMode ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
             const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser('${id}')">Start</button>` : '';
             const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser('${id}')">Cancel Assist</button>` : '';
 
@@ -4302,7 +4433,7 @@
 
             const content = `
                 <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>
-                ${editBtn}${stopBtn}${startBtn}
+                ${editBtn}${stopBtn}${sleepBtn}${startBtn}
                 ${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}
                 ${infoLine}<br>
                 Battery: <span style="${batStyle}">${batStr}</span>${drainStr}<br>
@@ -4451,6 +4582,7 @@
                 const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
+                const sleepBtn = adminMode ? `<button class="popup-stop-btn" onclick="sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
                 const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
                 const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="startUser('${id}')">Start</button>` : '';
                 const versionStr = sailor.ver || 'Unknown';
@@ -4487,7 +4619,7 @@
                 }
 
                 sailorMarkers[id].bindPopup(`
-                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${startBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
+                    <strong>${displayName}</strong>${nameExtra} <span style="color:#666;font-size:11px">(${roleLabel})</span>${editBtn}${stopBtn}${sleepBtn}${startBtn}${sailor.ast ? ` <span style="color:red;font-weight:bold">⚠ ASSIST</span>${cancelAssistBtn}` : ''}${infoLine}<br>
                     ${sailor.spd !== undefined ? `Speed: ${sailor.spd.toFixed(1)} kn<br>` : ''}
                     ${sailor.hdg !== undefined ? `Heading: ${sailor.hdg}°<br>` : ''}
                     Position: ${sailor.lat.toFixed(5)}, ${sailor.lon.toFixed(5)}<br>

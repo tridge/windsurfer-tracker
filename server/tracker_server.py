@@ -713,18 +713,39 @@ class EventManager:
                 return None
             return event.get("event_state")
 
-    def set_event_state(self, eid: int, state: str) -> bool:
-        """Set the event-scope tracking state ("tracking" or "idle"). Persisted to events.json."""
+    def set_event_state(self, eid: int, state: str, idle_submode: str | None = None) -> bool:
+        """Set the event-scope tracking state ("tracking" or "idle"). Persisted to events.json.
+
+        When state="idle", idle_submode picks "race" (default) or "overnight".
+        Switching to "tracking" always clears the idle_submode back to "race".
+        """
         if state not in ("tracking", "idle"):
+            return False
+        if idle_submode is not None and idle_submode not in ("race", "overnight"):
             return False
         with self._lock:
             if eid not in self.events:
                 return False
             self.events[eid]["event_state"] = state
             self.events[eid]["event_state_updated"] = time.time()
+            if state == "tracking":
+                # Leaving idle entirely — reset submode so a future /admin/stop
+                # without an explicit submode goes back to race-day idle.
+                self.events[eid]["idle_submode"] = "race"
+            elif idle_submode is not None:
+                self.events[eid]["idle_submode"] = idle_submode
             self._save_events()
-            log(f"[EVENTS] Event {eid} state set to '{state}'")
+            sub_str = f" submode={self.events[eid].get('idle_submode')}" if state == "idle" else ""
+            log(f"[EVENTS] Event {eid} state set to '{state}'{sub_str}")
             return True
+
+    def get_event_idle_submode(self, eid: int) -> str:
+        """Return the persisted idle-submode for an event. Default 'race'."""
+        with self._lock:
+            event = self.events.get(eid)
+            if not event:
+                return "race"
+            return event.get("idle_submode", "race")
 
 
 def write_current_positions(positions: dict, positions_file: Path, user_overrides: dict | None = None, position_tails: dict | None = None):
@@ -2991,6 +3012,45 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
             self._send_json({"success": True, "stopped_count": len(stopped_ids), "user_ids": stopped_ids})
 
+        elif subpath == '/admin/sleep-all':
+            # Like /admin/stop-all but switches to OVERNIGHT idle (MODE5 deep
+            # sleep). Sets event_state="idle" + idle_submode="overnight" so
+            # any tracker reconnecting later also picks up overnight commands.
+            tracker = get_event_tracker(eid)
+            if not tracker:
+                self._send_json({"error": f"Event {eid} not found"}, 404)
+                return
+            if _event_manager:
+                _event_manager.set_event_state(eid, "idle", idle_submode="overnight")
+            sleep_ids = []
+            for user_id in list(tracker.position_tracker.current_positions.keys()):
+                for listener in _protocol_listeners:
+                    if hasattr(listener, "set_idle"):
+                        try:
+                            listener.set_idle(eid, user_id, True, submode="overnight")
+                        except TypeError:
+                            # JT808Listener doesn't yet take submode — fall back
+                            listener.set_idle(eid, user_id, True)
+                sleep_ids.append(user_id)
+            log(f"[EVENT {eid}] Remote sleep-all (MODE5 overnight) queued for {len(sleep_ids)} trackers: {sleep_ids}")
+            self._send_json({"success": True, "sleep_count": len(sleep_ids), "user_ids": sleep_ids})
+
+        elif subpath.startswith('/admin/sleep/'):
+            # Per-tracker overnight (MODE5) idle.
+            from urllib.parse import unquote
+            user_id = unquote(subpath[len('/admin/sleep/'):])
+            if not user_id:
+                self._send_json({"error": "User ID required"}, 400)
+                return
+            for listener in _protocol_listeners:
+                if hasattr(listener, "set_idle"):
+                    try:
+                        listener.set_idle(eid, user_id, True, submode="overnight")
+                    except TypeError:
+                        listener.set_idle(eid, user_id, True)
+            log(f"[EVENT {eid}] Remote sleep (MODE5 overnight) queued for {user_id}")
+            self._send_json({"success": True, "user_id": user_id, "event_id": eid})
+
         elif subpath.startswith('/admin/stop/'):
             # Send remote stop command to a user
             from urllib.parse import unquote
@@ -4607,12 +4667,15 @@ def run_server(port: int, http_port: int | None = None,
             return get_event_tracker(eid)
         def _gt06_get_event_state(eid):
             return _event_manager.get_event_state(eid) if _event_manager else "idle"
+        def _gt06_get_event_idle_submode(eid):
+            return _event_manager.get_event_idle_submode(eid) if _event_manager else "race"
         global _gt06_listener
         gt06_listener = GT06Listener(gt06_port, gt06_interval, gt06_id_prefix, _gt06_get_tracker, gt06_config,
                                       log_file=gt06_log_path, log_func=log,
                                       save_overrides_func=save_user_overrides,
                                       write_positions_func=write_current_positions,
-                                      get_event_state_func=_gt06_get_event_state)
+                                      get_event_state_func=_gt06_get_event_state,
+                                      get_event_idle_submode_func=_gt06_get_event_idle_submode)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
