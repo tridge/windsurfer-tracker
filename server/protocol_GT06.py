@@ -66,8 +66,17 @@ def _idle_cmds(interval):
 
 
 def _active_cmds(interval):
-    """Commands to send when entering active tracking mode."""
-    return [f"TIMER,{interval},{interval}#", "SENDS,0#",
+    """Commands to send when entering active tracking mode.
+
+    MODE1 + SLPDISCONNECT=0 are added for the same V667-firmware reasons
+    as in _idle_cmds: without MODE1 the device's HB scheduler may not fire,
+    and without SLPDISCONNECT=0 the TCP can drop on transient sleeps.
+    For active mode we still want frequent uploads, so MODE1's Freq is
+    the active interval and Heart is the active HB (15s).
+    """
+    return [f"MODE1,{interval},15#",
+            "SZCS#SLPDISCONNECT=0",
+            f"TIMER,{interval},{interval}#", "SENDS,0#",
             "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
 
 
