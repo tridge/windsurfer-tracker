@@ -1441,15 +1441,11 @@ class EventTracker:
             battery_voltage=battery_voltage
         )
 
-        # Write positions with event-specific user overrides
-        if result and self.positions_file:
-            write_current_positions(
-                self.position_tracker.current_positions,
-                self.positions_file,
-                self.user_overrides,
-                self.position_tracker.position_tails
-            )
-
+        # No write here — PositionTracker.process_position() already writes
+        # current_positions.json on the active / idle / no-gps paths with
+        # the user_overrides we passed in above. Writing again would double
+        # the per-packet serialization cost on the GT06 hot path; matters
+        # at 200+ trackers.
         return result
 
     def clear_tracks(self):
@@ -2155,12 +2151,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if path == '/' or path == '':
                 path = '/index.html'
             
-            # Security: prevent directory traversal
+            # Security: prevent directory traversal. Use path-ancestor
+            # containment (Path.relative_to) rather than string-prefix match,
+            # which would let a sibling like /srv/web-backup pass when
+            # _static_dir is /srv/web.
             try:
                 filepath = (_static_dir / path.lstrip('/')).resolve()
-                if not str(filepath).startswith(str(_static_dir.resolve())):
-                    self._send_json({"error": "Forbidden"}, 403)
-                    return
+                filepath.relative_to(_static_dir.resolve())
+            except ValueError:
+                self._send_json({"error": "Forbidden"}, 403)
+                return
             except Exception:
                 self._send_json({"error": "Bad request"}, 400)
                 return
@@ -2327,7 +2327,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                                         'duration_secs': end_ts - start_ts if end_ts > start_ts else 0
                                     })
                     except Exception as e:
-                        logging.warning(f"Error reading summary {summary_file}: {e}")
+                        log(f"[WARN] Error reading summary {summary_file}: {e}")
                         continue
 
             self._send_json({"results": results})
@@ -2345,7 +2345,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"info": data.get('info', ''), "source": "custom"})
                     return
                 except Exception as e:
-                    logging.warning(f"Error reading info.json for event {eid}: {e}")
+                    log(f"[WARN] Error reading info.json for event {eid}: {e}")
 
             # Fall back to event description from events.json
             if _event_manager:
@@ -4092,7 +4092,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 packet_pwd = packet.get("pwd", "")
                 if packet_pwd not in event_tracker_pwds:
                     record_failed_auth(client_ip, sailor_id)
-                    log(f"[AUTH] Failed for event {eid} user={sailor_id} pwd='{packet_pwd}' os={os_version} ver={version} from {client_ip}")
+                    # Log only the length, never the value — a misconfigured
+                    # client could send a real event password to the wrong
+                    # event and we don't want that in logs.
+                    log(f"[AUTH] Failed for event {eid} user={sailor_id} pwd_len={len(packet_pwd)} os={os_version} ver={version} from {client_ip}")
                     self._send_json({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}, 401)
                     return
 
@@ -4749,7 +4752,8 @@ def run_server(port: int, http_port: int | None = None,
                     packet_pwd = packet.get("pwd", "")
                     if packet_pwd not in event_tracker_pwds:
                         record_failed_auth(client_ip, sailor_id)
-                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd='{packet_pwd}'")
+                        # Log length only (not the value) — see HTTP path.
+                        log(f"[UDP] Auth failed for {sailor_id} (event {eid}) from {client_ip} pwd_len={len(packet_pwd)}")
                         error_ack = json.dumps({"ack": seq, "ts": int(recv_time), "error": "auth", "msg": "Invalid password"}).encode("utf-8")
                         sock.sendto(error_ack, addr)
                         continue
