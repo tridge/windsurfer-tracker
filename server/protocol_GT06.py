@@ -712,6 +712,7 @@ class GT06Listener:
                     event_state = None
 
             saved_idle = None
+            saved_sleep = False  # persisted per-sailor SLEEP (overnight) flag
             tracker_for_lookup = self.get_tracker(gt_conn.eid)
             if tracker_for_lookup is not None:
                 pt = (tracker_for_lookup.position_tracker
@@ -719,8 +720,10 @@ class GT06Listener:
                       else tracker_for_lookup)
                 with pt._lock:
                     existing_pos = pt.current_positions.get(gt_conn.sailor_id)
-                if existing_pos is not None and "idle" in existing_pos:
-                    saved_idle = bool(existing_pos["idle"])
+                if existing_pos is not None:
+                    if "idle" in existing_pos:
+                        saved_idle = bool(existing_pos["idle"])
+                    saved_sleep = bool(existing_pos.get("sleep", False))
 
             sailor_key = (gt_conn.eid, gt_conn.sailor_id)
             if sailor_key in self.active_sailors:
@@ -748,16 +751,20 @@ class GT06Listener:
                 self._reset_rate_monitoring(gt_conn, self.interval)
             else:
                 gt_conn.idle = True
-                # Pick race-day idle vs overnight idle based on event's
-                # idle_submode (default "race"). Overnight uses MODE5 +
-                # ACCLINE=1 for deep sleep; race-day keeps TCP alive with
-                # periodic HBs at idle_hbt_interval seconds.
-                idle_submode = "race"
-                if self.get_event_idle_submode:
-                    try:
-                        idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
-                    except Exception:
-                        idle_submode = "race"
+                # Pick race-day idle vs overnight idle. Per-sailor saved_sleep
+                # (set by a previous /admin/sleep, persisted in
+                # current_positions.json) wins — that's the explicit per-
+                # tracker choice and survives server restart. Otherwise fall
+                # back to event-scope idle_submode (default "race").
+                if saved_sleep:
+                    idle_submode = "overnight"
+                else:
+                    idle_submode = "race"
+                    if self.get_event_idle_submode:
+                        try:
+                            idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
+                        except Exception:
+                            idle_submode = "race"
                 if idle_submode == "overnight":
                     gt_conn.desired_mode = 5
                     cmds = ["cxzt#"] + _overnight_cmds(self.overnight_interval_min)
@@ -1166,6 +1173,12 @@ class GT06Listener:
                         if existing:
                             existing["stopped"] = idle
                             existing["idle"] = idle
+                            # Per-sailor sleep flag — persisted to
+                            # current_positions.json so the state survives
+                            # server restart. WebUI reads it to show "SLEEP"
+                            # vs "Idle"; login handler reads it to pick
+                            # MODE5 vs MODE1 commands on reconnect.
+                            existing["sleep"] = bool(idle and submode == "overnight")
                             now = time.time()
                             existing["last_seen"] = now
                             existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()

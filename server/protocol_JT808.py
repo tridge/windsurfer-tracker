@@ -1128,6 +1128,10 @@ class JT808Listener:
                         if existing:
                             existing["stopped"] = idle
                             existing["idle"] = idle
+                            # No JT808 overnight equivalent yet — always
+                            # clear sleep so UI doesn't show stale SLEEP
+                            # state for JT808 trackers.
+                            existing["sleep"] = False
                             now = time.time()
                             existing["last_seen"] = now
                             existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()

@@ -985,7 +985,7 @@ class PositionTracker:
                     # admin overrides (set_idle) and start-all/stop-all see the
                     # correct state, and reconnecting trackers inherit it via
                     # the login handler.
-                    for k in ("idle", "stopped", "chg", "bat_v"):
+                    for k in ("idle", "stopped", "sleep", "chg", "bat_v"):
                         if k in pos:
                             self.current_positions[sailor_id][k] = pos[k]
                     if "did" in pos:
