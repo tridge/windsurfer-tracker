@@ -47,19 +47,19 @@ _W07C_DISCHARGE = [
 # The interval is matched to idle_hbt_interval so the rate monitor doesn't
 # get confused.
 #
-# MODE1,F,H# switches the W07C out of "normal mode" (data only on sleep/
-# movement transitions) into periodic-send mode. On V667 firmware this also
-# appears to make the HB scheduler reliably fire, where it previously did not
-# in idle. F/H values are largely overridden by the subsequent TIMER/HBT
-# commands; we just need MODE1 to flip the mode.
-#
 # SZCS#SLPDISCONNECT=0 = "long connection", i.e. don't drop TCP when the
 # device's modem enters sleep. Without this, V667 idle devices lose TCP
 # within ~10 min of silence and we can't reach them until their next ACC-OFF
-# reconnect cycle. With it, TCP stays open across sleep.
+# reconnect cycle. With it, TCP stays open across sleep. Safe to send on
+# every login (no reconnect side-effect, no-op if already set).
+#
+# MODE1 is deliberately NOT sent here. Sending MODE1 every login causes a
+# reconnect storm: each MODE1 tears down the TCP, the device immediately
+# reconnects, login handler sends MODE1 again, repeat. MODE1 persists on
+# the device across reboots, so it should be set once per device via a
+# separate first-time-setup path.
 def _idle_cmds(interval):
-    return [f"MODE1,{interval},{interval}#",
-            "SZCS#SLPDISCONNECT=0",
+    return ["SZCS#SLPDISCONNECT=0",
             f"TIMER,{interval},{interval}#",
             "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
             "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
@@ -68,14 +68,11 @@ def _idle_cmds(interval):
 def _active_cmds(interval):
     """Commands to send when entering active tracking mode.
 
-    MODE1 + SLPDISCONNECT=0 are added for the same V667-firmware reasons
-    as in _idle_cmds: without MODE1 the device's HB scheduler may not fire,
-    and without SLPDISCONNECT=0 the TCP can drop on transient sleeps.
-    For active mode we still want frequent uploads, so MODE1's Freq is
-    the active interval and Heart is the active HB (15s).
+    SLPDISCONNECT=0 added for V667 firmware to prevent TCP drops on
+    transient modem sleeps. MODE1 NOT sent here — see _idle_cmds comment;
+    MODE1 must be a one-shot per device, not a per-login command.
     """
-    return [f"MODE1,{interval},15#",
-            "SZCS#SLPDISCONNECT=0",
+    return ["SZCS#SLPDISCONNECT=0",
             f"TIMER,{interval},{interval}#", "SENDS,0#",
             "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
 
