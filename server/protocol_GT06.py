@@ -39,14 +39,28 @@ _W07C_DISCHARGE = [
 
 
 # Commands to send when entering idle mode.
+#
 # TIMER ACC ON/OFF intervals are deliberately equal — vehicle-tracker "ACC"
 # detection on the W07C is vibration-driven, so we don't want behavior to
 # depend on whether the device thinks it's "stopped" or "running". With both
 # intervals equal, every idle device uploads at the same cadence regardless.
 # The interval is matched to idle_hbt_interval so the rate monitor doesn't
 # get confused.
+#
+# MODE1,F,H# switches the W07C out of "normal mode" (data only on sleep/
+# movement transitions) into periodic-send mode. On V667 firmware this also
+# appears to make the HB scheduler reliably fire, where it previously did not
+# in idle. F/H values are largely overridden by the subsequent TIMER/HBT
+# commands; we just need MODE1 to flip the mode.
+#
+# SZCS#SLPDISCONNECT=0 = "long connection", i.e. don't drop TCP when the
+# device's modem enters sleep. Without this, V667 idle devices lose TCP
+# within ~10 min of silence and we can't reach them until their next ACC-OFF
+# reconnect cycle. With it, TCP stays open across sleep.
 def _idle_cmds(interval):
-    return [f"TIMER,{interval},{interval}#",
+    return [f"MODE1,{interval},{interval}#",
+            "SZCS#SLPDISCONNECT=0",
+            f"TIMER,{interval},{interval}#",
             "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
             "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
 
