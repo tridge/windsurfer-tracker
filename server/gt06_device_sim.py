@@ -442,19 +442,25 @@ class GT06DeviceSim:
 
         # TIMER,N,N# — real device's F register bleeds: TIMER overwrites
         # Freq even when device is in MODE5 (the bug we hit on Wed).
+        # Reset _next_loc_at so an interval change takes effect immediately
+        # rather than waiting out the previously-scheduled (possibly long)
+        # interval.
         if cmd.startswith("TIMER,"):
             try:
                 n = int(cmd.rstrip("#").split(",")[1])
                 self.freq = n
+                self._next_loc_at = self.clock.now() + min(n, 1.0)
             except (ValueError, IndexError):
                 n = 0
             self._reply(f"TIMER ACC ON:{n}s,ACC OFF:{n}s", server_flag)
             return
 
         # HBT,N,N# — set heartbeat interval. Triggers hbt_silent quirk.
+        # Same reasoning as TIMER: reset _next_hbt_at on every change.
         if cmd.startswith("HBT,"):
             try:
                 self.hbt_interval = int(cmd.rstrip("#").split(",")[1])
+                self._next_hbt_at = self.clock.now() + min(self.hbt_interval, 1.0)
             except (ValueError, IndexError):
                 pass
             self._reply(f"HBT ACC ON:{self.hbt_interval}s,ACC OFF:{self.hbt_interval}s", server_flag)
