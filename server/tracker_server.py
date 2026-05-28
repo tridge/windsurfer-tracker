@@ -1491,17 +1491,41 @@ class EventTracker:
         log(f"[EVENT {self.eid}] Tracks cleared")
 
     def clear_positions_only(self):
-        """Clear in-memory positions without rotating log file.
+        """Clear yesterday's position data without losing operator-intent state.
 
-        Used by midnight auto-clear since DailyLogger already handles
-        switching to a new date-named log file automatically.
+        Used by midnight auto-clear. Drops lat/lon/spd/hdg/ts/last_seen etc.
+        so the map starts fresh, but preserves per-sailor sleep/idle/stopped
+        flags (and identifying metadata like did/role/bat) so trackers in
+        overnight SLEEP don't silently revert to race-day idle the moment
+        the day rolls over. Mirrors the field-preservation pattern used by
+        PositionTracker._load_from_file across server restarts.
         """
-        if self.positions_file and self.positions_file.exists():
-            self.positions_file.unlink()
-        self.position_tracker.clear()
-        # Recreate empty positions file
-        write_current_positions({}, self.positions_file, self.user_overrides)
-        log(f"[EVENT {self.eid}] Positions cleared (midnight auto-clear)")
+        # Preserved per-sailor fields — operator intent + identity, no
+        # position data. Must stay in sync with _load_from_file at line
+        # ~988 so restart and midnight-clear behave identically.
+        keep_keys = ("id", "did", "role", "name", "displayid", "bat", "sig",
+                     "idle", "stopped", "sleep", "chg", "bat_v")
+        pt = self.position_tracker
+        with pt._lock:
+            stubs = {}
+            for sailor_id, pos in pt.current_positions.items():
+                stub = {k: pos[k] for k in keep_keys if k in pos}
+                # Ensure 'id' is always present so downstream code (e.g.
+                # WebUI's sidebar) doesn't need to special-case stubs.
+                stub.setdefault("id", sailor_id)
+                stubs[sailor_id] = stub
+            pt.current_positions.clear()
+            pt.current_positions.update(stubs)
+            pt.last_timestamp.clear()
+            pt.last_sq.clear()
+            pt.position_tails.clear()
+        if self.positions_file:
+            write_current_positions(pt.current_positions, self.positions_file,
+                                    self.user_overrides)
+        kept = sum(1 for s in stubs.values() if s.get("sleep") or s.get("idle"))
+        log(f"[EVENT {self.eid}] Positions cleared (midnight auto-clear); "
+            f"preserved operator-intent stubs for {len(stubs)} sailors "
+            f"({kept} with sleep/idle flag set)")
 
     def close(self):
         """Clean up resources."""
