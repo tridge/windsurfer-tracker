@@ -767,7 +767,15 @@ class GT06Listener:
                             idle_submode = "race"
                 if idle_submode == "overnight":
                     gt_conn.desired_mode = 5
-                    cmds = ["cxzt#"] + _overnight_cmds(self.overnight_interval_min)
+                    # Overnight: queue ONLY cxzt# probe. If the device is
+                    # already in MODE5 (it usually is — wake-cycle reconnects
+                    # land here), the cxzt# handler will see M:5 == desired:5
+                    # and do nothing; device just sleeps again on its own
+                    # cadence. Otherwise the handler pushes the full
+                    # _overnight_cmds chain (SLPDISCONNECT, ACCLINE, MODE5).
+                    # This avoids the re-push storm where every wake reset
+                    # the MODE5 timer back to the start of its period.
+                    cmds = ["cxzt#"]
                     gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
                     self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
                 else:
