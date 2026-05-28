@@ -551,8 +551,10 @@ class GT06DeviceSim:
     def _reset_timers(self):
         now = self.clock.now()
         self._next_hbt_at = now + self.hbt_interval
-        # First LOC ~5s after connect.
-        self._next_loc_at = now + 5
+        # First LOC fires almost immediately — real W07C devices upload their
+        # last-known position on reconnect, and tests need a position to
+        # register the sailor in current_positions.json without waiting.
+        self._next_loc_at = now + 0.3
         self._last_rx_at = now
         self._hbt_acked_silent = False
 
