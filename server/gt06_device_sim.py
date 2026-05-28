@@ -289,23 +289,26 @@ class GT06DeviceSim:
 
     def send_loc(self):
         """Build and send a LOC frame from current entity position."""
-        if self.entity is None:
-            lat, lon, speed_kmh, heading, sats = -41.2865, 174.7762, 0, 180, 8
-        else:
-            lat = self.entity.lat
-            lon = self.entity.lon
-            speed_kmh = int(self.entity.spd * 1.852)  # knots → km/h
-            heading = int(self.entity.hdg) % 360
-            sats = 8
-        ts = datetime.fromtimestamp(self.clock.now(), tz=timezone.utc)
-        data = build_location_data(
-            lat=lat, lon=lon, speed_kmh=speed_kmh, heading=heading,
-            satellites=sats, gps_valid=True,
-            year=ts.year - 2000, month=ts.month, day=ts.day,
-            hour=ts.hour, minute=ts.minute, second=ts.second,
-            course_status_zero=bool(self.quirks.get("course_status_zero")),
-        )
-        self._send_frame(0x12, data)
+        try:
+            if self.entity is None:
+                lat, lon, speed_kmh, heading, sats = -41.2865, 174.7762, 0, 180, 8
+            else:
+                lat = float(self.entity.lat)
+                lon = float(self.entity.lon)
+                speed_kmh = max(0, min(255, int(self.entity.spd * 1.852)))
+                heading = int(self.entity.hdg) % 360
+                sats = 8
+            ts = datetime.fromtimestamp(self.clock.now(), tz=timezone.utc)
+            data = build_location_data(
+                lat=lat, lon=lon, speed_kmh=speed_kmh, heading=heading,
+                satellites=sats, gps_valid=True,
+                year=ts.year - 2000, month=ts.month, day=ts.day,
+                hour=ts.hour, minute=ts.minute, second=ts.second,
+                course_status_zero=bool(self.quirks.get("course_status_zero")),
+            )
+            self._send_frame(0x12, data)
+        except Exception as e:
+            log.error("%s send_loc failed: %s (entity=%r)", self.sailor_id, e, self.entity)
 
     def send_hbt(self):
         """Build and send a 0x13 heartbeat frame.
@@ -567,9 +570,12 @@ class GT06DeviceSim:
         self._reset_timers()
 
         while not self._stop_event.is_set():
-            self._drain_rx()
-            self._emit_due()
-            self._maybe_disconnect_after_mode5()
+            try:
+                self._drain_rx()
+                self._emit_due()
+                self._maybe_disconnect_after_mode5()
+            except Exception as e:
+                log.exception("%s loop iteration failed: %s", self.sailor_id, e)
 
             # V667 tcp-dies-after-10min quirk: stop responding after silence.
             tcp_dies = self.quirks.get("tcp_dies_after_idle_s")
