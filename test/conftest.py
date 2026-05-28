@@ -183,17 +183,17 @@ class HTTPClient:
         return self._request("POST", path, data=body, headers=req_headers)
 
 
-def _gt06_crc_itu(data):
-    """CRC-ITU (CRC-16/X.25) — matches server implementation."""
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 1:
-                crc = (crc >> 1) ^ 0x8408
-            else:
-                crc >>= 1
-    return crc ^ 0xFFFF
+sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
+from gt06_frames import (
+    build_frame as _gt06_build_frame,
+    build_login_data as _gt06_build_login_data,
+    build_location_data as _gt06_build_location_data,
+    build_heartbeat_data as _gt06_build_heartbeat_data,
+    build_alarm_data as _gt06_build_alarm_data,
+    iter_frames as _gt06_iter_frames,
+    parse_frame as _gt06_parse_frame,
+    extract_command as _gt06_extract_command,
+)
 
 
 class GT06Client:
@@ -228,14 +228,8 @@ class GT06Client:
         return self._serial
 
     def _build_frame(self, protocol, data):
-        """Build a complete GT06 frame with CRC."""
-        serial = self._next_serial()
-        # length = protocol(1) + data + serial(2) + crc(2)
-        length = 1 + len(data) + 2 + 2
-        payload = struct.pack(">B", length) + struct.pack(">B", protocol) + data
-        payload += struct.pack(">H", serial)
-        crc = _gt06_crc_itu(payload)
-        return b"\x78\x78" + payload + struct.pack(">H", crc) + b"\x0d\x0a"
+        """Build a complete GT06 frame with CRC, using the next serial number."""
+        return _gt06_build_frame(protocol, data, self._next_serial())
 
     def _recv_frames(self, timeout=0.5):
         """Receive all available frames from the server within timeout."""
@@ -248,51 +242,24 @@ class GT06Client:
                 if not chunk:
                     break
                 buf += chunk
-                # Extract complete frames
-                while len(buf) >= 5:
-                    if buf[0:2] != b"\x78\x78":
-                        # Skip junk
-                        idx = buf.find(b"\x78\x78", 1)
-                        if idx < 0:
-                            buf = b""
-                            break
-                        buf = buf[idx:]
-                        continue
-                    length = buf[2]
-                    frame_size = 2 + 1 + length + 2  # start(2) + len(1) + payload + end(2)
-                    if len(buf) < frame_size:
-                        break
-                    frames.append(buf[:frame_size])
-                    buf = buf[frame_size:]
+                new_frames, buf = _gt06_iter_frames(buf)
+                frames.extend(new_frames)
         except socket.timeout:
             pass
         return frames
 
     def _parse_frame(self, frame):
         """Parse a GT06 frame into (protocol, data_bytes, serial)."""
-        protocol = frame[3]
-        length = frame[2]
-        serial_offset = 3 + length - 4
-        serial = struct.unpack(">H", frame[serial_offset:serial_offset + 2])[0]
-        data = frame[4:serial_offset]
-        return protocol, data, serial
+        return _gt06_parse_frame(frame)
 
     def _extract_command_text(self, frame):
         """Extract ASCII command string from a server command frame (protocol 0x80)."""
-        protocol, data, serial = self._parse_frame(frame)
-        if protocol != 0x80:
-            return None
-        # data: content_len(1) + server_flag(4) + cmd_ascii
-        if len(data) < 5:
-            return None
-        return data[5:].decode("ascii", errors="replace")
+        result = _gt06_extract_command(frame)
+        return result[1] if result else None
 
     def send_login(self, imei="863874081226122"):
         """Send login packet and return list of received frames."""
-        # BCD-encode the IMEI (pad to 16 digits = 8 bytes)
-        imei_padded = imei.rjust(16, "0")
-        imei_bcd = bytes.fromhex(imei_padded)
-        frame = self._build_frame(0x01, imei_bcd)
+        frame = self._build_frame(0x01, _gt06_build_login_data(imei))
         self.sock.sendall(frame)
         return self._recv_frames()
 
@@ -300,26 +267,11 @@ class GT06Client:
                             heading=180, satellites=8, gps_valid=True,
                             year=26, month=2, day=21, hour=12, minute=0, second=0):
         """Build 18-byte location data block."""
-        data = struct.pack(">BBBBBB", year, month, day, hour, minute, second)
-        gps_info = (satellites & 0x0F) | 0xF0  # high nibble = GPS data length
-        data += struct.pack(">B", gps_info)
-
-        lat_raw = int(abs(lat) * 1_800_000)
-        lon_raw = int(abs(lon) * 1_800_000)
-        data += struct.pack(">II", lat_raw, lon_raw)
-
-        data += struct.pack(">B", speed_kmh)
-
-        course_status = heading & 0x03FF
-        if gps_valid:
-            course_status |= (1 << 12)
-        if lat >= 0:
-            course_status |= (1 << 10)  # North
-        if lon < 0:
-            course_status |= (1 << 11)  # West
-        data += struct.pack(">H", course_status)
-
-        return data
+        return _gt06_build_location_data(
+            lat=lat, lon=lon, speed_kmh=speed_kmh, heading=heading,
+            satellites=satellites, gps_valid=gps_valid,
+            year=year, month=month, day=day, hour=hour, minute=minute, second=second,
+        )
 
     def send_location(self, protocol=0x12, **kwargs):
         """Send a location packet. Returns list of received frames."""
@@ -335,8 +287,7 @@ class GT06Client:
         signal: 0-4
         charging: bool
         """
-        info = 0x08 if charging else 0x00
-        data = struct.pack(">BBB", info, battery_level, signal)
+        data = _gt06_build_heartbeat_data(battery_level, signal, charging)
         frame = self._build_frame(0x13, data)
         self.sock.sendall(frame)
         return self._recv_frames()
@@ -348,20 +299,8 @@ class GT06Client:
         alarm_type: "Normal", "Shock", "Power Cut", "Low Battery", "SOS"
         """
         loc_data = self.build_location_data(**loc_kwargs)
-
-        alarm_bits_map = {"Normal": 0, "Shock": 1, "Power Cut": 2,
-                          "Low Battery": 3, "SOS": 4}
-        alarm_bits = alarm_bits_map.get(alarm_type, 0)
-
-        # LBS data (minimal: 0 bytes)
-        lbs_len = 0
-        # terminal_info: alarm_bits in bits 3-5, charging in bit 2
-        ti = (alarm_bits << 3)
-        if charging:
-            ti |= 0x04
-
-        extra = struct.pack(">BBBB", lbs_len, ti, battery_level, signal)
-        frame = self._build_frame(protocol, loc_data + extra)
+        alarm_data = _gt06_build_alarm_data(loc_data, alarm_type, battery_level, signal, charging)
+        frame = self._build_frame(protocol, alarm_data)
         self.sock.sendall(frame)
         return self._recv_frames()
 
