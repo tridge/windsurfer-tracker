@@ -1544,34 +1544,64 @@ _server_port: int | None = None
 def _run_simulator_thread(eid: int, config: dict, stop_event: "threading.Event",
                           course_file: str, tracker_pwd: str, udp_port: int,
                           speedup_ref: list | None = None):
-    """Thread wrapper for running a simulation for an event."""
-    from test_client import run_simulation
+    """Thread wrapper for running a simulation for an event.
+
+    Dispatches on config['device_type']:
+      - 'phone' (default): UDP JSON packets via test_client.run_simulation.
+      - 'gt06': GT06 binary frames over TCP via gt06_device_sim.run_gt06_simulation.
+        Uses the local GT06 listener's port — refuses to start if --gt06-port
+        wasn't configured on the server.
+    """
 
     def status_cb(status):
         with _simulations_lock:
             if eid in _active_simulations:
                 _active_simulations[eid]['status'] = status
 
-    log(f"[EVENT {eid}] Simulator starting: {config}")
+    device_type = config.get('device_type', 'phone')
+    log(f"[EVENT {eid}] Simulator starting ({device_type}): {config}")
     try:
-        result = run_simulation(
-            host="127.0.0.1", port=udp_port, eid=eid,
-            num_sailors=config.get('num_sailors', 5),
-            num_support=config.get('num_support', 1),
-            num_spectators=0,
-            wind_direction=config.get('wind_direction'),
-            avg_speed=config.get('speed', 12.0),
-            num_laps=config.get('laps', 0),
-            delay=10.0,
-            max_duration=config.get('max_duration', 3600),
-            password=tracker_pwd,
-            course_file=course_file,
-            stop_event=stop_event,
-            status_callback=status_cb,
-            speedup=config.get('speedup', 1.0),
-            start_at_start=config.get('start_at_start', True),
-            speedup_ref=speedup_ref,
-        )
+        if device_type == 'gt06':
+            if _gt06_listener is None:
+                log(f"[EVENT {eid}] Simulator error: GT06 listener not running "
+                    f"(start the server with --gt06-port to use this device type)")
+                return
+            from gt06_device_sim import run_gt06_simulation
+            result = run_gt06_simulation(
+                host="127.0.0.1", gt06_port=_gt06_listener.port, eid=eid,
+                num_sailors=config.get('num_sailors', 5),
+                num_support=config.get('num_support', 1),
+                wind_direction=config.get('wind_direction'),
+                avg_speed=config.get('speed', 12.0),
+                num_laps=config.get('laps', 0),
+                max_duration=config.get('max_duration', 3600),
+                course_file=course_file,
+                stop_event=stop_event,
+                status_callback=status_cb,
+                speedup=config.get('speedup', 1.0),
+                start_at_start=config.get('start_at_start', True),
+                speedup_ref=speedup_ref,
+            )
+        else:
+            from test_client import run_simulation
+            result = run_simulation(
+                host="127.0.0.1", port=udp_port, eid=eid,
+                num_sailors=config.get('num_sailors', 5),
+                num_support=config.get('num_support', 1),
+                num_spectators=0,
+                wind_direction=config.get('wind_direction'),
+                avg_speed=config.get('speed', 12.0),
+                num_laps=config.get('laps', 0),
+                delay=10.0,
+                max_duration=config.get('max_duration', 3600),
+                password=tracker_pwd,
+                course_file=course_file,
+                stop_event=stop_event,
+                status_callback=status_cb,
+                speedup=config.get('speedup', 1.0),
+                start_at_start=config.get('start_at_start', True),
+                speedup_ref=speedup_ref,
+            )
         log(f"[EVENT {eid}] Simulator finished: {result}")
     except Exception as e:
         log(f"[EVENT {eid}] Simulator error: {e}")
@@ -3564,7 +3594,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 tp = event.get('tracker_password', [])
                 tracker_pwd = tp[0] if tp else ""
 
+                device_type = data.get('device_type', 'phone')
+                if device_type not in ('phone', 'gt06'):
+                    self._send_json({"error": f"Unknown device_type {device_type!r}; "
+                                              f"must be 'phone' or 'gt06'"}, 400)
+                    return
                 config = {
+                    'device_type': device_type,
                     'num_sailors': int(data.get('num_sailors', 5)),
                     'num_support': int(data.get('num_support', 1)),
                     'wind_direction': float(data['wind_direction']) if data.get('wind_direction') is not None else None,

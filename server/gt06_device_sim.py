@@ -589,6 +589,125 @@ class GT06DeviceSim:
 
 
 # ---------------------------------------------------------------------------
+# Fleet runner — drives N GT06DeviceSim instances using SailingSimulator's
+# entity model. Invoked by tracker_server.py's _run_simulator_thread when the
+# WebUI selects "GT06 W07C tracker" as the device type.
+# ---------------------------------------------------------------------------
+
+def run_gt06_simulation(host, gt06_port, eid, *,
+                        num_sailors=5, num_support=1,
+                        wind_direction=None, avg_speed=12.0, num_laps=0,
+                        max_duration=3600,
+                        course_file=None, course_waypoints=None,
+                        sailor_names=None,
+                        stop_event=None, status_callback=None,
+                        speedup=1.0, start_at_start=True, speedup_ref=None,
+                        loc_interval_s=10, hbt_interval_s=60):
+    """Spin up N GT06DeviceSim instances and drive them with SailingSimulator.
+
+    Mirrors test_client.py:run_simulation's setup (course loading, entity
+    generation, wind direction) but each entity's position is shipped over
+    TCP as GT06 frames rather than UDP JSON.
+    """
+    # Lazy imports — test_client pulls in argparse and other heavy modules,
+    # and we want gt06_device_sim importable as a small standalone too.
+    from test_client import (
+        load_course, calculate_wind_from_course, generate_sailor_names,
+        create_entities, SailingSimulator,
+    )
+
+    if course_waypoints is None and course_file:
+        course_data = load_course(course_file)
+        if course_data:
+            course_waypoints = course_data.waypoints
+
+    if course_waypoints and len(course_waypoints) >= 2:
+        start_loc = course_waypoints[0]
+        end_loc = course_waypoints[-1]
+    else:
+        start_loc = (-41.2865, 174.7762)
+        end_loc = (-41.2700, 174.8050)
+
+    if wind_direction is None and course_waypoints and len(course_waypoints) >= 2:
+        wind_direction = calculate_wind_from_course(course_waypoints)
+    elif wind_direction is None:
+        wind_direction = 180.0
+
+    if sailor_names is None:
+        sailor_names = generate_sailor_names(num_sailors)
+
+    entities = create_entities(
+        num_sailors, num_support, 0,
+        start_loc, end_loc, course_waypoints, avg_speed=avg_speed,
+        sailor_names=sailor_names, start_at_start=start_at_start,
+    )
+    sailors = [e for e in entities if e.role == "sailor"]
+    sailing = SailingSimulator(start_loc, end_loc,
+                               wind_direction=wind_direction,
+                               num_laps=num_laps)
+
+    # Spawn one sim per entity. IMEIs are synthetic but unique within the
+    # event so the server's IMEI→sailor_id mapping produces distinct sailors.
+    sims = []
+    for i, ent in enumerate(entities):
+        # 999-prefixed IMEIs make it obvious in logs these are simulated.
+        # Including the eid in the IMEI keeps multi-event sims from colliding.
+        imei = f"999{eid:03d}{i:09d}"
+        sim = GT06DeviceSim(
+            imei=imei, host=host, port=gt06_port,
+            entity=ent,
+            freq=loc_interval_s,
+            hbt_interval=hbt_interval_s,
+        )
+        sims.append(sim)
+        sim.start()
+
+    start_time = time.time()
+    tick = 1.0  # advance entities once per real second
+    reason = "stopped"
+    try:
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                break
+            elapsed = time.time() - start_time
+            if max_duration > 0 and elapsed >= max_duration:
+                reason = "timeout"
+                break
+            if num_laps > 0 and all(s.current_lap >= num_laps for s in sailors):
+                reason = "finished"
+                break
+
+            cur_speedup = speedup_ref[0] if speedup_ref else speedup
+            steps = max(1, int(tick * cur_speedup))
+            for _ in range(steps):
+                for ent in entities:
+                    if ent.role == "sailor":
+                        sailing.update_sailor(ent, 1.0)
+                    elif ent.role == "support":
+                        sailing.update_support(ent, 1.0, sailors)
+                    else:
+                        sailing.update_spectator(ent, 1.0)
+
+            if status_callback is not None:
+                sailors_finished = sum(
+                    1 for s in sailors if num_laps > 0 and s.current_lap >= num_laps)
+                status_callback({
+                    "updates_sent": int(elapsed),
+                    "sailors_finished": sailors_finished,
+                    "elapsed_s": elapsed,
+                })
+
+            time.sleep(tick)
+    finally:
+        for sim in sims:
+            sim.stop()
+
+    return {"reason": reason,
+            "elapsed_s": time.time() - start_time,
+            "device_count": len(sims)}
+
+
+# ---------------------------------------------------------------------------
 # CLI for manual dogfooding
 # ---------------------------------------------------------------------------
 

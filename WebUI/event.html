@@ -1482,6 +1482,11 @@
     <div class="edit-user-overlay" id="simOverlay" onclick="if(event.target===this)closeSimDialog()">
         <div class="edit-user-dialog">
             <h3>Start Simulator</h3>
+            <label for="simDeviceType">Device Type</label>
+            <select id="simDeviceType" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="phone">Phone app (UDP)</option>
+                <option value="gt06">GT06 W07C tracker (TCP)</option>
+            </select>
             <label for="simSailors">Number of Sailors</label>
             <input type="number" id="simSailors" value="5" min="1" max="50">
             <label for="simSupport">Support Boats</label>
@@ -2141,6 +2146,7 @@
         }
         async function startSimulator() {
             const body = {
+                device_type: document.getElementById('simDeviceType').value || 'phone',
                 num_sailors: parseInt(document.getElementById('simSailors').value) || 5,
                 num_support: parseInt(document.getElementById('simSupport').value) || 1,
                 speed: parseFloat(document.getElementById('simSpeed').value) || 12,
