@@ -594,6 +594,19 @@ class GT06Listener:
                 loc_rate_wrong = True
 
         if loc_rate_wrong:
+            # Overnight idle (MODE5): the device wakes briefly every ~15
+            # min and pushes a couple of heartbeats in a ~30s window, which
+            # always trips the rate-mismatch check. Pushing _idle_cmds()
+            # here sends TIMER,540,540# which overwrites MODE5's Freq:15
+            # to Freq:540, breaking the 15-min wake cadence. Suppress the
+            # whole rate-mismatch path for MODE5 — the wake cycles are by
+            # design infrequent and a couple of LOC per wake is expected.
+            if gt_conn.desired_mode == 5:
+                gt_conn.rate_check_time = now
+                gt_conn.loc_count = 0
+                gt_conn.hbt_count = 0
+                gt_conn.rate_retry_count = 0
+                return
             if gt_conn.rate_retry_count < 2:
                 gt_conn.rate_retry_count += 1
                 if gt_conn.idle:
@@ -1082,6 +1095,7 @@ class GT06Listener:
                     # e.g. MODE5 stuck after a previous overnight period
                     # when the operator clicks All Start.
                     desired = gt_conn.desired_mode
+                    push_cmds = None
                     if mode != desired:
                         if desired == 5:
                             # Push full overnight setup (SLPDISCONNECT,
@@ -1093,6 +1107,20 @@ class GT06Listener:
                             push_cmds = ["MODE1,30,300#"]
                         self._log(f"[GT06] {label} reports MODE={mode}, "
                                   f"desired MODE={desired} — pushing {' '.join(push_cmds)}")
+                    elif desired == 5:
+                        # Device is in MODE5 but check F — race-day TIMER
+                        # commands sent earlier may have overwritten the
+                        # MODE5 Freq to 540 (we saw this in production on
+                        # G334189 and G378848). Re-push the overnight chain
+                        # to restore Freq:overnight_interval_min.
+                        fmatch = re.search(r'\*F:(\d+)', text)
+                        if fmatch:
+                            f_val = int(fmatch.group(1))
+                            if f_val != self.overnight_interval_min:
+                                push_cmds = _overnight_cmds(self.overnight_interval_min)
+                                self._log(f"[GT06] {label} in MODE5 but F={f_val}, "
+                                          f"expected {self.overnight_interval_min} — re-pushing overnight setup")
+                    if push_cmds:
                         gt_conn.cmd_queue.clear()
                         self._queue_commands(gt_conn, push_cmds)
             # Parse battery voltage from STATUS response
