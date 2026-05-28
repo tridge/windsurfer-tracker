@@ -1646,6 +1646,37 @@ def get_event_tracker(eid: int) -> EventTracker | None:
         return _event_trackers[eid]
 
 
+def set_user_sleep_flag(eid: int, user_id: str, sleep: bool) -> bool:
+    """Set or clear the per-sailor SLEEP flag in current_positions.json.
+
+    Runs regardless of whether the tracker is currently connected to any
+    listener. This is what makes /admin/sleep show "SLEEP" immediately
+    in the WebUI for an offline tracker (V667 idle TCP often dies
+    between wake cycles), and what makes the next reconnect's login
+    handler see saved_sleep=True and queue MODE5 commands.
+
+    Returns True if the user existed and was updated, False otherwise.
+    """
+    tracker = get_event_tracker(eid)
+    if not tracker:
+        return False
+    pt = tracker.position_tracker
+    with pt._lock:
+        existing = pt.current_positions.get(user_id)
+        if existing is None:
+            return False
+        if sleep:
+            existing["sleep"] = True
+            existing["idle"] = True
+            existing["stopped"] = True
+        else:
+            existing.pop("sleep", None)
+    if pt.positions_file:
+        write_current_positions(pt.current_positions, pt.positions_file,
+                                tracker.user_overrides, pt.position_tails)
+    return True
+
+
 def load_user_overrides(users_file: Path) -> dict[str, dict]:
     """Load user overrides from JSON file."""
     if users_file and users_file.exists():
@@ -3020,6 +3051,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     send_proactive_command(f"{eid}:{user_id}", "stop")
                     for listener in _protocol_listeners:
                         listener.set_idle(eid, user_id, True)
+                    set_user_sleep_flag(eid, user_id, False)
                     stopped_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote stop-all queued for {len(stopped_ids)} trackers: {stopped_ids}")
@@ -3044,6 +3076,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         except TypeError:
                             # JT808Listener doesn't yet take submode — fall back
                             listener.set_idle(eid, user_id, True)
+                set_user_sleep_flag(eid, user_id, True)
                 sleep_ids.append(user_id)
             log(f"[EVENT {eid}] Remote sleep-all (MODE5 overnight) queued for {len(sleep_ids)} trackers: {sleep_ids}")
             self._send_json({"success": True, "sleep_count": len(sleep_ids), "user_ids": sleep_ids})
@@ -3061,6 +3094,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         listener.set_idle(eid, user_id, True, submode="overnight")
                     except TypeError:
                         listener.set_idle(eid, user_id, True)
+            # Mark sleep in current_positions even if no listener has a
+            # live connection — V667 idle TCP often dies between wake
+            # cycles. This makes the UI show SLEEP immediately and lets
+            # the next reconnect's login handler pick MODE5.
+            set_user_sleep_flag(eid, user_id, True)
             log(f"[EVENT {eid}] Remote sleep (MODE5 overnight) queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -3076,6 +3114,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             send_proactive_command(f"{eid}:{user_id}", "stop")
             for listener in _protocol_listeners:
                 listener.set_idle(eid, user_id, True)
+            set_user_sleep_flag(eid, user_id, False)
             log(f"[EVENT {eid}] Remote stop queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
@@ -3113,6 +3152,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     send_proactive_command(f"{eid}:{user_id}", "start")
                     for listener in _protocol_listeners:
                         listener.set_idle(eid, user_id, False)
+                    set_user_sleep_flag(eid, user_id, False)
                     started_ids.append(user_id)
 
             log(f"[EVENT {eid}] Remote start-all queued for {len(started_ids)} idle trackers: {started_ids}")
@@ -3147,6 +3187,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             send_proactive_command(f"{eid}:{user_id}", "start")
             for listener in _protocol_listeners:
                 listener.set_idle(eid, user_id, False)
+            set_user_sleep_flag(eid, user_id, False)
             log(f"[EVENT {eid}] Remote start queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
