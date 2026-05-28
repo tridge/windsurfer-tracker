@@ -151,7 +151,7 @@ def _reset_state(server):
 def test_sim_login_registers_device(gt06_sim_factory, server):
     """A sim connecting + sending login + first LOC should appear in
     current_positions.json with did=imei."""
-    sim = gt06_sim_factory("999000000001001")
+    sim = gt06_sim_factory("999010000001001")
     pos = _wait_for_login(server, sim.sailor_id)
     assert pos.get("did") == sim.imei
 
@@ -161,7 +161,7 @@ def test_sim_loc_lands_when_tracking(gt06_sim_factory, server):
     a real lat/lon in current_positions.json (not just an idle stub)."""
     # Start in tracking so the first LOC isn't idle-suppressed.
     _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
-    sim = gt06_sim_factory("999000000002001", freq=1)
+    sim = gt06_sim_factory("999010000002001", freq=1)
     _wait_for_login(server, sim.sailor_id)
     time.sleep(1.5)
     pos = _read_positions(server).get(sim.sailor_id, {})
@@ -179,7 +179,7 @@ def test_v667_course_status_zero_accepted(gt06_sim_factory, server):
     would never show on the map. See project_v667_firmware_quirks.md item 1.
     """
     _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
-    sim = gt06_sim_factory("999000000003001",
+    sim = gt06_sim_factory("999010000003001",
                            quirks={"course_status_zero": True},
                            freq=1)
     _wait_for_login(server, sim.sailor_id)
@@ -194,7 +194,7 @@ def test_cxzt_in_mode1_does_not_repush_mode1(gt06_sim_factory, server):
     (Originally codex-followup#P1a — the desired_mode field was added so
     the server doesn't fight modes it's already happy with.)
     """
-    sim = gt06_sim_factory("999000000004001")
+    sim = gt06_sim_factory("999010000004001")
     _wait_for_login(server, sim.sailor_id)
     # Wait for login burst to settle, then drop our marker.
     time.sleep(0.5)
@@ -215,7 +215,7 @@ def test_storm_does_not_recur(gt06_sim_factory, server):
     the storm we fixed Wed.)
     """
     # Mark sailor SLEEP first, then push MODE5,15# to get sim into the right state.
-    sim = gt06_sim_factory("999000000006001")
+    sim = gt06_sim_factory("999010000006001")
     _wait_for_login(server, sim.sailor_id)
     _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
     # Push MODE5,15# so sim mutates its own state to mode=5, freq=15.
@@ -247,7 +247,7 @@ def test_f540_recovery_triggers_overnight_repush(gt06_sim_factory, server):
     F-recovery: cxzt# response with M:5 F:540 → server pushes _overnight_cmds
     to restore F:15.
     """
-    sim = gt06_sim_factory("999000000005001")
+    sim = gt06_sim_factory("999010000005001")
     _wait_for_login(server, sim.sailor_id)
     _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
     # Get sim into MODE5 cleanly first.

@@ -670,9 +670,21 @@ class GT06Listener:
             gt_conn.imei = imei
             gt_conn.sailor_id = self._imei_to_sailor_id(imei)
 
-            # Look up IMEI in gt06_config for event routing
+            # Look up IMEI in gt06_config for event routing.
+            # Sim convention: IMEIs starting with 999 carry the eid in
+            # positions 3..5 (two decimal digits), so WebUI-launched sim
+            # fleets route to their owning event without any config edits.
+            # Real GT06 hardware never uses 999 as a TAC prefix.
             dev_cfg = self.gt06_config["devices"].get(imei, {})
-            gt_conn.eid = dev_cfg.get("eid", self.gt06_config["default_eid"])
+            sim_eid = None
+            if "eid" not in dev_cfg and imei.startswith("999") and len(imei) >= 5:
+                try:
+                    sim_eid = int(imei[3:5])
+                except ValueError:
+                    sim_eid = None
+            gt_conn.eid = dev_cfg.get(
+                "eid",
+                sim_eid if sim_eid is not None else self.gt06_config["default_eid"])
             self._log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
             self._send(gt_conn, gt06_make_response(protocol, serial))
 

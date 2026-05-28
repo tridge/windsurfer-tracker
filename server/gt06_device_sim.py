@@ -649,10 +649,15 @@ def run_gt06_simulation(host, gt06_port, eid, *,
     # Spawn one sim per entity. IMEIs are synthetic but unique within the
     # event so the server's IMEI→sailor_id mapping produces distinct sailors.
     sims = []
+    if eid < 0 or eid > 99:
+        raise ValueError(
+            f"Sim IMEI scheme encodes eid in 2 digits — eid={eid} out of range")
     for i, ent in enumerate(entities):
-        # 999-prefixed IMEIs make it obvious in logs these are simulated.
-        # Including the eid in the IMEI keeps multi-event sims from colliding.
-        imei = f"999{eid:03d}{i:09d}"
+        # IMEI format: 999 + 2-digit eid + 10-digit index = 15 digits.
+        # The 999 TAC prefix flags this as a sim (real GT06 hardware uses
+        # 866-prefixed TACs); the embedded eid lets the listener auto-route
+        # to the right event without any gt06.json edits.
+        imei = f"999{eid:02d}{i:010d}"
         sim = GT06DeviceSim(
             imei=imei, host=host, port=gt06_port,
             entity=ent,
