@@ -31,6 +31,13 @@ from conftest import HTTPClient  # noqa: E402
 EID = 1
 ADMIN_PW = "admin123"
 
+# Server's default overnight config (matches gt06_config defaults in
+# protocol_GT06.py — MODE4 with 15 min wake cycle = 900 s on the wire).
+# Tests use these so they don't break when the default flips again.
+OVERNIGHT_MODE = 4
+OVERNIGHT_INTERVAL_MIN = 15
+OVERNIGHT_F = OVERNIGHT_INTERVAL_MIN * 60 if OVERNIGHT_MODE == 4 else OVERNIGHT_INTERVAL_MIN
+
 
 def _http(server):
     return HTTPClient(f"http://{server.host}:{server.port}")
@@ -210,21 +217,25 @@ def test_cxzt_in_mode1_does_not_repush_mode1(gt06_sim_factory, server):
 
 
 def test_storm_does_not_recur(gt06_sim_factory, server):
-    """A sim already in MODE5 with the correct Freq should NOT receive
-    repeated MODE5,15# pushes when the server probes it. (Issue #42 —
-    the storm we fixed Wed.)
+    """A sim already in the configured overnight MODE with the correct Freq
+    should NOT receive repeated MODE pushes when the server probes it.
+    (Issue #42 — the storm we fixed Wed; same property holds for MODE4 and
+    MODE5 since the cxzt# enforcement path is mode-agnostic now.)
     """
-    # Mark sailor SLEEP first, then push MODE5,15# to get sim into the right state.
     sim = gt06_sim_factory("999010000006001")
     _wait_for_login(server, sim.sailor_id)
     _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
-    # Push MODE5,15# so sim mutates its own state to mode=5, freq=15.
+    # First cxzt# triggers the mode-mismatch push (sim defaults to MODE1).
+    # Wait for the sim to settle into the server's overnight mode + freq.
     _http(server).get(
-        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=MODE5%2C15%23",
+        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
         headers={"X-Admin-Password": ADMIN_PW},
     )
-    assert _wait_for(lambda: sim.mode == 5 and sim.freq == 15, timeout=2.0), \
-        f"sim never reached MODE5,15: mode={sim.mode} freq={sim.freq}"
+    assert _wait_for(
+        lambda: sim.mode == OVERNIGHT_MODE and sim.freq == OVERNIGHT_F,
+        timeout=3.0), (
+        f"sim never reached overnight state: mode={sim.mode} freq={sim.freq}, "
+        f"expected mode={OVERNIGHT_MODE} freq={OVERNIGHT_F}")
     # Now drop a marker and hit the device with repeated cxzt# probes.
     time.sleep(0.3)
     marker = _log_marker(server, "before-storm-test")
@@ -235,36 +246,87 @@ def test_storm_does_not_recur(gt06_sim_factory, server):
         )
         time.sleep(0.3)
     pushes = _log_lines_for(server, sim.sailor_id, "pushing", since_marker=marker)
-    pushes = [p for p in pushes if "MODE5" in p or "overnight" in p]
+    # Filter to overnight-setup pushes (MODE4 / MODE5 / overnight chain).
+    pushes = [p for p in pushes if "MODE" in p or "overnight" in p]
     assert not pushes, (
-        f"unexpected re-push of MODE5/overnight setup ({len(pushes)}):\n  "
+        f"unexpected re-push of overnight setup ({len(pushes)}):\n  "
         + "\n  ".join(pushes))
 
 
+def test_mode_command_round_trip(gt06_sim_factory, server):
+    """Sim must accept both MODE4 and MODE5 commands and ACK with the right
+    on-wire format. Locks in the dual-mode handler in handle_server_cmd —
+    the swap to MODE4 default would have silently passed if MODE5 was
+    accidentally dropped, since most tests fire MODE4 by default now.
+    """
+    sim = gt06_sim_factory("999010000007001")
+    _wait_for_login(server, sim.sailor_id)
+    # MODE4,300# — sim should set mode=4, freq=300, ACK with MODE4 OK.
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=MODE4%2C300%23",
+        headers={"X-Admin-Password": ADMIN_PW},
+    )
+    assert _wait_for(lambda: sim.mode == 4 and sim.freq == 300, timeout=2.0), \
+        f"MODE4,300# not accepted: mode={sim.mode} freq={sim.freq}"
+    # MODE5,30# — switch the sim to MODE5 to confirm both branches work.
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=MODE5%2C30%23",
+        headers={"X-Admin-Password": ADMIN_PW},
+    )
+    assert _wait_for(lambda: sim.mode == 5 and sim.freq == 30, timeout=2.0), \
+        f"MODE5,30# not accepted: mode={sim.mode} freq={sim.freq}"
+
+
+def test_overnight_setup_uses_configured_mode(gt06_sim_factory, server):
+    """When the server pushes the overnight chain to a sim in MODE1, the
+    sim should end up in the server's configured overnight_mode_number
+    (currently 4) with freq matching overnight_interval_min in the chosen
+    mode's units."""
+    sim = gt06_sim_factory("999010000008001")
+    _wait_for_login(server, sim.sailor_id)
+    _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
+    # First cxzt# triggers the mode-mismatch handler, which pushes the full
+    # _overnight_cmds chain (SLPDISCONNECT + ACCLINE + MODE{n},{arg}#).
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
+        headers={"X-Admin-Password": ADMIN_PW},
+    )
+    settled = _wait_for(
+        lambda: sim.mode == OVERNIGHT_MODE and sim.freq == OVERNIGHT_F,
+        timeout=3.0)
+    assert settled, (
+        f"sim didn't settle into overnight: mode={sim.mode} freq={sim.freq}, "
+        f"expected MODE{OVERNIGHT_MODE} F={OVERNIGHT_F}")
+    # ACCLINE should have been set as part of the chain (vibration-wake off).
+    assert sim.accline == 1, f"sim.accline={sim.accline}, expected 1"
+
+
 def test_f540_recovery_triggers_overnight_repush(gt06_sim_factory, server):
-    """A sim in MODE5 but with corrupted Freq:540 (the bug we hit Wed where
-    TIMER,540,540# clobbered MODE5's F register) should trigger the server's
-    F-recovery: cxzt# response with M:5 F:540 → server pushes _overnight_cmds
-    to restore F:15.
+    """A sim in the overnight MODE but with a corrupted Freq (the bug we hit
+    Wed where TIMER,540,540# clobbered MODE5's F register) should trigger
+    the server's F-recovery: cxzt# response with the right MODE but wrong
+    Freq → server pushes _overnight_cmds to restore the expected Freq.
     """
     sim = gt06_sim_factory("999010000005001")
     _wait_for_login(server, sim.sailor_id)
     _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
-    # Get sim into MODE5 cleanly first.
+    # First cxzt# pushes the mode-mismatch overnight chain → sim settles.
     _http(server).get(
-        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=MODE5%2C15%23",
+        f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
         headers={"X-Admin-Password": ADMIN_PW},
     )
-    assert _wait_for(lambda: sim.mode == 5, timeout=2.0)
+    assert _wait_for(
+        lambda: sim.mode == OVERNIGHT_MODE and sim.freq == OVERNIGHT_F,
+        timeout=3.0), f"sim never reached overnight state: mode={sim.mode} freq={sim.freq}"
     # Now corrupt the sim's freq to simulate the TIMER-clobber bug.
     sim.freq = 540
-    # Probe cxzt# — server should detect M:5 F:540 and re-push overnight setup.
+    # Probe cxzt# — server should detect right MODE but wrong F and re-push.
     _http(server).get(
         f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
         headers={"X-Admin-Password": ADMIN_PW},
     )
     # Wait for the server's overnight push to propagate back to the sim.
-    recovered = _wait_for(lambda: sim.freq == 15, timeout=3.0)
+    recovered = _wait_for(lambda: sim.freq == OVERNIGHT_F, timeout=3.0)
     assert recovered, (
-        f"server failed to recover F: sim.freq={sim.freq}\n"
+        f"server failed to recover F: sim.freq={sim.freq}, expected {OVERNIGHT_F}\n"
         + _read_log_tail(server, 30))

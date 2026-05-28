@@ -77,25 +77,44 @@ def _active_cmds(interval):
             "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
 
 
-def _overnight_cmds(interval_min):
-    """Commands to send when entering OVERNIGHT idle (deep sleep, MODE5).
+def _overnight_arg(interval_min, mode_number):
+    """Convert the human-facing interval_min into the units the chosen
+    MODE command expects on the wire.
+
+    MODE5 takes minutes directly (vendor doc: min 5, max 65535 minutes).
+    MODE4 takes seconds (vendor doc: default 60 seconds, vibration-wake).
+
+    Keeping a single human-facing "interval_min" knob means operators
+    can flip overnight_mode_number between 4 and 5 in gt06.json without
+    rethinking the wake cadence.
+    """
+    return interval_min * 60 if mode_number == 4 else interval_min
+
+
+def _overnight_cmds(interval_min, mode_number=4):
+    """Commands to send when entering OVERNIGHT idle (deep sleep).
 
     The device wakes every `interval_min` minutes, opens a TCP connection,
-    locates, reports, then powers off the MCU and modem until the next
-    scheduled wake. Vendor (gt06/General commands for wireless devices
-    updated.xlsx): "MODE5 OK Freq:N-DW:?" — same scheduled-wake behaviour
-    as MODE2 but with MCU also off between wakes for max energy efficiency.
+    locates, reports, then powers off until the next scheduled wake.
+
+    Two supported overnight modes (mode_number config):
+      4 — MODE4: scheduled wake, vibration-responsive (default; vendor-
+          recommended replacement for MODE5 as of 2026-05). Arg in seconds.
+      5 — MODE5: scheduled wake, strictly time-based (no vibration wake),
+          MCU+modem off between wakes. Arg in minutes.
 
     SZCS#ACCLINE=1 stops the device treating vibration as ACC-ON, so
     boats rocking with wind/wave overnight don't trigger spurious wakes.
+    For MODE5 this is belt-and-braces (MODE5 already ignores vibration);
+    for MODE4 it suppresses the vibration-wake behaviour for the night.
 
-    SZCS#SLPDISCONNECT=0 ("long connection" — don't drop TCP on sleep)
-    is harmless in MODE5 since the device tears down its TCP every cycle
-    anyway, but kept for parity with the race-day idle command set.
+    SZCS#SLPDISCONNECT=0 ("long connection") is harmless in either mode
+    since the device tears down its TCP every cycle anyway.
     """
+    arg = _overnight_arg(interval_min, mode_number)
     return ["SZCS#SLPDISCONNECT=0",
             "SZCS#ACCLINE=1",
-            f"MODE5,{interval_min}#"]
+            f"MODE{mode_number},{arg}#"]
 
 
 def voltage_to_percent(voltage):
@@ -281,6 +300,10 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "idle_hbt_interval": cfg.get("idle_hbt_interval", 15),
             "idle_poll_interval": cfg.get("idle_poll_interval", 60),
             "overnight_interval_min": cfg.get("overnight_interval_min", 15),
+            # 4 = MODE4 (vendor-recommended 2026-05, vibration-responsive
+            # but ACCLINE=1 in the chain suppresses spurious wakes);
+            # 5 = MODE5 (strictly scheduled, no vibration wake).
+            "overnight_mode_number": cfg.get("overnight_mode_number", 4),
             "slow_speed_knots": cfg.get("slow_speed_knots", 2),
             "slow_speed_seconds": cfg.get("slow_speed_seconds", 20),
             "slow_loc_interval": cfg.get("slow_loc_interval", 3),
@@ -405,9 +428,15 @@ class GT06Listener:
         self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
         self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
         self.idle_poll_interval = self.gt06_config.get("idle_poll_interval", 60)
-        # Overnight (deep-sleep) wake interval in MINUTES. Used by MODE5
-        # via _overnight_cmds(). Min 5 (vendor spec); default 15.
+        # Overnight (deep-sleep) wake interval in MINUTES. Same human-facing
+        # value regardless of which overnight mode is in use; _overnight_cmds
+        # converts to the on-wire unit (seconds for MODE4, minutes for MODE5).
         self.overnight_interval_min = self.gt06_config.get("overnight_interval_min", 15)
+        # Overnight mode number — 4 (MODE4, vendor-recommended 2026-05) or
+        # 5 (MODE5). Live-flippable: edit gt06.json and restart, trackers
+        # currently in the other mode will migrate on their next cxzt# poll
+        # via the mode-mismatch handler in the 0x15 path.
+        self.overnight_mode_number = self.gt06_config.get("overnight_mode_number", 4)
         self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
         self.slow_speed_seconds = self.gt06_config.get("slow_speed_seconds", 20)
         self.slow_loc_interval = self.gt06_config.get("slow_loc_interval", 3)
@@ -601,7 +630,7 @@ class GT06Listener:
             # to Freq:540, breaking the 15-min wake cadence. Suppress the
             # whole rate-mismatch path for MODE5 — the wake cycles are by
             # design infrequent and a couple of LOC per wake is expected.
-            if gt_conn.desired_mode == 5:
+            if gt_conn.desired_mode == self.overnight_mode_number:
                 gt_conn.rate_check_time = now
                 gt_conn.loc_count = 0
                 gt_conn.hbt_count = 0
@@ -791,15 +820,16 @@ class GT06Listener:
                         except Exception:
                             idle_submode = "race"
                 if idle_submode == "overnight":
-                    gt_conn.desired_mode = 5
+                    gt_conn.desired_mode = self.overnight_mode_number
                     # Overnight: queue ONLY cxzt# probe. If the device is
-                    # already in MODE5 (it usually is — wake-cycle reconnects
-                    # land here), the cxzt# handler will see M:5 == desired:5
-                    # and do nothing; device just sleeps again on its own
-                    # cadence. Otherwise the handler pushes the full
-                    # _overnight_cmds chain (SLPDISCONNECT, ACCLINE, MODE5).
-                    # This avoids the re-push storm where every wake reset
-                    # the MODE5 timer back to the start of its period.
+                    # already in the right MODE (it usually is — wake-cycle
+                    # reconnects land here), the cxzt# handler will see
+                    # M:overnight_mode == desired and do nothing; device
+                    # just sleeps again on its own cadence. Otherwise the
+                    # handler pushes the full _overnight_cmds chain
+                    # (SLPDISCONNECT, ACCLINE, MODE{4|5}). This avoids the
+                    # re-push storm where every wake reset the timer back
+                    # to the start of its period.
                     cmds = ["cxzt#"]
                     gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
                     self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
@@ -1107,31 +1137,38 @@ class GT06Listener:
                     # e.g. MODE5 stuck after a previous overnight period
                     # when the operator clicks All Start.
                     desired = gt_conn.desired_mode
+                    overnight_mode = self.overnight_mode_number
                     push_cmds = None
                     if mode != desired:
-                        if desired == 5:
+                        if desired == overnight_mode:
                             # Push full overnight setup (SLPDISCONNECT,
-                            # ACCLINE, MODE5) — bare MODE5 without ACCLINE=1
-                            # leaves vibration-wake enabled and the device
-                            # wakes uselessly on wave motion at night.
-                            push_cmds = _overnight_cmds(self.overnight_interval_min)
+                            # ACCLINE, MODE{4|5}) — bare MODE without
+                            # ACCLINE=1 leaves vibration-wake enabled and
+                            # the device wakes uselessly on wave motion.
+                            push_cmds = _overnight_cmds(
+                                self.overnight_interval_min, overnight_mode)
                         else:
                             push_cmds = ["MODE1,30,300#"]
                         self._log(f"[GT06] {label} reports MODE={mode}, "
                                   f"desired MODE={desired} — pushing {' '.join(push_cmds)}")
-                    elif desired == 5:
-                        # Device is in MODE5 but check F — race-day TIMER
-                        # commands sent earlier may have overwritten the
-                        # MODE5 Freq to 540 (we saw this in production on
-                        # G334189 and G378848). Re-push the overnight chain
-                        # to restore Freq:overnight_interval_min.
+                    elif desired == overnight_mode:
+                        # Device is in the right MODE; check F — race-day
+                        # TIMER commands sent earlier may have overwritten
+                        # the overnight Freq (we saw this in production on
+                        # G334189 and G378848 in MODE5). Re-push to restore.
+                        # Expected F is in the unit the chosen MODE uses
+                        # on the wire (MODE4 = seconds, MODE5 = minutes).
+                        expected_f = _overnight_arg(
+                            self.overnight_interval_min, overnight_mode)
                         fmatch = re.search(r'\*F:(\d+)', text)
                         if fmatch:
                             f_val = int(fmatch.group(1))
-                            if f_val != self.overnight_interval_min:
-                                push_cmds = _overnight_cmds(self.overnight_interval_min)
-                                self._log(f"[GT06] {label} in MODE5 but F={f_val}, "
-                                          f"expected {self.overnight_interval_min} — re-pushing overnight setup")
+                            if f_val != expected_f:
+                                push_cmds = _overnight_cmds(
+                                    self.overnight_interval_min, overnight_mode)
+                                self._log(f"[GT06] {label} in MODE{mode} but "
+                                          f"F={f_val}, expected {expected_f} — "
+                                          f"re-pushing overnight setup")
                     if push_cmds:
                         gt_conn.cmd_queue.clear()
                         self._queue_commands(gt_conn, push_cmds)
@@ -1176,7 +1213,9 @@ class GT06Listener:
 
         When idle=True:
           submode="race"      → race-day idle (long TIMER + HBT + SENDS,1)
-          submode="overnight" → MODE5 deep sleep with scheduled wake
+          submode="overnight" → scheduled-wake deep sleep using the mode
+                                number from overnight_mode_number config
+                                (4 = MODE4, 5 = MODE5).
         When idle=False: restore active command set.
         """
         key = (eid, sailor_id)
@@ -1198,9 +1237,10 @@ class GT06Listener:
                 gt_conn.cmd_pending = None
                 if idle:
                     if submode == "overnight":
-                        gt_conn.desired_mode = 5
-                        cmds = _overnight_cmds(self.overnight_interval_min)
-                        # No HBT for overnight — MODE5 controls cadence itself
+                        gt_conn.desired_mode = self.overnight_mode_number
+                        cmds = _overnight_cmds(self.overnight_interval_min,
+                                               self.overnight_mode_number)
+                        # No HBT for overnight — MODE4/MODE5 controls cadence
                         gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
                         self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
                     else:

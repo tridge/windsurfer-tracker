@@ -200,7 +200,7 @@ class GT06DeviceSim:
         self._rx_buf = b""
         self._last_rx_at = 0.0
         self._hbt_acked_silent = False  # tracks the hbt_silent quirk
-        self._mode5_disconnect_pending = False
+        self._scheduled_disconnect_pending = False
         self._connected_at = 0.0
         # Initialised so step()/_emit_due() are safe to call before connect().
         self._next_hbt_at = float("inf")
@@ -262,7 +262,7 @@ class GT06DeviceSim:
         self._rx_buf = b""
         self._last_rx_at = self.clock.now()
         self._connected_at = self.clock.now()
-        self._mode5_disconnect_pending = False
+        self._scheduled_disconnect_pending = False
         # Login frame: protocol 0x01, payload = 8-byte BCD IMEI.
         self._send_frame(0x01, build_login_data(self.imei))
 
@@ -426,19 +426,26 @@ class GT06DeviceSim:
             self._reply(f"MODE1 OK Freq:{self.freq}-HBT:{self.hbt_interval}", server_flag)
             return
 
-        # MODE5,M# → MODE5 scheduled-wake. After ACK, schedule a disconnect
-        # so the next wake is freq minutes away. NB: vendor doc says minutes;
-        # real devices behave like minutes (~13-15 min observed wakes).
-        if cmd.startswith("MODE5,"):
-            try:
-                self.mode = 5
-                self.freq = int(cmd.rstrip("#").split(",")[1])
-            except (ValueError, IndexError):
-                pass
-            self._reply(f"MODE5 OK Freq:{self.freq}-DW:2", server_flag)
-            # Schedule TCP disconnect after a short dwell.
-            self._mode5_disconnect_pending = True
-            return
+        # MODE4,M# / MODE5,M# → scheduled-wake. After ACK, schedule a
+        # disconnect so the next wake fires at the right offset.
+        # Arg unit differs by mode (vendor doc):
+        #   MODE5: minutes (real devices wake every ~13-15 min @ N=15)
+        #   MODE4: seconds (default 60, vibration-responsive)
+        # Both ACK in the same format: "MODE{n} OK Freq:{arg}-DW:2".
+        for n in (4, 5):
+            prefix = f"MODE{n},"
+            if cmd.startswith(prefix):
+                try:
+                    self.mode = n
+                    self.freq = int(cmd.rstrip("#").split(",")[1])
+                except (ValueError, IndexError):
+                    pass
+                self._reply(f"MODE{n} OK Freq:{self.freq}-DW:2", server_flag)
+                # Schedule TCP disconnect after a short dwell — applies to
+                # both MODE4 and MODE5 since both tear down the connection
+                # between scheduled wakes.
+                self._scheduled_disconnect_pending = True
+                return
 
         # TIMER,N,N# — real device's F register bleeds: TIMER overwrites
         # Freq even when device is in MODE5 (the bug we hit on Wed).
@@ -532,18 +539,22 @@ class GT06DeviceSim:
                 interval = 60
             self._next_loc_at = now + interval
 
-    def _maybe_disconnect_after_mode5(self):
-        """MODE5: after a short awake-dwell, drop TCP and schedule reconnect."""
-        if not self._mode5_disconnect_pending:
+    def _maybe_disconnect_after_scheduled_mode(self):
+        """MODE4/MODE5: after a short awake-dwell, drop TCP and schedule
+        reconnect at the configured wake interval. MODE5's arg is in
+        minutes, MODE4's in seconds (vendor doc)."""
+        if not self._scheduled_disconnect_pending:
             return
         now = self.clock.now()
         # Stay awake mode5_dwell_s seconds, then disconnect.
         if now - self._connected_at < self.mode5_dwell_s:
             return
-        next_wake = now + self.freq * 60  # MODE5,N — N is minutes
-        log.info("%s MODE5 sleep, next wake in %ds", self.sailor_id, self.freq * 60)
+        wake_delta = self.freq * 60 if self.mode == 5 else self.freq
+        next_wake = now + wake_delta
+        log.info("%s MODE%d sleep, next wake in %ds",
+                 self.sailor_id, self.mode, wake_delta)
         self._disconnect()
-        self._mode5_disconnect_pending = False
+        self._scheduled_disconnect_pending = False
         # Schedule reconnect via the clock.
         self.clock.schedule(next_wake, self._reconnect)
 
@@ -579,7 +590,7 @@ class GT06DeviceSim:
             try:
                 self._drain_rx()
                 self._emit_due()
-                self._maybe_disconnect_after_mode5()
+                self._maybe_disconnect_after_scheduled_mode()
             except Exception as e:
                 log.exception("%s loop iteration failed: %s", self.sailor_id, e)
 
@@ -590,7 +601,7 @@ class GT06DeviceSim:
                     log.info("%s modem-sleep quirk: closing TCP", self.sailor_id)
                     self._disconnect()
 
-            if self.sock is None and not self._mode5_disconnect_pending:
+            if self.sock is None and not self._scheduled_disconnect_pending:
                 # Disconnected and no scheduled reconnect — wait for one or stop.
                 self.clock.sleep(0.5, self._stop_event)
                 continue
