@@ -90,6 +90,20 @@ def fmt_time(ts):
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S.") + f"{ts % 1:.3f}"[2:]
 
 
+def gps_time_str(data):
+    """Embedded GPS fix time (first 6 bytes = UTC Y/M/D h:m:s), shown in local
+    time as HH:MM:SS so it lines up with the packet receive time. Returns '?'
+    if the bytes aren't a valid date."""
+    if len(data) < 6:
+        return "?"
+    try:
+        gps_dt = datetime(2000 + data[0], data[1], data[2],
+                          data[3], data[4], data[5], tzinfo=timezone.utc)
+    except ValueError:
+        return "?"
+    return gps_dt.astimezone().strftime("%H:%M:%S")
+
+
 def validate_frame(frame):
     """Validate frame structure. Returns (protocol, data, serial, crc_ok) or None."""
     if len(frame) < 10 or frame[0:2] != b"\x78\x78":
@@ -182,8 +196,9 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False):
             return
         spd_kn = loc["speed_kmh"] / 1.852
         valid = "" if loc["gps_valid"] else " [NO FIX]"
-        print(f"{ts_str}  {proto_name:<7s} lat={loc['lat']:.4f} lon={loc['lon']:.4f} "
-              f"spd={spd_kn:.1f}kn hdg={loc['heading']} sats={loc['satellites']}{valid}{crc_tag}")
+        print(f"{ts_str}  {proto_name:<7s} lat={loc['lat']:.8f} lon={loc['lon']:.8f} "
+              f"spd={spd_kn:.1f}kn hdg={loc['heading']} sats={loc['satellites']} "
+              f"gps={gps_time_str(data)}{valid}{crc_tag}")
         if verbose:
             print(f"           speed_kmh={loc['speed_kmh']} gps_valid={loc['gps_valid']}")
             if len(data) >= 18:
@@ -254,8 +269,9 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False):
             alarm_label = " ALARM"
 
         valid = "" if loc["gps_valid"] else " [NO FIX]"
-        print(f"{ts_str}  ALARM   lat={loc['lat']:.4f} lon={loc['lon']:.4f} "
-              f"spd={spd_kn:.1f}kn hdg={loc['heading']}{alarm_label}{valid}{crc_tag}")
+        print(f"{ts_str}  ALARM   lat={loc['lat']:.8f} lon={loc['lon']:.8f} "
+              f"spd={spd_kn:.1f}kn hdg={loc['heading']} gps={gps_time_str(data)}"
+              f"{alarm_label}{valid}{crc_tag}")
         if verbose:
             print(f"           sats={loc['satellites']}  speed_kmh={loc['speed_kmh']}  "
                   f"gps_valid={loc['gps_valid']}")
