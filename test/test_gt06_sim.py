@@ -20,8 +20,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 from gt06_device_sim import GT06DeviceSim  # noqa: E402
+from protocol_GT06 import OVERNIGHT_FREQ_MAX_RETRIES  # noqa: E402
 
-from conftest import HTTPClient  # noqa: E402
+from conftest import HTTPClient, MANAGER_PASSWORD  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -330,3 +331,121 @@ def test_f540_recovery_triggers_overnight_repush(gt06_sim_factory, server):
     assert recovered, (
         f"server failed to recover F: sim.freq={sim.freq}, expected {OVERNIGHT_F}\n"
         + _read_log_tail(server, 30))
+
+
+def test_w07_firmware_overnight_uses_mode1_not_mode4(gt06_sim_factory, server):
+    """W07/V6.6x firmware ignores the MODE4 Freq arg, so the server must keep
+    those units on MODE1 (long TIMER) overnight instead of MODE4. Relies on
+    firmware_overrides {"W07_": {"overnight_mode_number": 1}} in the test config.
+    """
+    sim = gt06_sim_factory("999010000009001",
+                           firmware="W07_MG133_10F8G_B53_V6.68",
+                           mode=4, freq=120)
+    _wait_for_login(server, sim.sailor_id)
+    marker = _log_marker(server, "w07mode1")
+    _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
+    for _ in range(4):
+        _http(server).get(
+            f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
+            headers={"X-Admin-Password": ADMIN_PW})
+        time.sleep(0.2)
+    switched = _wait_for(lambda: sim.mode == 1, timeout=4.0)
+    assert switched, (f"W07 sim still in MODE{sim.mode} freq={sim.freq} fw={sim.firmware}\n"
+                      + "\n".join(_log_lines_for(server, sim.sailor_id)))
+    lines = _log_lines_for(server, sim.sailor_id, since_marker=marker)
+    # The MODE4 *command* is "MODE4,900#" (comma); "switching MODE4->1" and
+    # "in MODE4" log text are fine — only an actual MODE4 push is a bug here.
+    assert not any("MODE4," in l for l in lines), \
+        f"server pushed MODE4 to W07 firmware: {[l for l in lines if 'MODE4,' in l]}"
+    assert not any("re-pushing overnight setup" in l for l in lines), \
+        f"W07 sim triggered an overnight re-push storm: {lines}"
+
+
+def test_overnight_freq_storm_is_capped(gt06_sim_factory, server):
+    """A device whose firmware refuses the overnight Freq (clamps MODE4 to 120,
+    like real W07) must not storm: the server caps freq re-pushes at
+    OVERNIGHT_FREQ_MAX_RETRIES then gives up."""
+    sim = gt06_sim_factory("999010000009002",
+                           quirks={"mode4_freq_clamp": 120})
+    _wait_for_login(server, sim.sailor_id)
+    marker = _log_marker(server, "stormcap")
+    _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
+    # Reaches MODE4 but Freq stays clamped at 120 (never OVERNIGHT_F).
+    reached = _wait_for(
+        lambda: sim.mode == OVERNIGHT_MODE and sim.freq == 120, timeout=4.0)
+    assert reached, f"clamp sim mode={sim.mode} freq={sim.freq}"
+    for _ in range(OVERNIGHT_FREQ_MAX_RETRIES + 4):
+        _http(server).get(
+            f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
+            headers={"X-Admin-Password": ADMIN_PW})
+        time.sleep(0.2)
+    lines = _log_lines_for(server, sim.sailor_id, since_marker=marker)
+    repushes = [l for l in lines if "re-pushing overnight setup" in l]
+    gave_up = [l for l in lines if "giving up after" in l]
+    assert len(repushes) <= OVERNIGHT_FREQ_MAX_RETRIES, \
+        f"re-pushed {len(repushes)}x (cap {OVERNIGHT_FREQ_MAX_RETRIES}): {repushes}"
+    assert gave_up, "storm guard never gave up:\n" + "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# GT06 management page (manager-level device admin)
+# ---------------------------------------------------------------------------
+
+def _mgr_get(server, path):
+    return _http(server).get(path, headers={"X-Manager-Password": MANAGER_PASSWORD})
+
+
+def _mgr_post(server, path, body=None):
+    return _http(server).post(
+        path, body, headers={"X-Manager-Password": MANAGER_PASSWORD})
+
+
+def test_gt06_manage_requires_manager_auth(server):
+    # Use a unique IP for this intentional auth failure so the resulting
+    # 5s rate-limit doesn't block the shared default IP that other manager
+    # tests (e.g. inventory) use right after.
+    status, _ = _http(server).get(
+        "/api/manage/gt06/trackers",
+        headers={"X-Forwarded-For": "203.0.113.77"})  # no manager password
+    assert status == 401
+
+
+def test_gt06_manage_inventory_and_actions(gt06_sim_factory, server):
+    """End-to-end through the real server: a connected device shows up in the
+    inventory with firmware, and per-device config / refresh / reboot /
+    firmware-update endpoints behave. HTTPClient returns (status, body)."""
+    sim = gt06_sim_factory("999010000010001",
+                           firmware="W07_MG133_10F8G_B53_V6.68")
+    _wait_for_login(server, sim.sailor_id)
+    _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/refresh")
+
+    def _find():
+        status, body = _mgr_get(server, "/api/manage/gt06/trackers")
+        if status != 200:
+            return None
+        for t in body.get("trackers", []):
+            if t["imei"] == sim.imei and t.get("firmware"):
+                return t
+        return None
+
+    assert _wait_for(lambda: _find() is not None, timeout=4.0), \
+        "device with firmware never appeared in manager inventory"
+    entry = _find()
+    assert entry["firmware"].startswith("W07_")
+
+    # Per-device config write always works (persists to gt06.json) regardless of
+    # connection state.
+    status, body = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}",
+                             {"overnight_mode_number": 1})
+    assert status == 200 and body["success"] is True
+
+    # Reboot needs a live connection. The sim may have cycled offline; accept
+    # either a queued reboot (200) or a not-connected response (404).
+    status, body = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/reboot")
+    assert status in (200, 404)
+
+    status, _ = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/firmware-update")
+    assert status == 501
+
+    status, _ = _mgr_post(server, "/api/manage/gt06/tracker/000000000000000/reboot")
+    assert status == 404

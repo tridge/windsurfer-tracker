@@ -1093,9 +1093,17 @@ class PositionTracker:
         no_gps = (nsats == 0) or (lat == 0.0 and lon == 0.0)
         if no_gps:
             with self._lock:
-                self.last_timestamp[sailor_id] = ts
-                if sq > 0:
-                    self.last_sq[sailor_id] = sq
+                # Deliberately do NOT advance last_timestamp/last_sq here.
+                # GPS-wait (nogps) heartbeats are stamped with ts=server-now
+                # (see the GT06 heartbeat path), while real LOC fixes carry the
+                # device's embedded gps_time. After a TCP reconnect a GT06
+                # replays a buffered backlog whose gps_time lags wall-clock by
+                # tens of seconds; if a nogps heartbeat pushed the dedup
+                # high-water mark forward to "now", every real backlog fix would
+                # then fail the `ts <= last_timestamp` dup check and be silently
+                # dropped — freezing the track for the rest of the session
+                # (observed on G334189/G334023, 2026-05-30). Heartbeats only
+                # touch liveness/metadata below.
                 existing = self.current_positions.get(sailor_id, {})
                 pos_data = {
                     "id": sailor_id,
@@ -1120,10 +1128,16 @@ class PositionTracker:
                     pos_data["bat_v"] = battery_voltage
                 if os_version:
                     pos_data["os"] = os_version
-                # Preserve existing lat/lon if user previously tracked
+                # Preserve existing lat/lon if user previously tracked, and
+                # keep that fix's GPS ts so the live view ages the marker from
+                # when the *position* was taken (not now) — a nogps heartbeat
+                # means "still alive, no new fix", so "last update" should stay
+                # at the last real fix and visibly grow stale.
                 if "lat" in existing and "lon" in existing:
                     pos_data["lat"] = existing["lat"]
                     pos_data["lon"] = existing["lon"]
+                    if "ts" in existing:
+                        pos_data["ts"] = existing["ts"]
                 # Preserve per-sailor SLEEP flag — see comment on the
                 # idle branch above for rationale.
                 if existing.get("sleep"):
@@ -2256,6 +2270,20 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Unauthorized"}, 401)
                 return
             self._send_json({"events": _event_manager.get_all_events()})
+
+        elif path == '/api/manage/gt06/trackers':
+            # GT06 device inventory for the manager device-management page.
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            if _gt06_listener is None:
+                self._send_json({"trackers": [], "gt06_running": False})
+                return
+            self._send_json({
+                "trackers": _gt06_listener.get_device_inventory(),
+                "gt06_running": True,
+                "events": _event_manager.get_all_events() if _event_manager else [],
+            })
 
         elif path.startswith('/api/event/'):
             # Per-event API endpoints
@@ -4159,6 +4187,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._handle_create_event()
             return
 
+        # Manager GT06 device-management endpoints
+        if path.startswith('/api/manage/gt06/') or path == '/api/manage/server/restart':
+            self._handle_gt06_manage_post(path)
+            return
+
         if path == '/api/admin/stop-all':
             # Send remote stop command to all active trackers
             parsed = urlparse(self.path)
@@ -4468,6 +4501,76 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header('Location', '/install/flutter-ios.html?error=unknown')
             self.end_headers()
+
+    def _handle_gt06_manage_post(self, path):
+        """Manager-level GT06 device management + server restart.
+
+        Routes (all require manager auth):
+          POST /api/manage/gt06/tracker/{imei}            set per-device config
+          POST /api/manage/gt06/tracker/{imei}/refresh    queue cxzt# probe
+          POST /api/manage/gt06/tracker/{imei}/reboot     queue RESET#
+          POST /api/manage/gt06/tracker/{imei}/firmware-update  (placeholder)
+          POST /api/manage/server/restart                 restart the server
+        """
+        if not self._check_manager_auth():
+            self._send_json({"error": "Unauthorized"}, 401)
+            return
+
+        if path == '/api/manage/server/restart':
+            log("[MANAGE] Server restart requested via web UI")
+            self._send_json({"success": True, "restarting": True})
+            # Flush the response, then re-exec this process. os.execv keeps the
+            # same PID (clean under systemd) and reloads all code + config.
+            try:
+                self.wfile.flush()
+            except Exception:
+                pass
+            _schedule_server_restart()
+            return
+
+        if _gt06_listener is None:
+            self._send_json({"error": "GT06 listener not running"}, 404)
+            return
+
+        from urllib.parse import unquote
+        m = re.match(r'^/api/manage/gt06/tracker/([^/]+)(/[a-z-]+)?$', path)
+        if not m:
+            self._send_json({"error": "Not found"}, 404)
+            return
+        imei = unquote(m.group(1))
+        action = (m.group(2) or '').lstrip('/')
+
+        if action == 'refresh':
+            ok = _gt06_listener.refresh_device(imei)
+            self._send_json({"success": ok, "imei": imei,
+                             "error": None if ok else "device not connected"},
+                            200 if ok else 404)
+            return
+        if action == 'reboot':
+            ok = _gt06_listener.reboot_device(imei)
+            self._send_json({"success": ok, "imei": imei,
+                             "error": None if ok else "device not connected"},
+                            200 if ok else 404)
+            return
+        if action == 'firmware-update':
+            # Not yet implemented — needs the vendor FOTA URL + A76XX flow.
+            self._send_json({"success": False, "imei": imei,
+                             "error": "firmware update not yet implemented"}, 501)
+            return
+        if action == '':
+            # Set per-device config (eid / overnight_mode_number / name).
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+                updates = json.loads(body)
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
+            ok, err = _gt06_listener.set_device_config(imei, updates)
+            self._send_json({"success": ok, "imei": imei, "error": err},
+                            200 if ok else 400)
+            return
+        self._send_json({"error": "Not found"}, 404)
 
     def _handle_create_event(self):
         """Handle event creation (manager endpoint)."""
@@ -4789,7 +4892,8 @@ def run_server(port: int, http_port: int | None = None,
                                       save_overrides_func=save_user_overrides,
                                       write_positions_func=write_current_positions,
                                       get_event_state_func=_gt06_get_event_state,
-                                      get_event_idle_submode_func=_gt06_get_event_idle_submode)
+                                      get_event_idle_submode_func=_gt06_get_event_idle_submode,
+                                      gt06_config_path=gt06_config_path)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")

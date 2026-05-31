@@ -651,6 +651,21 @@ def server(tmp_path_factory):
     events_file = data_dir / "events.json"
     events_file.write_text(json.dumps(events_data))
 
+    # GT06 config with firmware-aware overnight overrides so tests exercise the
+    # real W07-vs-V667 split. overnight_interval_min stays 15 to keep the
+    # OVERNIGHT_F=900 assumptions in test_gt06_sim.py valid.
+    gt06_config_file = data_dir / "gt06.json"
+    gt06_config_file.write_text(json.dumps({
+        "default_eid": 1,
+        "overnight_interval_min": 15,
+        "overnight_mode_number": 4,
+        "firmware_overrides": {
+            "W07_": {"overnight_mode_number": 1},
+            "NT19D_": {"overnight_mode_number": 4},
+        },
+        "devices": {},
+    }))
+
     log_path = data_dir / "server.log"
     log_fh = open(log_path, "w")
 
@@ -664,6 +679,7 @@ def server(tmp_path_factory):
             "--gt06-port", str(gt06_port),
             "--gt06-interval", "10",
             "--gt06-id-prefix", "G",
+            "--gt06-config", str(gt06_config_file),
             "--jt808-port", str(jt808_port),
             "--jt808-interval", "10",
             "--jt808-id-prefix", "J",

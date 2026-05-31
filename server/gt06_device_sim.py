@@ -414,6 +414,34 @@ class GT06DeviceSim:
             self._reply(resp, server_flag)
             return
 
+        # PARAM# — bulk parameter dump (the subset our reconciler reads back).
+        if cmd == "PARAM#":
+            self._reply(
+                f"IMEI:{self.imei};TIMER:{self.freq},{self.freq};"
+                f"SENDS:{self.sends_mode};HBT:{self.hbt_interval}Sec;Defense:0;",
+                server_flag)
+            return
+
+        # CXCS#KEY — read back a SZCS# setting (READOK: KEY=VAL).
+        if cmd.startswith("CXCS#"):
+            key = cmd[len("CXCS#"):].rstrip("#")
+            vals = {"SLPDISCONNECT": self.slp_disconnect,
+                    "GPS_RST_TIME": self.gps_rst_time,
+                    "VIBCHK": self.vibchk, "ACCLINE": self.accline}
+            self._reply(f"READOK: {key}={vals.get(key, 0)}", server_flag)
+            return
+
+        # Bare query forms (no comma): SENALM# / MOVING# / SENDS#.
+        if cmd == "SENALM#":
+            self._reply(f"SENALM:{self.senalm}", server_flag)
+            return
+        if cmd == "MOVING#":
+            self._reply(f"MOVING:{self.moving}", server_flag)
+            return
+        if cmd == "SENDS#":
+            self._reply(f"SENDS:{self.sends_mode}", server_flag)
+            return
+
         # MODE1,F,H#  → switch to MODE1, set freq + heartbeat.
         if cmd.startswith("MODE1,"):
             parts = cmd.rstrip("#").split(",")
@@ -437,7 +465,14 @@ class GT06DeviceSim:
             if cmd.startswith(prefix):
                 try:
                     self.mode = n
-                    self.freq = int(cmd.rstrip("#").split(",")[1])
+                    requested = int(cmd.rstrip("#").split(",")[1])
+                    clamp = self.quirks.get("mode4_freq_clamp")
+                    if n == 4 and clamp is not None:
+                        # W07 firmware ignores the MODE4 Freq arg and stays
+                        # clamped (the real storm bug). Mirror that here.
+                        self.freq = clamp
+                    else:
+                        self.freq = requested
                 except (ValueError, IndexError):
                     pass
                 self._reply(f"MODE{n} OK Freq:{self.freq}-DW:2", server_flag)
