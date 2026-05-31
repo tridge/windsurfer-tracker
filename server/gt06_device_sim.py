@@ -556,7 +556,11 @@ class GT06DeviceSim:
         self._reply(f"ACK:{cmd}", server_flag)
 
     def _reply(self, text, server_flag):
-        data = build_command_ack_data(server_flag, text + " ")
+        # Real W07C devices terminate command-response strings with a \x00\x01
+        # trailer (seen in raw gt06.log). Mirror it so the server's response
+        # parsing (e.g. the settings reconciler's value extraction) is exercised
+        # against the real framing, not a forgiving trailing space.
+        data = build_command_ack_data(server_flag, text + "\x00\x01")
         self._send_frame(0x15, data)
 
     # ------ main loop ------

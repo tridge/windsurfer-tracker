@@ -157,10 +157,13 @@ _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
 
 
 def _norm(v):
-    """Normalise a setting value for comparison."""
+    """Normalise a setting value for comparison. Strips surrounding whitespace
+    AND control chars — real devices terminate command replies with a \\x00\\x01
+    trailer, so e.g. "300\\x00\\x01" must compare equal to 300 (else the diff
+    would re-apply correct settings on every reconnect = churn)."""
     if v is None:
         return None
-    return str(v).strip().lower()
+    return re.sub(r'[\x00-\x1f]', '', str(v)).strip().lower()
 
 
 def _atomic_write_json(path, obj):
@@ -715,7 +718,9 @@ class GT06Listener:
                            ("HBT", r'HBT:(\d+)')):
                 m = re.search(pat, text)
                 if m: obs[k] = int(m.group(1))
-        m = re.search(r'(?:READOK|SETOK):\s*([A-Z_]+)=(\S+)', text)  # CXCS read / set ack
+        # CXCS read / set ack. Value stops at whitespace OR a control char so the
+        # device's trailing \x00\x01 (and any framing) isn't captured.
+        m = re.search(r'(?:READOK|SETOK):\s*([A-Z_]+)=([^\s\x00-\x1f]+)', text)
         if m: obs[m.group(1)] = m.group(2)
         m = re.search(r'\bSENALM:(\w+)', text)
         if m: obs["SENALM"] = m.group(1)
@@ -1734,9 +1739,15 @@ class GT06Listener:
                 gt_conn.idle = idle
                 gt_conn.slow_mode = False
                 gt_conn.slow_since = 0
-                # Clear any pending commands from previous state
+                # Clear any pending commands from previous state. Abort any
+                # in-flight reconcile too, otherwise a stale phase would, once
+                # the new state's probe drains, apply the OLD target's settings
+                # (e.g. active/idle config onto a device we just put to sleep).
+                # The active/idle branches below restart reconcile cleanly; the
+                # overnight branch deliberately leaves it off.
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
+                gt_conn.reconcile_phase = None
                 if idle:
                     if submode == "overnight":
                         gt_conn.overnight = True
