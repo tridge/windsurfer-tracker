@@ -1507,18 +1507,24 @@ class EventTracker:
     def clear_positions_only(self):
         """Clear yesterday's position data without losing operator-intent state.
 
-        Used by midnight auto-clear. Drops lat/lon/spd/hdg/ts/last_seen etc.
+        Used by midnight auto-clear. Drops the position (lat/lon/spd/hdg/ts)
         so the map starts fresh, but preserves per-sailor sleep/idle/stopped
         flags (and identifying metadata like did/role/bat) so trackers in
         overnight SLEEP don't silently revert to race-day idle the moment
         the day rolls over. Mirrors the field-preservation pattern used by
         PositionTracker._load_from_file across server restarts.
+
+        last_seen/last_seen_iso (the contact time, not position data) are kept
+        so the WebUI shows "last seen Nh ago" for a stopped/offline stub. Without
+        them the stub has no timestamp and timeAgo() renders "NaNh ago" (or, once
+        a restart turns the absent field into 0, "494614h ago").
         """
-        # Preserved per-sailor fields — operator intent + identity, no
-        # position data. Must stay in sync with _load_from_file at line
+        # Preserved per-sailor fields — operator intent + identity + contact
+        # time, no position data. Must stay in sync with _load_from_file at line
         # ~988 so restart and midnight-clear behave identically.
         keep_keys = ("id", "did", "role", "name", "displayid", "bat", "sig",
-                     "idle", "stopped", "sleep", "chg", "bat_v")
+                     "idle", "stopped", "sleep", "chg", "bat_v",
+                     "last_seen", "last_seen_iso")
         pt = self.position_tracker
         with pt._lock:
             stubs = {}

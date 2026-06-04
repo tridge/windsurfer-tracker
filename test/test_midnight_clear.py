@@ -89,6 +89,20 @@ def test_midnight_clear_drops_active_position_data(tracker):
     assert pos.get("bat_v") == 4.05
 
 
+def test_midnight_clear_keeps_last_seen_for_timeago(tracker):
+    """The contact time (last_seen/last_seen_iso) must survive the clear so the
+    WebUI shows "last seen Nh ago" for a stopped/offline stub. Dropping it left
+    the stub with no timestamp -> timeAgo() rendered "NaNh ago", and after a
+    restart turned the absent field into 0 -> "494614h ago"."""
+    _seed_sailor(tracker, "G375356", idle=True, stopped=True)
+    tracker.clear_positions_only()
+    pos = tracker.position_tracker.current_positions["G375356"]
+    assert pos.get("last_seen") == 1779990000.0, "last_seen wiped by midnight clear"
+    assert pos.get("last_seen_iso") == "2026-05-28T12:00:00"
+    # ts (the GPS fix time, tied to the dropped position) is still removed.
+    assert "ts" not in pos
+
+
 def test_midnight_clear_resets_dedup_state(tracker):
     """last_timestamp and last_sq must be cleared so a tracker's first
     packet of the new day isn't dropped as a duplicate."""
