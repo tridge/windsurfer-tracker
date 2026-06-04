@@ -381,6 +381,15 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "slow_speed_knots": cfg.get("slow_speed_knots", 2),
             "slow_speed_seconds": cfg.get("slow_speed_seconds", 20),
             "slow_loc_interval": cfg.get("slow_loc_interval", 3),
+            # Lag remediation (blind-buffer drain). lag_remediation_sec=0 disables
+            # it; these must be copied here or _resolve_setting() only sees the
+            # per-device layer and the global gt06.json values are silently lost.
+            "lag_remediation_sec": cfg.get("lag_remediation_sec", 0),
+            "lag_drain_interval": cfg.get("lag_drain_interval", 2),
+            "lag_restore_sec": cfg.get("lag_restore_sec", 8),
+            "lag_remediation_cooldown_sec": cfg.get("lag_remediation_cooldown_sec", 60),
+            "lag_remediation_max_retries": cfg.get("lag_remediation_max_retries", 3),
+            "lag_drain_max_sec": cfg.get("lag_drain_max_sec", 180),
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
