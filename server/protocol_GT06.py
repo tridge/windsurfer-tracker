@@ -413,6 +413,7 @@ class GT06Connection:
         self.last_lat = None
         self.last_lon = None
         self.last_ts = None
+        self.last_loc_mono = 0.0  # monotonic wall-time the last LOC arrived
         self.pos_history = []  # last 3 (lat, lon, ts) for speed smoothing
 
         # Command queue — sequential delivery with SIOCOUTQ verification
@@ -467,6 +468,16 @@ class GT06Connection:
         self.target_state = None      # "active" | "idle" we're reconciling to
         self.observed = {}            # settings read back this connection
         self.reconcile_phase = None   # None | "query" | "apply"
+
+        # Lag remediation (blind-buffer drain). When an ACTIVE device's replay
+        # tip (last_ts) falls behind wall-clock, its on-device offline buffer is
+        # replaying at the fixed ~1Hz rate but never catching up. Bench-proven
+        # 2026-05-31: temporarily lowering TIMER (capture rate) below the 1Hz
+        # replay drains the backlog with no track loss. State for that drain:
+        self.lag_draining = False     # currently in a TIMER-lowered drain
+        self.lag_drain_started = 0.0  # monotonic when the current drain began
+        self.lag_drain_last = 0.0     # monotonic of last drain start (cooldown)
+        self.lag_drain_attempts = 0   # drains started since last full recovery
 
         # Last time we received ANY frame from the device. Used as the
         # liveness signal for the no-HBT-disconnect check, so a device that
@@ -803,6 +814,93 @@ class GT06Listener:
         gt_conn.last_hbt_time = now
         gt_conn.last_alive_time = now
         gt_conn.rate_retry_count = 0
+
+    def _check_lag(self, fd, gt_conn, now):
+        """Blind-buffer lag remediation (active tracking only).
+
+        If the device's replay tip (`last_ts`, the gps_time of its most recent
+        LOC) is behind wall-clock by more than `lag_remediation_sec`, its offline
+        buffer is replaying at the fixed ~1Hz device rate but never catching up.
+        Temporarily lower TIMER to `lag_drain_interval` so capture drops below the
+        replay rate and the backlog drains (no track loss — every buffered fix
+        still replays); restore the active interval once the lag falls back under
+        `lag_restore_sec`. Throttled like the overnight storm guard.
+
+        `now` is monotonic (cooldown/timeout); lag is wall-clock because
+        `last_ts` is the embedded gps_time.
+        """
+        threshold = self._resolve_setting(gt_conn, "lag_remediation_sec", 0)
+        if not threshold or threshold <= 0:
+            return  # feature disabled (default)
+
+        # Active tracking only — never touch idle / overnight / mid-reconcile.
+        active = (not gt_conn.idle and not gt_conn.overnight
+                  and gt_conn.target_state != "idle"
+                  and gt_conn.reconcile_phase is None)
+        if not active or gt_conn.last_ts is None:
+            if gt_conn.lag_draining:
+                self._lag_restore(gt_conn, "state change")
+            return
+
+        lag = time.time() - gt_conn.last_ts
+        restore_sec = self._resolve_setting(gt_conn, "lag_restore_sec", 8)
+
+        if gt_conn.lag_draining:
+            if lag <= restore_sec:
+                self._lag_restore(gt_conn, f"recovered (lag {lag:.0f}s)")
+                gt_conn.lag_drain_attempts = 0   # full recovery re-arms budget
+            else:
+                max_drain = self._resolve_setting(gt_conn, "lag_drain_max_sec", 180)
+                if now - gt_conn.lag_drain_started > max_drain:
+                    self._lag_restore(gt_conn, f"timeout (lag still {lag:.0f}s)")
+            return
+
+        # Not draining.
+        if lag <= threshold:
+            if gt_conn.lag_drain_attempts and lag <= restore_sec:
+                gt_conn.lag_drain_attempts = 0   # caught up on its own — re-arm
+            return
+
+        # Lag over threshold — consider starting a drain. Only act on a device
+        # that's actively sending LOC (genuinely replaying a backlog); if LOC
+        # have stopped (e.g. GPS lost), the lag is stale and a TIMER change won't
+        # help — wait for it to resume.
+        if now - gt_conn.last_loc_mono > 10:
+            return
+        # Quiet pipeline only, so we don't stack onto an in-flight reconcile /
+        # slow-mode push / rate retry.
+        if gt_conn.cmd_queue or gt_conn.cmd_pending is not None:
+            return
+        max_retries = self._resolve_setting(gt_conn, "lag_remediation_max_retries", 3)
+        if gt_conn.lag_drain_attempts >= max_retries:
+            return  # gave up; re-arms when lag returns to normal
+        cooldown = self._resolve_setting(gt_conn, "lag_remediation_cooldown_sec", 60)
+        if gt_conn.lag_drain_last and now - gt_conn.lag_drain_last < cooldown:
+            return
+        self._lag_start_drain(gt_conn, now, lag, threshold, max_retries)
+
+    def _lag_start_drain(self, gt_conn, now, lag, threshold, max_retries):
+        """Lower TIMER to the drain interval so the buffer replay outpaces capture."""
+        drain_interval = self._resolve_setting(gt_conn, "lag_drain_interval", 2)
+        gt_conn.lag_draining = True
+        gt_conn.lag_drain_started = now
+        gt_conn.lag_drain_last = now
+        gt_conn.lag_drain_attempts += 1
+        self._queue_commands(gt_conn, [_SETTINGS["TIMER"][0](drain_interval)])
+        # Tell the rate monitor to expect the slower drain rate (don't fight it).
+        self._reset_rate_monitoring(gt_conn, drain_interval)
+        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+        self._log(f"[GT06] {label} lag {lag:.0f}s > {threshold}s — draining backlog "
+                  f"at TIMER,{drain_interval} (attempt {gt_conn.lag_drain_attempts}/{max_retries})")
+
+    def _lag_restore(self, gt_conn, reason):
+        """End the drain: restore the active LOC interval."""
+        gt_conn.lag_draining = False
+        interval = self.slow_loc_interval if gt_conn.slow_mode else self.interval
+        self._queue_commands(gt_conn, [_SETTINGS["TIMER"][0](interval)])
+        self._reset_rate_monitoring(gt_conn, interval)
+        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+        self._log(f"[GT06] {label} lag drain {reason} — restoring TIMER,{interval}")
 
     def _check_rates(self, fd, gt_conn, now):
         """Check LOC/HBT rates and retry or disconnect if device ignores commands."""
@@ -1147,8 +1245,9 @@ class GT06Listener:
             if len(gt_conn.pos_history) > 3:
                 gt_conn.pos_history.pop(0)
 
-            # Adaptive LOC rate: reduce interval when moving slowly
-            if not gt_conn.idle:
+            # Adaptive LOC rate: reduce interval when moving slowly. Suppressed
+            # during a lag drain so slow/fast TIMER pushes don't fight the drain.
+            if not gt_conn.idle and not gt_conn.lag_draining:
                 now_mono = time.monotonic()
                 if speed_knots < self.slow_speed_knots:
                     if gt_conn.slow_since == 0:
@@ -1172,6 +1271,7 @@ class GT06Listener:
             gt_conn.last_lat = loc["lat"]
             gt_conn.last_lon = loc["lon"]
             gt_conn.last_ts = loc["ts"]
+            gt_conn.last_loc_mono = time.monotonic()
 
             tracker = self.get_tracker(gt_conn.eid)
             if tracker is None:
@@ -1966,6 +2066,8 @@ class GT06Listener:
                     self._check_cmd_delivery(fd, gt_conn, now)
                 # Check LOC/HBT rates
                 self._check_rates(fd, gt_conn, now)
+                # Blind-buffer lag remediation (active devices only)
+                self._check_lag(fd, gt_conn, now)
                 # (STATUS# is also sent from heartbeat handler when HB arrives;
                 # this block additionally polls idle connections that have
                 # gone silent, since some new-firmware devices ACK HBT but

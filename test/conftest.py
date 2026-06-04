@@ -655,6 +655,16 @@ def server(tmp_path_factory):
     # real W07-vs-V667 split. overnight_interval_min stays 15 to keep the
     # OVERNIGHT_F=900 assumptions in test_gt06_sim.py valid.
     gt06_config_file = data_dir / "gt06.json"
+    # Fast lag-remediation tuning for the two lag-drain test devices: trip at 5s
+    # lag, drain at TIMER,2 (the sim drains only at this freq), restore under 3s.
+    _LAG_TEST_CFG = {
+        "lag_remediation_sec": 5,
+        "lag_drain_interval": 2,
+        "lag_restore_sec": 3,
+        "lag_remediation_cooldown_sec": 5,
+        "lag_remediation_max_retries": 3,
+        "lag_drain_max_sec": 60,
+    }
     gt06_config_file.write_text(json.dumps({
         "default_eid": 1,
         "overnight_interval_min": 15,
@@ -663,7 +673,13 @@ def server(tmp_path_factory):
             "W07_": {"overnight_mode_number": 1},
             "NT19D_": {"overnight_mode_number": 4},
         },
-        "devices": {},
+        # Lag remediation defaults OFF globally (lag_remediation_sec unset -> 0),
+        # so it never fires for the other tests' sims. Enabled per-device, with
+        # fast/aggressive values, only for the two lag-remediation test devices.
+        "devices": {
+            "999010000088001": _LAG_TEST_CFG,
+            "999010000088002": _LAG_TEST_CFG,
+        },
     }))
 
     log_path = data_dir / "server.log"

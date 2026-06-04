@@ -176,6 +176,94 @@ def test_sim_loc_lands_when_tracking(gt06_sim_factory, server):
     assert pos.get("lat") is not None, f"no lat after LOC; pos={pos}"
 
 
+def test_server_processes_loc_at_2hz(gt06_sim_factory, server):
+    """SERVER THROUGHPUT CHECK (not a device behaviour test): a client streaming
+    LOC at 2Hz with distinct, past-dated timestamps — i.e. a 2x backlog replay —
+    must be received AND recorded at ~2Hz. Confirms the ~1Hz blind-buffer replay
+    seen on real W07C devices is a device-side cap, not a server processing or
+    dedup limit. Prerequisite for the lower-TIMER lag-drain remediation."""
+    _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
+    # 2 sends/sec wall-clock; GPS time starts 120s in the past and steps +1s per
+    # send (distinct + monotonic + never future-dated). loc_interval_override
+    # holds the 2Hz pacing even after the server reconciles TIMER to 1Hz.
+    sim = gt06_sim_factory("999010000099001", freq=1,
+                           loc_interval_override=0.5,
+                           loc_ts_step=1.0,
+                           loc_ts_start_offset=-120.0)
+    _wait_for_login(server, sim.sailor_id)
+    time.sleep(1.0)  # let login + reconcile settle before measuring
+    before = len(server.log_file.read_text().splitlines())
+    window = 6.0
+    t0 = time.time()
+    time.sleep(window)
+    elapsed = time.time() - t0
+    new = server.log_file.read_text().splitlines()[before:]
+    tag = f"[{sim.sailor_id}]"
+    accepted = [l for l in new if tag in l and "pos=" in l and "[DUP]" not in l]
+    dups = [l for l in new if tag in l and "pos=" in l and "[DUP]" in l]
+    rate = len(accepted) / elapsed
+    print(f"\n[2Hz throughput] {len(accepted)} fixes accepted in {elapsed:.1f}s "
+          f"= {rate:.2f}/s, dups={len(dups)}")
+    assert rate >= 1.6, (
+        f"server recorded {len(accepted)} fixes in {elapsed:.1f}s = {rate:.2f}/s "
+        f"(expected ~2/s); dups={len(dups)}. Server is NOT keeping up at 2Hz.")
+    assert len(dups) == 0, (
+        f"distinct-timestamp fixes were deduped ({len(dups)} dups) — unexpected.")
+
+
+# ---------------------------------------------------------------------------
+# Lag remediation (blind-buffer drain) — Phase 2 _check_lag
+# ---------------------------------------------------------------------------
+
+def test_lag_remediation_drains_then_restores(gt06_sim_factory, server):
+    """A device replaying its offline buffer (replay tip lags > threshold) gets
+    its TIMER lowered to the drain interval; once the lag drains back under the
+    restore threshold the active interval is restored. (Server _check_lag.)"""
+    _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
+    # freq=10 matches the test active interval (reconcile won't push TIMER); the
+    # sim stamps LOC 20s behind wall-clock and only drains the lag once it sees
+    # the drain TIMER (freq==2). loc_interval_override paces emits at 2/s.
+    sim = gt06_sim_factory("999010000088001", freq=10,
+                           loc_interval_override=0.5,
+                           replay_lag_s=20.0,
+                           replay_drain_freq=2,
+                           replay_drain_step=1.5)
+    _wait_for_login(server, sim.sailor_id)
+    text = lambda: server.log_file.read_text()
+    tag = sim.sailor_id
+
+    # 1. Server detects the lag and pushes the drain TIMER.
+    assert _wait_for(lambda: f"{tag} lag" in text()
+                     and "draining backlog at TIMER,2" in text(), timeout=30), \
+        "server never started a lag drain"
+    assert _wait_for(lambda: sim.freq == 2, timeout=5), \
+        f"sim never received the drain TIMER (freq={sim.freq})"
+
+    # 2. As the lag drains, the server restores the active interval (TIMER,10).
+    assert _wait_for(lambda: f"{tag} lag drain recovered" in text()
+                     and "restoring TIMER,10" in text(), timeout=30), \
+        "server never restored after the lag drained"
+    assert _wait_for(lambda: sim.freq == 10, timeout=5), \
+        f"sim TIMER not restored to active (freq={sim.freq})"
+
+
+def test_lag_remediation_skips_idle(gt06_sim_factory, server):
+    """An IDLE device with a stale replay tip must NOT be drained — remediation
+    is active-tracking only (idle devices legitimately report infrequently)."""
+    # Event stays idle (autouse _reset_state left it idle).
+    sim = gt06_sim_factory("999010000088002", freq=10,
+                           loc_interval_override=0.5,
+                           replay_lag_s=20.0,
+                           replay_drain_freq=2,
+                           replay_drain_step=1.5)
+    _wait_for_login(server, sim.sailor_id)
+    time.sleep(12)  # well past the 5s threshold + several check cycles
+    text = server.log_file.read_text()
+    assert f"{sim.sailor_id} lag" not in text, \
+        "lag remediation fired on an IDLE device"
+    assert sim.freq != 2, "idle device was sent a drain TIMER"
+
+
 # ---------------------------------------------------------------------------
 # This-week's-fix regressions
 # ---------------------------------------------------------------------------

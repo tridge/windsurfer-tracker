@@ -158,7 +158,11 @@ class GT06DeviceSim:
                  apn="simbase",
                  quirks=None, entity=None,
                  mode=1, freq=30, hbt_interval=300,
-                 battery_mv=4000, signal=4):
+                 battery_mv=4000, signal=4,
+                 loc_interval_override=None, loc_ts_step=None,
+                 loc_ts_start_offset=0.0,
+                 replay_lag_s=None, replay_drain_freq=None,
+                 replay_drain_step=0.0):
         self.imei = imei
         self.host = host
         self.port = port
@@ -190,6 +194,23 @@ class GT06DeviceSim:
         self.moving = "ON"
         # MODE5 dwell-while-awake (seconds the device stays online per wake).
         self.mode5_dwell_s = 60
+        # TEMP (2Hz server-throughput test): decouple LOC send pacing + timestamp
+        # from self.freq, so the server's TIMER reconcile can't reset the rate,
+        # and emit DISTINCT incrementing GPS timestamps (past-dated) to dodge the
+        # 1s-resolution dedup — mimics a device replaying a backlog faster than
+        # wall-clock. All default to no-op (unchanged behaviour).
+        self.loc_interval_override = loc_interval_override
+        self.loc_ts_step = loc_ts_step
+        self.loc_ts_start_offset = loc_ts_start_offset
+        self._loc_ts = None
+        # TEMP (lag-remediation test): model an offline-buffer replay. When
+        # replay_lag_s is set, each LOC is stamped `now - replay_lag` (the device
+        # replaying a backlog behind wall-clock). The lag drains toward 0 only
+        # while freq == replay_drain_freq (i.e. once the server lowers TIMER to
+        # the drain interval) — mimicking capture dropping below the ~1Hz replay.
+        self.replay_drain_freq = replay_drain_freq
+        self.replay_drain_step = replay_drain_step
+        self._replay_lag = replay_lag_s   # None = disabled
 
         # Internal plumbing.
         self.sock = None
@@ -298,7 +319,22 @@ class GT06DeviceSim:
                 speed_kmh = max(0, min(255, int(self.entity.spd * 1.852)))
                 heading = int(self.entity.hdg) % 360
                 sats = 8
-            ts = datetime.fromtimestamp(self.clock.now(), tz=timezone.utc)
+            if self._replay_lag is not None:
+                # Replaying a backlog: stamp `now - lag`, then drain the lag once
+                # the server has lowered TIMER to the drain freq (capture < replay).
+                ts = datetime.fromtimestamp(self.clock.now() - self._replay_lag,
+                                            tz=timezone.utc)
+                if (self.replay_drain_freq is not None
+                        and self.freq == self.replay_drain_freq):
+                    self._replay_lag = max(0.0, self._replay_lag - self.replay_drain_step)
+            elif self.loc_ts_step is not None:
+                if self._loc_ts is None:
+                    self._loc_ts = self.clock.now() + self.loc_ts_start_offset
+                else:
+                    self._loc_ts += self.loc_ts_step
+                ts = datetime.fromtimestamp(self._loc_ts, tz=timezone.utc)
+            else:
+                ts = datetime.fromtimestamp(self.clock.now(), tz=timezone.utc)
             data = build_location_data(
                 lat=lat, lon=lon, speed_kmh=speed_kmh, heading=heading,
                 satellites=sats, gps_valid=True,
@@ -573,7 +609,9 @@ class GT06DeviceSim:
             self._next_hbt_at = now + self.hbt_interval
         if self._next_loc_at <= now:
             self.send_loc()
-            interval = self.freq
+            interval = (self.loc_interval_override
+                        if self.loc_interval_override is not None
+                        else self.freq)
             if self.quirks.get("vibration_loc_override") and interval > 60:
                 interval = 60
             self._next_loc_at = now + interval

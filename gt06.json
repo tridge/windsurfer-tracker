@@ -1,6 +1,21 @@
 {
   "default_eid": 1,
+  "idle_loc_interval": 300,
+  "idle_hbt_interval": 15,
+  "idle_keepalive_interval": 60,
+  "overnight_interval_min": 30,
+  "overnight_mode_number": 4,
+  "lag_remediation_sec": 30,
+  "lag_drain_interval": 2,
+  "lag_restore_sec": 8,
+  "lag_remediation_cooldown_sec": 60,
+  "lag_remediation_max_retries": 3,
+  "lag_drain_max_sec": 180,
+  "firmware_overrides": {
+    "W07_": {"overnight_mode_number": 1},
+    "NT19D_": {"overnight_mode_number": 4}
+  },
   "devices": {
-    "863874081226122": {"eid": 1}
+    "863874081226122": {"eid": 1, "overnight_mode_number": 1}
   }
 }
