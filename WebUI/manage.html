@@ -348,8 +348,11 @@
         <!-- GT06 Trackers Section (hidden until the Trackers tab is selected) -->
         <div class="events-section" id="trackersSection">
             <div class="section-header">
-                <h2>GT06 Trackers</h2>
+                <h2>GT06 Trackers <span id="gt06Count" style="font-size:14px;font-weight:normal;color:#888"></span></h2>
                 <div>
+                    <input type="text" id="gt06Search" placeholder="Search ID / IMEI / firmware / event"
+                           oninput="gt06Filter = this.value; renderTrackers()"
+                           style="padding:6px 8px;margin-right:8px;border:1px solid #ccc;border-radius:4px;font-size:13px;width:230px">
                     <button class="btn" onclick="loadTrackers()">Refresh</button>
                     <button class="btn btn-danger" onclick="restartServer()">Restart Server</button>
                 </div>
@@ -891,6 +894,9 @@
         // Handle Enter key in password field
         // ---- GT06 tracker management ----
         let gt06Events = [];
+        let gt06Trackers = [];
+        let gt06Filter = '';
+        let gt06Sort = { key: 'id', dir: 1 };
 
         function esc(s) {
             return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -908,32 +914,83 @@
                 const data = await r.json();
                 gt06Events = data.events || [];
                 if (!data.gt06_running) {
+                    document.getElementById('gt06Count').textContent = '';
                     document.getElementById('trackerList').innerHTML =
                         '<p style="color:#888">GT06 listener is not running on this server.</p>';
                     return;
                 }
-                renderTrackers(data.trackers || []);
+                gt06Trackers = data.trackers || [];
+                window._trackers = gt06Trackers;
+                renderTrackers();
             } catch (e) {
                 errEl.textContent = 'Could not load trackers: ' + e.message;
                 errEl.style.display = 'block';
             }
         }
 
-        function renderTrackers(trackers) {
-            if (!trackers.length) {
+        function gt06EventName(eid) {
+            const e = gt06Events.find(x => String(x.eid) === String(eid));
+            return e ? e.name : '';
+        }
+
+        function gt06SortVal(t, key) {
+            switch (key) {
+                case 'st': return t.online ? 0 : 1;
+                case 'id': return String(t.sailor_id || t.imei || '').toLowerCase();
+                case 'fw': return String(t.firmware || '').toLowerCase();
+                case 'event': return gt06EventName(t.eid).toLowerCase();
+                case 'overnight': return t.overnight_mode_number == null ? -1 : t.overnight_mode_number;
+                case 'batt': return t.battery == null ? -1 : t.battery;
+                case 'modef': return (t.mode == null ? -1 : t.mode) * 100000 + (t.freq == null ? 0 : t.freq);
+                case 'seen': return t.last_seen_iso || '';
+                default: return '';
+            }
+        }
+
+        function sortTrackers(key) {
+            if (gt06Sort.key === key) gt06Sort.dir = -gt06Sort.dir;
+            else gt06Sort = { key: key, dir: 1 };
+            renderTrackers();
+        }
+
+        function renderTrackers() {
+            const countEl = document.getElementById('gt06Count');
+            const online = gt06Trackers.filter(t => t.online).length;
+            if (!gt06Trackers.length) {
+                countEl.textContent = '';
                 document.getElementById('trackerList').innerHTML =
                     '<p style="color:#888">No GT06 trackers seen yet.</p>';
                 return;
             }
+            const q = gt06Filter.trim().toLowerCase();
+            let trackers = !q ? gt06Trackers.slice() : gt06Trackers.filter(t =>
+                [t.sailor_id, t.imei, t.firmware, gt06EventName(t.eid)]
+                    .some(v => String(v || '').toLowerCase().indexOf(q) >= 0));
+            countEl.textContent = (q ? trackers.length + ' of ' : '')
+                + gt06Trackers.length + ' trackers, ' + online + ' online';
+            if (!trackers.length) {
+                document.getElementById('trackerList').innerHTML =
+                    '<p style="color:#888">No trackers match the search.</p>';
+                return;
+            }
+            trackers.sort((a, b) => {
+                const va = gt06SortVal(a, gt06Sort.key), vb = gt06SortVal(b, gt06Sort.key);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * gt06Sort.dir;
+            });
             const evOpts = (sel) => gt06Events.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
             const modeOpts = (sel) => [['', 'default'], ['1', 'MODE1 (TCP open)'],
                 ['4', 'MODE4 (deep sleep)'], ['5', 'MODE5 (scheduled)']]
                 .map(([v, l]) => `<option value="${v}" ${String(v) === String(sel == null ? '' : sel) ? 'selected' : ''}>${l}</option>`).join('');
+            const cols = [['st', 'St'], ['id', 'ID / IMEI'], ['fw', 'Firmware'], ['event', 'Event'],
+                ['overnight', 'Overnight'], ['batt', 'Batt'], ['modef', 'Mode/F'], ['seen', 'Last seen']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
-                + '<th>St</th><th>ID / IMEI</th><th>Firmware</th><th>Event</th>'
-                + '<th>Overnight</th><th>Batt</th><th>Mode/F</th><th>Last seen</th><th>Actions</th></tr>';
+                + cols.map(([k, label]) => {
+                    const arrow = gt06Sort.key === k ? (gt06Sort.dir > 0 ? ' ▲' : ' ▼') : '';
+                    return `<th style="cursor:pointer;user-select:none" onclick="sortTrackers('${k}')">${label}${arrow}</th>`;
+                }).join('')
+                + '<th>Actions</th></tr>';
             for (const t of trackers) {
                 const dot = t.online ? '\u{1F7E2}' : '⚪';
                 const fwShort = t.firmware || '—';
@@ -962,7 +1019,6 @@
                 + 'Firmware in orange is not on the V667 target (candidate for firmware update). '
                 + 'Event/overnight changes take effect on the device\'s next reconnect/check-in.</p>';
             document.getElementById('trackerList').innerHTML = html;
-            window._trackers = trackers;
         }
 
         async function setTrackerConfig(imei, field, value) {
