@@ -1139,6 +1139,7 @@
                 case 'name': return String(s.name || '').toLowerCase();
                 case 'iccid': return s.iccid || '';
                 case 'msisdn': return s.msisdn || '';
+                case 'imei6': return simImei6(s);
                 case 'carrier': return String(s.carrier || '').toLowerCase();
                 case 'tags': return (s.tags || []).join(',').toLowerCase();
                 case 'state': return s.state || '';
@@ -1152,11 +1153,15 @@
             renderSims();
         }
 
+        function simImei6(s) {
+            return (s.imei || '').slice(-6);
+        }
+
         function filteredSims() {
             const q = simFilter.trim().toLowerCase();
             if (!q) return simSims.slice();
             return simSims.filter(s =>
-                [s.name, s.iccid, s.msisdn, s.carrier, s.state, (s.tags || []).join(',')]
+                [s.name, s.iccid, s.msisdn, s.imei, s.carrier, s.state, (s.tags || []).join(',')]
                     .some(v => String(v || '').toLowerCase().indexOf(q) >= 0));
         }
 
@@ -1183,7 +1188,7 @@
                 return (va < vb ? -1 : va > vb ? 1 : 0) * simSort.dir;
             });
             const cols = [['st', 'St'], ['name', 'Name'], ['iccid', 'ICCID'], ['msisdn', 'MSISDN'],
-                ['carrier', 'Carrier'], ['tags', 'Tags'], ['state', 'State']];
+                ['imei6', 'IMEI6'], ['carrier', 'Carrier'], ['tags', 'Tags'], ['state', 'State']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
                 + cols.map(([k, label]) => {
@@ -1199,6 +1204,7 @@
                     + `<td><b>${esc(s.name || '—')}</b></td>`
                     + `<td style="color:#999">${esc(s.iccid)}</td>`
                     + `<td>${esc(s.msisdn || '—')}</td>`
+                    + `<td title="${esc(s.imei)}">${esc(simImei6(s) || '—')}</td>`
                     + `<td>${esc(s.carrier || '—')}</td>`
                     + `<td>${esc((s.tags || []).join(', '))}</td>`
                     + `<td>${esc(s.state)}</td>`
