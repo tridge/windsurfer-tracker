@@ -22,7 +22,9 @@ from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
+import urllib.request
+import urllib.error
 
 # Force line-buffered output for real-time logging with tail -f
 sys.stdout.reconfigure(line_buffering=True)
@@ -1584,6 +1586,110 @@ _active_simulations: dict[int, dict] = {}  # eid -> {thread, stop_event, config,
 _simulations_lock = threading.Lock()
 _server_port: int | None = None
 
+# ---- SimBase SIM management (proxied for the manager web UI) ----
+SIMBASE_BASE_URL = 'https://api.simbase.com/v2'
+SIMBASE_CACHE_TTL = 60.0
+SIMBASE_WORKERS = 4  # higher trips the API rate limit
+SIMBASE_RETRIES = 5
+_simbase_api_key: str | None = None  # resolved at startup; None = feature off
+_simbase_cache: dict = {"ts": 0.0, "sims": []}
+_simbase_lock = threading.Lock()
+
+
+def resolve_simbase_api_key(settings_key=None) -> str | None:
+    """SimBase key: settings.json -> SIMBASE_API_KEY env -> ~/.simbase.key."""
+    if settings_key:
+        return str(settings_key).strip()
+    key = os.environ.get('SIMBASE_API_KEY')
+    if key:
+        return key.strip()
+    try:
+        with open(os.path.expanduser('~/.simbase.key')) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _simbase_request(method: str, path: str, body: dict | None = None) -> dict:
+    """SimBase API call with backoff on 429/5xx (honours Retry-After)."""
+    data = json.dumps(body).encode() if body is not None else None
+    for attempt in range(SIMBASE_RETRIES):
+        req = urllib.request.Request(SIMBASE_BASE_URL + path, data=data, method=method, headers={
+            'Authorization': f'Bearer {_simbase_api_key}',
+            'Content-Type': 'application/json',
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if (e.code == 429 or e.code >= 500) and attempt < SIMBASE_RETRIES - 1:
+                try:
+                    delay = float(e.headers.get('Retry-After'))
+                except (TypeError, ValueError):
+                    delay = 2 ** attempt
+                time.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
+
+def _simbase_fetch_sims() -> list:
+    """Fetch all SIMs, then per-SIM detail for session/carrier info."""
+    sims = []
+    cursor = None
+    while True:
+        q = {'limit': 100}
+        if cursor:
+            q['cursor'] = cursor
+        data = _simbase_request('GET', '/simcards?' + urlencode(q))
+        page = data.get('data', data.get('simcards', []))
+        if not isinstance(page, list):
+            break
+        sims.extend(page)
+        if not data.get('has_more', data.get('hasMore', False)):
+            break
+        cursor = data.get('cursor', data.get('nextCursor'))
+        if not cursor:
+            break
+
+    def detail(s):
+        d = _simbase_request('GET', f"/simcards/{s['iccid']}")
+        conn = d.get('connection') or {}
+        return {
+            'iccid': d.get('iccid') or s.get('iccid'),
+            'name': d.get('name') or '',
+            'state': d.get('state', d.get('status', 'unknown')),
+            'online': d.get('session_status') == 'in_session',
+            'msisdn': d.get('msisdn') or '',
+            'carrier': conn.get('carrier') or '',
+            'tags': d.get('tags') or [],
+        }
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=SIMBASE_WORKERS) as pool:
+        return list(pool.map(detail, sims))
+
+
+def simbase_get_sims(force_refresh: bool = False) -> list:
+    """Cached SIM list; a full fetch is ~40 API calls so cache for a minute."""
+    with _simbase_lock:
+        if (not force_refresh and _simbase_cache["sims"]
+                and time.time() - _simbase_cache["ts"] < SIMBASE_CACHE_TTL):
+            return _simbase_cache["sims"]
+        sims = _simbase_fetch_sims()
+        _simbase_cache["sims"] = sims
+        _simbase_cache["ts"] = time.time()
+        return sims
+
+
+def simbase_invalidate_cache() -> None:
+    with _simbase_lock:
+        _simbase_cache["ts"] = 0.0
+
+
+def simbase_set_state(iccid: str, state: str) -> None:
+    _simbase_request('POST', f'/simcards/{iccid}/state', {'state': state})
+
 
 def _run_simulator_thread(eid: int, config: dict, stop_event: "threading.Event",
                           course_file: str, tracker_pwd: str, udp_port: int,
@@ -2290,6 +2396,24 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "gt06_running": True,
                 "events": _event_manager.get_all_events() if _event_manager else [],
             })
+
+        elif path == '/api/manage/simbase/sims':
+            # SimBase SIM inventory for the manager SIM-management page.
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            if not _simbase_api_key:
+                self._send_json({"configured": False, "sims": []})
+                return
+            force = parse_qs(urlparse(self.path).query).get('refresh', ['0'])[0] == '1'
+            try:
+                sims = simbase_get_sims(force_refresh=force)
+            except Exception as e:
+                log(f"[SIMBASE] fetch failed: {e}")
+                self._send_json({"error": f"SimBase API error: {e}"}, 502)
+                return
+            self._send_json({"configured": True, "sims": sims,
+                             "fetched_at": int(_simbase_cache["ts"])})
 
         elif path.startswith('/api/event/'):
             # Per-event API endpoints
@@ -4198,6 +4322,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._handle_gt06_manage_post(path)
             return
 
+        # Manager SimBase SIM-management endpoints
+        if path.startswith('/api/manage/simbase/'):
+            self._handle_simbase_manage_post(path)
+            return
+
         if path == '/api/admin/stop-all':
             # Send remote stop command to all active trackers
             parsed = urlparse(self.path)
@@ -4576,6 +4705,69 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"success": ok, "imei": imei, "error": err},
                             200 if ok else 400)
             return
+        self._send_json({"error": "Not found"}, 404)
+
+    def _handle_simbase_manage_post(self, path):
+        """Manager-level SimBase SIM management.
+
+        Routes (all require manager auth):
+          POST /api/manage/simbase/sim/{iccid}/state   body {"state": "enabled"|"disabled"}
+          POST /api/manage/simbase/state               body {"state": ..., "iccids": [...]}
+        """
+        if not self._check_manager_auth():
+            self._send_json({"error": "Unauthorized"}, 401)
+            return
+        if not _simbase_api_key:
+            self._send_json({"error": "SimBase API key not configured"}, 404)
+            return
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            self._send_json({"error": "Invalid JSON"}, 400)
+            return
+        state = data.get('state')
+        if state not in ('enabled', 'disabled'):
+            self._send_json({"error": "state must be 'enabled' or 'disabled'"}, 400)
+            return
+
+        m = re.match(r'^/api/manage/simbase/sim/([0-9A-Za-z]+)/state$', path)
+        if m:
+            iccid = m.group(1)
+            try:
+                simbase_set_state(iccid, state)
+            except Exception as e:
+                log(f"[SIMBASE] set state failed for {iccid}: {e}")
+                self._send_json({"success": False, "iccid": iccid, "error": str(e)}, 502)
+                return
+            simbase_invalidate_cache()
+            log(f"[SIMBASE] {iccid} -> {state}")
+            self._send_json({"success": True, "iccid": iccid, "state": state})
+            return
+
+        if path == '/api/manage/simbase/state':
+            iccids = data.get('iccids')
+            if not isinstance(iccids, list) or not iccids:
+                self._send_json({"error": "iccids must be a non-empty list"}, 400)
+                return
+            errors = {}
+
+            def set_one(iccid):
+                try:
+                    simbase_set_state(str(iccid), state)
+                except Exception as e:
+                    errors[str(iccid)] = str(e)
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=SIMBASE_WORKERS) as pool:
+                list(pool.map(set_one, iccids))
+            simbase_invalidate_cache()
+            log(f"[SIMBASE] bulk {state}: {len(iccids) - len(errors)}/{len(iccids)} ok")
+            self._send_json({"success": not errors, "state": state,
+                             "ok": len(iccids) - len(errors), "errors": errors})
+            return
+
         self._send_json({"error": "Not found"}, 404)
 
     def _handle_create_event(self):
@@ -5181,6 +5373,7 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
         "gt06_config": "gt06.json",
         "gt06_log": "gt06.log",
         "tracker_log": None,
+        "simbase_api_key": None,
     }
 
     if settings_file.exists():
@@ -5340,6 +5533,11 @@ def main():
     jt808_log_path = args.jt808_log if args.jt808_log is not None else Path(settings.get('jt808_log', 'jt808.log'))
     _tracker_log_setting = args.tracker_log if args.tracker_log is not None else settings.get('tracker_log')
     tracker_log_path = Path(_tracker_log_setting) if _tracker_log_setting else None
+
+    global _simbase_api_key
+    _simbase_api_key = resolve_simbase_api_key(settings.get('simbase_api_key'))
+    if _simbase_api_key:
+        log("SimBase SIM management enabled")
 
     run_server(port,
                http_port=http_port,
