@@ -949,6 +949,13 @@
             }
         }
 
+        // Age since a unix timestamp as h:mm (e.g. "0:05", "27:45").
+        function seenAge(ts) {
+            if (!ts) return '—';
+            const mins = Math.max(0, Math.floor((Date.now() / 1000 - ts) / 60));
+            return Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+        }
+
         function gt06EventName(eid) {
             const e = gt06Events.find(x => String(x.eid) === String(eid));
             return e ? e.name : '';
@@ -963,7 +970,7 @@
                 case 'overnight': return t.overnight_mode_number == null ? -1 : t.overnight_mode_number;
                 case 'batt': return t.battery == null ? -1 : t.battery;
                 case 'modef': return (t.mode == null ? -1 : t.mode) * 100000 + (t.freq == null ? 0 : t.freq);
-                case 'seen': return t.last_seen_iso || '';
+                case 'seen': return t.last_seen || 0;
                 default: return '';
             }
         }
@@ -1019,7 +1026,7 @@
                 const fwStyle = (t.firmware && !isV667) ? 'color:#c60;font-weight:bold' : '';
                 const batt = (t.battery == null) ? '—' : (t.battery + '%');
                 const modef = (t.mode == null ? '—' : ('M' + t.mode)) + (t.freq == null ? '' : ('/' + t.freq));
-                const seen = t.last_seen_iso ? t.last_seen_iso.replace('T', ' ').slice(0, 19) : '—';
+                const seenIso = t.last_seen_iso ? t.last_seen_iso.replace('T', ' ').slice(0, 19) : '';
                 html += `<tr style="border-bottom:1px solid #eee">`
                     + `<td>${dot}</td>`
                     + `<td><b>${esc(t.sailor_id || '')}</b><br><span style="color:#999">${esc(t.imei)}</span></td>`
@@ -1028,7 +1035,7 @@
                     + `<td><select onchange="setTrackerConfig('${esc(t.imei)}','overnight_mode_number',this.value)">${modeOpts(t.overnight_mode_number)}</select></td>`
                     + `<td>${batt}</td>`
                     + `<td>${esc(modef)}</td>`
-                    + `<td style="color:#777">${esc(seen)}</td>`
+                    + `<td style="color:#777" title="${esc(seenIso)}">${seenAge(t.last_seen)}</td>`
                     + `<td style="white-space:nowrap">`
                     + `<button class="btn" onclick="refreshTracker('${esc(t.imei)}')" ${t.online ? '' : 'disabled'}>Refresh</button> `
                     + `<button class="btn" onclick="showTrackerSettings('${esc(t.imei)}')">Settings</button> `
