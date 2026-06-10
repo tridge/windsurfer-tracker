@@ -1734,6 +1734,7 @@ class GT06Listener:
                 "firmware": (conn.firmware if conn and conn.firmware
                              else st.get("firmware")),
                 "online": conn is not None,
+                "last_seen": st.get("last_seen"),
                 "last_seen_iso": st.get("last_seen_iso"),
                 "battery": (conn.battery if conn and conn.battery is not None
                             and conn.battery >= 0 else st.get("battery")),
