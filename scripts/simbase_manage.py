@@ -22,7 +22,27 @@ import requests
 
 BASE_URL = 'https://api.simbase.com/v2'
 RATE_LIMIT_DELAY = 0.25  # seconds between API calls
-MAX_WORKERS = 10  # parallel API requests
+MAX_WORKERS = 4  # parallel API requests (10 trips the API rate limit)
+MAX_RETRIES = 5
+
+
+def request_with_retry(session, method, url, **kwargs):
+    '''Request with backoff on 429/5xx (honours Retry-After).'''
+    for attempt in range(MAX_RETRIES):
+        resp = session.request(method, url, **kwargs)
+        if resp.status_code == 429 or resp.status_code >= 500:
+            if attempt == MAX_RETRIES - 1:
+                break
+            retry_after = resp.headers.get('Retry-After')
+            try:
+                delay = float(retry_after)
+            except (TypeError, ValueError):
+                delay = 2 ** attempt
+            time.sleep(delay)
+            continue
+        break
+    resp.raise_for_status()
+    return resp
 
 
 def get_session(api_key):
@@ -42,8 +62,7 @@ def fetch_all_sims(session):
         params = {'limit': 100}
         if cursor:
             params['cursor'] = cursor
-        resp = session.get(f'{BASE_URL}/simcards', params=params)
-        resp.raise_for_status()
+        resp = request_with_retry(session, 'GET', f'{BASE_URL}/simcards', params=params)
         data = resp.json()
         page = data.get('data', data.get('simcards', []))
         if isinstance(page, list):
@@ -94,8 +113,7 @@ def get_sim_label(sim):
 
 def fetch_sim_detail(session, iccid):
     '''Fetch individual SIM details (has session_status and connection info).'''
-    resp = session.get(f'{BASE_URL}/simcards/{iccid}')
-    resp.raise_for_status()
+    resp = request_with_retry(session, 'GET', f'{BASE_URL}/simcards/{iccid}')
     return resp.json()
 
 
@@ -162,8 +180,8 @@ def cmd_enable(session, sims, dry_run=False):
 
     def activate_one(s):
         try:
-            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/state', json={'state': 'enabled'})
-            resp.raise_for_status()
+            request_with_retry(session, 'POST', f'{BASE_URL}/simcards/{s["iccid"]}/state',
+                               json={'state': 'enabled'})
             print(f'  enabled {get_sim_label(s)}')
             ok[0] += 1
         except requests.RequestException as e:
@@ -196,8 +214,8 @@ def cmd_disable(session, sims, dry_run=False):
 
     def deactivate_one(s):
         try:
-            resp = session.post(f'{BASE_URL}/simcards/{s["iccid"]}/state', json={'state': 'disabled'})
-            resp.raise_for_status()
+            request_with_retry(session, 'POST', f'{BASE_URL}/simcards/{s["iccid"]}/state',
+                               json={'state': 'disabled'})
             print(f'  disabled {get_sim_label(s)}')
             ok[0] += 1
         except requests.RequestException as e:
