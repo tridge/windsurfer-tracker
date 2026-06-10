@@ -1661,6 +1661,7 @@ def _simbase_fetch_sims() -> list:
             'state': d.get('state', d.get('status', 'unknown')),
             'online': d.get('session_status') == 'in_session',
             'msisdn': d.get('msisdn') or '',
+            'imei': d.get('imei') or '',
             'carrier': conn.get('carrier') or '',
             'tags': d.get('tags') or [],
         }
