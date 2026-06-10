@@ -88,6 +88,12 @@
             background: #1e3a8a;
         }
 
+        .tab-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
         .events-section {
             display: none;
         }
@@ -322,6 +328,12 @@
             <button onclick="login()">Login</button>
         </div>
 
+        <!-- Tab bar (shown after login) -->
+        <div class="tab-bar" id="tabBar" style="display:none">
+            <button class="btn btn-primary" id="tabBtnEvents" onclick="showTab('events')">Events</button>
+            <button class="btn" id="tabBtnTrackers" onclick="showTab('trackers')">GT06 Trackers</button>
+        </div>
+
         <!-- Events Section (hidden until logged in) -->
         <div class="events-section" id="eventsSection">
             <div class="section-header">
@@ -330,6 +342,21 @@
             </div>
             <div id="eventList" class="event-list">
                 <div class="loading">Loading events...</div>
+            </div>
+        </div>
+
+        <!-- GT06 Trackers Section (hidden until the Trackers tab is selected) -->
+        <div class="events-section" id="trackersSection">
+            <div class="section-header">
+                <h2>GT06 Trackers</h2>
+                <div>
+                    <button class="btn" onclick="loadTrackers()">Refresh</button>
+                    <button class="btn btn-danger" onclick="restartServer()">Restart Server</button>
+                </div>
+            </div>
+            <div id="gt06Error" class="error-message" style="display:none"></div>
+            <div id="trackerList" class="event-list">
+                <div class="loading">Loading trackers&hellip;</div>
             </div>
         </div>
     </div>
@@ -487,6 +514,17 @@
         </div>
     </div>
 
+    <!-- GT06 Tracker Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <h2>Tracker Settings</h2>
+            <pre id="settingsBody" style="white-space:pre-wrap;word-break:break-word;font-size:13px;max-height:60vh;overflow:auto;margin:0 0 16px;"></pre>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeSettings()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/utils.js"></script>
     <script>
         const API_BASE = window.location.origin;
@@ -606,8 +644,8 @@
             .then(response => {
                 if (response.ok) {
                     document.getElementById('loginPanel').style.display = 'none';
-                    document.getElementById('eventsSection').classList.add('visible');
-                    loadEvents();
+                    document.getElementById('tabBar').style.display = 'flex';
+                    showTab('events');
                 } else {
                     showLoginError('Invalid manager password');
                     managerPassword = '';
@@ -622,6 +660,21 @@
             const el = document.getElementById('loginError');
             el.textContent = msg;
             el.style.display = 'block';
+        }
+
+        // Switch between the Events and GT06 Trackers tabs, loading the data
+        // for the tab being shown.
+        function showTab(name) {
+            const onEvents = name === 'events';
+            document.getElementById('eventsSection').classList.toggle('visible', onEvents);
+            document.getElementById('trackersSection').classList.toggle('visible', !onEvents);
+            document.getElementById('tabBtnEvents').className = 'btn' + (onEvents ? ' btn-primary' : '');
+            document.getElementById('tabBtnTrackers').className = 'btn' + (onEvents ? '' : ' btn-primary');
+            if (onEvents) {
+                loadEvents();
+            } else {
+                loadTrackers();
+            }
         }
 
         async function loadEvents() {
@@ -836,6 +889,157 @@
         }
 
         // Handle Enter key in password field
+        // ---- GT06 tracker management ----
+        let gt06Events = [];
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        async function loadTrackers() {
+            const errEl = document.getElementById('gt06Error');
+            errEl.style.display = 'none';
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/trackers`, {
+                    headers: { 'X-Manager-Password': managerPassword }
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                gt06Events = data.events || [];
+                if (!data.gt06_running) {
+                    document.getElementById('trackerList').innerHTML =
+                        '<p style="color:#888">GT06 listener is not running on this server.</p>';
+                    return;
+                }
+                renderTrackers(data.trackers || []);
+            } catch (e) {
+                errEl.textContent = 'Could not load trackers: ' + e.message;
+                errEl.style.display = 'block';
+            }
+        }
+
+        function renderTrackers(trackers) {
+            if (!trackers.length) {
+                document.getElementById('trackerList').innerHTML =
+                    '<p style="color:#888">No GT06 trackers seen yet.</p>';
+                return;
+            }
+            const evOpts = (sel) => gt06Events.map(e =>
+                `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
+            const modeOpts = (sel) => [['', 'default'], ['1', 'MODE1 (TCP open)'],
+                ['4', 'MODE4 (deep sleep)'], ['5', 'MODE5 (scheduled)']]
+                .map(([v, l]) => `<option value="${v}" ${String(v) === String(sel == null ? '' : sel) ? 'selected' : ''}>${l}</option>`).join('');
+            let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+            html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
+                + '<th>St</th><th>ID / IMEI</th><th>Firmware</th><th>Event</th>'
+                + '<th>Overnight</th><th>Batt</th><th>Mode/F</th><th>Last seen</th><th>Actions</th></tr>';
+            for (const t of trackers) {
+                const dot = t.online ? '\u{1F7E2}' : '⚪';
+                const fwShort = t.firmware || '—';
+                const isV667 = fwShort.indexOf('V667') >= 0;
+                const fwStyle = (t.firmware && !isV667) ? 'color:#c60;font-weight:bold' : '';
+                const batt = (t.battery == null) ? '—' : (t.battery + '%');
+                const modef = (t.mode == null ? '—' : ('M' + t.mode)) + (t.freq == null ? '' : ('/' + t.freq));
+                const seen = t.last_seen_iso ? t.last_seen_iso.replace('T', ' ').slice(0, 19) : '—';
+                html += `<tr style="border-bottom:1px solid #eee">`
+                    + `<td>${dot}</td>`
+                    + `<td><b>${esc(t.sailor_id || '')}</b><br><span style="color:#999">${esc(t.imei)}</span></td>`
+                    + `<td style="${fwStyle}">${esc(fwShort)}</td>`
+                    + `<td><select onchange="setTrackerConfig('${esc(t.imei)}','eid',this.value)">${evOpts(t.eid)}</select></td>`
+                    + `<td><select onchange="setTrackerConfig('${esc(t.imei)}','overnight_mode_number',this.value)">${modeOpts(t.overnight_mode_number)}</select></td>`
+                    + `<td>${batt}</td>`
+                    + `<td>${esc(modef)}</td>`
+                    + `<td style="color:#777">${esc(seen)}</td>`
+                    + `<td style="white-space:nowrap">`
+                    + `<button class="btn" onclick="refreshTracker('${esc(t.imei)}')" ${t.online ? '' : 'disabled'}>Refresh</button> `
+                    + `<button class="btn" onclick="showTrackerSettings('${esc(t.imei)}')">Settings</button> `
+                    + `<button class="btn" onclick="rebootTracker('${esc(t.imei)}')" ${t.online ? '' : 'disabled'}>Reboot</button>`
+                    + `</td></tr>`;
+            }
+            html += '</table>';
+            html += '<p style="margin-top:14px;color:#888;font-size:12px">'
+                + 'Firmware in orange is not on the V667 target (candidate for firmware update). '
+                + 'Event/overnight changes take effect on the device\'s next reconnect/check-in.</p>';
+            document.getElementById('trackerList').innerHTML = html;
+            window._trackers = trackers;
+        }
+
+        async function setTrackerConfig(imei, field, value) {
+            const body = {};
+            if (field === 'eid') body.eid = value === '' ? null : parseInt(value, 10);
+            else if (field === 'overnight_mode_number') body.overnight_mode_number = value === '' ? null : parseInt(value, 10);
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(imei)}`, {
+                    method: 'POST',
+                    headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const d = await r.json();
+                if (!d.success) alert('Update failed: ' + (d.error || r.status));
+            } catch (e) { alert('Update failed: ' + e.message); }
+        }
+
+        async function refreshTracker(imei) {
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(imei)}/refresh`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                });
+                const d = await r.json();
+                if (!d.success) { alert('Refresh failed: ' + (d.error || r.status)); return; }
+                setTimeout(loadTrackers, 1500);
+            } catch (e) { alert('Refresh failed: ' + e.message); }
+        }
+
+        async function rebootTracker(imei) {
+            if (!confirm('Reboot tracker ' + imei + '? It will drop offline briefly.')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(imei)}/reboot`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                });
+                const d = await r.json();
+                alert(d.success ? 'Reboot command sent.' : ('Reboot failed: ' + (d.error || r.status)));
+            } catch (e) { alert('Reboot failed: ' + e.message); }
+        }
+
+        function showTrackerSettings(imei) {
+            const t = (window._trackers || []).find(x => x.imei === imei);
+            let body = 'IMEI: ' + imei + '\n';
+            if (t) {
+                body += 'Firmware: ' + (t.firmware || '—') + '\n';
+                body += 'Effective overnight mode: ' + (t.effective_overnight_mode == null ? '—' : ('MODE' + t.effective_overnight_mode)) + '\n\n';
+                const s = t.settings || {};
+                const keys = Object.keys(s);
+                if (keys.length) {
+                    body += 'cxzt# settings:\n';
+                    for (const k of keys) body += '  ' + k + ': ' + s[k] + '\n';
+                } else {
+                    body += '(no cxzt# snapshot yet — use Refresh on a connected device)\n';
+                }
+                if (t.raw_cxzt) body += '\nRaw:\n' + t.raw_cxzt + '\n';
+            }
+            document.getElementById('settingsBody').textContent = body;
+            document.getElementById('settingsModal').classList.add('visible');
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('visible');
+        }
+
+        async function restartServer() {
+            if (!confirm('Restart the tracker server now? It will be briefly unreachable while it re-execs.')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/server/restart`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                });
+                const d = await r.json();
+                alert(d.success ? 'Server is restarting — reload the page in a few seconds.'
+                                : ('Restart failed: ' + (d.error || r.status)));
+            } catch (e) {
+                alert('Restart triggered (connection closed). Reload in a few seconds.');
+            }
+        }
+
         document.getElementById('managerPassword').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') login();
         });
