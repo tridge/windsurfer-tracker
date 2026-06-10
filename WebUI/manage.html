@@ -332,6 +332,7 @@
         <div class="tab-bar" id="tabBar" style="display:none">
             <button class="btn btn-primary" id="tabBtnEvents" onclick="showTab('events')">Events</button>
             <button class="btn" id="tabBtnTrackers" onclick="showTab('trackers')">GT06 Trackers</button>
+            <button class="btn" id="tabBtnSimbase" onclick="showTab('simbase')">SIMbase</button>
         </div>
 
         <!-- Events Section (hidden until logged in) -->
@@ -360,6 +361,25 @@
             <div id="gt06Error" class="error-message" style="display:none"></div>
             <div id="trackerList" class="event-list">
                 <div class="loading">Loading trackers&hellip;</div>
+            </div>
+        </div>
+
+        <!-- SIMbase Section (hidden until the SIMbase tab is selected) -->
+        <div class="events-section" id="simbaseSection">
+            <div class="section-header">
+                <h2>SIMbase <span id="simCount" style="font-size:14px;font-weight:normal;color:#888"></span></h2>
+                <div>
+                    <input type="text" id="simSearch" placeholder="Search name / ICCID / carrier / tag"
+                           oninput="simFilter = this.value; renderSims()"
+                           style="padding:6px 8px;margin-right:8px;border:1px solid #ccc;border-radius:4px;font-size:13px;width:230px">
+                    <button class="btn" onclick="loadSims(true)">Refresh</button>
+                    <button class="btn" onclick="bulkSimState('enabled')">Enable all</button>
+                    <button class="btn btn-danger" onclick="bulkSimState('disabled')">Disable all</button>
+                </div>
+            </div>
+            <div id="simError" class="error-message" style="display:none"></div>
+            <div id="simList" class="event-list">
+                <div class="loading">Loading SIMs&hellip;</div>
             </div>
         </div>
     </div>
@@ -665,19 +685,20 @@
             el.style.display = 'block';
         }
 
-        // Switch between the Events and GT06 Trackers tabs, loading the data
-        // for the tab being shown.
+        // Switch between the Events / GT06 Trackers / SIMbase tabs, loading
+        // the data for the tab being shown.
+        const TABS = {
+            events:   { section: 'eventsSection',   button: 'tabBtnEvents',   load: () => loadEvents() },
+            trackers: { section: 'trackersSection', button: 'tabBtnTrackers', load: () => loadTrackers() },
+            simbase:  { section: 'simbaseSection',  button: 'tabBtnSimbase',  load: () => loadSims() },
+        };
+
         function showTab(name) {
-            const onEvents = name === 'events';
-            document.getElementById('eventsSection').classList.toggle('visible', onEvents);
-            document.getElementById('trackersSection').classList.toggle('visible', !onEvents);
-            document.getElementById('tabBtnEvents').className = 'btn' + (onEvents ? ' btn-primary' : '');
-            document.getElementById('tabBtnTrackers').className = 'btn' + (onEvents ? '' : ' btn-primary');
-            if (onEvents) {
-                loadEvents();
-            } else {
-                loadTrackers();
+            for (const [tab, ids] of Object.entries(TABS)) {
+                document.getElementById(ids.section).classList.toggle('visible', tab === name);
+                document.getElementById(ids.button).className = 'btn' + (tab === name ? ' btn-primary' : '');
             }
+            TABS[name].load();
         }
 
         async function loadEvents() {
@@ -1080,6 +1101,147 @@
 
         function closeSettings() {
             document.getElementById('settingsModal').classList.remove('visible');
+        }
+
+        // ---- SimBase SIM management ----
+        let simSims = [];
+        let simFilter = '';
+        let simSort = { key: 'name', dir: 1 };
+
+        async function loadSims(force) {
+            const errEl = document.getElementById('simError');
+            errEl.style.display = 'none';
+            document.getElementById('simList').innerHTML =
+                '<div class="loading">Loading SIMs&hellip;</div>';
+            try {
+                const url = `${API_BASE}/api/manage/simbase/sims` + (force ? '?refresh=1' : '');
+                const r = await fetch(url, { headers: { 'X-Manager-Password': managerPassword } });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+                if (!data.configured) {
+                    document.getElementById('simCount').textContent = '';
+                    document.getElementById('simList').innerHTML =
+                        '<p style="color:#888">SimBase API key not configured on this server.</p>';
+                    return;
+                }
+                simSims = data.sims || [];
+                renderSims();
+            } catch (e) {
+                document.getElementById('simList').innerHTML = '';
+                errEl.textContent = 'Could not load SIMs: ' + e.message;
+                errEl.style.display = 'block';
+            }
+        }
+
+        function simSortVal(s, key) {
+            switch (key) {
+                case 'st': return (s.state === 'enabled' ? 0 : 2) + (s.online ? 0 : 1);
+                case 'name': return String(s.name || '').toLowerCase();
+                case 'iccid': return s.iccid || '';
+                case 'msisdn': return s.msisdn || '';
+                case 'carrier': return String(s.carrier || '').toLowerCase();
+                case 'tags': return (s.tags || []).join(',').toLowerCase();
+                case 'state': return s.state || '';
+                default: return '';
+            }
+        }
+
+        function sortSims(key) {
+            if (simSort.key === key) simSort.dir = -simSort.dir;
+            else simSort = { key: key, dir: 1 };
+            renderSims();
+        }
+
+        function filteredSims() {
+            const q = simFilter.trim().toLowerCase();
+            if (!q) return simSims.slice();
+            return simSims.filter(s =>
+                [s.name, s.iccid, s.msisdn, s.carrier, s.state, (s.tags || []).join(',')]
+                    .some(v => String(v || '').toLowerCase().indexOf(q) >= 0));
+        }
+
+        function renderSims() {
+            const countEl = document.getElementById('simCount');
+            if (!simSims.length) {
+                countEl.textContent = '';
+                document.getElementById('simList').innerHTML =
+                    '<p style="color:#888">No SIMs found.</p>';
+                return;
+            }
+            const enabled = simSims.filter(s => s.state === 'enabled').length;
+            const online = simSims.filter(s => s.online).length;
+            const sims = filteredSims();
+            countEl.textContent = (simFilter.trim() ? sims.length + ' of ' : '')
+                + simSims.length + ' SIMs, ' + enabled + ' enabled, ' + online + ' online';
+            if (!sims.length) {
+                document.getElementById('simList').innerHTML =
+                    '<p style="color:#888">No SIMs match the search.</p>';
+                return;
+            }
+            sims.sort((a, b) => {
+                const va = simSortVal(a, simSort.key), vb = simSortVal(b, simSort.key);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * simSort.dir;
+            });
+            const cols = [['st', 'St'], ['name', 'Name'], ['iccid', 'ICCID'], ['msisdn', 'MSISDN'],
+                ['carrier', 'Carrier'], ['tags', 'Tags'], ['state', 'State']];
+            let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+            html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
+                + cols.map(([k, label]) => {
+                    const arrow = simSort.key === k ? (simSort.dir > 0 ? ' ▲' : ' ▼') : '';
+                    return `<th style="cursor:pointer;user-select:none" onclick="sortSims('${k}')">${label}${arrow}</th>`;
+                }).join('')
+                + '<th>Actions</th></tr>';
+            for (const s of sims) {
+                const dot = s.state !== 'enabled' ? '⚪' : (s.online ? '\u{1F7E2}' : '\u{1F7E1}');
+                const toEnable = s.state !== 'enabled';
+                html += `<tr style="border-bottom:1px solid #eee">`
+                    + `<td>${dot}</td>`
+                    + `<td><b>${esc(s.name || '—')}</b></td>`
+                    + `<td style="color:#999">${esc(s.iccid)}</td>`
+                    + `<td>${esc(s.msisdn || '—')}</td>`
+                    + `<td>${esc(s.carrier || '—')}</td>`
+                    + `<td>${esc((s.tags || []).join(', '))}</td>`
+                    + `<td>${esc(s.state)}</td>`
+                    + `<td><button class="btn ${toEnable ? '' : 'btn-danger'}" `
+                    + `onclick="setSimState('${esc(s.iccid)}','${toEnable ? 'enabled' : 'disabled'}')">`
+                    + `${toEnable ? 'Enable' : 'Disable'}</button></td></tr>`;
+            }
+            html += '</table>';
+            document.getElementById('simList').innerHTML = html;
+        }
+
+        async function setSimState(iccid, state) {
+            if (state === 'disabled' && !confirm('Disable SIM ' + iccid + '? Its tracker will lose connectivity.')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/simbase/sim/${encodeURIComponent(iccid)}/state`, {
+                    method: 'POST',
+                    headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: state })
+                });
+                const d = await r.json();
+                if (!d.success) { alert('Failed: ' + (d.error || r.status)); return; }
+                loadSims();
+            } catch (e) { alert('Failed: ' + e.message); }
+        }
+
+        async function bulkSimState(state) {
+            const sims = filteredSims().filter(s => (s.state === 'enabled') !== (state === 'enabled'));
+            if (!sims.length) { alert('No SIMs to change' + (simFilter.trim() ? ' in the current search' : '') + '.'); return; }
+            const scope = simFilter.trim() ? ' matching the search' : '';
+            if (!confirm((state === 'enabled' ? 'Enable ' : 'Disable ') + sims.length + ' SIMs' + scope + '?')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/simbase/state`, {
+                    method: 'POST',
+                    headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: state, iccids: sims.map(s => s.iccid) })
+                });
+                const d = await r.json();
+                if (!d.success) {
+                    const errs = d.errors ? Object.entries(d.errors).map(([k, v]) => k + ': ' + v).join('\n') : '';
+                    alert('Some SIMs failed (' + (d.ok || 0) + ' ok):\n' + (errs || d.error || r.status));
+                }
+                loadSims();
+            } catch (e) { alert('Failed: ' + e.message); }
         }
 
         async function restartServer() {
