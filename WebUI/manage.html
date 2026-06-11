@@ -1112,8 +1112,19 @@
 
         // ---- SimBase SIM management ----
         let simSims = [];
+        let simBalance = null;
         let simFilter = '';
         let simSort = { key: 'name', dir: 1 };
+
+        function simBalanceHtml() {
+            if (!simBalance || simBalance.balance == null) return '';
+            const amount = parseFloat(simBalance.balance);
+            const cur = simBalance.currency === 'AUD' ? 'A$' : (simBalance.currency || '') + ' ';
+            const color = amount < 10 ? '#c00' : (amount < 25 ? '#c60' : '#888');
+            const warn = amount < 10 ? ' — TOP UP NOW' : (amount < 25 ? ' — top-up soon' : '');
+            return ` · <span style="color:${color}${amount < 25 ? ';font-weight:bold' : ''}">` +
+                   `balance ${cur}${amount.toFixed(2)}${warn}</span>`;
+        }
 
         async function loadSims(force) {
             const errEl = document.getElementById('simError');
@@ -1132,6 +1143,7 @@
                     return;
                 }
                 simSims = data.sims || [];
+                simBalance = data.balance || null;
                 renderSims();
             } catch (e) {
                 document.getElementById('simList').innerHTML = '';
@@ -1183,8 +1195,9 @@
             const enabled = simSims.filter(s => s.state === 'enabled').length;
             const online = simSims.filter(s => s.online).length;
             const sims = filteredSims();
-            countEl.textContent = (simFilter.trim() ? sims.length + ' of ' : '')
-                + simSims.length + ' SIMs, ' + enabled + ' enabled, ' + online + ' online';
+            countEl.innerHTML = (simFilter.trim() ? sims.length + ' of ' : '')
+                + simSims.length + ' SIMs, ' + enabled + ' enabled, ' + online + ' online'
+                + simBalanceHtml();
             if (!sims.length) {
                 document.getElementById('simList').innerHTML =
                     '<p style="color:#888">No SIMs match the search.</p>';
