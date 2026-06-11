@@ -4651,6 +4651,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
           POST /api/manage/gt06/tracker/{imei}            set per-device config
           POST /api/manage/gt06/tracker/{imei}/refresh    queue cxzt# probe
           POST /api/manage/gt06/tracker/{imei}/reboot     queue RESET#
+          POST /api/manage/gt06/tracker/{imei}/command    queue arbitrary command
           POST /api/manage/gt06/tracker/{imei}/firmware-update  (placeholder)
           POST /api/manage/server/restart                 restart the server
         """
@@ -4691,6 +4692,24 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         if action == 'reboot':
             ok = _gt06_listener.reboot_device(imei)
             self._send_json({"success": ok, "imei": imei,
+                             "error": None if ok else "device not connected"},
+                            200 if ok else 404)
+            return
+        if action == 'command':
+            # Queue an arbitrary device command (e.g. SZCS#APN=simbase) over
+            # the live TCP link — for devices whose SMS path doesn't work.
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+                cmd = (json.loads(body).get('cmd') or '').strip()
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
+            if not cmd:
+                self._send_json({"error": "cmd required"}, 400)
+                return
+            ok = _gt06_listener.queue_command_by_imei(imei, cmd)
+            self._send_json({"success": ok, "imei": imei, "cmd": cmd,
                              "error": None if ok else "device not connected"},
                             200 if ok else 404)
             return
