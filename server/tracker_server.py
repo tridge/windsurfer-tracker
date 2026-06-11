@@ -1678,6 +1678,11 @@ def simbase_get_sims(force_refresh: bool = False) -> list:
                 and time.time() - _simbase_cache["ts"] < SIMBASE_CACHE_TTL):
             return _simbase_cache["sims"]
         sims = _simbase_fetch_sims()
+        try:
+            _simbase_cache["balance"] = _simbase_request('GET', '/account/balance')
+        except Exception as e:
+            log(f"[SIMBASE] balance fetch failed: {e}")
+            _simbase_cache["balance"] = None
         _simbase_cache["sims"] = sims
         _simbase_cache["ts"] = time.time()
         return sims
@@ -2414,6 +2419,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"SimBase API error: {e}"}, 502)
                 return
             self._send_json({"configured": True, "sims": sims,
+                             "balance": _simbase_cache.get("balance"),
                              "fetched_at": int(_simbase_cache["ts"])})
 
         elif path.startswith('/api/event/'):
