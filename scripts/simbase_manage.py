@@ -228,11 +228,115 @@ def cmd_disable(session, sims, dry_run=False):
     print(f'\nDisabled {ok[0]}/{len(targets)} SIMs ({already} already disabled, {errors[0]} errors)')
 
 
+def cmd_sms(session, iccid, text):
+    '''Send an SMS to a SIM via the SimBase API.'''
+    resp = request_with_retry(session, 'POST', f'{BASE_URL}/simcards/{iccid}/sms',
+                              json={'message': text})
+    print(f'Sent to {iccid}: {resp.status_code} {resp.text}')
+
+
+def cmd_inbox(session, iccid):
+    '''Show SMS received from a SIM (device replies).'''
+    resp = request_with_retry(session, 'GET', f'{BASE_URL}/simcards/{iccid}/sms')
+    data = resp.json()
+    msgs = data.get('sms', [])
+    if not msgs:
+        print(f'No SMS for {iccid}.')
+        return
+    for m in msgs:
+        print(m)
+
+
+def fetch_server_inventory(server_url, manager_password):
+    '''GT06 device inventory from the tracker server, or None without a password.'''
+    if not manager_password:
+        return None
+    resp = requests.get(f'{server_url}/api/manage/gt06/trackers',
+                        headers={'X-Manager-Password': manager_password}, timeout=30)
+    resp.raise_for_status()
+    return resp.json().get('trackers', [])
+
+
+def cmd_diagnose(session, sims, server_url, manager_password):
+    '''Join SimBase SIM detail with the tracker-server inventory and bucket the fleet.'''
+    total = len(sims)
+    print(f'Fetching details for {total} SIMs...')
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        details = list(pool.map(lambda s: fetch_sim_detail(session, s['iccid']), sims))
+
+    inventory = fetch_server_inventory(server_url, manager_password)
+    if inventory is None:
+        print('(no manager password: server-side columns unavailable; '
+              'pass --manager-password or set WSTRACKER_MANAGER_PASSWORD)')
+    by_imei = {t['imei']: t for t in inventory or []}
+
+    now = time.time()
+
+    def iso_age_h(iso):
+        if not iso:
+            return None
+        t = time.mktime(time.strptime(iso, '%Y-%m-%dT%H:%M:%SZ')) - time.timezone
+        return (now - t) / 3600
+
+    rows = []
+    for d in details:
+        imei = d.get('imei') or ''
+        loc = d.get('location') or {}
+        usage = d.get('current_month_usage') or {}
+        t = by_imei.get(imei)
+        rows.append({
+            'iccid': d['iccid'],
+            'imei6': imei[-6:],
+            'sess': d.get('session_status') == 'in_session',
+            'loc_age_h': iso_age_h(loc.get('last_update')),
+            'radio': loc.get('radio') or '',
+            'mb': (usage.get('data') or 0) / 1e6,
+            'srv': t,
+            'seen_h': ((now - t['last_seen']) / 3600
+                       if t and t.get('last_seen') else None),
+        })
+
+    rows.sort(key=lambda r: (r['sess'], r['srv'] is not None,
+                             r['loc_age_h'] if r['loc_age_h'] is not None else 9e9))
+    hdr = f'{"ICCID":>20} {"IMEI6":>6} {"sess":>4} {"net_seen":>8} {"radio":>5} {"MB_mo":>6}'
+    if inventory is not None:
+        hdr += f' {"sailor":>8} {"online":>6} {"srv_seen":>8}'
+    print(hdr)
+    for r in rows:
+        la = f'{r["loc_age_h"]:.1f}h' if r['loc_age_h'] is not None else 'never'
+        line = (f'{r["iccid"]:>20} {r["imei6"] or "—":>6} '
+                f'{"IN" if r["sess"] else "off":>4} {la:>8} {r["radio"]:>5} {r["mb"]:>6.1f}')
+        if inventory is not None:
+            t = r['srv']
+            sh = f'{r["seen_h"]:.1f}h' if r['seen_h'] is not None else '—'
+            line += (f' {(t or {}).get("sailor_id") or "—":>8} '
+                     f'{str((t or {}).get("online", "—")):>6} {sh:>8}')
+        print(line)
+
+    buckets = {}
+    for r in rows:
+        if r['sess'] and r['srv'] and r['srv'].get('online'):
+            k = 'healthy: in session + connected to server'
+        elif r['sess']:
+            k = 'in session but NOT connected to server'
+        elif r['loc_age_h'] is not None:
+            k = 'offline: was on the network, now dropped'
+        else:
+            k = 'NEVER attached to any network'
+        buckets.setdefault(k, []).append(r['imei6'] or r['iccid'][-6:])
+    print('\nBuckets:')
+    for k, v in sorted(buckets.items()):
+        print(f'  {len(v):>3}  {k}: {", ".join(v)}')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Manage SimBase SIMs - bulk enable/disable to save costs between regattas')
-    parser.add_argument('action', choices=['status', 'enable', 'disable'],
+    parser.add_argument('action',
+                        choices=['status', 'enable', 'disable', 'diagnose', 'sms', 'inbox'],
                         help='Action to perform')
+    parser.add_argument('text', nargs='?',
+                        help='SMS text (for the sms action)')
     default_key = os.environ.get('SIMBASE_API_KEY')
     if not default_key:
         keyfile = os.path.expanduser('~/.simbase.key')
@@ -245,6 +349,12 @@ def main():
     parser.add_argument('--iccid', help='Only manage a single SIM by ICCID')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview changes without making them')
+    parser.add_argument('--server-url', default='https://wstracker.org',
+                        help='Tracker server URL for diagnose (default: %(default)s)')
+    parser.add_argument('--manager-password',
+                        default=os.environ.get('WSTRACKER_MANAGER_PASSWORD'),
+                        help='Tracker-server manager password for diagnose '
+                             '(default: WSTRACKER_MANAGER_PASSWORD env var)')
     args = parser.parse_args()
 
     if not args.api_key:
@@ -252,6 +362,20 @@ def main():
         sys.exit(1)
 
     session = get_session(args.api_key)
+
+    # sms/inbox act on one SIM and don't need the full fleet fetch
+    if args.action in ('sms', 'inbox'):
+        if not args.iccid:
+            print('Error: --iccid required for sms/inbox', file=sys.stderr)
+            sys.exit(1)
+        if args.action == 'sms':
+            if not args.text:
+                print('Error: sms needs message text', file=sys.stderr)
+                sys.exit(1)
+            cmd_sms(session, args.iccid, args.text)
+        else:
+            cmd_inbox(session, args.iccid)
+        return
 
     print('Fetching SIM list...')
     all_sims = fetch_all_sims(session)
@@ -275,6 +399,8 @@ def main():
         cmd_enable(session, sims, dry_run=args.dry_run)
     elif args.action == 'disable':
         cmd_disable(session, sims, dry_run=args.dry_run)
+    elif args.action == 'diagnose':
+        cmd_diagnose(session, sims, args.server_url, args.manager_password)
 
 
 if __name__ == '__main__':
