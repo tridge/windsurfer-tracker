@@ -981,9 +981,11 @@ class GT06Listener:
             # always trips the rate-mismatch check. Pushing _idle_cmds()
             # here sends TIMER,540,540# which overwrites MODE5's Freq:15
             # to Freq:540, breaking the 15-min wake cadence. Suppress the
-            # whole rate-mismatch path for MODE5 — the wake cycles are by
-            # design infrequent and a couple of LOC per wake is expected.
-            if gt_conn.desired_mode == self.overnight_mode_number:
+            # whole rate-mismatch path for ANY overnight unit — the wake cycles
+            # are by design infrequent and a couple of LOC per wake is expected.
+            # (Was `desired_mode == self.overnight_mode_number`, which missed
+            # schedule-driven MODE5 units when the global default is MODE4.)
+            if gt_conn.overnight:
                 gt_conn.rate_check_time = now
                 gt_conn.loc_count = 0
                 gt_conn.hbt_count = 0
@@ -1130,7 +1132,13 @@ class GT06Listener:
                 if existing_pos is not None:
                     if "idle" in existing_pos:
                         saved_idle = bool(existing_pos["idle"])
-                    saved_sleep = bool(existing_pos.get("sleep", False))
+                    # saved_sleep is the MANUAL overnight flag (/admin/sleep),
+                    # which persists across reconnects. A SCHEDULE-driven sleep
+                    # also sets "sleep" (for the UI) but marks "sleep_sched" — we
+                    # exclude those here so that out of the sleep window they
+                    # fall back to race-idle instead of being stuck overnight.
+                    saved_sleep = (bool(existing_pos.get("sleep", False))
+                                   and not existing_pos.get("sleep_sched", False))
 
             sailor_key = (gt_conn.eid, gt_conn.sailor_id)
             if sailor_key in self.active_sailors:
@@ -1273,6 +1281,15 @@ class GT06Listener:
                         ex["idle"] = gt_conn.idle
                         ex["stopped"] = gt_conn.idle
                         ex["sleep"] = bool(gt_conn.overnight)
+                        # Mark schedule-driven sleep so it's distinguished from
+                        # a manual /admin/sleep: schedule sleeps must wake at the
+                        # window end (incl. units offline at the edge), manual
+                        # ones persist. sched_params is set iff a sleep window
+                        # drove this overnight decision.
+                        if gt_conn.overnight and sched_params:
+                            ex["sleep_sched"] = True
+                        else:
+                            ex.pop("sleep_sched", None)
                 if pt.positions_file and self._write_positions:
                     self._write_positions(
                         pt.current_positions, pt.positions_file,
@@ -1951,7 +1968,10 @@ class GT06Listener:
             self.active_sailors.add(key)
 
         found = False
-        for gt_conn in self.connections.values():
+        # Snapshot — this runs on the scheduler/HTTP threads while the listener's
+        # select loop may add/remove connections, so iterating the live dict
+        # could raise "dict changed size during iteration".
+        for gt_conn in list(self.connections.values()):
             if gt_conn.eid == eid and gt_conn.sailor_id == sailor_id:
                 gt_conn.idle = idle
                 gt_conn.slow_mode = False
@@ -2017,6 +2037,15 @@ class GT06Listener:
                             # vs "Idle"; login handler reads it to pick
                             # MODE5 vs MODE1 commands on reconnect.
                             existing["sleep"] = bool(idle and submode == "overnight")
+                            # A scheduler-driven overnight (overnight_mode passed
+                            # by scheduled_sleep_apply) is marked so it wakes at
+                            # the window end; a manual /admin/sleep (no mode)
+                            # clears the marker so it persists out of window.
+                            if (idle and submode == "overnight"
+                                    and overnight_mode is not None):
+                                existing["sleep_sched"] = True
+                            else:
+                                existing.pop("sleep_sched", None)
                             now = time.time()
                             existing["last_seen"] = now
                             existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()

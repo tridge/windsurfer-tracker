@@ -657,28 +657,30 @@ class EventManager:
             return eid
 
     def update_event(self, eid: int, updates: dict) -> bool:
-        """Update event properties (name, description, archived, passwords, timezone, location)."""
+        """Update event properties (name, description, passwords, timezone,
+        location, sleep_schedule override). Raises ValueError on an invalid
+        sleep_schedule (caught by the PATCH handler)."""
+        # Validate the per-event sleep-schedule override BEFORE any mutation, so
+        # a bad value can't leave the in-memory event half-updated.
+        cleaned_sched = None
+        has_sched = 'sleep_schedule' in updates
+        if has_sched and updates['sleep_schedule']:
+            cleaned_sched = clean_sleep_schedule(updates['sleep_schedule'])
         with self._lock:
             if eid not in self.events:
                 return False
             event = self.events[eid]
-            # Only allow updating certain fields
+            # Only allow updating certain fields (sleep_schedule handled below)
             allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
                               'idle_interval', 'admin_emails',
                               'admin_password', 'tracker_password', 'timezone',
-                              'home_location', 'home_lat', 'home_lon',
-                              'sleep_schedule']
+                              'home_location', 'home_lat', 'home_lon']
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
-            # Per-event night-sleep override: keep only recognised keys (None
-            # values fall back to the global default at resolve time).
-            if 'sleep_schedule' in updates:
-                s = updates['sleep_schedule']
-                event['sleep_schedule'] = ({k: s[k] for k in
-                    ('enabled', 'start', 'end', 'overnight_mode_number',
-                     'overnight_interval_min') if isinstance(s, dict) and k in s}
-                    if s else None)
+            # Per-event night-sleep override (None falls back to global default).
+            if has_sched:
+                event['sleep_schedule'] = cleaned_sched
             # Normalize tracker_password to list
             if 'tracker_password' in updates:
                 tp = event['tracker_password']
@@ -4707,9 +4709,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError):
                     self._send_json({"error": "default_eid must be an integer"}, 400)
                     return
-            if not isinstance(disk.get("sleep_schedule", {}), dict):
-                self._send_json({"error": "sleep_schedule must be an object"}, 400)
-                return
+            if "sleep_schedule" in disk:
+                try:
+                    disk["sleep_schedule"] = {**(disk.get("sleep_schedule") or {}),
+                                              **clean_sleep_schedule(disk["sleep_schedule"])}
+                except ValueError as e:
+                    self._send_json({"error": str(e)}, 400)
+                    return
         else:
             # Structured partial merge into the current on-disk config.
             try:
@@ -4738,24 +4744,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if 'firmware_overrides' in body and isinstance(body['firmware_overrides'], dict):
                 disk['firmware_overrides'] = body['firmware_overrides']
             if 'sleep_schedule' in body and isinstance(body['sleep_schedule'], dict):
-                s = body['sleep_schedule']
-                cur = dict(disk.get('sleep_schedule') or {})
-                if 'enabled' in s:
-                    cur['enabled'] = bool(s['enabled'])
-                for k in ('start', 'end'):
-                    if k in s:
-                        if _parse_hhmm(s[k]) is None:
-                            self._send_json({"error": f"sleep_schedule.{k} must be HH:MM"}, 400)
-                            return
-                        cur[k] = s[k]
-                if 'overnight_mode_number' in s and s['overnight_mode_number'] in (1, 4, 5):
-                    cur['overnight_mode_number'] = s['overnight_mode_number']
-                if 'overnight_interval_min' in s:
-                    try:
-                        cur['overnight_interval_min'] = max(1, int(s['overnight_interval_min']))
-                    except (ValueError, TypeError):
-                        pass
-                disk['sleep_schedule'] = cur
+                try:
+                    clean = clean_sleep_schedule(body['sleep_schedule'])
+                except ValueError as e:
+                    self._send_json({"error": str(e)}, 400)
+                    return
+                disk['sleep_schedule'] = {**(disk.get('sleep_schedule') or {}), **clean}
         try:
             _atomic_write_json(path, disk)
         except Exception as e:
@@ -4969,6 +4963,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 extra['assist_enabled'] = data['assist_enabled']
             if data.get('idle_interval') is not None:
                 extra['idle_interval'] = data['idle_interval']
+            if 'sleep_schedule' in data:
+                extra['sleep_schedule'] = data['sleep_schedule']
             if extra:
                 _event_manager.update_event(eid, extra)
 
@@ -5123,6 +5119,37 @@ def _parse_hhmm(s):
     except Exception:
         pass
     return None
+
+
+def clean_sleep_schedule(s):
+    """Validate + coerce a sleep_schedule dict (only the keys present). Returns a
+    cleaned dict; raises ValueError on any invalid value. Used for the config
+    POST and per-event overrides so bad values can't reach the scheduler."""
+    if not isinstance(s, dict):
+        raise ValueError("sleep_schedule must be an object")
+    out = {}
+    if "enabled" in s:
+        if not isinstance(s["enabled"], bool):
+            raise ValueError("sleep_schedule.enabled must be true or false")
+        out["enabled"] = s["enabled"]
+    for k in ("start", "end"):
+        if k in s:
+            if _parse_hhmm(s[k]) is None:
+                raise ValueError(f"sleep_schedule.{k} must be HH:MM")
+            out[k] = s[k]
+    if "overnight_mode_number" in s:
+        if s["overnight_mode_number"] not in (1, 4, 5):
+            raise ValueError("sleep_schedule.overnight_mode_number must be 1, 4 or 5")
+        out["overnight_mode_number"] = s["overnight_mode_number"]
+    if "overnight_interval_min" in s:
+        try:
+            v = int(s["overnight_interval_min"])
+        except (ValueError, TypeError):
+            raise ValueError("sleep_schedule.overnight_interval_min must be an integer")
+        if v < 1:
+            raise ValueError("sleep_schedule.overnight_interval_min must be >= 1")
+        out["overnight_interval_min"] = v
+    return out
 
 
 def event_sleep_schedule(eid):
