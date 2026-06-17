@@ -1539,6 +1539,20 @@ class GT06Listener:
             if fwmatch and gt_conn.firmware != fwmatch.group(0):
                 gt_conn.firmware = fwmatch.group(0)
                 self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
+            # A "MODE<n> OK" ack confirms the device adopted mode n. Update the
+            # cached mode/freq now so the management UI reflects the switch
+            # immediately — otherwise it shows the stale mode from this wake's
+            # earlier cxzt# (which reports the PRE-switch mode) until the next
+            # wake. (e.g. a unit migrating MODE4->MODE5 showed MODE4 for a cycle.)
+            mode_ok = re.search(r'MODE(\d)\s+OK', text)
+            if mode_ok and gt_conn.imei:
+                st = self.device_state.get(gt_conn.imei)
+                if st is not None:
+                    st['mode'] = mode_ok.group(1)
+                    fok = re.search(r'Freq:(\d+)', text)
+                    if fok:
+                        st['freq'] = fok.group(1)
+                    self._save_device_state()
             # Parse cxzt# response (rich device-info, *-delimited fields).
             # Detect by presence of "MCU:" and "ID:" within the response.
             # If the device is not in MODE1, queue MODE1 once — this is the
