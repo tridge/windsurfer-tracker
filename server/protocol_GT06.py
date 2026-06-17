@@ -351,6 +351,19 @@ def gt06_parse_heartbeat(data):
     return result
 
 
+# Global night-sleep schedule default. Bench-proven overnight recipe
+# (2026-06-17): MODE5 + 1-hour wake interval keeps the fleet's battery drain
+# negligible even when GPS can't lock. Disabled by default (opt-in); times are
+# "HH:MM" in each event's own timezone; a window with start > end wraps midnight.
+DEFAULT_SLEEP_SCHEDULE = {
+    "enabled": False,
+    "start": "22:00",
+    "end": "06:00",
+    "overnight_mode_number": 5,
+    "overnight_interval_min": 60,
+}
+
+
 def load_gt06_config(config_path: Path, log_func=None) -> dict:
     """Load GT06 device config from JSON file.
 
@@ -358,7 +371,8 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
     If file doesn't exist, returns defaults.
     """
     _log = log_func or _default_log
-    default = {"default_eid": 1, "devices": {}}
+    default = {"default_eid": 1, "devices": {},
+               "sleep_schedule": dict(DEFAULT_SLEEP_SCHEDULE)}
     if not config_path.exists():
         return default
     try:
@@ -390,6 +404,8 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "lag_remediation_cooldown_sec": cfg.get("lag_remediation_cooldown_sec", 60),
             "lag_remediation_max_retries": cfg.get("lag_remediation_max_retries", 3),
             "lag_drain_max_sec": cfg.get("lag_drain_max_sec", 180),
+            "sleep_schedule": {**DEFAULT_SLEEP_SCHEDULE,
+                               **(cfg.get("sleep_schedule") or {})},
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
@@ -526,7 +542,8 @@ class GT06Listener:
     def __init__(self, port, interval, id_prefix, get_tracker_func, gt06_config=None,
                  log_file=None, log_func=None, save_overrides_func=None,
                  write_positions_func=None, get_event_state_func=None,
-                 get_event_idle_submode_func=None, gt06_config_path=None):
+                 get_event_idle_submode_func=None, gt06_config_path=None,
+                 get_event_sleep_active_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
@@ -535,30 +552,12 @@ class GT06Listener:
         # callable(eid) -> "race" | "overnight" — when an idle tracker
         # reconnects, picks the command set. Default "race" if unset.
         self.get_event_idle_submode = get_event_idle_submode_func
-        self.gt06_config = gt06_config or {"default_eid": 1, "idle_hbt_interval": 15, "devices": {}}
-        self.idle_hbt_interval = self.gt06_config.get("idle_hbt_interval", 15)
-        self.idle_poll_interval = self.gt06_config.get("idle_poll_interval", 60)
-        # Daytime-idle LOC cadence, decoupled from heartbeat (Phase B). Falls
-        # back to idle_hbt_interval so behaviour is unchanged until set.
-        self.idle_loc_interval = self.gt06_config.get(
-            "idle_loc_interval", self.idle_hbt_interval)
-        # STATUS# keepalive cadence; 0 disables. Defaults to idle_poll_interval.
-        self.idle_keepalive_interval = self.gt06_config.get(
-            "idle_keepalive_interval", self.idle_poll_interval)
-        # Per-firmware-prefix override table (see _resolve_setting).
-        self.firmware_overrides = self.gt06_config.get("firmware_overrides", {})
-        # Overnight (deep-sleep) wake interval in MINUTES. Same human-facing
-        # value regardless of which overnight mode is in use; _overnight_cmds
-        # converts to the on-wire unit (seconds for MODE4, minutes for MODE5).
-        self.overnight_interval_min = self.gt06_config.get("overnight_interval_min", 15)
-        # Overnight mode number — 4 (MODE4, vendor-recommended 2026-05) or
-        # 5 (MODE5). Live-flippable: edit gt06.json and restart, trackers
-        # currently in the other mode will migrate on their next cxzt# poll
-        # via the mode-mismatch handler in the 0x15 path.
-        self.overnight_mode_number = self.gt06_config.get("overnight_mode_number", 4)
-        self.slow_speed_knots = self.gt06_config.get("slow_speed_knots", 2)
-        self.slow_speed_seconds = self.gt06_config.get("slow_speed_seconds", 20)
-        self.slow_loc_interval = self.gt06_config.get("slow_loc_interval", 3)
+        # callable(eid) -> bool: is the event currently inside its scheduled
+        # night-sleep window? Used so an idle tracker that connects during the
+        # window goes straight to overnight deep-sleep (sticky on reconnect).
+        self.get_event_sleep_active = get_event_sleep_active_func
+        self._apply_config(gt06_config or {"default_eid": 1, "idle_hbt_interval": 15,
+                                           "devices": {}})
         self.connections = {}  # fd -> GT06Connection
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
@@ -577,6 +576,36 @@ class GT06Listener:
         # last-seen) so the management page shows offline devices too. Sidecar
         # gt06_state.json next to the config; survives restart.
         self.device_state = self._load_device_state()
+
+    def _apply_config(self, cfg):
+        """(Re)derive all config-cached attributes from a gt06_config dict.
+        Called at init and by reload_config() so a live config edit takes
+        effect without a restart (new values apply on each device's next
+        wake/reconnect, since the reconciler reads these attributes then)."""
+        self.gt06_config = cfg
+        self.idle_hbt_interval = cfg.get("idle_hbt_interval", 15)
+        self.idle_poll_interval = cfg.get("idle_poll_interval", 60)
+        self.idle_loc_interval = cfg.get("idle_loc_interval", self.idle_hbt_interval)
+        self.idle_keepalive_interval = cfg.get("idle_keepalive_interval",
+                                               self.idle_poll_interval)
+        self.firmware_overrides = cfg.get("firmware_overrides", {})
+        self.overnight_interval_min = cfg.get("overnight_interval_min", 15)
+        self.overnight_mode_number = cfg.get("overnight_mode_number", 4)
+        self.slow_speed_knots = cfg.get("slow_speed_knots", 2)
+        self.slow_speed_seconds = cfg.get("slow_speed_seconds", 20)
+        self.slow_loc_interval = cfg.get("slow_loc_interval", 3)
+        self.sleep_schedule = {**DEFAULT_SLEEP_SCHEDULE,
+                               **(cfg.get("sleep_schedule") or {})}
+
+    def reload_config(self, new_config):
+        """Swap in a freshly-loaded gt06_config and re-derive cached attrs.
+        Lets the management UI edit gt06.json and apply it with no restart."""
+        self._apply_config(new_config)
+        self._log("[GT06] Config reloaded (live, no restart): "
+                  f"{len(new_config.get('devices', {}))} device(s), "
+                  f"overnight MODE{self.overnight_mode_number}/"
+                  f"{self.overnight_interval_min}min")
+
     def _log_packet(self, gt_conn, frame, outgoing=False):
         """Log a raw GT06 frame with v2 header (ts + conn_id + length).
 
@@ -1142,6 +1171,16 @@ class GT06Listener:
                             idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
                         except Exception:
                             idle_submode = "race"
+                # Scheduled night sleep: an idle tracker that connects while the
+                # event is inside its sleep window goes overnight (sticky on
+                # reconnect). Only deepens idle→overnight; never touches an
+                # active/racing tracker (this branch is the idle path).
+                if idle_submode != "overnight" and self.get_event_sleep_active:
+                    try:
+                        if self.get_event_sleep_active(gt_conn.eid):
+                            idle_submode = "overnight"
+                    except Exception:
+                        pass
                 if idle_submode == "overnight":
                     gt_conn.overnight = True
                     gt_conn.overnight_freq_retries = 0
@@ -1824,6 +1863,30 @@ class GT06Listener:
                 self._log(f"[GT06] Cancelled assist for {sailor_id} (sticky cleared)")
                 return True
         return False
+
+    def scheduled_sleep_apply(self, eid, sleep_active):
+        """Transition connected units in `eid` at a night-sleep window edge.
+
+        sleep_active=True  → put currently-IDLE units into overnight deep-sleep.
+        sleep_active=False → return overnight units to race-day idle.
+
+        ONLY idle (non-racing, non-assist) units are touched — an actively
+        tracked tracker (a sailor still out) is never auto-slept. Returns the
+        number of units transitioned. Reconnecting/late units are handled
+        separately by the login handler via get_event_sleep_active."""
+        targets = []
+        for gt_conn in list(self.connections.values()):
+            if gt_conn.eid != eid or not gt_conn.sailor_id:
+                continue
+            if sleep_active:
+                if gt_conn.idle and not gt_conn.overnight and not gt_conn.assist_active:
+                    targets.append(gt_conn.sailor_id)
+            elif gt_conn.overnight:
+                targets.append(gt_conn.sailor_id)
+        for sid in targets:
+            self.set_idle(eid, sid, True,
+                          submode="overnight" if sleep_active else "race")
+        return len(targets)
 
     def set_idle(self, eid, sailor_id, idle, submode="race"):
         """Set idle state for the GT06 device matching (eid, sailor_id).

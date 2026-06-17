@@ -520,7 +520,8 @@ def generate_log_summaries(log_dir: Path) -> int:
     return updated_count
 
 
-from protocol_GT06 import GT06Listener, GT06Connection, load_gt06_config
+from protocol_GT06 import (GT06Listener, GT06Connection, load_gt06_config,
+                           _atomic_write_json)
 from protocol_JT808 import JT808Listener, load_jt808_config
 
 
@@ -665,10 +666,19 @@ class EventManager:
             allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
                               'idle_interval', 'admin_emails',
                               'admin_password', 'tracker_password', 'timezone',
-                              'home_location', 'home_lat', 'home_lon']
+                              'home_location', 'home_lat', 'home_lon',
+                              'sleep_schedule']
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
+            # Per-event night-sleep override: keep only recognised keys (None
+            # values fall back to the global default at resolve time).
+            if 'sleep_schedule' in updates:
+                s = updates['sleep_schedule']
+                event['sleep_schedule'] = ({k: s[k] for k in
+                    ('enabled', 'start', 'end', 'overnight_mode_number',
+                     'overnight_interval_min') if isinstance(s, dict) and k in s}
+                    if s else None)
             # Normalize tracker_password to list
             if 'tracker_password' in updates:
                 tp = event['tracker_password']
@@ -2401,6 +2411,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "trackers": _gt06_listener.get_device_inventory(),
                 "gt06_running": True,
                 "events": _event_manager.get_all_events() if _event_manager else [],
+            })
+
+        elif path == '/api/manage/gt06/config':
+            # Editable GT06 config (overnight mode/interval + global sleep
+            # schedule) for the management UI. Hot-applied on POST, no restart.
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            if _gt06_listener is None:
+                self._send_json({"gt06_running": False})
+                return
+            cfg = _gt06_listener.gt06_config
+            self._send_json({
+                "gt06_running": True,
+                "overnight_mode_number": _gt06_listener.overnight_mode_number,
+                "overnight_interval_min": _gt06_listener.overnight_interval_min,
+                "idle_hbt_interval": _gt06_listener.idle_hbt_interval,
+                "idle_loc_interval": _gt06_listener.idle_loc_interval,
+                "sleep_schedule": _gt06_listener.sleep_schedule,
             })
 
         elif path == '/api/manage/simbase/sims':
@@ -4644,6 +4673,69 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Location', '/install/flutter-ios.html?error=unknown')
             self.end_headers()
 
+    def _handle_gt06_config_post(self):
+        """POST /api/manage/gt06/config — edit overnight defaults + the global
+        night-sleep schedule, persist to gt06.json, and hot-apply (no restart).
+        Already manager-authed + listener-checked by the caller."""
+        try:
+            n = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send_json({"error": "Invalid JSON"}, 400)
+            return
+        path = _gt06_listener.gt06_config_path
+        if not path:
+            self._send_json({"error": "No gt06 config path configured"}, 400)
+            return
+        # Load the on-disk file fresh, apply only the recognised editable keys.
+        try:
+            disk = json.load(open(path)) if Path(path).exists() else {}
+        except Exception:
+            disk = {}
+        if 'overnight_mode_number' in body:
+            v = body['overnight_mode_number']
+            if v not in (1, 4, 5):
+                self._send_json({"error": "overnight_mode_number must be 1, 4 or 5"}, 400)
+                return
+            disk['overnight_mode_number'] = v
+        if 'overnight_interval_min' in body:
+            try:
+                disk['overnight_interval_min'] = max(1, int(body['overnight_interval_min']))
+            except (ValueError, TypeError):
+                self._send_json({"error": "overnight_interval_min must be an integer"}, 400)
+                return
+        if 'sleep_schedule' in body and isinstance(body['sleep_schedule'], dict):
+            s = body['sleep_schedule']
+            cur = dict(disk.get('sleep_schedule') or {})
+            if 'enabled' in s:
+                cur['enabled'] = bool(s['enabled'])
+            for k in ('start', 'end'):
+                if k in s:
+                    if _parse_hhmm(s[k]) is None:
+                        self._send_json({"error": f"sleep_schedule.{k} must be HH:MM"}, 400)
+                        return
+                    cur[k] = s[k]
+            if 'overnight_mode_number' in s and s['overnight_mode_number'] in (1, 4, 5):
+                cur['overnight_mode_number'] = s['overnight_mode_number']
+            if 'overnight_interval_min' in s:
+                try:
+                    cur['overnight_interval_min'] = max(1, int(s['overnight_interval_min']))
+                except (ValueError, TypeError):
+                    pass
+            disk['sleep_schedule'] = cur
+        try:
+            _atomic_write_json(path, disk)
+        except Exception as e:
+            self._send_json({"error": f"Could not write config: {e}"}, 500)
+            return
+        # Hot-apply: re-load through the same path the listener used at startup.
+        _gt06_listener.reload_config(load_gt06_config(Path(path), log_func=log))
+        log("[MANAGE] GT06 config updated via web UI (hot-applied)")
+        self._send_json({"success": True,
+                         "overnight_mode_number": _gt06_listener.overnight_mode_number,
+                         "overnight_interval_min": _gt06_listener.overnight_interval_min,
+                         "sleep_schedule": _gt06_listener.sleep_schedule})
+
     def _handle_gt06_manage_post(self, path):
         """Manager-level GT06 device management + server restart.
 
@@ -4673,6 +4765,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         if _gt06_listener is None:
             self._send_json({"error": "GT06 listener not running"}, 404)
+            return
+
+        if path == '/api/manage/gt06/config':
+            self._handle_gt06_config_post()
             return
 
         from urllib.parse import unquote
@@ -4987,6 +5083,87 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
 
 
 
+def _parse_hhmm(s):
+    """'HH:MM' -> minutes since midnight, or None."""
+    try:
+        h, m = str(s).split(":")
+        h, m = int(h), int(m)
+        if 0 <= h < 24 and 0 <= m < 60:
+            return h * 60 + m
+    except Exception:
+        pass
+    return None
+
+
+def event_sleep_schedule(eid):
+    """Effective night-sleep schedule for an event: per-event override merged
+    over the global default (gt06.json). Returns the merged dict (or None)."""
+    if _gt06_listener is None or _event_manager is None:
+        return None
+    base = dict(getattr(_gt06_listener, "sleep_schedule", {}) or {})
+    ev = _event_manager.get_event(eid) or {}
+    ovr = ev.get("sleep_schedule") or {}
+    base.update({k: v for k, v in ovr.items() if v is not None})
+    return base
+
+
+def event_sleep_window_active(eid):
+    """Is event `eid` currently inside its scheduled night-sleep window?
+    Times are in the event's own timezone; a window with start > end wraps
+    midnight. Returns False when disabled or no GT06 listener."""
+    sched = event_sleep_schedule(eid)
+    if not sched or not sched.get("enabled"):
+        return False
+    start = _parse_hhmm(sched.get("start", "22:00"))
+    end = _parse_hhmm(sched.get("end", "06:00"))
+    if start is None or end is None or start == end:
+        return False
+    ev = _event_manager.get_event(eid) or {}
+    try:
+        tz = ZoneInfo(ev.get("timezone", "Australia/Sydney"))
+    except Exception:
+        tz = ZoneInfo("Australia/Sydney")
+    now = datetime.now(tz)
+    cur = now.hour * 60 + now.minute
+    return (start <= cur < end) if start < end else (cur >= start or cur < end)
+
+
+def run_sleep_scheduler(event_manager: EventManager, check_interval: int = 60):
+    """Apply each event's scheduled night-sleep window to its GT06 fleet.
+
+    At the window start, the event's IDLE units are put into overnight deep
+    sleep (MODE5); at the window end they return to race-day idle. ONLY idle
+    units are ever touched — an actively-tracked tracker (a sailor still out)
+    is never auto-slept, honouring the never-auto-idle rule. Trackers that
+    connect mid-window are handled by the login handler via
+    get_event_sleep_active. On startup the scheduler only *sleeps* (never wakes)
+    so a manual /admin/sleep survives a restart."""
+    log("[SLEEP-SCHED] Night-sleep scheduler started")
+    last = {}  # eid -> bool (last observed in-window)
+    while True:
+        try:
+            if _gt06_listener is not None:
+                for eid in event_manager.list_events():
+                    active = event_sleep_window_active(eid)
+                    prev = last.get(eid)
+                    if prev is None:
+                        if active:
+                            n = _gt06_listener.scheduled_sleep_apply(eid, True)
+                            if n:
+                                log(f"[SLEEP-SCHED] Event {eid}: startup in window — "
+                                    f"slept {n} idle unit(s)")
+                        last[eid] = active
+                    elif active != prev:
+                        n = _gt06_listener.scheduled_sleep_apply(eid, active)
+                        log(f"[SLEEP-SCHED] Event {eid}: window "
+                            f"{'START → overnight' if active else 'END → race-idle'} "
+                            f"({n} unit(s))")
+                        last[eid] = active
+        except Exception as e:
+            log(f"[SLEEP-SCHED] Error: {e}")
+        time.sleep(check_interval)
+
+
 def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
     """Background thread to clear tracks at midnight in each event's timezone.
 
@@ -5117,7 +5294,8 @@ def run_server(port: int, http_port: int | None = None,
                                       write_positions_func=write_current_positions,
                                       get_event_state_func=_gt06_get_event_state,
                                       get_event_idle_submode_func=_gt06_get_event_idle_submode,
-                                      gt06_config_path=gt06_config_path)
+                                      gt06_config_path=gt06_config_path,
+                                      get_event_sleep_active_func=event_sleep_window_active)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
@@ -5197,6 +5375,17 @@ def run_server(port: int, http_port: int | None = None,
         name="midnight-clearer"
     )
     midnight_thread.start()
+
+    # Start the scheduled night-sleep service (only runs effectively when a
+    # sleep schedule is enabled globally or per-event).
+    if _gt06_listener is not None:
+        sleep_sched_thread = threading.Thread(
+            target=run_sleep_scheduler,
+            args=(_event_manager,),
+            daemon=True,
+            name="sleep-scheduler"
+        )
+        sleep_sched_thread.start()
 
     try:
         while True:
