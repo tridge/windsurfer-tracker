@@ -115,8 +115,11 @@ ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
 
 echo "=== Verifying iOS-only archive (no embedded watch app) ==="
-ssh "$MAC_HOST" "if [ -d '$ARCHIVE_PATH/Products/Applications/Windsurfer Tracker.app/Watch' ]; then \
-    echo 'ERROR: watch app present in archive — aborting before upload'; exit 1; \
+# cd first so the remote shell expands ~ in $REMOTE_PROJECT_DIR, then use a
+# relative path (a quoted absolute ~ path would not be tilde-expanded).
+ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
+    if [ -d 'build/WindsurferTracker.xcarchive/Products/Applications/Windsurfer Tracker.app/Watch' ]; then \
+        echo 'ERROR: watch app present in archive — aborting before upload'; exit 1; \
     else echo 'OK: no watch app in archive'; fi"
 
 echo "=== Exporting IPA ==="
