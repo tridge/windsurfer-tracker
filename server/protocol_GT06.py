@@ -1177,20 +1177,22 @@ class GT06Listener:
                             idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
                         except Exception:
                             idle_submode = "race"
-                # Scheduled night sleep: an idle tracker that connects while the
-                # event is inside its sleep window goes overnight (sticky on
-                # reconnect). Only deepens idle→overnight; never touches an
-                # active/racing tracker (this branch is the idle path). The
-                # callback returns the effective (mode, interval_min) for the
-                # window, or None when not in a window.
+                # Scheduled night sleep: if the event is inside its sleep window,
+                # force overnight (sticky on reconnect) AND adopt the window's
+                # (mode, interval). Checked even when saved_sleep already chose
+                # overnight, so the schedule's mode/interval wins over the global
+                # default — otherwise a scheduler-slept unit (which carries the
+                # persisted sleep flag) would reconnect via the saved_sleep path
+                # and flap back to the default mode. Only the idle path reaches
+                # here, so an active/racing tracker is never auto-slept.
                 sched_params = None
-                if idle_submode != "overnight" and self.get_event_sleep_active:
+                if self.get_event_sleep_active:
                     try:
                         sched_params = self.get_event_sleep_active(gt_conn.eid)
-                        if sched_params:
-                            idle_submode = "overnight"
                     except Exception:
                         sched_params = None
+                if sched_params:
+                    idle_submode = "overnight"
                 if idle_submode == "overnight":
                     gt_conn.overnight = True
                     gt_conn.overnight_freq_retries = 0
