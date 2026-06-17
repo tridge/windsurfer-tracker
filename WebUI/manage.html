@@ -332,6 +332,7 @@
         <div class="tab-bar" id="tabBar" style="display:none">
             <button class="btn btn-primary" id="tabBtnEvents" onclick="showTab('events')">Events</button>
             <button class="btn" id="tabBtnTrackers" onclick="showTab('trackers')">GT06 Trackers</button>
+            <button class="btn" id="tabBtnGt06Settings" onclick="showTab('gt06settings')">GT06 Settings</button>
             <button class="btn" id="tabBtnSimbase" onclick="showTab('simbase')">SIMbase</button>
         </div>
 
@@ -359,34 +360,20 @@
                 </div>
             </div>
             <div id="gt06Error" class="error-message" style="display:none"></div>
-
-            <!-- Overnight sleep schedule (global default) -->
-            <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:12px 16px;margin-bottom:14px;font-size:13px">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                    <b style="color:#333">Overnight sleep schedule (global default)</b>
-                    <span id="gt06ConfigMsg" style="color:#16a34a;font-size:12px"></span>
-                </div>
-                <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
-                    <label><input type="checkbox" id="schedEnabled"> Enable night sleep</label>
-                    <label>From <input type="time" id="schedStart" value="22:00" style="font-size:13px"></label>
-                    <label>to <input type="time" id="schedEnd" value="06:00" style="font-size:13px"> <span style="color:#999">(event timezone)</span></label>
-                    <label>Mode
-                        <select id="schedMode" style="font-size:13px">
-                            <option value="5">MODE5 (timed, recommended)</option>
-                            <option value="4">MODE4 (vibration)</option>
-                        </select>
-                    </label>
-                    <label>Wake every <input type="number" id="schedInterval" value="60" min="1" style="width:60px;font-size:13px"> min</label>
-                    <button class="btn btn-primary" onclick="saveGt06Config()">Save</button>
-                </div>
-                <div style="color:#888;margin-top:8px;font-size:12px">
-                    Only <b>idle</b> trackers are slept during the window; actively-tracked units are never auto-slept.
-                    Per-event overrides can be set on each event. Applied live — no restart.
-                </div>
-            </div>
-
             <div id="trackerList" class="event-list">
                 <div class="loading">Loading trackers&hellip;</div>
+            </div>
+        </div>
+
+        <!-- GT06 Settings Section (hidden until the GT06 Settings tab is selected) -->
+        <div class="events-section" id="gt06settingsSection">
+            <div class="section-header">
+                <h2>GT06 Settings</h2>
+                <span id="gt06ConfigMsg" style="color:#16a34a;font-size:13px"></span>
+            </div>
+            <div id="gt06SettingsError" class="error-message" style="display:none"></div>
+            <div id="gt06SettingsBody" style="max-width:760px;font-size:13px">
+                <div class="loading">Loading settings&hellip;</div>
             </div>
         </div>
 
@@ -728,9 +715,10 @@
         // Switch between the Events / GT06 Trackers / SIMbase tabs, loading
         // the data for the tab being shown.
         const TABS = {
-            events:   { section: 'eventsSection',   button: 'tabBtnEvents',   load: () => loadEvents() },
-            trackers: { section: 'trackersSection', button: 'tabBtnTrackers', load: () => loadTrackers() },
-            simbase:  { section: 'simbaseSection',  button: 'tabBtnSimbase',  load: () => loadSims() },
+            events:       { section: 'eventsSection',       button: 'tabBtnEvents',       load: () => loadEvents() },
+            trackers:     { section: 'trackersSection',     button: 'tabBtnTrackers',     load: () => loadTrackers() },
+            gt06settings: { section: 'gt06settingsSection', button: 'tabBtnGt06Settings', load: () => loadGt06Settings() },
+            simbase:      { section: 'simbaseSection',      button: 'tabBtnSimbase',      load: () => loadSims() },
         };
 
         function showTab(name) {
@@ -985,46 +973,132 @@
                 ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        async function loadGt06Config() {
+        // ---- GT06 Settings tab ----
+        let gt06Cfg = {};
+        let gt06CfgEvents = [];
+
+        function gt06CfgMsg(text, ok) {
+            const m = document.getElementById('gt06ConfigMsg');
+            m.style.color = ok ? '#16a34a' : '#c00';
+            m.textContent = text;
+            if (ok) setTimeout(() => { if (m.textContent === text) m.textContent = ''; }, 3000);
+        }
+
+        async function loadGt06Settings() {
+            const err = document.getElementById('gt06SettingsError');
+            err.style.display = 'none';
             try {
                 const r = await fetch(`${API_BASE}/api/manage/gt06/config`, {
                     headers: { 'X-Manager-Password': managerPassword }
                 });
-                if (!r.ok) return;
                 const d = await r.json();
-                const s = d.sleep_schedule || {};
-                document.getElementById('schedEnabled').checked = !!s.enabled;
-                if (s.start) document.getElementById('schedStart').value = s.start;
-                if (s.end) document.getElementById('schedEnd').value = s.end;
-                document.getElementById('schedMode').value = String(s.overnight_mode_number || d.overnight_mode_number || 5);
-                document.getElementById('schedInterval').value = s.overnight_interval_min || d.overnight_interval_min || 60;
-            } catch (e) { /* leave defaults */ }
+                if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+                if (!d.gt06_running) {
+                    document.getElementById('gt06SettingsBody').innerHTML =
+                        '<p style="color:#888">GT06 listener is not running on this server.</p>';
+                    return;
+                }
+                gt06Cfg = d.config || {};
+                gt06CfgEvents = d.events || [];
+                renderGt06Settings();
+            } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
         }
 
-        async function saveGt06Config() {
-            const msg = document.getElementById('gt06ConfigMsg');
-            const body = { sleep_schedule: {
-                enabled: document.getElementById('schedEnabled').checked,
-                start: document.getElementById('schedStart').value,
-                end: document.getElementById('schedEnd').value,
-                overnight_mode_number: parseInt(document.getElementById('schedMode').value, 10),
-                overnight_interval_min: parseInt(document.getElementById('schedInterval').value, 10) || 60
-            }};
-            try {
-                const r = await fetch(`${API_BASE}/api/manage/gt06/config`, {
-                    method: 'POST',
-                    headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                const d = await r.json();
-                if (!d.success) { msg.style.color = '#c00'; msg.textContent = 'Error: ' + (d.error || r.status); return; }
-                msg.style.color = '#16a34a'; msg.textContent = 'Saved (applied live)';
-                setTimeout(() => { msg.textContent = ''; }, 3000);
-            } catch (e) { msg.style.color = '#c00'; msg.textContent = 'Error: ' + e.message; }
+        function renderGt06Settings() {
+            const c = gt06Cfg, s = c.sleep_schedule || {};
+            const evOpts = (sel) => gt06CfgEvents.map(e =>
+                `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)} (#${e.eid})</option>`).join('');
+            const num = (id, v, w) => `<input type="number" id="${id}" value="${v == null ? '' : v}" style="width:${w || 70}px;font-size:13px">`;
+            document.getElementById('gt06SettingsBody').innerHTML = `
+                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Default event for GT06 devices</b>
+                    <div style="margin-top:8px">New / unassigned trackers join:
+                        <select id="cfgDefaultEid" style="font-size:13px">${evOpts(c.default_eid)}</select>
+                    </div>
+                    <div style="color:#888;margin-top:6px;font-size:12px">Per-tracker overrides are on the GT06 Trackers tab.</div>
+                </div>
+
+                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Overnight sleep schedule (global default)</b>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px">
+                        <label><input type="checkbox" id="cfgSchedEnabled" ${s.enabled ? 'checked' : ''}> Enable night sleep</label>
+                        <label>From <input type="time" id="cfgSchedStart" value="${s.start || '22:00'}"></label>
+                        <label>to <input type="time" id="cfgSchedEnd" value="${s.end || '06:00'}"> <span style="color:#999">(each event's timezone)</span></label>
+                        <label>Mode <select id="cfgSchedMode" style="font-size:13px">
+                            <option value="5" ${String(s.overnight_mode_number||5)==='5'?'selected':''}>MODE5 (timed, recommended)</option>
+                            <option value="4" ${String(s.overnight_mode_number||5)==='4'?'selected':''}>MODE4 (vibration)</option></select></label>
+                        <label>Wake every ${num('cfgSchedInterval', s.overnight_interval_min || 60, 60)} min</label>
+                    </div>
+                    <div style="color:#888;margin-top:8px;font-size:12px">Only <b>idle</b> trackers are slept; actively-tracked units are never auto-slept. Per-event overrides set on each event.</div>
+                </div>
+
+                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Overnight / idle defaults</b>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px">
+                        <label>Overnight mode <select id="cfgOvMode" style="font-size:13px">
+                            ${[1,4,5].map(m=>`<option value="${m}" ${String(c.overnight_mode_number||4)===String(m)?'selected':''}>MODE${m}</option>`).join('')}</select></label>
+                        <label>Overnight wake (min) ${num('cfgOvInterval', c.overnight_interval_min)}</label>
+                        <label>Idle heartbeat (s) ${num('cfgIdleHbt', c.idle_hbt_interval)}</label>
+                        <label>Idle LOC (s) ${num('cfgIdleLoc', c.idle_loc_interval)}</label>
+                        <label>Idle poll (s) ${num('cfgIdlePoll', c.idle_poll_interval)}</label>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="saveGt06Settings()">Save settings (applied live)</button>
+
+                <div style="margin-top:22px">
+                    <a href="#" onclick="document.getElementById('cfgRawWrap').style.display=(document.getElementById('cfgRawWrap').style.display==='none'?'block':'none');return false" style="font-size:13px">▸ Advanced: edit full gt06.json</a>
+                    <div id="cfgRawWrap" style="display:none;margin-top:10px">
+                        <textarea id="cfgRaw" spellcheck="false" style="width:100%;height:300px;font-family:monospace;font-size:12px;border:1px solid #ccc;border-radius:4px;padding:8px">${esc(JSON.stringify(c, null, 2))}</textarea>
+                        <div style="margin-top:8px"><button class="btn btn-danger" onclick="saveGt06Raw()">Save full JSON (replaces config)</button>
+                        <span style="color:#888;font-size:12px;margin-left:8px">Edits every setting incl. per-device & firmware overrides. Validated + applied live.</span></div>
+                    </div>
+                </div>`;
+        }
+
+        async function postGt06Config(body) {
+            const r = await fetch(`${API_BASE}/api/manage/gt06/config`, {
+                method: 'POST',
+                headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const d = await r.json();
+            if (!d.success) throw new Error(d.error || ('HTTP ' + r.status));
+            gt06Cfg = d.config || gt06Cfg;
+            return d;
+        }
+
+        async function saveGt06Settings() {
+            const v = id => document.getElementById(id).value;
+            const iv = id => { const n = parseInt(v(id), 10); return isNaN(n) ? undefined : n; };
+            const body = {
+                default_eid: iv('cfgDefaultEid'),
+                overnight_mode_number: parseInt(v('cfgOvMode'), 10),
+                overnight_interval_min: iv('cfgOvInterval'),
+                idle_hbt_interval: iv('cfgIdleHbt'),
+                idle_loc_interval: iv('cfgIdleLoc'),
+                idle_poll_interval: iv('cfgIdlePoll'),
+                sleep_schedule: {
+                    enabled: document.getElementById('cfgSchedEnabled').checked,
+                    start: v('cfgSchedStart'), end: v('cfgSchedEnd'),
+                    overnight_mode_number: parseInt(v('cfgSchedMode'), 10),
+                    overnight_interval_min: iv('cfgSchedInterval') || 60
+                }
+            };
+            Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+            try { await postGt06Config(body); gt06CfgMsg('Saved — applied live', true); }
+            catch (e) { gt06CfgMsg('Error: ' + e.message, false); }
+        }
+
+        async function saveGt06Raw() {
+            let parsed;
+            try { parsed = JSON.parse(document.getElementById('cfgRaw').value); }
+            catch (e) { gt06CfgMsg('Invalid JSON: ' + e.message, false); return; }
+            try { await postGt06Config({ raw_config: parsed }); renderGt06Settings(); gt06CfgMsg('Full config saved — applied live', true); }
+            catch (e) { gt06CfgMsg('Error: ' + e.message, false); }
         }
 
         async function loadTrackers() {
-            loadGt06Config();
             const errEl = document.getElementById('gt06Error');
             errEl.style.display = 'none';
             try {

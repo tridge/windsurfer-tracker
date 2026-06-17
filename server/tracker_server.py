@@ -2422,14 +2422,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if _gt06_listener is None:
                 self._send_json({"gt06_running": False})
                 return
-            cfg = _gt06_listener.gt06_config
             self._send_json({
                 "gt06_running": True,
-                "overnight_mode_number": _gt06_listener.overnight_mode_number,
-                "overnight_interval_min": _gt06_listener.overnight_interval_min,
-                "idle_hbt_interval": _gt06_listener.idle_hbt_interval,
-                "idle_loc_interval": _gt06_listener.idle_loc_interval,
-                "sleep_schedule": _gt06_listener.sleep_schedule,
+                "config": _gt06_listener.gt06_config,
+                "events": _event_manager.get_all_events() if _event_manager else [],
             })
 
         elif path == '/api/manage/simbase/sims':
@@ -4673,10 +4669,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Location', '/install/flutter-ios.html?error=unknown')
             self.end_headers()
 
+    # Top-level gt06.json keys editable from the settings tab, with coercion.
+    _GT06_INT_KEYS = {
+        "default_eid", "idle_hbt_interval", "idle_poll_interval",
+        "idle_loc_interval", "idle_keepalive_interval", "overnight_interval_min",
+        "slow_speed_seconds", "slow_loc_interval", "lag_remediation_sec",
+        "lag_drain_interval", "lag_restore_sec", "lag_remediation_cooldown_sec",
+        "lag_remediation_max_retries", "lag_drain_max_sec",
+    }
+    _GT06_NUM_KEYS = {"slow_speed_knots"}
+
     def _handle_gt06_config_post(self):
-        """POST /api/manage/gt06/config — edit overnight defaults + the global
-        night-sleep schedule, persist to gt06.json, and hot-apply (no restart).
-        Already manager-authed + listener-checked by the caller."""
+        """POST /api/manage/gt06/config — edit gt06.json (default event,
+        overnight, idle/slow/lag settings, night-sleep schedule, or the whole
+        file via raw_config), persist, and hot-apply with no restart. Already
+        manager-authed + listener-checked by the caller."""
         try:
             n = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
@@ -4687,42 +4694,68 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         if not path:
             self._send_json({"error": "No gt06 config path configured"}, 400)
             return
-        # Load the on-disk file fresh, apply only the recognised editable keys.
-        try:
-            disk = json.load(open(path)) if Path(path).exists() else {}
-        except Exception:
-            disk = {}
-        if 'overnight_mode_number' in body:
-            v = body['overnight_mode_number']
-            if v not in (1, 4, 5):
-                self._send_json({"error": "overnight_mode_number must be 1, 4 or 5"}, 400)
+
+        # Advanced: replace the entire gt06.json with a validated dict.
+        if isinstance(body.get("raw_config"), dict):
+            disk = body["raw_config"]
+            if not isinstance(disk.get("devices", {}), dict):
+                self._send_json({"error": "devices must be an object"}, 400)
                 return
-            disk['overnight_mode_number'] = v
-        if 'overnight_interval_min' in body:
-            try:
-                disk['overnight_interval_min'] = max(1, int(body['overnight_interval_min']))
-            except (ValueError, TypeError):
-                self._send_json({"error": "overnight_interval_min must be an integer"}, 400)
-                return
-        if 'sleep_schedule' in body and isinstance(body['sleep_schedule'], dict):
-            s = body['sleep_schedule']
-            cur = dict(disk.get('sleep_schedule') or {})
-            if 'enabled' in s:
-                cur['enabled'] = bool(s['enabled'])
-            for k in ('start', 'end'):
-                if k in s:
-                    if _parse_hhmm(s[k]) is None:
-                        self._send_json({"error": f"sleep_schedule.{k} must be HH:MM"}, 400)
-                        return
-                    cur[k] = s[k]
-            if 'overnight_mode_number' in s and s['overnight_mode_number'] in (1, 4, 5):
-                cur['overnight_mode_number'] = s['overnight_mode_number']
-            if 'overnight_interval_min' in s:
+            if "default_eid" in disk:
                 try:
-                    cur['overnight_interval_min'] = max(1, int(s['overnight_interval_min']))
+                    disk["default_eid"] = int(disk["default_eid"])
                 except (ValueError, TypeError):
-                    pass
-            disk['sleep_schedule'] = cur
+                    self._send_json({"error": "default_eid must be an integer"}, 400)
+                    return
+            if not isinstance(disk.get("sleep_schedule", {}), dict):
+                self._send_json({"error": "sleep_schedule must be an object"}, 400)
+                return
+        else:
+            # Structured partial merge into the current on-disk config.
+            try:
+                disk = json.load(open(path)) if Path(path).exists() else {}
+            except Exception:
+                disk = {}
+            for k in self._GT06_INT_KEYS:
+                if k in body:
+                    try:
+                        disk[k] = int(body[k])
+                    except (ValueError, TypeError):
+                        self._send_json({"error": f"{k} must be an integer"}, 400)
+                        return
+            for k in self._GT06_NUM_KEYS:
+                if k in body:
+                    try:
+                        disk[k] = float(body[k])
+                    except (ValueError, TypeError):
+                        self._send_json({"error": f"{k} must be a number"}, 400)
+                        return
+            if 'overnight_mode_number' in body:
+                if body['overnight_mode_number'] not in (1, 4, 5):
+                    self._send_json({"error": "overnight_mode_number must be 1, 4 or 5"}, 400)
+                    return
+                disk['overnight_mode_number'] = body['overnight_mode_number']
+            if 'firmware_overrides' in body and isinstance(body['firmware_overrides'], dict):
+                disk['firmware_overrides'] = body['firmware_overrides']
+            if 'sleep_schedule' in body and isinstance(body['sleep_schedule'], dict):
+                s = body['sleep_schedule']
+                cur = dict(disk.get('sleep_schedule') or {})
+                if 'enabled' in s:
+                    cur['enabled'] = bool(s['enabled'])
+                for k in ('start', 'end'):
+                    if k in s:
+                        if _parse_hhmm(s[k]) is None:
+                            self._send_json({"error": f"sleep_schedule.{k} must be HH:MM"}, 400)
+                            return
+                        cur[k] = s[k]
+                if 'overnight_mode_number' in s and s['overnight_mode_number'] in (1, 4, 5):
+                    cur['overnight_mode_number'] = s['overnight_mode_number']
+                if 'overnight_interval_min' in s:
+                    try:
+                        cur['overnight_interval_min'] = max(1, int(s['overnight_interval_min']))
+                    except (ValueError, TypeError):
+                        pass
+                disk['sleep_schedule'] = cur
         try:
             _atomic_write_json(path, disk)
         except Exception as e:
@@ -4731,10 +4764,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         # Hot-apply: re-load through the same path the listener used at startup.
         _gt06_listener.reload_config(load_gt06_config(Path(path), log_func=log))
         log("[MANAGE] GT06 config updated via web UI (hot-applied)")
-        self._send_json({"success": True,
-                         "overnight_mode_number": _gt06_listener.overnight_mode_number,
-                         "overnight_interval_min": _gt06_listener.overnight_interval_min,
-                         "sleep_schedule": _gt06_listener.sleep_schedule})
+        self._send_json({"success": True, "config": _gt06_listener.gt06_config})
 
     def _handle_gt06_manage_post(self, path):
         """Manager-level GT06 device management + server restart.
