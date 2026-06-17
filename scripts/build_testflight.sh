@@ -102,6 +102,7 @@ ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     -archivePath build/WindsurferTracker.xcarchive \
     DEVELOPMENT_TEAM=$TEAM_ID \
     GIT_HASH=$GIT_HASH \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS='\$(inherited) APPSTORE' \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
 
 echo "=== Exporting IPA ==="

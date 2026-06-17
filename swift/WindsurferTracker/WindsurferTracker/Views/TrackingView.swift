@@ -184,6 +184,8 @@ struct TrackingView: View {
             Spacer(minLength: 16)
 
             // Assist button - large and prominent (only show if assist is enabled for this event)
+            // Compiled out of App Store builds (sailor-side assist request removed).
+            #if !APPSTORE
             if viewModel.assistEnabled {
                 AssistButton(
                     isActive: viewModel.assistRequested,
@@ -196,6 +198,7 @@ struct TrackingView: View {
             }
 
             Spacer(minLength: 16)
+            #endif
 
             // Stop button
             Button {

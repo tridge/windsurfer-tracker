@@ -114,11 +114,14 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.gray)
 
+                    // Volume-combo assist trigger — compiled out of App Store builds.
+                    #if !APPSTORE
                     Toggle("Volume Button Assist", isOn: $viewModel.volumeAssist)
 
                     Text("Press volume up+down together to toggle assist")
                         .font(.caption)
                         .foregroundColor(.gray)
+                    #endif
                 }
 
                 // Role Section - less commonly changed

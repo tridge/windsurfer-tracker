@@ -82,7 +82,9 @@ public class TrackerViewModel: ObservableObject {
         self.volumeAssist = preferences.volumeAssist
 
         setupBindings()
+        #if !APPSTORE
         setupVolumeAssist()
+        #endif
 
         // Initial background refresh status
         backgroundRefreshDisabled = UIApplication.shared.backgroundRefreshStatus != .available
@@ -303,6 +305,8 @@ public class TrackerViewModel: ObservableObject {
             .store(in: &cancellables)
 
         // Subscribe to remote cancel assist commands
+        // Compiled out of App Store builds (sailor-side assist request removed).
+        #if !APPSTORE
         TrackerService.shared.remoteCancelAssistPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -317,6 +321,7 @@ public class TrackerViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        #endif
 
         // Subscribe to remote start commands (resume from idle)
         TrackerService.shared.remoteStartPublisher
@@ -374,6 +379,8 @@ public class TrackerViewModel: ObservableObject {
 
     // MARK: - Volume Button Assist
 
+    // Volume up+down combo assist trigger — compiled out of App Store builds.
+    #if !APPSTORE
     private func setupVolumeAssist() {
         volumeButtonAssist.onComboDetected = { [weak self] in
             guard let self = self else { return }
@@ -382,6 +389,7 @@ public class TrackerViewModel: ObservableObject {
             self.toggleAssist()
         }
     }
+    #endif
 
     // MARK: - Assist Tones
 
@@ -396,6 +404,8 @@ public class TrackerViewModel: ObservableObject {
         }
     }
 
+    // Sailor-side assist tones + alarm — compiled out of App Store builds.
+    #if !APPSTORE
     /// Play ascending (activate) or descending (deactivate) assist tones at max volume
     private func playAssistTones(ascending: Bool) {
         // Save current volume, crank to max, play, then restore
@@ -422,6 +432,7 @@ public class TrackerViewModel: ObservableObject {
         }
         RunLoop.main.add(assistAlarmTimer!, forMode: .common)
     }
+    #endif
 
     /// Stop the assist alarm timer
     private func stopAssistAlarm() {
@@ -532,6 +543,8 @@ public class TrackerViewModel: ObservableObject {
         }
     }
 
+    // Sailor-side assist request — compiled out of App Store builds.
+    #if !APPSTORE
     public func toggleAssist() {
         let activating = !assistRequested
         // If activating assist and not currently tracking, start tracking first
@@ -551,6 +564,7 @@ public class TrackerViewModel: ObservableObject {
             stopAssistAlarm()
         }
     }
+    #endif
 
     public func requestLocationPermission() {
         locationManager.requestAuthorization()

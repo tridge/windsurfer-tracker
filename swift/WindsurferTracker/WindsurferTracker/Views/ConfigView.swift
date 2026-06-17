@@ -80,7 +80,7 @@ struct ConfigView: View {
                                     .fontWeight(.semibold)
                                     .foregroundColor(.orange)
 
-                                Text("Tap 'Start Tracking' to grant permission")
+                                Text("Location access is required to report your position during races.")
                                     .font(.caption)
                                     .foregroundColor(.gray)
                             }
@@ -96,11 +96,13 @@ struct ConfigView: View {
 
             Spacer()
 
-            // Start button
+            // Start button. Before location permission is granted this button
+            // triggers the permission prompt, so it uses neutral wording
+            // ("Continue") per App Store Guideline 5.1.1.
             Button {
                 viewModel.startTracking()
             } label: {
-                Text("Start Tracking")
+                Text(viewModel.needsLocationPermission ? "Continue" : "Start Tracking")
                     .font(.title3)
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity)
