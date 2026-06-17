@@ -5138,16 +5138,17 @@ def event_sleep_schedule(eid):
 
 
 def event_sleep_window_active(eid):
-    """Is event `eid` currently inside its scheduled night-sleep window?
-    Times are in the event's own timezone; a window with start > end wraps
-    midnight. Returns False when disabled or no GT06 listener."""
+    """If event `eid` is currently inside its scheduled night-sleep window,
+    return its effective (overnight_mode_number, overnight_interval_min);
+    else None. Times are in the event's own timezone; start > end wraps
+    midnight. None when disabled or no GT06 listener."""
     sched = event_sleep_schedule(eid)
     if not sched or not sched.get("enabled"):
-        return False
+        return None
     start = _parse_hhmm(sched.get("start", "22:00"))
     end = _parse_hhmm(sched.get("end", "06:00"))
     if start is None or end is None or start == end:
-        return False
+        return None
     ev = _event_manager.get_event(eid) or {}
     try:
         tz = ZoneInfo(ev.get("timezone", "Australia/Sydney"))
@@ -5155,7 +5156,15 @@ def event_sleep_window_active(eid):
         tz = ZoneInfo("Australia/Sydney")
     now = datetime.now(tz)
     cur = now.hour * 60 + now.minute
-    return (start <= cur < end) if start < end else (cur >= start or cur < end)
+    in_window = (start <= cur < end) if start < end else (cur >= start or cur < end)
+    if not in_window:
+        return None
+    try:
+        mode = int(sched.get("overnight_mode_number") or _gt06_listener.overnight_mode_number)
+        interval = int(sched.get("overnight_interval_min") or _gt06_listener.overnight_interval_min)
+    except (TypeError, ValueError):
+        mode, interval = 5, 60
+    return (mode, interval)
 
 
 def run_sleep_scheduler(event_manager: EventManager, check_interval: int = 60):
@@ -5174,20 +5183,27 @@ def run_sleep_scheduler(event_manager: EventManager, check_interval: int = 60):
         try:
             if _gt06_listener is not None:
                 for eid in event_manager.list_events():
-                    active = event_sleep_window_active(eid)
+                    params = event_sleep_window_active(eid)  # (mode,int) or None
+                    active = params is not None
                     prev = last.get(eid)
                     if prev is None:
                         if active:
-                            n = _gt06_listener.scheduled_sleep_apply(eid, True)
+                            n = _gt06_listener.scheduled_sleep_apply(
+                                eid, True, params[0], params[1])
                             if n:
-                                log(f"[SLEEP-SCHED] Event {eid}: startup in window — "
-                                    f"slept {n} idle unit(s)")
+                                log(f"[SLEEP-SCHED] Event {eid}: startup in window "
+                                    f"(MODE{params[0]}/{params[1]}min) — slept {n} idle unit(s)")
                         last[eid] = active
                     elif active != prev:
-                        n = _gt06_listener.scheduled_sleep_apply(eid, active)
-                        log(f"[SLEEP-SCHED] Event {eid}: window "
-                            f"{'START → overnight' if active else 'END → race-idle'} "
-                            f"({n} unit(s))")
+                        if active:
+                            n = _gt06_listener.scheduled_sleep_apply(
+                                eid, True, params[0], params[1])
+                            log(f"[SLEEP-SCHED] Event {eid}: window START → overnight "
+                                f"MODE{params[0]}/{params[1]}min ({n} unit(s))")
+                        else:
+                            n = _gt06_listener.scheduled_sleep_apply(eid, False)
+                            log(f"[SLEEP-SCHED] Event {eid}: window END → race-idle "
+                                f"({n} unit(s))")
                         last[eid] = active
         except Exception as e:
             log(f"[SLEEP-SCHED] Error: {e}")

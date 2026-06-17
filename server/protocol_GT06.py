@@ -481,6 +481,12 @@ class GT06Connection:
         # intent. The effective MODE is firmware-dependent (V667 -> MODE4,
         # W07/V6.6x -> MODE1 long-TIMER) and resolved in the cxzt# handler.
         self.overnight = False
+        # When overnight was driven by a sleep SCHEDULE, the schedule's
+        # (mode, interval_min) — these override the config-resolved overnight
+        # mode/interval in the cxzt# handler. None = use config resolution
+        # (manual /admin/sleep or event-submode overnight).
+        self.sched_overnight_mode = None
+        self.sched_overnight_interval = None
         # Storm guard counter for overnight Freq re-pushes (see
         # OVERNIGHT_FREQ_MAX_RETRIES).
         self.overnight_freq_retries = 0
@@ -1174,29 +1180,40 @@ class GT06Listener:
                 # Scheduled night sleep: an idle tracker that connects while the
                 # event is inside its sleep window goes overnight (sticky on
                 # reconnect). Only deepens idle→overnight; never touches an
-                # active/racing tracker (this branch is the idle path).
+                # active/racing tracker (this branch is the idle path). The
+                # callback returns the effective (mode, interval_min) for the
+                # window, or None when not in a window.
+                sched_params = None
                 if idle_submode != "overnight" and self.get_event_sleep_active:
                     try:
-                        if self.get_event_sleep_active(gt_conn.eid):
+                        sched_params = self.get_event_sleep_active(gt_conn.eid)
+                        if sched_params:
                             idle_submode = "overnight"
                     except Exception:
-                        pass
+                        sched_params = None
                 if idle_submode == "overnight":
                     gt_conn.overnight = True
                     gt_conn.overnight_freq_retries = 0
-                    gt_conn.desired_mode = self.overnight_mode_number
+                    # Use the schedule's mode/interval if the window drove this;
+                    # otherwise (manual /admin/sleep) the global overnight default.
+                    if sched_params:
+                        ov_mode, ov_int = sched_params
+                        gt_conn.sched_overnight_mode = ov_mode
+                        gt_conn.sched_overnight_interval = ov_int
+                    else:
+                        ov_mode, ov_int = self.overnight_mode_number, self.overnight_interval_min
+                        gt_conn.sched_overnight_mode = None
+                        gt_conn.sched_overnight_interval = None
+                    gt_conn.desired_mode = ov_mode
                     # Overnight: queue ONLY cxzt# probe. If the device is
                     # already in the right MODE (it usually is — wake-cycle
                     # reconnects land here), the cxzt# handler will see
                     # M:overnight_mode == desired and do nothing; device
                     # just sleeps again on its own cadence. Otherwise the
-                    # handler pushes the full _overnight_cmds chain
-                    # (SLPDISCONNECT, ACCLINE, MODE{4|5}). This avoids the
-                    # re-push storm where every wake reset the timer back
-                    # to the start of its period.
+                    # handler pushes the full _overnight_cmds chain.
                     cmds = ["cxzt#"]
-                    gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
-                    self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
+                    gt_conn.expected_hbt_interval = ov_int * 60
+                    self._reset_rate_monitoring(gt_conn, ov_int * 60)
                 else:
                     gt_conn.overnight = False
                     gt_conn.desired_mode = 1
@@ -1244,6 +1261,20 @@ class GT06Listener:
                         did=gt_conn.imei,
                         skip_log=True,
                     )
+                # Reflect overnight as SLEEP in the UI — process_position carries
+                # idle/stopped but not the sleep flag, so a unit that goes
+                # overnight on (re)connect during a sleep window would otherwise
+                # show "idle" instead of "SLEEP". Set it explicitly + persist.
+                with pt._lock:
+                    ex = pt.current_positions.get(gt_conn.sailor_id)
+                    if ex:
+                        ex["idle"] = gt_conn.idle
+                        ex["stopped"] = gt_conn.idle
+                        ex["sleep"] = bool(gt_conn.overnight)
+                if pt.positions_file and self._write_positions:
+                    self._write_positions(
+                        pt.current_positions, pt.positions_file,
+                        getattr(tracker, 'user_overrides', {}), pt.position_tails)
 
         elif protocol in (0x12, 0x22):
             # Location
@@ -1512,12 +1543,19 @@ class GT06Listener:
                         # not (it clamps MODE4 to 120 and would storm), so those
                         # are configured to overnight_mode_number=1 and kept on
                         # MODE1 with a long TIMER instead.
-                        eff_mode = self._resolve_setting(
-                            gt_conn, "overnight_mode_number",
-                            self.overnight_mode_number)
-                        eff_interval = self._resolve_setting(
-                            gt_conn, "overnight_interval_min",
-                            self.overnight_interval_min)
+                        # A sleep SCHEDULE's mode/interval (stored on the conn)
+                        # win over the config resolution; otherwise fall back to
+                        # per-IMEI > firmware-prefix > global config.
+                        if gt_conn.sched_overnight_mode is not None:
+                            eff_mode = gt_conn.sched_overnight_mode
+                            eff_interval = gt_conn.sched_overnight_interval
+                        else:
+                            eff_mode = self._resolve_setting(
+                                gt_conn, "overnight_mode_number",
+                                self.overnight_mode_number)
+                            eff_interval = self._resolve_setting(
+                                gt_conn, "overnight_interval_min",
+                                self.overnight_interval_min)
                         if eff_mode == 1:
                             # MODE1 long-TIMER. desired_mode=1 means the overnight
                             # Freq re-push branch never runs for this firmware, so
@@ -1864,7 +1902,8 @@ class GT06Listener:
                 return True
         return False
 
-    def scheduled_sleep_apply(self, eid, sleep_active):
+    def scheduled_sleep_apply(self, eid, sleep_active,
+                              overnight_mode=None, overnight_interval_min=None):
         """Transition connected units in `eid` at a night-sleep window edge.
 
         sleep_active=True  → put currently-IDLE units into overnight deep-sleep.
@@ -1885,10 +1924,13 @@ class GT06Listener:
                 targets.append(gt_conn.sailor_id)
         for sid in targets:
             self.set_idle(eid, sid, True,
-                          submode="overnight" if sleep_active else "race")
+                          submode="overnight" if sleep_active else "race",
+                          overnight_mode=overnight_mode,
+                          overnight_interval_min=overnight_interval_min)
         return len(targets)
 
-    def set_idle(self, eid, sailor_id, idle, submode="race"):
+    def set_idle(self, eid, sailor_id, idle, submode="race",
+                 overnight_mode=None, overnight_interval_min=None):
         """Set idle state for the GT06 device matching (eid, sailor_id).
 
         When idle=True:
@@ -1925,13 +1967,22 @@ class GT06Listener:
                     if submode == "overnight":
                         gt_conn.overnight = True
                         gt_conn.overnight_freq_retries = 0
-                        gt_conn.desired_mode = self.overnight_mode_number
+                        # Schedule's mode/interval override config resolution
+                        # (stored on the conn for the cxzt# handler too).
+                        ov_int = overnight_interval_min or self.overnight_interval_min
+                        if overnight_mode is not None:
+                            gt_conn.sched_overnight_mode = overnight_mode
+                            gt_conn.sched_overnight_interval = ov_int
+                            gt_conn.desired_mode = overnight_mode
+                        else:
+                            gt_conn.sched_overnight_mode = None
+                            gt_conn.sched_overnight_interval = None
+                            gt_conn.desired_mode = self.overnight_mode_number
                         # Defer to the cxzt# handler — it resolves the firmware-
-                        # appropriate overnight MODE (MODE4 for V667, MODE1
-                        # long-TIMER for W07) and pushes it only if needed.
+                        # appropriate overnight MODE and pushes it only if needed.
                         cmds = ["cxzt#"]
-                        gt_conn.expected_hbt_interval = self.overnight_interval_min * 60
-                        self._reset_rate_monitoring(gt_conn, self.overnight_interval_min * 60)
+                        gt_conn.expected_hbt_interval = ov_int * 60
+                        self._reset_rate_monitoring(gt_conn, ov_int * 60)
                     else:
                         gt_conn.overnight = False
                         gt_conn.desired_mode = 1
