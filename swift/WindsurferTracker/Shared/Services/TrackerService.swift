@@ -40,6 +40,11 @@ public actor TrackerService {
     private var isInIdleMode = false
     private var idleIntervalSeconds: Int = 0  // From server ACK, 0 = disabled
     private var idleTask: Task<Void, Never>?
+    // Consecutive idle-heartbeat auth failures. After a few in a row (a wrong/
+    // stale stored password), stop idling so we don't spam the server and
+    // self-rate-limit the IP — which would block the Settings save that fixes it.
+    private var idleAuthFailures = 0
+    private let maxIdleAuthFailures = 3
 
     // Keepalive task (sends GPS-wait packets when no position was sent recently)
     private var keepaliveTask: Task<Void, Never>?
@@ -311,6 +316,7 @@ public actor TrackerService {
         isRunning = false
         isInIdleMode = true
         assistRequested = false
+        idleAuthFailures = 0
         keepaliveTask?.cancel()
         keepaliveTask = nil
 
@@ -374,6 +380,20 @@ public actor TrackerService {
         let response = await networkManager.send(packet)
         if let response = response {
             await handleACK(response)
+            // Back off if the server keeps rejecting our auth: a wrong/stale
+            // password would otherwise fail every cycle and rate-limit our IP.
+            // Only act on repeated failures so a transient blip doesn't drop us.
+            if response.isAuthError {
+                idleAuthFailures += 1
+                // Re-check isInIdleMode: the await above may have let idle stop/
+                // resume while this send was in flight; avoid a double exit.
+                if idleAuthFailures >= maxIdleAuthFailures && isInIdleMode {
+                    print("[TrackerService] Idle auth failed \(idleAuthFailures)x — stopping idle to avoid rate-limit spam")
+                    await exitIdleMode()
+                }
+            } else {
+                idleAuthFailures = 0
+            }
         }
     }
 

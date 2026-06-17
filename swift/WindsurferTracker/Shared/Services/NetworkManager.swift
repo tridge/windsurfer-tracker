@@ -379,6 +379,15 @@ public actor NetworkManager {
                   httpResponse.statusCode == 200 else {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
                 print("[NET] HTTP error status=\(status)")
+                // Surface auth / rate-limit errors (same {"error":"auth"} body as
+                // a 200 ack) so callers like the idle backoff can react. Without
+                // this, HTTP-fallback and watchOS (always HTTP) would never see
+                // an auth failure and could keep retrying indefinitely.
+                if (status == 401 || status == 429),
+                   let ackResponse = try? JSONDecoder().decode(AckResponse.self, from: responseData) {
+                    ackPublisher.send(ackResponse)
+                    return ackResponse
+                }
                 errorPublisher.send(.serverUnreachable)
                 return nil
             }
