@@ -359,6 +359,32 @@
                 </div>
             </div>
             <div id="gt06Error" class="error-message" style="display:none"></div>
+
+            <!-- Overnight sleep schedule (global default) -->
+            <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:12px 16px;margin-bottom:14px;font-size:13px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <b style="color:#333">Overnight sleep schedule (global default)</b>
+                    <span id="gt06ConfigMsg" style="color:#16a34a;font-size:12px"></span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+                    <label><input type="checkbox" id="schedEnabled"> Enable night sleep</label>
+                    <label>From <input type="time" id="schedStart" value="22:00" style="font-size:13px"></label>
+                    <label>to <input type="time" id="schedEnd" value="06:00" style="font-size:13px"> <span style="color:#999">(event timezone)</span></label>
+                    <label>Mode
+                        <select id="schedMode" style="font-size:13px">
+                            <option value="5">MODE5 (timed, recommended)</option>
+                            <option value="4">MODE4 (vibration)</option>
+                        </select>
+                    </label>
+                    <label>Wake every <input type="number" id="schedInterval" value="60" min="1" style="width:60px;font-size:13px"> min</label>
+                    <button class="btn btn-primary" onclick="saveGt06Config()">Save</button>
+                </div>
+                <div style="color:#888;margin-top:8px;font-size:12px">
+                    Only <b>idle</b> trackers are slept during the window; actively-tracked units are never auto-slept.
+                    Per-event overrides can be set on each event. Applied live — no restart.
+                </div>
+            </div>
+
             <div id="trackerList" class="event-list">
                 <div class="loading">Loading trackers&hellip;</div>
             </div>
@@ -523,6 +549,20 @@
                         <span>Assist Button Enabled</span>
                     </label>
                     <small>When disabled, the assist/emergency button is hidden in tracker apps</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="evSchedOverride" style="width:auto;margin:0;" onchange="document.getElementById('evSchedFields').style.display=this.checked?'block':'none'">
+                        <span>Override night-sleep schedule for this event</span>
+                    </label>
+                    <small>Otherwise this event uses the global GT06 sleep schedule.</small>
+                    <div id="evSchedFields" style="display:none;margin-top:8px;padding:8px;background:#f7f8fa;border-radius:5px;font-size:13px">
+                        <label><input type="checkbox" id="evSchedEnabled"> Enable night sleep</label><br>
+                        <label style="display:inline-block;margin-top:6px">From <input type="time" id="evSchedStart" value="22:00"> to <input type="time" id="evSchedEnd" value="06:00"> (this event's timezone)</label><br>
+                        <label style="display:inline-block;margin-top:6px">MODE
+                            <select id="evSchedMode"><option value="5">5 (timed)</option><option value="4">4 (vibration)</option></select>,
+                            wake every <input type="number" id="evSchedInterval" value="60" min="1" style="width:55px"> min</label>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="idleInterval">Idle Interval (seconds)</label>
@@ -762,8 +802,21 @@
             setLocationFromTimezone('Australia/Sydney');  // Set default location
             document.getElementById('assistEnabled').checked = true;  // Default to enabled
             document.getElementById('idleInterval').value = 0;
+            setEventSchedFields(null);
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
+        }
+
+        function setEventSchedFields(s) {
+            const on = !!s;
+            document.getElementById('evSchedOverride').checked = on;
+            document.getElementById('evSchedFields').style.display = on ? 'block' : 'none';
+            s = s || {};
+            document.getElementById('evSchedEnabled').checked = !!s.enabled;
+            document.getElementById('evSchedStart').value = s.start || '22:00';
+            document.getElementById('evSchedEnd').value = s.end || '06:00';
+            document.getElementById('evSchedMode').value = String(s.overnight_mode_number || 5);
+            document.getElementById('evSchedInterval').value = s.overnight_interval_min || 60;
         }
 
         async function editEvent(eid) {
@@ -794,6 +847,7 @@
                 document.getElementById('homeLon').value = event.home_lon || '';
                 document.getElementById('assistEnabled').checked = event.assist_enabled !== false;  // Default true
                 document.getElementById('idleInterval').value = event.idle_interval || 0;
+                setEventSchedFields(event.sleep_schedule || null);
                 // If no location set, default from timezone
                 if (!event.home_location && !event.home_lat) {
                     setLocationFromTimezone(event.timezone || 'Australia/Sydney');
@@ -843,7 +897,14 @@
                 home_lat: homeLat ? parseFloat(homeLat) : null,
                 home_lon: homeLon ? parseFloat(homeLon) : null,
                 assist_enabled: document.getElementById('assistEnabled').checked,
-                idle_interval: parseInt(document.getElementById('idleInterval').value) || 0
+                idle_interval: parseInt(document.getElementById('idleInterval').value) || 0,
+                sleep_schedule: document.getElementById('evSchedOverride').checked ? {
+                    enabled: document.getElementById('evSchedEnabled').checked,
+                    start: document.getElementById('evSchedStart').value,
+                    end: document.getElementById('evSchedEnd').value,
+                    overnight_mode_number: parseInt(document.getElementById('evSchedMode').value, 10),
+                    overnight_interval_min: parseInt(document.getElementById('evSchedInterval').value, 10) || 60
+                } : null
             };
 
             try {
@@ -924,7 +985,46 @@
                 ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
+        async function loadGt06Config() {
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/config`, {
+                    headers: { 'X-Manager-Password': managerPassword }
+                });
+                if (!r.ok) return;
+                const d = await r.json();
+                const s = d.sleep_schedule || {};
+                document.getElementById('schedEnabled').checked = !!s.enabled;
+                if (s.start) document.getElementById('schedStart').value = s.start;
+                if (s.end) document.getElementById('schedEnd').value = s.end;
+                document.getElementById('schedMode').value = String(s.overnight_mode_number || d.overnight_mode_number || 5);
+                document.getElementById('schedInterval').value = s.overnight_interval_min || d.overnight_interval_min || 60;
+            } catch (e) { /* leave defaults */ }
+        }
+
+        async function saveGt06Config() {
+            const msg = document.getElementById('gt06ConfigMsg');
+            const body = { sleep_schedule: {
+                enabled: document.getElementById('schedEnabled').checked,
+                start: document.getElementById('schedStart').value,
+                end: document.getElementById('schedEnd').value,
+                overnight_mode_number: parseInt(document.getElementById('schedMode').value, 10),
+                overnight_interval_min: parseInt(document.getElementById('schedInterval').value, 10) || 60
+            }};
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/config`, {
+                    method: 'POST',
+                    headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const d = await r.json();
+                if (!d.success) { msg.style.color = '#c00'; msg.textContent = 'Error: ' + (d.error || r.status); return; }
+                msg.style.color = '#16a34a'; msg.textContent = 'Saved (applied live)';
+                setTimeout(() => { msg.textContent = ''; }, 3000);
+            } catch (e) { msg.style.color = '#c00'; msg.textContent = 'Error: ' + e.message; }
+        }
+
         async function loadTrackers() {
+            loadGt06Config();
             const errEl = document.getElementById('gt06Error');
             errEl.style.display = 'none';
             try {
