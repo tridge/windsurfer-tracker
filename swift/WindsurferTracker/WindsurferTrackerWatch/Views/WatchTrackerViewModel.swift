@@ -265,6 +265,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             .store(in: &cancellables)
 
         // Subscribe to remote cancel assist commands
+        // Compiled out of App Store builds (sailor-side assist request removed).
+        #if !APPSTORE
         TrackerService.shared.remoteCancelAssistPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -274,6 +276,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
                 self?.errorMessage = "Assist cancelled"
             }
             .store(in: &cancellables)
+        #endif
 
         // Subscribe to remote start commands (resume from idle)
         TrackerService.shared.remoteStartPublisher
@@ -598,6 +601,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
         }
     }
 
+    // Sailor-side assist request — compiled out of App Store builds.
+    #if !APPSTORE
     public func toggleAssist() {
         let activating = !assistRequested
         tonePlayer.play(ascending: activating)
@@ -615,6 +620,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             assistRequested = await TrackerService.shared.isAssistRequested
         }
     }
+    #endif
 
     public func fetchEvents() {
         eventsLoading = true
@@ -677,6 +683,8 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
 
     // MARK: - Assist Tone Timer
 
+    // Sailor-side assist tone timer — compiled out of App Store builds.
+    #if !APPSTORE
     private func startAssistToneTimer() {
         assistToneTimer?.invalidate()
         // Play ascending triple tone every 5 seconds while assist is active
@@ -686,6 +694,7 @@ public class WatchTrackerViewModel: NSObject, ObservableObject {
             }
         }
     }
+    #endif
 
     private func stopAssistToneTimer() {
         assistToneTimer?.invalidate()

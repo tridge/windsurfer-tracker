@@ -218,6 +218,8 @@ struct WatchTrackingView: View {
                     .frame(height: 4)
 
                 // Assist / Cancel Assist button (only show if assist is enabled and not in idle mode)
+                // Compiled out of App Store builds (sailor-side assist request removed).
+                #if !APPSTORE
                 if viewModel.assistEnabled && !viewModel.isIdleMode {
                     Button {
                         if viewModel.assistRequested {
@@ -238,6 +240,7 @@ struct WatchTrackingView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                 }
+                #endif
             }
             .padding(.bottom, 4)
 
@@ -274,6 +277,8 @@ struct WatchTrackingView: View {
             }
 
             // Slide-to-assist confirmation overlay
+            // Compiled out of App Store builds (sailor-side assist request removed).
+            #if !APPSTORE
             if showAssistConfirmation {
                 SlideToConfirmOverlay(
                     title: "Slide for Assist",
@@ -288,6 +293,7 @@ struct WatchTrackingView: View {
                     }
                 )
             }
+            #endif
         }
         .navigationBarBackButtonHidden(true)
         .onTapGesture {

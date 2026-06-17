@@ -12,6 +12,8 @@ struct WatchEULAView: View {
                     .bold()
 
                 VStack(alignment: .leading, spacing: 8) {
+                    // Assist disclaimer — compiled out of App Store builds.
+                    #if !APPSTORE
                     Text("IMPORTANT: ASSIST FEATURE")
                         .font(.caption)
                         .bold()
@@ -25,14 +27,17 @@ struct WatchEULAView: View {
                         .foregroundColor(.red)
 
                     Divider()
+                    #endif
 
                     Text("By using this app you agree that:")
                         .font(.caption2)
                         .bold()
 
                     VStack(alignment: .leading, spacing: 4) {
+                        #if !APPSTORE
                         Text("• Assist response depends on event staff availability")
                         Text("• No guarantee of response time")
+                        #endif
                         Text("• GPS accuracy varies by conditions")
                         Text("• Network required for tracking")
                         Text("• Water sports involve inherent risks")
