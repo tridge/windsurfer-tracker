@@ -9,11 +9,16 @@ struct SettingsView: View {
     @State private var validationError: String? = nil
     @State private var isCheckingPassword = false
 
-    // Local state to avoid updating settings while typing
+    // Local state to avoid updating settings while typing.
+    // eventId is staged here too (not bound live) so changing the event does
+    // not repoint the running idle/tracking session before the new password
+    // is confirmed on Done — otherwise the session auths the new event with
+    // the old password and self-rate-limits, blocking the save.
     @State private var tempSailorId: String = ""
     @State private var tempPassword: String = ""
     @State private var tempServerHost: String = ""
     @State private var tempServerPort: Int = 41234
+    @State private var tempEventId: Int = 0
 
     // Track original auth values to detect changes
     @State private var originalSailorId: String = ""
@@ -79,7 +84,7 @@ struct SettingsView: View {
                         HStack {
                             Text("Event ID")
                             Spacer()
-                            TextField("1", value: $viewModel.eventId, format: .number)
+                            TextField("1", value: $tempEventId, format: .number)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 80)
                                 .multilineTextAlignment(.trailing)
@@ -92,12 +97,12 @@ struct SettingsView: View {
                             }
                         }
                     } else {
-                        Picker("Event", selection: $viewModel.eventId) {
+                        Picker("Event", selection: $tempEventId) {
                             ForEach(viewModel.events) { event in
                                 Text(event.name).tag(event.eid)
                             }
                         }
-                        .onChange(of: viewModel.eventId) { newEventId in
+                        .onChange(of: tempEventId) { newEventId in
                             // Auto-fill saved password for this event if available
                             if let savedPassword = PreferencesManager.shared.getEventPassword(eventId: newEventId) {
                                 tempPassword = savedPassword
@@ -231,7 +236,7 @@ struct SettingsView: View {
                         // Check if auth fields changed
                         let authFieldsChanged = tempSailorId != originalSailorId ||
                             tempPassword != originalPassword ||
-                            viewModel.eventId != originalEventId
+                            tempEventId != originalEventId
 
                         if authFieldsChanged {
                             // Check password with server
@@ -244,7 +249,7 @@ struct SettingsView: View {
                                 )
                                 let osVersion = "iOS \(UIDevice.current.systemVersion)"
                                 let result = await networkManager.checkPassword(
-                                    eventId: viewModel.eventId,
+                                    eventId: tempEventId,
                                     password: tempPassword,
                                     userId: tempSailorId,
                                     userOs: osVersion,
@@ -259,8 +264,10 @@ struct SettingsView: View {
                                     viewModel.password = tempPassword
                                     viewModel.serverHost = tempServerHost
                                     viewModel.serverPort = tempServerPort
+                                    // Commit the staged event only after a successful auth check
+                                    viewModel.eventId = tempEventId
                                     // Save password for this event for quick switching
-                                    PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
+                                    PreferencesManager.shared.saveEventPassword(eventId: tempEventId, password: tempPassword)
                                     dismiss()
                                 case .failure(let error):
                                     validationError = error.localizedDescription
@@ -272,8 +279,9 @@ struct SettingsView: View {
                             viewModel.password = tempPassword
                             viewModel.serverHost = tempServerHost
                             viewModel.serverPort = tempServerPort
+                            viewModel.eventId = tempEventId
                             // Save password for this event for quick switching
-                            PreferencesManager.shared.saveEventPassword(eventId: viewModel.eventId, password: tempPassword)
+                            PreferencesManager.shared.saveEventPassword(eventId: tempEventId, password: tempPassword)
                             dismiss()
                         }
                     }
@@ -308,6 +316,7 @@ struct SettingsView: View {
                 tempPassword = viewModel.password
                 tempServerHost = viewModel.serverHost
                 tempServerPort = viewModel.serverPort
+                tempEventId = viewModel.eventId
                 // Track original auth values
                 originalSailorId = viewModel.sailorId
                 originalPassword = viewModel.password
