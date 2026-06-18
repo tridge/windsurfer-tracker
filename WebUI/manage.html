@@ -1008,7 +1008,9 @@
             const c = gt06Cfg, s = c.sleep_schedule || {};
             const evOpts = (sel) => gt06CfgEvents.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)} (#${e.eid})</option>`).join('');
-            const num = (id, v, w) => `<input type="number" id="${id}" value="${v == null ? '' : v}" style="width:${w || 70}px;font-size:13px">`;
+            const num = (id, v, w) => `<input type="number" id="${id}" value="${esc(v == null ? '' : v)}" style="width:${w || 70}px;font-size:13px">`;
+            // labelled numeric field: tooltip on hover (ⓘ), value defaults to `def`, shows "def N" hint for easy restore
+            const fld = (id, label, val, def, tip) => `<label style="display:inline-flex;flex-direction:column;gap:2px;font-size:13px"><span>${label}&nbsp;<span onclick="showGt06Tip(event)" title="${esc(tip)}" style="color:#3b82f6;cursor:pointer;font-weight:bold">&#9432;</span></span><span style="white-space:nowrap"><input type="number" id="${id}" value="${esc(val == null ? def : val)}" style="width:80px;font-size:13px"> <span style="color:#999;font-size:11px">def ${def}</span></span></label>`;
             document.getElementById('gt06SettingsBody').innerHTML = `
                 <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
                     <b>Default event for GT06 devices</b>
@@ -1034,14 +1036,16 @@
 
                 <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
                     <b>Overnight / idle defaults</b>
-                    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px">
-                        <label>Overnight mode <select id="cfgOvMode" style="font-size:13px">
-                            ${[1,4,5].map(m=>`<option value="${m}" ${String(c.overnight_mode_number||4)===String(m)?'selected':''}>MODE${m}</option>`).join('')}</select></label>
-                        <label>Overnight wake (min) ${num('cfgOvInterval', c.overnight_interval_min)}</label>
-                        <label>Idle heartbeat (s) ${num('cfgIdleHbt', c.idle_hbt_interval)}</label>
-                        <label>Idle LOC (s) ${num('cfgIdleLoc', c.idle_loc_interval)}</label>
-                        <label>Idle poll (s) ${num('cfgIdlePoll', c.idle_poll_interval)}</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;align-items:flex-end">
+                        <label style="display:inline-flex;flex-direction:column;gap:2px;font-size:13px"><span>Overnight mode&nbsp;<span onclick="showGt06Tip(event)" title="Deep-sleep mode used during the night-sleep window (MODE5 = timed deep sleep, recommended)." style="color:#3b82f6;cursor:pointer;font-weight:bold">&#9432;</span></span><span style="white-space:nowrap"><select id="cfgOvMode" style="font-size:13px">${[1,4,5].map(m=>`<option value="${m}" ${String(c.overnight_mode_number||4)===String(m)?'selected':''}>MODE${m}</option>`).join('')}</select> <span style="color:#999;font-size:11px">def 5</span></span></label>
+                        ${fld('cfgOvInterval','Overnight wake (min)', c.overnight_interval_min, 30, 'How often sleeping units wake to report a position, in minutes (vendor minimum 5).')}
+                        ${fld('cfgIdleHbt','Idle heartbeat (s)', c.idle_hbt_interval, 15, 'Expected heartbeat interval. Sets the no-traffic disconnect threshold (~3x this + 30s); the Idle keepalive poll must be faster than that or units drop before being pinged.')}
+                        ${fld('cfgIdleAccOn','Idle moving LOC (s)', c.idle_acc_on_interval, 60, 'TIMER T1 (ACC-ON): upload interval when the unit is MOVING. Vendor range 5-60s (device accepts higher). Does not affect responsiveness.')}
+                        ${fld('cfgIdleAccOff','Idle parked LOC (s)', c.idle_acc_off_interval, 1800, 'TIMER T2 (ACC-OFF): how often a PARKED unit uploads a position = the GPS-off lever. Range 5-1800s; 1800 = every 30 min, GPS stays powered down between uploads.')}
+                        ${fld('cfgIdleKeepalive','Idle keepalive (s)', c.idle_keepalive_interval, 60, 'How often the server pings each unit (STATUS#) to hold the TCP open for ~1s operator response. Bigger = less battery, but must stay under both the disconnect threshold (3x heartbeat + 30s) and the carrier NAT idle-timeout.')}
                     </div>
+                    <div id="gt06TipBox" style="display:none;margin-top:10px;padding:9px 11px;background:#eef4ff;border:1px solid #cfe0ff;border-radius:5px;font-size:12px;color:#1f3a5f;line-height:1.4" onclick="this.style.display='none'"></div>
+                    <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Values clamp to 5-1800s server-side; invalid combinations are flagged on Save. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
                 <button class="btn btn-primary" onclick="saveGt06Settings()">Save settings (applied live)</button>
@@ -1068,7 +1072,32 @@
             return d;
         }
 
+        function showGt06Tip(e) {
+            e.preventDefault(); e.stopPropagation();
+            const tip = (e.currentTarget && e.currentTarget.title) || '';
+            const box = document.getElementById('gt06TipBox');
+            if (!box) return;
+            box.textContent = tip;
+            box.style.display = tip ? 'block' : 'none';
+        }
+
+        function validateGt06Settings() {
+            const iv = id => { const n = parseInt(document.getElementById(id).value, 10); return isNaN(n) ? null : n; };
+            const issues = [];
+            for (const [id, name] of [['cfgIdleHbt','Idle heartbeat'], ['cfgIdleAccOn','Idle moving LOC'],
+                                      ['cfgIdleAccOff','Idle parked LOC'], ['cfgIdleKeepalive','Idle keepalive']]) {
+                const val = iv(id);
+                if (val !== null && (val < 5 || val > 1800)) issues.push(`${name} (${val}) must be 5–1800 s`);
+            }
+            const hbt = iv('cfgIdleHbt'), ka = iv('cfgIdleKeepalive');
+            if (hbt !== null && ka !== null && ka >= hbt * 3 + 30)
+                issues.push(`Idle keepalive (${ka}s) ≥ disconnect threshold (${hbt * 3 + 30}s = 3×heartbeat+30) — units would drop before the poll. Lower keepalive or raise Idle heartbeat.`);
+            return issues;
+        }
+
         async function saveGt06Settings() {
+            const problems = validateGt06Settings();
+            if (problems.length) { gt06CfgMsg('⚠ ' + problems.join(' · '), false); return; }
             const v = id => document.getElementById(id).value;
             const iv = id => { const n = parseInt(v(id), 10); return isNaN(n) ? undefined : n; };
             const body = {
@@ -1076,8 +1105,9 @@
                 overnight_mode_number: parseInt(v('cfgOvMode'), 10),
                 overnight_interval_min: iv('cfgOvInterval'),
                 idle_hbt_interval: iv('cfgIdleHbt'),
-                idle_loc_interval: iv('cfgIdleLoc'),
-                idle_poll_interval: iv('cfgIdlePoll'),
+                idle_acc_on_interval: iv('cfgIdleAccOn'),
+                idle_acc_off_interval: iv('cfgIdleAccOff'),
+                idle_keepalive_interval: iv('cfgIdleKeepalive'),
                 sleep_schedule: {
                     enabled: document.getElementById('cfgSchedEnabled').checked,
                     start: v('cfgSchedStart'), end: v('cfgSchedEnd'),
