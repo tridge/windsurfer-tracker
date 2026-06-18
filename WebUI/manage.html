@@ -1044,7 +1044,7 @@
                         ${fld('cfgIdleAccOff','Idle parked LOC (s)', c.idle_acc_off_interval, 1800, 'TIMER T2 (ACC-OFF): how often a PARKED unit uploads a position = the GPS-off lever. Range 5-1800s; 1800 = every 30 min, GPS stays powered down between uploads.')}
                         ${fld('cfgIdleKeepalive','Idle keepalive (s)', c.idle_keepalive_interval, 60, 'How often the server pings each unit (STATUS#) to hold the TCP open for ~1s operator response. Bigger = less battery, but must stay under both the disconnect threshold (3x heartbeat + 30s) and the carrier NAT idle-timeout.')}
                     </div>
-                    <div id="gt06TipBox" style="display:none;margin-top:10px;padding:9px 11px;background:#eef4ff;border:1px solid #cfe0ff;border-radius:5px;font-size:12px;color:#1f3a5f;line-height:1.4" onclick="this.style.display='none'"></div>
+                    <div id="gt06TipBox" style="display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;padding:12px 14px;background:#1f3a5f;color:#fff;border-radius:8px;font-size:13px;line-height:1.45;box-shadow:0 2px 14px rgba(0,0,0,0.35);cursor:pointer" onclick="this.style.display='none'"></div>
                     <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Values clamp to 5-1800s server-side; invalid combinations are flagged on Save. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
@@ -1088,7 +1088,7 @@
             const tip = (e.currentTarget && e.currentTarget.title) || '';
             const box = document.getElementById('gt06TipBox');
             if (!box) return;
-            box.textContent = tip;
+            box.textContent = tip ? (tip + '   (tap to dismiss)') : '';
             box.style.display = tip ? 'block' : 'none';
         }
 
