@@ -48,6 +48,7 @@ WebUI/config.js
 key.properties
 keys/
 keystore.properties
+/log_analysis/
 local.properties
 play-store-key.json
 /app/
