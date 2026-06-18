@@ -1048,6 +1048,17 @@
                     <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Values clamp to 5-1800s server-side; invalid combinations are flagged on Save. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
+                <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Lag catch-up (LTE reconnect)</b>
+                    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;align-items:flex-end">
+                        ${fld('cfgLagSec','Lag threshold (s)', c.lag_remediation_sec, 0, 'Enable + threshold. 0 = OFF. If a reconnected unit has buffered fixes lagging real time by more than this many seconds, drain the backlog at the catch-up interval below. 30 recommended for race-day LTE drops.')}
+                        ${fld('cfgLagDrain','Catch-up interval (s)', c.lag_drain_interval, 2, 'During catch-up, capture at this interval so the device blind-buffer replay (about 1Hz) outpaces capture and drains the backlog. 2s = 0.5Hz capture.')}
+                        ${fld('cfgLagRestore','Restore-when-caught (s)', c.lag_restore_sec, 8, 'Once the lag falls below this, restore normal 1Hz tracking.')}
+                        ${fld('cfgLagMax','Max drain (s)', c.lag_drain_max_sec, 180, 'Give up draining after this long and restore 1Hz regardless.')}
+                    </div>
+                    <div style="color:#888;margin-top:10px;font-size:12px">When LTE drops mid-race and a unit reconnects with a backlog of buffered fixes, this drains them at a lower capture rate so they are not lost as [DUP]. <b>Set Lag threshold &gt; 0 to enable</b> (currently OFF by default).</div>
+                </div>
+
                 <button class="btn btn-primary" onclick="saveGt06Settings()">Save settings (applied live)</button>
 
                 <div style="margin-top:22px">
@@ -1108,6 +1119,10 @@
                 idle_acc_on_interval: iv('cfgIdleAccOn'),
                 idle_acc_off_interval: iv('cfgIdleAccOff'),
                 idle_keepalive_interval: iv('cfgIdleKeepalive'),
+                lag_remediation_sec: iv('cfgLagSec'),
+                lag_drain_interval: iv('cfgLagDrain'),
+                lag_restore_sec: iv('cfgLagRestore'),
+                lag_drain_max_sec: iv('cfgLagMax'),
                 sleep_schedule: {
                     enabled: document.getElementById('cfgSchedEnabled').checked,
                     start: v('cfgSchedStart'), end: v('cfgSchedEnd'),
