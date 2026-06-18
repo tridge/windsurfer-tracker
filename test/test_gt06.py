@@ -74,10 +74,10 @@ def test_login_sends_commands(gt06_client):
 
 
 def test_login_defaults_to_idle(gt06_client):
-    """First-ever login should default to idle (TIMER,60,60#)."""
+    """First-ever login should default to idle (TIMER,60,1800#)."""
     frames = gt06_client.send_login()
     cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
-    assert "TIMER,15,15#" in cmds, f"Expected idle TIMER, got: {cmds}"
+    assert "TIMER,60,1800#" in cmds, f"Expected idle TIMER, got: {cmds}"
     assert "SENDS,1#" in cmds, f"Expected idle SENDS, got: {cmds}"
 
 
@@ -192,7 +192,7 @@ def test_stop_sets_gt06_idle(gt06_client, http_client, server):
     assert status == 200
 
     cmds = gt06_client.recv_all_queued_commands()
-    assert "TIMER,15,15#" in cmds, f"Expected idle TIMER, got: {cmds}"
+    assert "TIMER,60,1800#" in cmds, f"Expected idle TIMER, got: {cmds}"
     assert "SENDS,1#" in cmds, f"Expected idle SENDS, got: {cmds}"
 
 
@@ -438,7 +438,7 @@ def test_reconnect_stays_idle(gt06_client, server):
 
     frames = gt06_client.send_login(imei)
     cmds = gt06_client.recv_all_queued_commands(initial_frames=frames)
-    assert "TIMER,15,15#" in cmds, f"Expected idle TIMER on reconnect, got: {cmds}"
+    assert "TIMER,60,1800#" in cmds, f"Expected idle TIMER on reconnect, got: {cmds}"
 
 
 def test_reconnect_stays_active(gt06_client, http_client, server):
@@ -477,7 +477,7 @@ def test_stop_all_includes_gt06(gt06_client, http_client, server):
     assert status == 200
 
     cmds = gt06_client.recv_all_queued_commands()
-    assert "TIMER,15,15#" in cmds, f"Expected idle TIMER from stop-all, got: {cmds}"
+    assert "TIMER,60,1800#" in cmds, f"Expected idle TIMER from stop-all, got: {cmds}"
 
 
 def test_start_all_includes_gt06(gt06_client, http_client, server):

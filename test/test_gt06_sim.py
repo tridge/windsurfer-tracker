@@ -475,6 +475,166 @@ def test_overnight_freq_storm_is_capped(gt06_sim_factory, server):
     assert gave_up, "storm guard never gave up:\n" + "\n".join(lines)
 
 
+def test_schedule_mode4_floored_per_firmware(gt06_sim_factory, server):
+    """Hard firmware floor: a sleep SCHEDULE set to MODE4 must NOT reach W07/
+    V6.6x firmware (which hard-bricks on MODE4) — it's downgraded to the
+    firmware-safe mode. V667, which tolerates MODE4, still gets it. Regression
+    for the 2026-06-18 brick: the schedule path bypasses _resolve_setting, so
+    the firmware_overrides guard alone didn't protect these units."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    # Window active now in the event tz, ~2h to wake so the interval clamp
+    # doesn't fire, overnight mode forced to 4.
+    now = datetime.now(ZoneInfo("Pacific/Auckland"))
+    sched = {"enabled": True,
+             "start": (now - timedelta(hours=1)).strftime("%H:%M"),
+             "end": (now + timedelta(hours=2)).strftime("%H:%M"),
+             "overnight_mode_number": 4, "overnight_interval_min": 60}
+    status, _ = _http(server).patch(
+        f"/api/manage/event/{EID}", {"sleep_schedule": sched},
+        headers={"X-Manager-Password": MANAGER_PASSWORD})
+    assert status == 200, f"couldn't set sleep schedule: {status}"
+    try:
+        # W07 (V6.68) reporting MODE4 — must be pulled off MODE4, never re-pushed.
+        w07 = gt06_sim_factory("999010000004468",
+                               firmware="W07_MG133_10F8G_B53_V6.68",
+                               mode=4, freq=120)
+        _wait_for_login(server, w07.sailor_id)
+        marker = _log_marker(server, "floor4")
+        for _ in range(4):
+            _http(server).get(
+                f"/api/event/{EID}/admin/gt06-cmd/{w07.sailor_id}?cmd=cxzt%23",
+                headers={"X-Admin-Password": ADMIN_PW})
+            time.sleep(0.2)
+        assert _wait_for(lambda: w07.mode != 4, timeout=4.0), \
+            f"W07 left in MODE4 under a MODE4 schedule: mode={w07.mode}"
+        lines = _log_lines_for(server, w07.sailor_id, since_marker=marker)
+        assert not any("MODE4," in l for l in lines), \
+            f"server pushed MODE4 to W07 firmware: {[l for l in lines if 'MODE4,' in l]}"
+
+        # V667 tolerates MODE4 — the schedule's MODE4 should reach it.
+        v667 = gt06_sim_factory("999010000004667",
+                                firmware="NT19D_MG133_10F8G_B53_V667",
+                                mode=1, freq=540)
+        _wait_for_login(server, v667.sailor_id)
+        for _ in range(4):
+            _http(server).get(
+                f"/api/event/{EID}/admin/gt06-cmd/{v667.sailor_id}?cmd=cxzt%23",
+                headers={"X-Admin-Password": ADMIN_PW})
+            time.sleep(0.2)
+        assert _wait_for(lambda: v667.mode == 4, timeout=4.0), \
+            f"V667 didn't get MODE4 from the schedule: mode={v667.mode}"
+    finally:
+        _http(server).patch(
+            f"/api/manage/event/{EID}", {"sleep_schedule": {"enabled": False}},
+            headers={"X-Manager-Password": MANAGER_PASSWORD})
+
+
+def test_raw_mode4_command_refused_on_w07(gt06_sim_factory, server):
+    """A raw operator MODE4 command (the manual command box) must be dropped
+    for W07/V6.6x firmware — it bricks them — but still reach V667. Guards the
+    path the scheduled-sleep floor doesn't cover (_queue_commands safety net)."""
+    w07 = gt06_sim_factory("999010000004470",
+                           firmware="W07_MG133_10F8G_B53_V6.68", mode=1, freq=540)
+    _wait_for_login(server, w07.sailor_id)
+    # cxzt# first so the server learns the firmware before we send MODE4.
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{w07.sailor_id}?cmd=cxzt%23",
+        headers={"X-Admin-Password": ADMIN_PW})
+    time.sleep(0.5)
+    marker = _log_marker(server, "rawmode4")
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{w07.sailor_id}?cmd=MODE4%2C900%23",
+        headers={"X-Admin-Password": ADMIN_PW})
+    time.sleep(1.0)
+    assert w07.mode != 4, f"raw MODE4 reached W07 firmware: mode={w07.mode}"
+    lines = _log_lines_for(server, w07.sailor_id, since_marker=marker)
+    assert any("refusing" in l and "MODE4" in l for l in lines), \
+        f"no refusal logged for raw MODE4 to W07: {lines}"
+
+    # V667 tolerates MODE4 — the same raw command must NOT be refused.
+    v667 = gt06_sim_factory("999010000004671",
+                            firmware="NT19D_MG133_10F8G_B53_V667", mode=1, freq=540)
+    _wait_for_login(server, v667.sailor_id)
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{v667.sailor_id}?cmd=cxzt%23",
+        headers={"X-Admin-Password": ADMIN_PW})
+    time.sleep(0.5)
+    vmarker = _log_marker(server, "rawmode4v667")
+    _http(server).get(
+        f"/api/event/{EID}/admin/gt06-cmd/{v667.sailor_id}?cmd=MODE4%2C900%23",
+        headers={"X-Admin-Password": ADMIN_PW})
+    time.sleep(1.0)
+    vlines = _log_lines_for(server, v667.sailor_id, since_marker=vmarker)
+    assert not any("refusing" in l for l in vlines), \
+        f"raw MODE4 wrongly refused for V667: {vlines}"
+
+
+def test_overnight_sets_gpscodewait_failfast(gt06_sim_factory, server):
+    """Overnight deep-sleep pushes the fail-fast GPSCODEWAIT=2; race/active hold
+    the factory default 10 (so it's auto-managed per mode, not left stale)."""
+    sim = gt06_sim_factory("999010000012001")
+    _wait_for_login(server, sim.sailor_id)
+    assert sim.gpscodewait == 10, "sim factory default should be 10"
+    _admin_post(server, f"/api/event/{EID}/admin/sleep/{sim.sailor_id}")
+    for _ in range(3):
+        _admin_get(server,
+                   f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+        time.sleep(0.2)
+    assert _wait_for(lambda: sim.gpscodewait == 2, timeout=3.0), \
+        f"overnight didn't push GPSCODEWAIT=2: {sim.gpscodewait}"
+
+
+def test_cxzt_updates_battery_voltage_in_positions(gt06_sim_factory, server):
+    """cxzt# carries *BT:<mV>; the server must reflect it as bat_v in
+    current_positions, so event.html shows fresh voltage on every (MODE5) wake
+    without a STATUS# round-trip — which doesn't complete in the short dwell."""
+    sim = gt06_sim_factory("999010000011001", battery_mv=3850)
+    _wait_for_login(server, sim.sailor_id)
+    _admin_get(server,
+               f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+    got = _wait_for(
+        lambda: _read_positions(server).get(sim.sailor_id, {}).get("bat_v"),
+        timeout=4.0)
+    assert got == 3.85, f"bat_v not updated from cxzt# BT:3850 -> {got}"
+
+
+def test_active_unit_never_slept_in_window(gt06_sim_factory, server):
+    """Safety invariant: an actively-tracked unit must NEVER be auto-slept, even
+    inside the night-sleep window. With the window active and the event in
+    tracking state, a connecting unit stays active (MODE1) — never pushed to
+    overnight MODE5."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Pacific/Auckland"))
+    sched = {"enabled": True,
+             "start": (now - timedelta(hours=1)).strftime("%H:%M"),
+             "end": (now + timedelta(hours=2)).strftime("%H:%M"),
+             "overnight_mode_number": 5, "overnight_interval_min": 60}
+    _http(server).patch(
+        f"/api/manage/event/{EID}", {"sleep_schedule": sched},
+        headers={"X-Manager-Password": MANAGER_PASSWORD})
+    _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
+    try:
+        sim = gt06_sim_factory("999010000007701", mode=1, freq=540)
+        _wait_for_login(server, sim.sailor_id)
+        marker = _log_marker(server, "activewin")
+        for _ in range(4):
+            _http(server).get(
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
+                headers={"X-Admin-Password": ADMIN_PW})
+            time.sleep(0.2)
+        assert sim.mode != 5, f"active unit was slept into MODE5: mode={sim.mode}"
+        lines = _log_lines_for(server, sim.sailor_id, since_marker=marker)
+        assert not any("MODE5" in l for l in lines), \
+            f"server pushed MODE5 to an active unit: {[l for l in lines if 'MODE5' in l]}"
+    finally:
+        _http(server).patch(
+            f"/api/manage/event/{EID}", {"sleep_schedule": {"enabled": False}},
+            headers={"X-Manager-Password": MANAGER_PASSWORD})
+        _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "idle"})
+
+
 # ---------------------------------------------------------------------------
 # GT06 management page (manager-level device admin)
 # ---------------------------------------------------------------------------
@@ -537,3 +697,26 @@ def test_gt06_manage_inventory_and_actions(gt06_sim_factory, server):
 
     status, _ = _mgr_post(server, "/api/manage/gt06/tracker/000000000000000/reboot")
     assert status == 404
+
+
+def test_idle_uses_asymmetric_parked_timer(gt06_sim_factory, server):
+    """Idle reconcile must push TIMER,60,1800: T1=60 (ACC-ON, 5-60s max) and
+    T2=1800 (ACC-OFF/parked, 5-1800s max = 30 min). At T2=1800 a parked unit
+    uploads a position only every 30 min, so GPS stays powered down between
+    uploads — the heartbeat-only/GPS-off idle that commit 4d21120 regressed by
+    collapsing TIMER to a single value (T1=540 is out of the 5-60s range, so the
+    device fell back to ~30s uploads with GPS continuously on). Vendor range from
+    gt06/'Tutrack - W07 Work Mode'."""
+    sim = gt06_sim_factory("999010000060001")  # default freq=30 -> reconcile pushes
+    _wait_for_login(server, sim.sailor_id)
+    # Drive the idle reconcile (query cxzt# -> diff -> apply) in case the
+    # login-time reconcile hasn't settled yet.
+    ok = _wait_for(lambda: sim.freq == 60 and sim.freq_off == 1800, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.freq == 60 and sim.freq_off == 1800, timeout=4.0)
+    assert ok, f"idle didn't push TIMER,60,1800 (T1={sim.freq}, T2={sim.freq_off})"
