@@ -33,7 +33,11 @@ from gps_accuracy import (
 # Battery capacity per unit (mAh). Two units carry a 3000 mAh cell; the rest are
 # 6000 mAh. Capacity matters because %/h drain depends on it — the
 # capacity-independent power measure is current draw (mA), computed from %/h.
-DEFAULT_CAPACITY = {"G226122": 3000, "G375356": 3000}
+DEFAULT_CAPACITY = {dev: 3000 for dev in (
+    # 10× V6.68 + 1× V6.63 (G226122) carry a 3000 mAh cell; rest are 6000 mAh.
+    "G312243", "G312268", "G312292", "G312342", "G375349", "G375356",
+    "G375372", "G375539", "G375562", "G378657", "G226122",
+)}
 DEFAULT_CAPACITY_MAH = 6000
 
 
