@@ -178,7 +178,8 @@ class GT06DeviceSim:
 
         # Device-side state — mirrors what real W07C exposes via cxzt#.
         self.mode = mode
-        self.freq = freq
+        self.freq = freq            # TIMER T1 (ACC-ON upload interval)
+        self.freq_off = freq        # TIMER T2 (ACC-OFF / parked upload interval)
         self.hbt_interval = hbt_interval
         self.battery_mv = battery_mv
         self.signal = signal
@@ -188,6 +189,7 @@ class GT06DeviceSim:
         self.accline = 0
         self.gps_rst_time = 300
         self.vibchk = "0:16"
+        self.gpscodewait = 10                   # GPS lock-wait timeout; factory default 10
         # Other tunables touched by server commands.
         self.sends_mode = 0
         self.senalm = "ON"
@@ -436,7 +438,7 @@ class GT06DeviceSim:
             resp = (
                 f"{self.firmware}-GT06 MCU:{self.mcu}*ID:{self.imei}*"
                 f"{self.server_addr}*A:{self.apn}*G:A*4G:14*"
-                f"M:{self.mode}|2|0*F:{self.freq}|540*H:{self.hbt_interval}*"
+                f"M:{self.mode}|2|0*F:{self.freq}|{self.freq_off}*H:{self.hbt_interval}*"
                 f"SP:1*SF:0*V:0*BT:{self.battery_mv}*LBS:1*R:14|1|1"
             )
             self._reply(resp, server_flag)
@@ -453,7 +455,7 @@ class GT06DeviceSim:
         # PARAM# — bulk parameter dump (the subset our reconciler reads back).
         if cmd == "PARAM#":
             self._reply(
-                f"IMEI:{self.imei};TIMER:{self.freq},{self.freq};"
+                f"IMEI:{self.imei};TIMER:{self.freq},{self.freq_off};"
                 f"SENDS:{self.sends_mode};HBT:{self.hbt_interval}Sec;Defense:0;",
                 server_flag)
             return
@@ -462,7 +464,7 @@ class GT06DeviceSim:
         if cmd.startswith("CXCS#"):
             key = cmd[len("CXCS#"):].rstrip("#")
             vals = {"SLPDISCONNECT": self.slp_disconnect,
-                    "GPS_RST_TIME": self.gps_rst_time,
+                    "GPS_RST_TIME": self.gps_rst_time, "GPSCODEWAIT": self.gpscodewait,
                     "VIBCHK": self.vibchk, "ACCLINE": self.accline}
             self._reply(f"READOK: {key}={vals.get(key, 0)}", server_flag)
             return
@@ -525,12 +527,15 @@ class GT06DeviceSim:
         # interval.
         if cmd.startswith("TIMER,"):
             try:
-                n = int(cmd.rstrip("#").split(",")[1])
-                self.freq = n
-                self._next_loc_at = self.clock.now() + min(n, 1.0)
+                parts = cmd.rstrip("#").split(",")
+                t1 = int(parts[1])
+                t2 = int(parts[2]) if len(parts) > 2 else t1
+                self.freq = t1
+                self.freq_off = t2
+                self._next_loc_at = self.clock.now() + min(t1, 1.0)
             except (ValueError, IndexError):
-                n = 0
-            self._reply(f"TIMER ACC ON:{n}s,ACC OFF:{n}s", server_flag)
+                t1 = t2 = 0
+            self._reply(f"TIMER ACC ON:{t1}s,ACC OFF:{t2}s", server_flag)
             return
 
         # HBT,N,N# — set heartbeat interval. Triggers hbt_silent quirk.
@@ -562,6 +567,11 @@ class GT06DeviceSim:
             elif key == "GPS_RST_TIME":
                 try:
                     self.gps_rst_time = int(val)
+                except ValueError:
+                    pass
+            elif key == "GPSCODEWAIT":
+                try:
+                    self.gpscodewait = int(val)
                 except ValueError:
                     pass
             elif key == "VIBCHK":

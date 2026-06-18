@@ -999,7 +999,7 @@ class PositionTracker:
                     # admin overrides (set_idle) and start-all/stop-all see the
                     # correct state, and reconnecting trackers inherit it via
                     # the login handler.
-                    for k in ("idle", "stopped", "sleep", "chg", "bat_v"):
+                    for k in ("idle", "stopped", "sleep", "sleep_until", "chg", "bat_v"):
                         if k in pos:
                             self.current_positions[sailor_id][k] = pos[k]
                     if "did" in pos:
@@ -1081,6 +1081,11 @@ class PositionTracker:
                 # by MODE5 wake-cycle heartbeats.
                 if existing.get("sleep"):
                     pos_data["sleep"] = True
+                # Carry the manual-sleep expiry too — else a wake-cycle heartbeat
+                # drops it and the unit loses its "wake in the morning" (or
+                # sticky) override on the next reconnect.
+                if "sleep_until" in existing:
+                    pos_data["sleep_until"] = existing["sleep_until"]
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1156,6 +1161,11 @@ class PositionTracker:
                 # idle branch above for rationale.
                 if existing.get("sleep"):
                     pos_data["sleep"] = True
+                # Carry the manual-sleep expiry too — else a wake-cycle heartbeat
+                # drops it and the unit loses its "wake in the morning" (or
+                # sticky) override on the next reconnect.
+                if "sleep_until" in existing:
+                    pos_data["sleep_until"] = existing["sleep_until"]
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1537,7 +1547,7 @@ class EventTracker:
         # time, no position data. Must stay in sync with _load_from_file at line
         # ~988 so restart and midnight-clear behave identically.
         keep_keys = ("id", "did", "role", "name", "displayid", "bat", "sig",
-                     "idle", "stopped", "sleep", "chg", "bat_v",
+                     "idle", "stopped", "sleep", "sleep_until", "chg", "bat_v",
                      "last_seen", "last_seen_iso")
         pt = self.position_tracker
         with pt._lock:
@@ -1850,8 +1860,8 @@ def set_user_sleep_flag(eid: int, user_id: str, sleep: bool) -> bool:
     Runs regardless of whether the tracker is currently connected to any
     listener. This is what makes /admin/sleep show "SLEEP" immediately
     in the WebUI for an offline tracker (V667 idle TCP often dies
-    between wake cycles), and what makes the next reconnect's login
-    handler see saved_sleep=True and queue MODE5 commands.
+    between wake cycles), and what stores sleep_until so the next reconnect's
+    login handler picks overnight (MODE5) until the morning wake.
 
     Returns True if the user existed and was updated, False otherwise.
     """
@@ -1867,8 +1877,12 @@ def set_user_sleep_flag(eid: int, user_id: str, sleep: bool) -> bool:
             existing["sleep"] = True
             existing["idle"] = True
             existing["stopped"] = True
+            # A manual sleep forces overnight until the next morning wake, then
+            # expires so the unit rejoins the schedule (vs the old sticky flag).
+            existing["sleep_until"] = event_next_window_end(eid)
         else:
             existing.pop("sleep", None)
+            existing.pop("sleep_until", None)
     if pt.positions_file:
         write_current_positions(pt.current_positions, pt.positions_file,
                                 tracker.user_overrides, pt.position_tails)
@@ -3304,21 +3318,24 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True, "stopped_count": len(stopped_ids), "user_ids": stopped_ids})
 
         elif subpath == '/admin/sleep-all':
-            # Like /admin/stop-all but switches to OVERNIGHT idle (MODE5 deep
-            # sleep). Sets event_state="idle" + idle_submode="overnight" so
-            # any tracker reconnecting later also picks up overnight commands.
+            # Put every CURRENT idle tracker into overnight (MODE5) deep sleep
+            # until the next morning wake (per-unit sleep_until). Trackers that
+            # join LATER are governed by the night-sleep SCHEDULE, not this
+            # one-shot, so the event state stays plain "idle" (race), not a
+            # sticky overnight submode.
             tracker = get_event_tracker(eid)
             if not tracker:
                 self._send_json({"error": f"Event {eid} not found"}, 404)
                 return
             if _event_manager:
-                _event_manager.set_event_state(eid, "idle", idle_submode="overnight")
+                _event_manager.set_event_state(eid, "idle", idle_submode="race")
             sleep_ids = []
             for user_id in list(tracker.position_tracker.current_positions.keys()):
                 for listener in _protocol_listeners:
                     if hasattr(listener, "set_idle"):
                         try:
-                            listener.set_idle(eid, user_id, True, submode="overnight")
+                            listener.set_idle(eid, user_id, True, submode="overnight",
+                                              overnight_until=event_next_window_end(eid))
                         except TypeError:
                             # JT808Listener doesn't yet take submode — fall back
                             listener.set_idle(eid, user_id, True)
@@ -3337,7 +3354,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for listener in _protocol_listeners:
                 if hasattr(listener, "set_idle"):
                     try:
-                        listener.set_idle(eid, user_id, True, submode="overnight")
+                        listener.set_idle(eid, user_id, True, submode="overnight",
+                                          overnight_until=event_next_window_end(eid))
                     except TypeError:
                         listener.set_idle(eid, user_id, True)
             # Mark sleep in current_positions even if no listener has a
@@ -4675,6 +4693,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     _GT06_INT_KEYS = {
         "default_eid", "idle_hbt_interval", "idle_poll_interval",
         "idle_loc_interval", "idle_keepalive_interval", "overnight_interval_min",
+        "idle_gps_rst_time", "idle_gps_off_resend_sec",
+        "idle_acc_on_interval", "idle_acc_off_interval",
         "slow_speed_seconds", "slow_loc_interval", "lag_remediation_sec",
         "lag_drain_interval", "lag_restore_sec", "lag_remediation_cooldown_sec",
         "lag_remediation_max_retries", "lag_drain_max_sec",
@@ -5121,6 +5141,20 @@ def _parse_hhmm(s):
     return None
 
 
+def _clamp_sleep_interval(now_sec, end, configured):
+    """Clamp a scheduled sleep interval (minutes) to the time left in the
+    window so a unit never sleeps past its wake time. now_sec is seconds since
+    midnight; end is minutes since midnight (the window may wrap midnight).
+    Remaining is computed in seconds and floored to whole minutes (conservative
+    — so 06:14:59 with an 06:20 end leaves 5 min, not 6). Returns the clamped
+    interval, or None when <= 5 min remain (don't sleep — keep the unit idle
+    and reachable for the short remainder)."""
+    end_sec = end * 60
+    remaining = (end_sec - now_sec) if now_sec < end_sec else (86400 - now_sec + end_sec)
+    interval = min(configured, remaining // 60)
+    return None if interval <= 5 else interval
+
+
 def clean_sleep_schedule(s):
     """Validate + coerce a sleep_schedule dict (only the keys present). Returns a
     cleaned dict; raises ValueError on any invalid value. Used for the config
@@ -5164,6 +5198,38 @@ def event_sleep_schedule(eid):
     return base
 
 
+# Far-future epoch: a manual sleep/wake override with this expiry never
+# auto-expires (used when there's no usable schedule = no "morning" to wake into).
+SLEEP_OVERRIDE_STICKY = 9999999999
+
+
+def event_next_window_end(eid):
+    """Epoch of the next sleep-window END (the morning wake) for event `eid`, in
+    its timezone. Used as the expiry for a manual /admin/sleep so it rejoins the
+    morning wake instead of sticking forever. Returns SLEEP_OVERRIDE_STICKY when
+    there's no usable schedule, so a manual sleep then persists until changed."""
+    sched = event_sleep_schedule(eid)
+    if not sched or not sched.get("enabled"):
+        return SLEEP_OVERRIDE_STICKY
+    # Same usability test as event_sleep_window_active: an invalid or zero-width
+    # window has no morning, so a manual sleep stays sticky.
+    start = _parse_hhmm(sched.get("start", "22:00"))
+    end = _parse_hhmm(sched.get("end", "06:00"))
+    if start is None or end is None or start == end:
+        return SLEEP_OVERRIDE_STICKY
+    ev = (_event_manager.get_event(eid) if _event_manager else None) or {}
+    try:
+        tz = ZoneInfo(ev.get("timezone", "Australia/Sydney"))
+    except Exception:
+        tz = ZoneInfo("Australia/Sydney")
+    from datetime import timedelta
+    now = datetime.now(tz)
+    end_dt = now.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0)
+    if end_dt <= now:
+        end_dt += timedelta(days=1)
+    return end_dt.timestamp()
+
+
 def event_sleep_window_active(eid):
     """If event `eid` is currently inside its scheduled night-sleep window,
     return its effective (overnight_mode_number, overnight_interval_min);
@@ -5191,6 +5257,11 @@ def event_sleep_window_active(eid):
         interval = int(sched.get("overnight_interval_min") or _gt06_listener.overnight_interval_min)
     except (TypeError, ValueError):
         mode, interval = 5, 60
+    # Never sleep past the wake time: clamp to the minutes left in the window.
+    now_sec = now.hour * 3600 + now.minute * 60 + now.second
+    interval = _clamp_sleep_interval(now_sec, end, interval)
+    if interval is None:
+        return None
     return (mode, interval)
 
 

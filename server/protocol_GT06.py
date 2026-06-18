@@ -66,10 +66,14 @@ OVERNIGHT_FREQ_MAX_RETRIES = 3
 # the device across reboots, so it should be set once per device via a
 # separate first-time-setup path.
 def _idle_cmds(interval):
+    # TIMER T1=60 (ACC-ON, the documented 5-60s max), T2=interval as the
+    # ACC-OFF/parked cadence (clamped to the 5-1800s range). A symmetric
+    # TIMER,{interval},{interval} put T1 out of range for any interval >60,
+    # which made the device ignore it and fall back to ~30s GPS-on uploads.
     return ["SZCS#SLPDISCONNECT=0",
-            f"TIMER,{interval},{interval}#",
+            f"TIMER,60,{min(1800, max(5, interval))}#",
             "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
-            "SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"]
+            "SZCS#GPS_RST_TIME=0", "SZCS#GPSCODEWAIT=10", "SZCS#VIBCHK=0:16"]
 
 
 def _active_cmds(interval):
@@ -81,7 +85,7 @@ def _active_cmds(interval):
     """
     return ["SZCS#SLPDISCONNECT=0",
             f"TIMER,{interval},{interval}#", "SENDS,0#",
-            "SZCS#GPS_RST_TIME=300", "SZCS#VIBCHK=0:16"]
+            "SZCS#GPS_RST_TIME=300", "SZCS#GPSCODEWAIT=10", "SZCS#VIBCHK=0:16"]
 
 
 def _overnight_arg(interval_min, mode_number):
@@ -119,9 +123,24 @@ def _overnight_cmds(interval_min, mode_number=4):
     since the device tears down its TCP every cycle anyway.
     """
     arg = _overnight_arg(interval_min, mode_number)
+    # GPSCODEWAIT=2: fail-fast GPS lock-wait for overnight — the device still
+    # powers GPS on each wake, so cap how long it burns trying to lock when it
+    # can't (race-idle/active reconcile restores the factory default of 10).
     return ["SZCS#SLPDISCONNECT=0",
             "SZCS#ACCLINE=1",
+            "SZCS#GPSCODEWAIT=2",
             f"MODE{mode_number},{arg}#"]
+
+
+def _firmware_allows_mode4(fw):
+    """MODE4's per-wake Freq arg only works on V667/NT19D firmware. W07/V6.6x
+    hard-brick on MODE4 — the modem goes fully dark and only a physical
+    power-cycle recovers it. Allow MODE4 only when we positively know V667;
+    the W07 line and unknown fw are always refused. The version token is
+    anchored so V6670 etc. don't slip through."""
+    if not fw or fw.startswith("W07"):
+        return False
+    return re.search(r'V667(?!\d)', fw) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -141,19 +160,21 @@ def _overnight_cmds(interval_min, mode_number=4):
 _SETTINGS = {
     "SLPDISCONNECT": (lambda v: f"SZCS#SLPDISCONNECT={v}", "CXCS#SLPDISCONNECT"),
     "GPS_RST_TIME":  (lambda v: f"SZCS#GPS_RST_TIME={v}",  "CXCS#GPS_RST_TIME"),
+    "GPSCODEWAIT":   (lambda v: f"SZCS#GPSCODEWAIT={v}",   "CXCS#GPSCODEWAIT"),
     "VIBCHK":        (lambda v: f"SZCS#VIBCHK={v}",        "CXCS#VIBCHK"),
     "ACCLINE":       (lambda v: f"SZCS#ACCLINE={v}",       "CXCS#ACCLINE"),
     "SENDS":         (lambda v: f"SENDS,{v}#",             "SENDS#"),
     "SENALM":        (lambda v: f"SENALM,{v}#",            "SENALM#"),
     "MOVING":        (lambda v: f"MOVING,{v}#",            "MOVING#"),
-    "TIMER":         (lambda v: f"TIMER,{v},{v}#",         None),
+    # value is "T1,T2" (ACC-ON,ACC-OFF); cxzt reports it back as *F:T1|T2.
+    "TIMER":         (lambda v: f"TIMER,{v}#",              None),
     "HBT":           (lambda v: f"HBT,{v},{v}#",           None),
 }
 
 # Order in which corrective sets are applied (deterministic, mirrors the legacy
 # command order so any ordering dependence is preserved).
 _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
-                "GPS_RST_TIME", "VIBCHK", "ACCLINE", "HBT"]
+                "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE", "HBT"]
 
 
 def _norm(v):
@@ -386,6 +407,24 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
                                          cfg.get("idle_hbt_interval", 15)),
             "idle_keepalive_interval": cfg.get("idle_keepalive_interval",
                                                cfg.get("idle_poll_interval", 60)),
+            # Idle parked-upload interval = TIMER T2 (ACC-OFF), the GPS-off lever.
+            # Vendor range 5-1800s; at the 1800s max the parked device uploads a
+            # position only every 30 min, so GPS stays powered down between (the
+            # original behaviour that commit 4d21120 lost by collapsing TIMER to
+            # one value — T1's max is 60, so a symmetric 540 was out of range and
+            # the device fell back to ~30s uploads with GPS continuously on).
+            # TIMER T1 (ACC-ON, moving-upload interval). Vendor range 5-60 but the
+            # device accepts higher (tested to 120); doesn't affect responsiveness
+            # (that's the open TCP), only how often a *moving* idle unit uploads.
+            "idle_acc_on_interval": min(1800, max(5,
+                cfg.get("idle_acc_on_interval", 60))),
+            "idle_acc_off_interval": min(1800, max(5,
+                cfg.get("idle_acc_off_interval", 1800))),
+            # GPS no-fix timeout for idle (seconds). 0 = the firmware never
+            # powers GPS down, so a unit that can't lock (indoors) hunts forever
+            # and burns battery; a positive value gives it a give-up timeout.
+            "idle_gps_rst_time": cfg.get("idle_gps_rst_time", 0),
+            "idle_gps_off_resend_sec": cfg.get("idle_gps_off_resend_sec", 300),
             "firmware_overrides": cfg.get("firmware_overrides", {}),
             "overnight_interval_min": cfg.get("overnight_interval_min", 15),
             # 4 = MODE4 (vendor-recommended 2026-05, vibration-responsive
@@ -429,8 +468,10 @@ class GT06Connection:
         self.battery = -1
         self.signal = -1
         self.charging = None
-        self.battery_voltage = None             # actual voltage from STATUS (float)
+        self.battery_voltage = None             # actual voltage from STATUS/cxzt (float)
         self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
+        self.last_overnight_probe = 0.0         # monotonic time of last overnight cxzt# re-probe
+        self.last_gps_off_resend = 0.0          # monotonic time of last idle GPS-off re-push
         self.status_miss_count = 0
         self.cmd_serial = 0
         self.assist_active = False
@@ -487,6 +528,10 @@ class GT06Connection:
         # (manual /admin/sleep or event-submode overnight).
         self.sched_overnight_mode = None
         self.sched_overnight_interval = None
+        # Manual-sleep morning-wake deadline (epoch): the cxzt# handler clamps
+        # the resolved overnight interval to this so the unit wakes on time.
+        # None = no manual-sleep clamp (schedule pre-clamps its own interval).
+        self.overnight_until = None
         # Storm guard counter for overnight Freq re-pushes (see
         # OVERNIGHT_FREQ_MAX_RETRIES).
         self.overnight_freq_retries = 0
@@ -594,6 +639,12 @@ class GT06Listener:
         self.idle_loc_interval = cfg.get("idle_loc_interval", self.idle_hbt_interval)
         self.idle_keepalive_interval = cfg.get("idle_keepalive_interval",
                                                self.idle_poll_interval)
+        self.idle_acc_on_interval = min(1800, max(5,
+            cfg.get("idle_acc_on_interval", 60)))
+        self.idle_acc_off_interval = min(1800, max(5,
+            cfg.get("idle_acc_off_interval", 1800)))
+        self.idle_gps_rst_time = cfg.get("idle_gps_rst_time", 0)
+        self.idle_gps_off_resend_sec = cfg.get("idle_gps_off_resend_sec", 300)
         self.firmware_overrides = cfg.get("firmware_overrides", {})
         self.overnight_interval_min = cfg.get("overnight_interval_min", 15)
         self.overnight_mode_number = cfg.get("overnight_mode_number", 4)
@@ -677,7 +728,20 @@ class GT06Listener:
 
     def _queue_commands(self, gt_conn, cmds):
         """Queue command strings for sequential delivery to a GT06 device."""
-        gt_conn.cmd_queue.extend(cmds)
+        # Hard safety net: MODE4 hard-bricks W07/V6.6x firmware (modem goes
+        # dark, physical power-cycle to recover). Drop any MODE4 to such a
+        # device whatever the source — schedule, reconcile, or a raw operator
+        # command. The cxzt# overnight branch already substitutes a safe mode;
+        # this catches every other path (incl. unknown firmware). V667 only.
+        safe = []
+        for c in cmds:
+            if c.startswith("MODE4") and not _firmware_allows_mode4(gt_conn.firmware):
+                self._log(f"[GT06] {gt_conn.sailor_id or gt_conn.imei}: refusing "
+                          f"{c} — MODE4 unsafe on "
+                          f"{gt_conn.firmware or 'unknown fw'}")
+                continue
+            safe.append(c)
+        gt_conn.cmd_queue.extend(safe)
         self._send_next_cmd(gt_conn)
 
     def _send_next_cmd(self, gt_conn):
@@ -708,12 +772,17 @@ class GT06Listener:
         cxzt# path)."""
         if state == "active":
             interval = self.slow_loc_interval if gt_conn.slow_mode else self.interval
-            return {"SLPDISCONNECT": 0, "TIMER": interval, "SENDS": 0,
-                    "GPS_RST_TIME": 300, "VIBCHK": "0:16", "HBT": 15}
+            return {"SLPDISCONNECT": 0, "TIMER": f"{interval},{interval}", "SENDS": 0,
+                    "GPS_RST_TIME": 300, "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": 15}
         if state == "idle":
-            return {"SLPDISCONNECT": 0, "TIMER": self.idle_loc_interval, "SENDS": 1,
-                    "SENALM": "OFF", "MOVING": "OFF", "GPS_RST_TIME": 0,
-                    "VIBCHK": "0:16", "HBT": self.idle_hbt_interval}
+            # T1=idle_acc_on_interval (ACC-ON, moving) + T2=idle_acc_off_interval
+            # (ACC-OFF, parked). Parked units use T2 → upload rarely → GPS stays off.
+            return {"SLPDISCONNECT": 0,
+                    "TIMER": f"{self.idle_acc_on_interval},{self.idle_acc_off_interval}",
+                    "SENDS": 1,
+                    "SENALM": "OFF", "MOVING": "OFF",
+                    "GPS_RST_TIME": self.idle_gps_rst_time,
+                    "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": self.idle_hbt_interval}
         return {}
 
     def _reconcile_begin(self, gt_conn, state):
@@ -763,9 +832,9 @@ class GT06Listener:
         if getattr(gt_conn, "reconcile_phase", None) is None:
             return
         obs = gt_conn.observed
-        if 'MCU:' in text:  # cxzt#: F=TIMER loc freq, H=HBT
-            m = re.search(r'\*F:(\d+)', text)
-            if m: obs["TIMER"] = int(m.group(1))
+        if 'MCU:' in text:  # cxzt#: F=TIMER T1|T2 (ACC-ON|ACC-OFF), H=HBT
+            m = re.search(r'\*F:(\d+)\|(\d+)', text)
+            if m: obs["TIMER"] = f"{m.group(1)},{m.group(2)}"
             m = re.search(r'\*H:(\d+)', text)
             if m: obs["HBT"] = int(m.group(1))
         if 'TIMER:' in text and ';' in text:  # PARAM#
@@ -930,7 +999,8 @@ class GT06Listener:
         gt_conn.lag_drain_started = now
         gt_conn.lag_drain_last = now
         gt_conn.lag_drain_attempts += 1
-        self._queue_commands(gt_conn, [_SETTINGS["TIMER"][0](drain_interval)])
+        self._queue_commands(gt_conn,
+                             [_SETTINGS["TIMER"][0](f"{drain_interval},{drain_interval}")])
         # Tell the rate monitor to expect the slower drain rate (don't fight it).
         self._reset_rate_monitoring(gt_conn, drain_interval)
         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
@@ -941,7 +1011,7 @@ class GT06Listener:
         """End the drain: restore the active LOC interval."""
         gt_conn.lag_draining = False
         interval = self.slow_loc_interval if gt_conn.slow_mode else self.interval
-        self._queue_commands(gt_conn, [_SETTINGS["TIMER"][0](interval)])
+        self._queue_commands(gt_conn, [_SETTINGS["TIMER"][0](f"{interval},{interval}")])
         self._reset_rate_monitoring(gt_conn, interval)
         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
         self._log(f"[GT06] {label} lag drain {reason} — restoring TIMER,{interval}")
@@ -976,16 +1046,15 @@ class GT06Listener:
                 loc_rate_wrong = True
 
         if loc_rate_wrong:
-            # Overnight idle (MODE5): the device wakes briefly every ~15
-            # min and pushes a couple of heartbeats in a ~30s window, which
-            # always trips the rate-mismatch check. Pushing _idle_cmds()
-            # here sends TIMER,540,540# which overwrites MODE5's Freq:15
-            # to Freq:540, breaking the 15-min wake cadence. Suppress the
-            # whole rate-mismatch path for ANY overnight unit — the wake cycles
-            # are by design infrequent and a couple of LOC per wake is expected.
-            # (Was `desired_mode == self.overnight_mode_number`, which missed
-            # schedule-driven MODE5 units when the global default is MODE4.)
-            if gt_conn.overnight:
+            # Idle / overnight: the firmware ignores TIMER and uploads on its own
+            # fixed cadence (~30s on every W07/V667 unit, confirmed across the
+            # fleet), so a too-fast idle rate can NEVER be corrected by re-pushing
+            # TIMER — _idle_cmds() just churns the radio (8 cmds + 8 ACKs) every
+            # cycle, wasting battery on the very units we're trying to keep quiet.
+            # Overnight is the same story (brief wake bursts trip the check).
+            # Only ACTIVE tracking benefits from a re-push: there a too-slow rate
+            # means the device fell behind and needs re-arming, else disconnect.
+            if gt_conn.overnight or gt_conn.idle:
                 gt_conn.rate_check_time = now
                 gt_conn.loc_count = 0
                 gt_conn.hbt_count = 0
@@ -993,10 +1062,7 @@ class GT06Listener:
                 return
             if gt_conn.rate_retry_count < 2:
                 gt_conn.rate_retry_count += 1
-                if gt_conn.idle:
-                    cmds = _idle_cmds(self.idle_loc_interval)
-                else:
-                    cmds = _active_cmds(self.slow_loc_interval if gt_conn.slow_mode else self.interval)
+                cmds = _active_cmds(self.slow_loc_interval if gt_conn.slow_mode else self.interval)
                 self._log(f"[GT06] Rate mismatch for {label}: "
                     f"expected {expected_loc_rate:.3f}/s, actual {actual_loc_rate:.3f}/s "
                     f"({gt_conn.loc_count} LOC in {elapsed:.0f}s) — "
@@ -1008,15 +1074,9 @@ class GT06Listener:
                 gt_conn.loc_count = 0
                 gt_conn.hbt_count = 0
             else:
-                if not gt_conn.idle:
-                    self._log(f"[GT06] Rate mismatch for {label} after 2 retries — disconnecting")
-                    self._disconnect(fd)
-                    return
-                else:
-                    self._log(f"[GT06] Rate mismatch for {label} after 2 retries (idle, not disconnecting)")
-                    gt_conn.rate_retry_count = 0
-                    gt_conn.rate_check_time = now
-                    gt_conn.loc_count = 0
+                self._log(f"[GT06] Rate mismatch for {label} after 2 retries — disconnecting")
+                self._disconnect(fd)
+                return
 
         # Check HBT rate — if no heartbeat for > 3x expected interval and we're getting LOC
         if gt_conn.last_hbt_time > 0 and gt_conn.loc_count > 0:
@@ -1121,7 +1181,8 @@ class GT06Listener:
                     event_state = None
 
             saved_idle = None
-            saved_sleep = False  # persisted per-sailor SLEEP (overnight) flag
+            manual_sleep = False  # manual /admin/sleep override still in force
+            sleep_until = None    # its expiry (epoch) — clamps the sleep interval
             tracker_for_lookup = self.get_tracker(gt_conn.eid)
             if tracker_for_lookup is not None:
                 pt = (tracker_for_lookup.position_tracker
@@ -1132,13 +1193,15 @@ class GT06Listener:
                 if existing_pos is not None:
                     if "idle" in existing_pos:
                         saved_idle = bool(existing_pos["idle"])
-                    # saved_sleep is the MANUAL overnight flag (/admin/sleep),
-                    # which persists across reconnects. A SCHEDULE-driven sleep
-                    # also sets "sleep" (for the UI) but marks "sleep_sched" — we
-                    # exclude those here so that out of the sleep window they
-                    # fall back to race-idle instead of being stuck overnight.
-                    saved_sleep = (bool(existing_pos.get("sleep", False))
-                                   and not existing_pos.get("sleep_sched", False))
+                    # A manual /admin/sleep stores sleep_until = the next morning
+                    # wake (or a far-future sentinel when there's no schedule).
+                    # It forces overnight until that time, then expires so the
+                    # unit wakes — so a manual sleep rejoins the morning wake
+                    # instead of sticking forever. Schedule-driven sleeps carry
+                    # NO sleep_until; the window itself governs them (out of
+                    # window they fall to race-idle).
+                    sleep_until = existing_pos.get("sleep_until")
+                    manual_sleep = sleep_until is not None and time.time() < sleep_until
 
             sailor_key = (gt_conn.eid, gt_conn.sailor_id)
             if sailor_key in self.active_sailors:
@@ -1157,6 +1220,9 @@ class GT06Listener:
             if use_active:
                 gt_conn.idle = False
                 gt_conn.overnight = False
+                gt_conn.overnight_until = None
+                gt_conn.sched_overnight_mode = None
+                gt_conn.sched_overnight_interval = None
                 gt_conn.desired_mode = 1
                 # Table/state-driven reconcile: query every setting, then apply
                 # only the ones that are wrong. The reconciler queues cxzt#
@@ -1171,50 +1237,51 @@ class GT06Listener:
                 cmds = None
             else:
                 gt_conn.idle = True
-                # Pick race-day idle vs overnight idle. Per-sailor saved_sleep
-                # (set by a previous /admin/sleep, persisted in
-                # current_positions.json) wins — that's the explicit per-
-                # tracker choice and survives server restart. Otherwise fall
-                # back to event-scope idle_submode (default "race").
-                if saved_sleep:
-                    idle_submode = "overnight"
-                else:
-                    idle_submode = "race"
-                    if self.get_event_idle_submode:
-                        try:
-                            idle_submode = self.get_event_idle_submode(gt_conn.eid) or "race"
-                        except Exception:
-                            idle_submode = "race"
-                # Scheduled night sleep: if the event is inside its sleep window,
-                # force overnight (sticky on reconnect) AND adopt the window's
-                # (mode, interval). Checked even when saved_sleep already chose
-                # overnight, so the schedule's mode/interval wins over the global
-                # default — otherwise a scheduler-slept unit (which carries the
-                # persisted sleep flag) would reconnect via the saved_sleep path
-                # and flap back to the default mode. Only the idle path reaches
-                # here, so an active/racing tracker is never auto-slept.
+                # Overnight vs race-day idle. Overnight when the schedule window
+                # is active OR a manual /admin/sleep override is still in force;
+                # otherwise race-day idle. BOTH overnight sources wake in the
+                # morning: the window by going out-of-window, the manual override
+                # by expiring at the next window-end. The schedule's
+                # (mode, interval) is adopted when the window drove it. Only the
+                # idle path reaches here, so an active/racing tracker is never
+                # auto-slept.
                 sched_params = None
                 if self.get_event_sleep_active:
                     try:
                         sched_params = self.get_event_sleep_active(gt_conn.eid)
                     except Exception:
                         sched_params = None
+                # Resolve overnight, or fall to race-idle. The schedule pins both
+                # the mode and the window-clamped interval. A manual sleep pins
+                # only the interval — clamped to the time left until its morning
+                # wake, recomputed each wake — and leaves the MODE to per-device/
+                # firmware resolution in the cxzt# handler. Within 5 min of the
+                # wake a manual sleep doesn't sleep at all.
+                overnight = False
+                ov_int = None
                 if sched_params:
-                    idle_submode = "overnight"
-                if idle_submode == "overnight":
-                    gt_conn.overnight = True
-                    gt_conn.overnight_freq_retries = 0
-                    # Use the schedule's mode/interval if the window drove this;
-                    # otherwise (manual /admin/sleep) the global overnight default.
-                    if sched_params:
-                        ov_mode, ov_int = sched_params
-                        gt_conn.sched_overnight_mode = ov_mode
-                        gt_conn.sched_overnight_interval = ov_int
-                    else:
-                        ov_mode, ov_int = self.overnight_mode_number, self.overnight_interval_min
+                    overnight = True
+                    ov_mode, ov_int = sched_params
+                    gt_conn.sched_overnight_mode = ov_mode
+                    gt_conn.sched_overnight_interval = ov_int
+                    gt_conn.overnight_until = None
+                    gt_conn.desired_mode = ov_mode
+                elif manual_sleep:
+                    rem_min = int((sleep_until - time.time()) // 60)
+                    if rem_min > 5:
+                        overnight = True
+                        # Leave mode+interval to per-device/firmware resolution in
+                        # the cxzt# handler; it clamps the interval to the morning
+                        # wake recorded here. ov_int is just an HBT estimate.
                         gt_conn.sched_overnight_mode = None
                         gt_conn.sched_overnight_interval = None
-                    gt_conn.desired_mode = ov_mode
+                        gt_conn.overnight_until = sleep_until
+                        gt_conn.desired_mode = self.overnight_mode_number
+                        ov_int = min(self.overnight_interval_min, rem_min)
+                if overnight:
+                    idle_submode = "overnight"
+                    gt_conn.overnight = True
+                    gt_conn.overnight_freq_retries = 0
                     # Overnight: queue ONLY cxzt# probe. If the device is
                     # already in the right MODE (it usually is — wake-cycle
                     # reconnects land here), the cxzt# handler will see
@@ -1227,9 +1294,12 @@ class GT06Listener:
                 else:
                     gt_conn.overnight = False
                     gt_conn.desired_mode = 1
+                    gt_conn.sched_overnight_mode = None
+                    gt_conn.sched_overnight_interval = None
+                    gt_conn.overnight_until = None
                     # Race-day idle: table/state-driven reconcile (see active).
                     gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                    self._reset_rate_monitoring(gt_conn, self.idle_loc_interval)
+                    self._reset_rate_monitoring(gt_conn, self.idle_acc_off_interval)
                     self._reconcile_begin(gt_conn, "idle")
                     cmds = None
             if cmds:
@@ -1281,15 +1351,11 @@ class GT06Listener:
                         ex["idle"] = gt_conn.idle
                         ex["stopped"] = gt_conn.idle
                         ex["sleep"] = bool(gt_conn.overnight)
-                        # Mark schedule-driven sleep so it's distinguished from
-                        # a manual /admin/sleep: schedule sleeps must wake at the
-                        # window end (incl. units offline at the edge), manual
-                        # ones persist. sched_params is set iff a sleep window
-                        # drove this overnight decision.
-                        if gt_conn.overnight and sched_params:
-                            ex["sleep_sched"] = True
-                        else:
-                            ex.pop("sleep_sched", None)
+                        # Clear a spent manual-sleep override once the unit is no
+                        # longer overnight (it expired at the morning wake, or the
+                        # window/operator woke it) so it doesn't linger.
+                        if not gt_conn.overnight:
+                            ex.pop("sleep_until", None)
                 if pt.positions_file and self._write_positions:
                     self._write_positions(
                         pt.current_positions, pt.positions_file,
@@ -1435,6 +1501,15 @@ class GT06Listener:
                 self._queue_commands(gt_conn, ["STATUS#"])
                 gt_conn.last_status_time = now_mono
 
+            # Re-probe a CONNECTED overnight unit stuck in the wrong mode: if it
+            # didn't switch into deep-sleep at the window-start (e.g. it was on
+            # external power), re-send cxzt# every ~2 min to re-check/re-push the
+            # mode (and refresh voltage). A correctly-sleeping unit is offline
+            # between wakes, so this never fires for it.
+            if gt_conn.overnight and now_mono - gt_conn.last_overnight_probe >= 120:
+                self._queue_commands(gt_conn, ["cxzt#"])
+                gt_conn.last_overnight_probe = now_mono
+
             # Update tracker on heartbeat only when GPS is stale (no LOC for 15s+)
             # to avoid overwriting satellite/position data from recent LOC packets
             gps_stale = gt_conn.last_ts is None or (time.time() - gt_conn.last_ts) >= 15
@@ -1563,12 +1638,32 @@ class GT06Listener:
                 if fw_cxzt and gt_conn.firmware != fw_cxzt.group(1):
                     gt_conn.firmware = fw_cxzt.group(1)
                     self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
+                # cxzt# carries *BT:<mV> and lands on EVERY overnight wake (unlike
+                # STATUS#, whose round-trip often doesn't finish in the short
+                # MODE5 dwell), so use it as the per-wake battery-voltage source.
+                btmatch = re.search(r'\*BT:(\d+)', text)
+                if btmatch:
+                    gt_conn.battery_voltage = int(btmatch.group(1)) / 1000.0
+                    gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
                 mode_match = re.search(r'\*M:(\d+)', text)
                 if mode_match:
                     mode = int(mode_match.group(1))
                     fmatch = re.search(r'\*F:(\d+)', text)
                     f_val = int(fmatch.group(1)) if fmatch else None
                     push_cmds = None
+                    # A manual sleep whose morning wake is now within 5 min (e.g.
+                    # a delayed cxzt# round-trip) must NOT (re)sleep — clear
+                    # overnight so the race branch below wakes it instead.
+                    # set_idle/login apply the same >5 guard up front; this is the
+                    # authoritative backstop after firmware/timing are known.
+                    if (gt_conn.overnight and gt_conn.overnight_until is not None
+                            and int((gt_conn.overnight_until - time.time()) // 60)
+                            <= 5):
+                        gt_conn.overnight = False
+                        gt_conn.overnight_until = None
+                        gt_conn.sched_overnight_mode = None
+                        gt_conn.sched_overnight_interval = None
+                        gt_conn.desired_mode = 1
                     if gt_conn.overnight:
                         # Overnight intent — resolve the effective MODE for this
                         # device's firmware (per-IMEI > firmware-prefix > global).
@@ -1576,19 +1671,43 @@ class GT06Listener:
                         # not (it clamps MODE4 to 120 and would storm), so those
                         # are configured to overnight_mode_number=1 and kept on
                         # MODE1 with a long TIMER instead.
-                        # A sleep SCHEDULE's mode/interval (stored on the conn)
-                        # win over the config resolution; otherwise fall back to
-                        # per-IMEI > firmware-prefix > global config.
+                        # Mode and interval resolve INDEPENDENTLY: the schedule
+                        # pins both; a manual sleep pins NEITHER and leaves both
+                        # to per-IMEI > firmware-prefix > global resolution (here,
+                        # where the firmware IS known), then clamps the interval
+                        # to its morning-wake deadline just below.
                         if gt_conn.sched_overnight_mode is not None:
                             eff_mode = gt_conn.sched_overnight_mode
-                            eff_interval = gt_conn.sched_overnight_interval
                         else:
                             eff_mode = self._resolve_setting(
                                 gt_conn, "overnight_mode_number",
                                 self.overnight_mode_number)
+                        if gt_conn.sched_overnight_interval is not None:
+                            eff_interval = gt_conn.sched_overnight_interval
+                        else:
                             eff_interval = self._resolve_setting(
                                 gt_conn, "overnight_interval_min",
                                 self.overnight_interval_min)
+                        # Manual-sleep clamp: cap the resolved interval at the
+                        # minutes left until the morning wake so it wakes on time.
+                        if gt_conn.overnight_until is not None:
+                            rem_min = int(
+                                (gt_conn.overnight_until - time.time()) // 60)
+                            eff_interval = max(1, min(eff_interval, rem_min))
+                        # Hard firmware floor: never emit MODE4 to firmware
+                        # that bricks on it, whatever the source (a schedule
+                        # mode bypasses _resolve_setting, so the override alone
+                        # isn't enough). Fall back to the firmware's configured
+                        # overnight mode, or MODE5 if that's also 4.
+                        if eff_mode == 4 and not _firmware_allows_mode4(
+                                gt_conn.firmware):
+                            eff_mode = self._resolve_setting(
+                                gt_conn, "overnight_mode_number", 5)
+                            if eff_mode == 4:
+                                eff_mode = 5
+                            self._log(f"[GT06] {label} firmware "
+                                f"{gt_conn.firmware or 'unknown'} can't do "
+                                f"MODE4 safely — using MODE{eff_mode}")
                         if eff_mode == 1:
                             # MODE1 long-TIMER. desired_mode=1 means the overnight
                             # Freq re-push branch never runs for this firmware, so
@@ -1688,6 +1807,30 @@ class GT06Listener:
                 # Capture the full cxzt# settings snapshot for the manager
                 # device page (firmware, mode, freq, server, APN, battery_mV…).
                 self._record_device_state(gt_conn, text)
+                # A cxzt# response proves the unit is alive, so reset the
+                # STATUS-miss disconnect counter (a stuck overnight unit may
+                # answer cxzt# but not STATUS#), and reset the overnight re-probe
+                # throttle (the heartbeat re-probe counts from here).
+                gt_conn.status_miss_count = 0
+                gt_conn.last_overnight_probe = time.monotonic()
+                # Push the fresh cxzt# voltage straight into current_positions so
+                # event.html shows it on this wake even if no heartbeat follows —
+                # only when THIS response actually carried *BT (btmatch).
+                if btmatch and gt_conn.sailor_id:
+                    tracker = self.get_tracker(gt_conn.eid)
+                    if tracker:
+                        pt = (tracker.position_tracker
+                              if hasattr(tracker, 'position_tracker') else tracker)
+                        with pt._lock:
+                            ex = pt.current_positions.get(gt_conn.sailor_id)
+                            if ex:
+                                ex["bat_v"] = gt_conn.battery_voltage
+                                ex["bat"] = gt_conn.battery
+                        if pt.positions_file and self._write_positions:
+                            self._write_positions(
+                                pt.current_positions, pt.positions_file,
+                                getattr(tracker, 'user_overrides', {}),
+                                pt.position_tails)
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
@@ -1695,10 +1838,19 @@ class GT06Listener:
                 gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
                 gt_conn.status_miss_count = 0
                 self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
-            # Detect GPS still active during idle — re-send power-off commands
+            # Detect GPS still active during idle — re-assert the GPS-off setting,
+            # but rate-limited: firing on every STATUS# (~60s) was a second churn
+            # source, and on a unit that can't lock it re-sends every poll forever.
             if gt_conn.idle and 'GPS:Fail positioning' in text:
-                self._log(f"[GT06] {label} idle but GPS active — re-sending GPS power-off commands")
-                self._queue_commands(gt_conn, ["SZCS#GPS_RST_TIME=0", "SZCS#VIBCHK=0:16"])
+                now_mono = time.monotonic()
+                if (now_mono - gt_conn.last_gps_off_resend
+                        >= self.idle_gps_off_resend_sec):
+                    gt_conn.last_gps_off_resend = now_mono
+                    self._log(f"[GT06] {label} idle but GPS active — re-asserting "
+                              f"GPS_RST_TIME={self.idle_gps_rst_time}")
+                    self._queue_commands(gt_conn, [
+                        f"SZCS#GPS_RST_TIME={self.idle_gps_rst_time}",
+                        "SZCS#VIBCHK=0:16"])
             gt_conn.cmd_pending = None
             gt_conn.cmd_pending_frame = None
             self._send_next_cmd(gt_conn)
@@ -1963,7 +2115,8 @@ class GT06Listener:
         return len(targets)
 
     def set_idle(self, eid, sailor_id, idle, submode="race",
-                 overnight_mode=None, overnight_interval_min=None):
+                 overnight_mode=None, overnight_interval_min=None,
+                 overnight_until=None):
         """Set idle state for the GT06 device matching (eid, sailor_id).
 
         When idle=True:
@@ -2000,20 +2153,29 @@ class GT06Listener:
                 gt_conn.cmd_pending = None
                 gt_conn.reconcile_phase = None
                 if idle:
+                    # Within ~5 min of the morning wake a manual sleep isn't
+                    # worth it — stay race-idle (matches the login/schedule rule).
+                    if (submode == "overnight" and overnight_until is not None
+                            and int((overnight_until - time.time()) // 60) <= 5):
+                        submode = "race"
                     if submode == "overnight":
                         gt_conn.overnight = True
                         gt_conn.overnight_freq_retries = 0
-                        # Schedule's mode/interval override config resolution
-                        # (stored on the conn for the cxzt# handler too).
-                        ov_int = overnight_interval_min or self.overnight_interval_min
+                        # Pin state for the cxzt# handler, which does the
+                        # firmware-aware resolution. The schedule pins both mode
+                        # and its (already window-clamped) interval; a manual
+                        # sleep pins NEITHER and instead records its morning-wake
+                        # deadline (overnight_until) so the cxzt# handler resolves
+                        # per-device/firmware THEN clamps the interval to it.
                         if overnight_mode is not None:
                             gt_conn.sched_overnight_mode = overnight_mode
-                            gt_conn.sched_overnight_interval = ov_int
                             gt_conn.desired_mode = overnight_mode
                         else:
                             gt_conn.sched_overnight_mode = None
-                            gt_conn.sched_overnight_interval = None
                             gt_conn.desired_mode = self.overnight_mode_number
+                        gt_conn.sched_overnight_interval = overnight_interval_min
+                        gt_conn.overnight_until = overnight_until
+                        ov_int = overnight_interval_min or self.overnight_interval_min
                         # Defer to the cxzt# handler — it resolves the firmware-
                         # appropriate overnight MODE and pushes it only if needed.
                         cmds = ["cxzt#"]
@@ -2021,13 +2183,19 @@ class GT06Listener:
                         self._reset_rate_monitoring(gt_conn, ov_int * 60)
                     else:
                         gt_conn.overnight = False
+                        gt_conn.overnight_until = None
+                        gt_conn.sched_overnight_mode = None
+                        gt_conn.sched_overnight_interval = None
                         gt_conn.desired_mode = 1
                         gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                        self._reset_rate_monitoring(gt_conn, self.idle_loc_interval)
+                        self._reset_rate_monitoring(gt_conn, self.idle_acc_off_interval)
                         self._reconcile_begin(gt_conn, "idle")
                         cmds = None
                 else:
                     gt_conn.overnight = False
+                    gt_conn.overnight_until = None
+                    gt_conn.sched_overnight_mode = None
+                    gt_conn.sched_overnight_interval = None
                     gt_conn.desired_mode = 1
                     gt_conn.expected_hbt_interval = 15
                     self._reset_rate_monitoring(gt_conn, self.interval)
@@ -2051,15 +2219,11 @@ class GT06Listener:
                             # vs "Idle"; login handler reads it to pick
                             # MODE5 vs MODE1 commands on reconnect.
                             existing["sleep"] = bool(idle and submode == "overnight")
-                            # A scheduler-driven overnight (overnight_mode passed
-                            # by scheduled_sleep_apply) is marked so it wakes at
-                            # the window end; a manual /admin/sleep (no mode)
-                            # clears the marker so it persists out of window.
-                            if (idle and submode == "overnight"
-                                    and overnight_mode is not None):
-                                existing["sleep_sched"] = True
-                            else:
-                                existing.pop("sleep_sched", None)
+                            # Waking (race/active) clears any manual-sleep
+                            # override; sleep_until itself is set by the
+                            # /admin/sleep handler, not here.
+                            if not (idle and submode == "overnight"):
+                                existing.pop("sleep_until", None)
                             now = time.time()
                             existing["last_seen"] = now
                             existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()
