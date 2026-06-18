@@ -135,7 +135,7 @@
     <div id="battery-graph-panel" class="graph-panel" data-type="battery">
         <div id="battery-graph-resize" class="graph-resize"></div>
         <div id="battery-graph-container" class="graph-container">
-            <div class="graph-title">Battery Level (%)</div>
+            <div class="graph-title" id="battery-graph-title">Battery Level (%)<span id="battery-metric-toggle" style="cursor:pointer;font-size:11px;color:#3b82f6;margin-left:8px;user-select:none">[show voltage]</span></div>
             <div class="graph-y-axis" id="battery-y-labels">
                 <span>100</span>
                 <span>75</span>
@@ -375,6 +375,7 @@
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
     <script src="js/export.js"></script>
+    <script src="js/battery_cal.js"></script>
     <script src="js/flatpickr/flatpickr.min.js"></script>
     <script>
         // Event ID from URL parameter (default to 2)
@@ -923,13 +924,14 @@
         let courseLines = [];    // Course line layers
         let showCourse = true;   // Whether to display course
         let currentCourseFile = null;  // Currently loaded course filename
+        let batteryGraphMetric = 'pct';  // battery graph y-axis: 'pct' or 'volt' (corrected bat_v)
 
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
         function expandEntry(entry) {
             if (entry.pos && Array.isArray(entry.pos)) {
                 // Compact format: pos array [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
                 // Expand into individual entries, each inheriting all metadata
-                return entry.pos.map(p => ({
+                return entry.pos.map(p => BatteryCal.correct({
                     id: entry.id,
                     displayid: entry.displayid,  // Preserve display name mapping
                     ts: p[0],
@@ -938,6 +940,7 @@
                     spd: p.length >= 4 ? p[3] : entry.spd,  // Use per-point speed if available
                     hdg: entry.hdg,
                     bat: entry.bat,
+                    bat_v: entry.bat_v,
                     sig: entry.sig,
                     hr: entry.hr,
                     hac: entry.hac,
@@ -952,7 +955,7 @@
                 }));
             }
             // Old format: single position with lat/lon directly
-            return [entry];
+            return [BatteryCal.correct(entry)];
         }
 
         // Course display functions
@@ -1544,6 +1547,7 @@
         async function loadRace(logEntry) {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('status').textContent = `Loading ${logEntry.file}...`;
+            await BatteryCal.load();  // per-unit voltage offsets before expandEntry corrects records
 
             currentLogFile = logEntry.file;
             currentLogStartTs = logEntry.start_ts;
@@ -1648,6 +1652,7 @@
         async function loadTracksLegacy(logDate) {
             allData = [];
             userData = {};
+            await BatteryCal.load();  // per-unit voltage offsets before expandEntry corrects records
 
             // Try to load main file and rotated files
             const baseUrl = `${DATA_BASE}logs/${logDate}.jsonl`;
@@ -2615,17 +2620,30 @@
             document.getElementById('battery-time-start').textContent = formatTimeShortInTz(rangeStartTime);
             document.getElementById('battery-time-end').textContent = formatTimeShortInTz(rangeEndTime);
 
-            // Calculate battery range for Y axis scaling (only from visible time range)
-            let maxBat = 0;
-            let minBat = 100;
+            // Metric: '%' (derived, quantized, saturates at 100) or corrected
+            // voltage (mV resolution, better for comparing per-unit drain).
+            const useVolt = batteryGraphMetric === 'volt';
+            const valOf = e => useVolt ? e.bat_v : e.bat;
+            const hasVal = e => useVolt
+                ? (e.bat_v !== undefined && e.bat_v !== null && e.bat_v > 0)
+                : (e.bat !== undefined && e.bat !== null && e.bat >= 0);
+            const fmtVal = v => useVolt ? v.toFixed(2) + 'V' : v + '%';
+            document.getElementById('battery-graph-title').firstChild.textContent =
+                useVolt ? 'Battery Voltage (V)' : 'Battery Level (%)';
+            document.getElementById('battery-metric-toggle').textContent =
+                useVolt ? '[show %]' : '[show voltage]';
+
+            // Calculate value range for Y axis scaling (only from visible time range)
+            let maxBat = -Infinity;
+            let minBat = Infinity;
             let hasBatData = false;
             for (const [userId, entries] of Object.entries(userData)) {
                 if (!selectedUsers.has(userId)) continue;
                 for (const entry of entries) {
                     if (entry.ts < rangeStartTime || entry.ts > rangeEndTime) continue;
-                    if (entry.bat !== undefined && entry.bat !== null && entry.bat >= 0) {
-                        maxBat = Math.max(maxBat, entry.bat);
-                        minBat = Math.min(minBat, entry.bat);
+                    if (hasVal(entry)) {
+                        maxBat = Math.max(maxBat, valOf(entry));
+                        minBat = Math.min(minBat, valOf(entry));
                         hasBatData = true;
                     }
                 }
@@ -2633,8 +2651,13 @@
 
             // Set sensible defaults and add padding
             if (!hasBatData) {
-                maxBat = 100;
-                minBat = 0;
+                maxBat = useVolt ? 4.2 : 100;
+                minBat = useVolt ? 3.4 : 0;
+            } else if (useVolt) {
+                // Pad to 10mV; keep at least a 50mV window for readability.
+                maxBat = Math.ceil((maxBat + 0.005) * 100) / 100;
+                minBat = Math.floor((minBat - 0.005) * 100) / 100;
+                if (maxBat - minBat < 0.05) { minBat = maxBat - 0.05; }
             } else {
                 // Keep max at 100 if close, otherwise add padding
                 maxBat = maxBat > 95 ? 100 : Math.ceil((maxBat + 5) / 5) * 5;
@@ -2647,16 +2670,17 @@
                 }
             }
             // Ensure batRange is never 0 (prevents division by zero)
-            const batRange = Math.max(10, maxBat - minBat);
+            const batRange = Math.max(useVolt ? 0.05 : 10, maxBat - minBat);
 
             // Update Y axis labels
+            const yLbl = v => useVolt ? v.toFixed(2) : Math.round(v);
             const yLabels = document.getElementById('battery-y-labels');
             yLabels.innerHTML = `
-                <span>${maxBat}</span>
-                <span>${Math.round(minBat + batRange * 0.75)}</span>
-                <span>${Math.round(minBat + batRange * 0.5)}</span>
-                <span>${Math.round(minBat + batRange * 0.25)}</span>
-                <span>${minBat}</span>
+                <span>${yLbl(maxBat)}</span>
+                <span>${yLbl(minBat + batRange * 0.75)}</span>
+                <span>${yLbl(minBat + batRange * 0.5)}</span>
+                <span>${yLbl(minBat + batRange * 0.25)}</span>
+                <span>${yLbl(minBat)}</span>
             `;
 
             // Draw grid lines
@@ -2707,10 +2731,10 @@
 
                 let started = false;
                 for (const entry of filtered) {
-                    if (entry.bat === undefined || entry.bat === null || entry.bat < 0) continue;
+                    if (!hasVal(entry)) continue;
 
                     const x = ((entry.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                    const y = height - ((entry.bat - minBat) / batRange) * height;
+                    const y = height - ((valOf(entry) - minBat) / batRange) * height;
 
                     if (!started) {
                         ctx.moveTo(x, y);
@@ -2724,13 +2748,13 @@
                 // Draw user label at the end of the line
                 if (filtered.length > 0) {
                     const last = filtered[filtered.length - 1];
-                    if (last.bat !== undefined && last.bat !== null && last.bat >= 0) {
+                    if (hasVal(last)) {
                         const x = ((last.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * width;
-                        const y = height - ((last.bat - minBat) / batRange) * height;
+                        const y = height - ((valOf(last) - minBat) / batRange) * height;
                         ctx.fillStyle = userColor;
                         ctx.font = 'bold 10px sans-serif';
                         ctx.textAlign = 'right';
-                        ctx.fillText(`${getDisplayName(userId)}: ${last.bat}%`, Math.min(x, width - 5), y - 5);
+                        ctx.fillText(`${getDisplayName(userId)}: ${fmtVal(valOf(last))}`, Math.min(x, width - 5), y - 5);
                     }
                 }
             }
@@ -4953,6 +4977,12 @@
             if (e.target.checked) {
                 drawBatteryGraph();
             }
+        });
+
+        document.getElementById('battery-metric-toggle').addEventListener('click', (e) => {
+            e.stopPropagation();  // don't trigger panel drag/resize
+            batteryGraphMetric = (batteryGraphMetric === 'volt') ? 'pct' : 'volt';
+            drawBatteryGraph();
         });
 
         document.getElementById('show-signal-graph').addEventListener('change', (e) => {

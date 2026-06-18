@@ -571,6 +571,7 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<script src="js/battery_cal.js"></script>
 <script>
 // ── URL params & API paths ──────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
@@ -777,6 +778,7 @@ async function loadPositions() {
     if (positionsLoading) return;
     positionsLoading = true;
     try {
+        await BatteryCal.load();  // per-unit voltage offsets (fetched once, cached)
         const r = await fetch(`${DATA_BASE}current_positions.json`);
         if (!r.ok) return;
         const d = await r.json();
@@ -785,6 +787,7 @@ async function loadPositions() {
 
         for (const [sid, s] of Object.entries(sailorObj)) {
             if (s.role && s.role !== 'sailor') continue;
+            BatteryCal.correct(s);  // correct bat from per-unit voltage offset
             // Check user override for role
             if (userOverrides[sid] && userOverrides[sid].role && userOverrides[sid].role !== 'sailor') continue;
 

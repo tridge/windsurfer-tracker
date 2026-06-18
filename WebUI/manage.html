@@ -576,6 +576,7 @@
     </div>
 
     <script src="js/utils.js"></script>
+    <script src="js/battery_cal.js"></script>
     <script>
         const API_BASE = window.location.origin;
         let managerPassword = '';
@@ -1160,6 +1161,13 @@
                     return;
                 }
                 gt06Trackers = data.trackers || [];
+                // Correct each unit's % from its calibrated voltage (settings.BT
+                // is millivolts) so the table and sort match the corrected UI.
+                await BatteryCal.load();
+                for (const t of gt06Trackers) {
+                    const bt = (t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null;
+                    if (bt) t.battery = voltageToPercent(bt + BatteryCal.offsetFor(t.sailor_id));
+                }
                 window._trackers = gt06Trackers;
                 renderTrackers();
             } catch (e) {

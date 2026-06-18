@@ -1556,6 +1556,7 @@
     <script src="js/utils.js"></script>
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
+    <script src="js/battery_cal.js"></script>
     <script>
         // Initialize map centered on Auckland
         const map = L.map('map').setView([-36.8485, 174.7633], 13);
@@ -4689,11 +4690,15 @@
         // Fetch positions from server
         async function fetchPositions() {
             try {
+                await BatteryCal.load();  // per-unit voltage offsets (fetched once, cached)
                 const response = await fetch(`${DATA_BASE}current_positions.json`, { cache: 'no-cache' });
                 if (!response.ok) throw new Error('Failed to fetch');
-                
+
                 currentPositions = await response.json();
-                
+                if (currentPositions.sailors) {
+                    Object.values(currentPositions.sailors).forEach(s => BatteryCal.correct(s));
+                }
+
                 updateMarkers(currentPositions.sailors);
                 updateSailorList(currentPositions.sailors);
                 
