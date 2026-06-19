@@ -1989,6 +1989,17 @@ class GT06Listener:
             conn = self._conn_for_imei(imei)
             assigned_eid = (cfg.get("eid") if isinstance(cfg, dict) and "eid" in cfg
                             else st.get("eid", self.gt06_config.get("default_eid", 1)))
+            # device_state.last_seen only advances on login/cxzt; a tracking unit
+            # sends mostly LOC, so prefer the live connection's per-frame
+            # last_alive_time (any frame) when connected, so "last seen" reflects
+            # actual contact rather than time-since-last-cxzt.
+            last_seen = st.get("last_seen")
+            last_seen_iso = st.get("last_seen_iso")
+            if conn is not None and getattr(conn, "last_alive_time", 0) > 0:
+                wall = now - (time.monotonic() - conn.last_alive_time)
+                if wall > (last_seen or 0):
+                    last_seen = wall
+                    last_seen_iso = datetime.fromtimestamp(wall).isoformat()
             entry = {
                 "imei": imei,
                 "sailor_id": (conn.sailor_id if conn else st.get("sailor_id")),
@@ -1996,8 +2007,8 @@ class GT06Listener:
                 "firmware": (conn.firmware if conn and conn.firmware
                              else st.get("firmware")),
                 "online": conn is not None,
-                "last_seen": st.get("last_seen"),
-                "last_seen_iso": st.get("last_seen_iso"),
+                "last_seen": last_seen,
+                "last_seen_iso": last_seen_iso,
                 "battery": (conn.battery if conn and conn.battery is not None
                             and conn.battery >= 0 else st.get("battery")),
                 "signal": (conn.signal if conn and conn.signal is not None
