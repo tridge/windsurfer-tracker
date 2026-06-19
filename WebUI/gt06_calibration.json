@@ -1,45 +1,385 @@
 {
- "version": 1,
+ "version": 2,
  "generated": "2026-06-19",
  "reference_v": 4.17,
- "method": "median of per-unit bat_v over the 2026-06-18 09:00-10:00 Sydney full-charge plateau (n>=20/unit); offset = consensus 4.17V - unit median",
- "note": "volts to ADD to a unit's raw device bat_v to remove its voltage-divider bias; recompute battery % from the corrected voltage. Two units (G378517,G375430) capped at +0.05 pending a bench check.",
+ "model": "V = OCV(Q) + b - I*R; per-unit offset_mv (b), resistance_ohm (R), capacity_mah",
+ "track_current_ma": 115.0,
+ "nominal_voltage": 3.7,
+ "note": "offsets = volts to ADD to raw bat_v (= -offset_mv, uncertain capped at +-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians).",
+ "defaults": {
+  "offset_mv": 0.0,
+  "resistance_ohm": 0.554,
+  "capacity_mah": 6000,
+  "cap_class": "6Ah"
+ },
  "offsets": {
-  "G226122": -0.01,
-  "G304307": -0.02,
-  "G306088": 0.02,
-  "G306161": 0.05,
-  "G312243": -0.03,
-  "G312292": -0.01,
-  "G312300": 0.03,
-  "G312326": -0.03,
-  "G312334": 0.03,
-  "G312342": 0.01,
-  "G312359": -0.04,
-  "G334023": -0.01,
-  "G341846": -0.04,
-  "G347082": 0.04,
-  "G348635": 0.04,
-  "G370498": 0.02,
-  "G370589": -0.03,
-  "G370977": -0.02,
-  "G371116": 0.01,
-  "G375349": -0.01,
-  "G375356": -0.05,
-  "G375372": -0.03,
+  "G187547": -0.012,
+  "G226122": 0.005,
+  "G304307": -0.022,
+  "G306088": 0.008,
+  "G306161": 0.043,
+  "G312243": -0.02,
+  "G312268": 0.01,
+  "G312300": 0.023,
+  "G312326": -0.037,
+  "G312334": 0.018,
+  "G312342": 0.03,
+  "G312359": -0.047,
+  "G334023": -0.017,
+  "G334189": -0.007,
+  "G341846": -0.042,
+  "G341887": -0.007,
+  "G347082": 0.033,
+  "G348635": 0.033,
+  "G370498": 0.008,
+  "G370589": -0.032,
+  "G370977": -0.027,
+  "G371074": -0.007,
+  "G375349": 0.01,
+  "G375356": -0.035,
+  "G375372": -0.015,
   "G375430": 0.05,
-  "G375539": 0.02,
-  "G375547": 0.03,
-  "G375562": -0.02,
+  "G375539": 0.035,
+  "G375547": 0.023,
   "G378517": 0.05,
-  "G378657": -0.03,
-  "G378723": -0.01,
-  "G378830": -0.02,
-  "G378848": -0.03,
-  "G380521": 0.03,
-  "G388862": -0.02,
-  "G388920": 0.02,
-  "G594715": -0.05,
-  "G623050": 0.03
+  "G378657": -0.02,
+  "G378723": -0.017,
+  "G378830": -0.027,
+  "G378848": -0.032,
+  "G380521": 0.023,
+  "G388862": -0.027,
+  "G388920": 0.018,
+  "G594715": -0.057,
+  "G623050": 0.023
+ },
+ "units": {
+  "G187547": {
+   "offset_mv": 12.2,
+   "resistance_ohm": 0.633,
+   "capacity_mah": 7939,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.7,
+   "uncertain": true
+  },
+  "G226122": {
+   "offset_mv": -5.0,
+   "resistance_ohm": 0.337,
+   "capacity_mah": 2636,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 11.6,
+   "uncertain": false
+  },
+  "G304307": {
+   "offset_mv": 22.2,
+   "resistance_ohm": 0.581,
+   "capacity_mah": 4482,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 11.8,
+   "uncertain": false
+  },
+  "G306088": {
+   "offset_mv": -7.8,
+   "resistance_ohm": 0.596,
+   "capacity_mah": 6446,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 11.7,
+   "uncertain": false
+  },
+  "G306161": {
+   "offset_mv": -42.8,
+   "resistance_ohm": 0.454,
+   "capacity_mah": 8653,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 12.5,
+   "uncertain": true
+  },
+  "G312243": {
+   "offset_mv": 20.0,
+   "resistance_ohm": 0.561,
+   "capacity_mah": 3064,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 10.6,
+   "uncertain": false
+  },
+  "G312268": {
+   "offset_mv": -10.0,
+   "resistance_ohm": 0.724,
+   "capacity_mah": 3180,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 11.4,
+   "uncertain": false
+  },
+  "G312292": {
+   "offset_mv": -0.0,
+   "resistance_ohm": 0.886,
+   "capacity_mah": 2990,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 12.7,
+   "uncertain": false
+  },
+  "G312300": {
+   "offset_mv": -22.8,
+   "resistance_ohm": 0.404,
+   "capacity_mah": 4731,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 11.1,
+   "uncertain": false
+  },
+  "G312326": {
+   "offset_mv": 37.2,
+   "resistance_ohm": 0.771,
+   "capacity_mah": 5866,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 14.8,
+   "uncertain": false
+  },
+  "G312334": {
+   "offset_mv": -17.8,
+   "resistance_ohm": 0.472,
+   "capacity_mah": 5147,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 8.6,
+   "uncertain": false
+  },
+  "G312342": {
+   "offset_mv": -30.0,
+   "resistance_ohm": 0.453,
+   "capacity_mah": 2768,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 9.8,
+   "uncertain": false
+  },
+  "G312359": {
+   "offset_mv": 47.2,
+   "resistance_ohm": 0.777,
+   "capacity_mah": 5924,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 16.0,
+   "uncertain": false
+  },
+  "G334023": {
+   "offset_mv": 17.2,
+   "resistance_ohm": 0.717,
+   "capacity_mah": 5990,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 16.3,
+   "uncertain": false
+  },
+  "G334189": {
+   "offset_mv": 7.2,
+   "resistance_ohm": 0.441,
+   "capacity_mah": 4995,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 12.2,
+   "uncertain": false
+  },
+  "G341846": {
+   "offset_mv": 42.2,
+   "resistance_ohm": 0.536,
+   "capacity_mah": 5475,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 17.2,
+   "uncertain": false
+  },
+  "G341887": {
+   "offset_mv": 7.2,
+   "resistance_ohm": 0.499,
+   "capacity_mah": 6958,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.6,
+   "uncertain": false
+  },
+  "G347082": {
+   "offset_mv": -32.8,
+   "resistance_ohm": 0.697,
+   "capacity_mah": 5011,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 8.3,
+   "uncertain": false
+  },
+  "G348635": {
+   "offset_mv": -32.8,
+   "resistance_ohm": 0.48,
+   "capacity_mah": 8005,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.4,
+   "uncertain": true
+  },
+  "G370498": {
+   "offset_mv": -7.8,
+   "resistance_ohm": 0.657,
+   "capacity_mah": 6010,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 13.3,
+   "uncertain": false
+  },
+  "G370589": {
+   "offset_mv": 32.2,
+   "resistance_ohm": 0.614,
+   "capacity_mah": 6715,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 12.5,
+   "uncertain": false
+  },
+  "G370977": {
+   "offset_mv": 27.2,
+   "resistance_ohm": 0.662,
+   "capacity_mah": 5318,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.7,
+   "uncertain": false
+  },
+  "G371074": {
+   "offset_mv": 7.2,
+   "resistance_ohm": 0.565,
+   "capacity_mah": 5236,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 7.6,
+   "uncertain": false
+  },
+  "G371116": {
+   "offset_mv": -2.8,
+   "resistance_ohm": 0.466,
+   "capacity_mah": 4905,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 9.5,
+   "uncertain": false
+  },
+  "G375349": {
+   "offset_mv": -10.0,
+   "resistance_ohm": 0.558,
+   "capacity_mah": 3038,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 9.7,
+   "uncertain": false
+  },
+  "G375356": {
+   "offset_mv": 35.0,
+   "resistance_ohm": 0.912,
+   "capacity_mah": 2477,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 8.7,
+   "uncertain": false
+  },
+  "G375372": {
+   "offset_mv": 15.0,
+   "resistance_ohm": 0.58,
+   "capacity_mah": 1993,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 8.8,
+   "uncertain": true
+  },
+  "G375430": {
+   "offset_mv": -82.8,
+   "resistance_ohm": 0.358,
+   "capacity_mah": 8548,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.8,
+   "uncertain": true
+  },
+  "G375539": {
+   "offset_mv": -35.0,
+   "resistance_ohm": 0.587,
+   "capacity_mah": 3000,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 11.8,
+   "uncertain": false
+  },
+  "G375547": {
+   "offset_mv": -22.8,
+   "resistance_ohm": 0.468,
+   "capacity_mah": 8313,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.1,
+   "uncertain": true
+  },
+  "G375562": {
+   "offset_mv": -0.0,
+   "resistance_ohm": 0.649,
+   "capacity_mah": 3013,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 9.9,
+   "uncertain": false
+  },
+  "G378517": {
+   "offset_mv": -82.8,
+   "resistance_ohm": 0.166,
+   "capacity_mah": 7983,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 7.7,
+   "uncertain": true
+  },
+  "G378657": {
+   "offset_mv": 20.0,
+   "resistance_ohm": 0.722,
+   "capacity_mah": 3305,
+   "cap_class": "3Ah",
+   "fit_rms_mv": 11.3,
+   "uncertain": false
+  },
+  "G378723": {
+   "offset_mv": 17.2,
+   "resistance_ohm": 0.572,
+   "capacity_mah": 4655,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.7,
+   "uncertain": false
+  },
+  "G378830": {
+   "offset_mv": 27.2,
+   "resistance_ohm": 0.674,
+   "capacity_mah": 6267,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 16.0,
+   "uncertain": false
+  },
+  "G378848": {
+   "offset_mv": 32.2,
+   "resistance_ohm": 0.663,
+   "capacity_mah": 5322,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 14.0,
+   "uncertain": false
+  },
+  "G380521": {
+   "offset_mv": -22.8,
+   "resistance_ohm": 0.485,
+   "capacity_mah": 5801,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.4,
+   "uncertain": false
+  },
+  "G388862": {
+   "offset_mv": 27.2,
+   "resistance_ohm": 0.579,
+   "capacity_mah": 6596,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 11.6,
+   "uncertain": false
+  },
+  "G388920": {
+   "offset_mv": -17.8,
+   "resistance_ohm": 0.503,
+   "capacity_mah": 6852,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 10.5,
+   "uncertain": false
+  },
+  "G594715": {
+   "offset_mv": 57.2,
+   "resistance_ohm": 0.543,
+   "capacity_mah": 6970,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 13.1,
+   "uncertain": false
+  },
+  "G623050": {
+   "offset_mv": -22.8,
+   "resistance_ohm": 0.502,
+   "capacity_mah": 6491,
+   "cap_class": "6Ah",
+   "fit_rms_mv": 12.2,
+   "uncertain": false
+  }
  }
 }

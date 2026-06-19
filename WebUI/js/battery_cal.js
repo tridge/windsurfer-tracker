@@ -38,6 +38,7 @@ function voltageToPercent(voltage) {
 
 const BatteryCal = {
     offsets: {},
+    doc: null,          // full calibration document (v2: units, defaults, ...)
     loaded: false,
     _loading: null,
 
@@ -47,7 +48,7 @@ const BatteryCal = {
         if (this._loading) return this._loading;
         this._loading = fetch('/gt06_calibration.json', { cache: 'no-cache' })
             .then(r => (r.ok ? r.json() : null))
-            .then(d => { if (d && d.offsets) this.offsets = d.offsets; })
+            .then(d => { if (d) { this.doc = d; if (d.offsets) this.offsets = d.offsets; } })
             .catch(() => {})
             .finally(() => { this.loaded = true; });
         return this._loading;
@@ -55,6 +56,17 @@ const BatteryCal = {
 
     offsetFor(id) {
         return this.offsets[id] || 0;
+    },
+
+    // Per-unit 3-param calibration (v2). Falls back to the file's defaults
+    // (6Ah medians) for an unseen device; `_default:true` flags that case.
+    unitCal(id) {
+        const u = this.doc && this.doc.units && this.doc.units[id];
+        if (u) return u;
+        const d = (this.doc && this.doc.defaults) || {};
+        return { offset_mv: d.offset_mv || 0, resistance_ohm: d.resistance_ohm || null,
+                 capacity_mah: d.capacity_mah || null, cap_class: d.cap_class || '?',
+                 _default: true };
     },
 
     // Correct one record in place. No-op when bat_v is absent (old records keep

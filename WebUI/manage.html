@@ -333,6 +333,7 @@
             <button class="btn btn-primary" id="tabBtnEvents" onclick="showTab('events')">Events</button>
             <button class="btn" id="tabBtnTrackers" onclick="showTab('trackers')">GT06 Trackers</button>
             <button class="btn" id="tabBtnGt06Settings" onclick="showTab('gt06settings')">GT06 Settings</button>
+            <button class="btn" id="tabBtnGt06Battery" onclick="showTab('gt06battery')">GT06 Battery</button>
             <button class="btn" id="tabBtnSimbase" onclick="showTab('simbase')">SIMbase</button>
         </div>
 
@@ -374,6 +375,32 @@
             <div id="gt06SettingsError" class="error-message" style="display:none"></div>
             <div id="gt06SettingsBody" style="max-width:760px;font-size:13px">
                 <div class="loading">Loading settings&hellip;</div>
+            </div>
+        </div>
+
+        <!-- GT06 Battery Section (hidden until the GT06 Battery tab is selected) -->
+        <div class="events-section" id="gt06batterySection">
+            <div class="section-header">
+                <h2>GT06 Battery <span id="batCount" style="font-size:14px;font-weight:normal;color:#888"></span></h2>
+                <div>
+                    <input type="text" id="batSearch" placeholder="Search ID / IMEI / firmware"
+                           oninput="batFilter = this.value; renderBattery()"
+                           style="padding:6px 8px;margin-right:8px;border:1px solid #ccc;border-radius:4px;font-size:13px;width:230px">
+                    <button class="btn" onclick="loadGt06Battery()">Refresh</button>
+                </div>
+            </div>
+            <div id="batError" class="error-message" style="display:none"></div>
+            <div style="color:#888;font-size:12px;margin-bottom:8px">
+                Per-unit battery model from <code>gt06_calibration.json</code>:
+                <b>offset</b> = voltage-divider bias (reads high +), <b>R</b> = internal resistance.
+                <b>Offset &amp; R are solid.</b> <b>Capacity</b>/<b>Wh</b>/<b>Max track</b> are
+                <i>nominal-anchored estimates</i> from a shallow discharge &mdash; relative ordering
+                is meaningful, absolute values are soft pending a deep-discharge run.
+                Rows in grey use defaults (unseen unit); <span style="color:#c60">orange</span> =
+                uncertain fit (offset anomaly or capacity outside &plusmn;30%).
+            </div>
+            <div id="batList" class="event-list">
+                <div class="loading">Loading battery calibration&hellip;</div>
             </div>
         </div>
 
@@ -719,6 +746,7 @@
             events:       { section: 'eventsSection',       button: 'tabBtnEvents',       load: () => loadEvents() },
             trackers:     { section: 'trackersSection',     button: 'tabBtnTrackers',     load: () => loadTrackers() },
             gt06settings: { section: 'gt06settingsSection', button: 'tabBtnGt06Settings', load: () => loadGt06Settings() },
+            gt06battery:  { section: 'gt06batterySection',  button: 'tabBtnGt06Battery',  load: () => loadGt06Battery() },
             simbase:      { section: 'simbaseSection',      button: 'tabBtnSimbase',      load: () => loadSims() },
         };
 
@@ -972,6 +1000,109 @@
         function esc(s) {
             return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
                 ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        // ---- GT06 Battery tab (per-unit 3-param calibration) ----
+        let batRows = [];
+        let batFilter = '';
+        let batSort = { key: 'cap', dir: -1 };
+
+        async function loadGt06Battery() {
+            const errEl = document.getElementById('batError');
+            errEl.style.display = 'none';
+            try {
+                await BatteryCal.load();
+                const r = await fetch(`${API_BASE}/api/manage/gt06/trackers`,
+                    { headers: { 'X-Manager-Password': managerPassword } });
+                const data = r.ok ? await r.json() : { trackers: [] };
+                const doc = BatteryCal.doc || {};
+                const nomV = doc.nominal_voltage || 3.7;
+                const trkMa = doc.track_current_ma || 115;
+                // union of connected trackers and calibrated units
+                const byId = {};
+                for (const t of (data.trackers || []))
+                    byId[t.sailor_id] = { id: t.sailor_id, imei: t.imei, fw: t.firmware || '', online: !!t.online };
+                for (const id of Object.keys(doc.units || {}))
+                    if (!byId[id]) byId[id] = { id, imei: '', fw: '', online: false };
+                batRows = Object.values(byId).map(b => {
+                    const c = BatteryCal.unitCal(b.id);
+                    const cap = c.capacity_mah;
+                    return { ...b, offset_mv: c.offset_mv, r_ohm: c.resistance_ohm, cap_mah: cap,
+                             wh: cap ? cap/1000*nomV : null, track_h: cap ? cap/trkMa : null,
+                             uncertain: !!c.uncertain, isdefault: !!c._default };
+                });
+                renderBattery();
+            } catch (e) {
+                errEl.textContent = 'Could not load battery calibration: ' + e.message;
+                errEl.style.display = 'block';
+            }
+        }
+
+        function batSortVal(t, key) {
+            switch (key) {
+                case 'id':  return String(t.id || '').toLowerCase();
+                case 'fw':  return String(t.fw || '').toLowerCase();
+                case 'on':  return t.online ? 0 : 1;
+                case 'off': return t.offset_mv == null ? -1e9 : t.offset_mv;
+                case 'r':   return t.r_ohm == null ? -1 : t.r_ohm;
+                case 'cap': return t.cap_mah == null ? -1 : t.cap_mah;
+                case 'wh':  return t.wh == null ? -1 : t.wh;
+                case 'trk': return t.track_h == null ? -1 : t.track_h;
+                default:    return '';
+            }
+        }
+
+        function sortBattery(key) {
+            if (batSort.key === key) batSort.dir = -batSort.dir;
+            else batSort = { key, dir: 1 };
+            renderBattery();
+        }
+
+        function renderBattery() {
+            const countEl = document.getElementById('batCount');
+            if (!batRows.length) {
+                countEl.textContent = '';
+                document.getElementById('batList').innerHTML =
+                    '<p style="color:#888">No calibration data (gt06_calibration.json not loaded).</p>';
+                return;
+            }
+            const q = batFilter.trim().toLowerCase();
+            const rows = !q ? batRows.slice() : batRows.filter(t =>
+                [t.id, t.imei, t.fw].some(v => String(v || '').toLowerCase().indexOf(q) >= 0));
+            countEl.textContent = (q ? rows.length + ' of ' : '') + batRows.length + ' units';
+            rows.sort((a, b) => {
+                const va = batSortVal(a, batSort.key), vb = batSortVal(b, batSort.key);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * batSort.dir;
+            });
+            const cols = [['id','ID / IMEI'],['fw','Firmware'],['on','St'],['off','Offset (mV)'],
+                ['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],['trk','Max track (h)']];
+            let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+            html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
+                + cols.map(([k, l]) => {
+                    const arrow = batSort.key === k ? (batSort.dir > 0 ? ' ▲' : ' ▼') : '';
+                    return `<th style="cursor:pointer;user-select:none" onclick="sortBattery('${k}')">${l}${arrow}</th>`;
+                }).join('') + '</tr>';
+            for (const t of rows) {
+                const rowStyle = t.isdefault ? 'background:#f3f4f6;color:#888'
+                               : (t.uncertain ? 'background:#fff7ed' : '');
+                const fwShort = t.fw ? esc(t.fw.replace('_MG133_10F8G_B53', '')) : '—';
+                const off = t.offset_mv == null ? '—'
+                          : (t.offset_mv > 0 ? '+' : '') + t.offset_mv.toFixed(0);
+                html += `<tr style="border-bottom:1px solid #eee;${rowStyle}">`
+                    + `<td><b>${esc(t.id)}</b>${t.imei ? `<br><span style="color:#999">${esc(t.imei)}</span>` : ''}</td>`
+                    + `<td>${fwShort}`
+                        + `${t.uncertain ? ' <span style="color:#c60" title="uncertain fit">⚠</span>' : ''}`
+                        + `${t.isdefault ? ' <span style="color:#888" title="no cal data; using defaults">(def)</span>' : ''}</td>`
+                    + `<td>${t.online ? '\u{1F7E2}' : '⚪'}</td>`
+                    + `<td>${off}</td>`
+                    + `<td>${t.r_ohm == null ? '—' : t.r_ohm.toFixed(2)}</td>`
+                    + `<td>${t.cap_mah == null ? '—' : t.cap_mah}</td>`
+                    + `<td>${t.wh == null ? '—' : t.wh.toFixed(1)}</td>`
+                    + `<td>${t.track_h == null ? '—' : t.track_h.toFixed(1)}</td>`
+                    + `</tr>`;
+            }
+            html += '</table>';
+            document.getElementById('batList').innerHTML = html;
         }
 
         // ---- GT06 Settings tab ----
