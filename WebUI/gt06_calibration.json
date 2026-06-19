@@ -5,7 +5,13 @@
  "model": "V = OCV(Q) + b - I*R; per-unit offset_mv (b), resistance_ohm (R), capacity_mah",
  "track_current_ma": 115.0,
  "nominal_voltage": 3.7,
- "note": "offsets = volts to ADD to raw bat_v (= -offset_mv, uncertain capped at +-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians).",
+ "mode_power_w": {
+  "track": 0.426,
+  "idle": 0.277,
+  "sleep": null,
+  "idle_preliminary": true
+ },
+ "note": "offsets = volts to ADD to raw bat_v (= -offset_mv, uncertain capped at +-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians). mode_power_w: per-mode draw (W); max runtime = capacity_Wh / power.",
  "defaults": {
   "offset_mv": 0.0,
   "resistance_ohm": 0.554,

@@ -392,12 +392,13 @@
             <div id="batError" class="error-message" style="display:none"></div>
             <div style="color:#888;font-size:12px;margin-bottom:8px">
                 Per-unit battery model from <code>gt06_calibration.json</code>:
-                <b>offset</b> = voltage-divider bias (reads high +), <b>R</b> = internal resistance.
-                <b>Offset &amp; R are solid.</b> <b>Capacity</b>/<b>Wh</b>/<b>Max track</b> are
-                <i>nominal-anchored estimates</i> from a shallow discharge &mdash; relative ordering
-                is meaningful, absolute values are soft pending a deep-discharge run.
-                Rows in grey use defaults (unseen unit); <span style="color:#c60">orange</span> =
-                uncertain fit (offset anomaly or capacity outside &plusmn;30%).
+                <b>offset</b> = voltage-divider bias (reads high +), <b>R</b> = internal resistance
+                (both solid). <b>Capacity</b>/<b>Wh</b> are nominal-anchored estimates from a shallow
+                discharge (relative ordering meaningful, absolute soft pending a deep discharge).
+                <b>Max time</b> = Wh / per-mode power: <b>track</b> ~0.43&nbsp;W, <b>idle</b> ~0.28&nbsp;W
+                (<span style="color:#c60">*</span> preliminary &mdash; idle keeps the LTE link up so it's
+                most of tracking; GPS-off saves little), <b>sleep</b> pending a clean off-charge MODE5 night.
+                Grey rows = defaults (unseen unit); <span style="color:#c60">orange</span> = uncertain fit.
             </div>
             <div id="batList" class="event-list">
                 <div class="loading">Loading battery calibration&hellip;</div>
@@ -1006,6 +1007,7 @@
         let batRows = [];
         let batFilter = '';
         let batSort = { key: 'cap', dir: -1 };
+        let batIdlePrelim = false;
 
         async function loadGt06Battery() {
             const errEl = document.getElementById('batError');
@@ -1017,7 +1019,8 @@
                 const data = r.ok ? await r.json() : { trackers: [] };
                 const doc = BatteryCal.doc || {};
                 const nomV = doc.nominal_voltage || 3.7;
-                const trkMa = doc.track_current_ma || 115;
+                const mp = doc.mode_power_w || {};
+                batIdlePrelim = !!mp.idle_preliminary;
                 // union of connected trackers and calibrated units
                 const byId = {};
                 for (const t of (data.trackers || []))
@@ -1027,8 +1030,11 @@
                 batRows = Object.values(byId).map(b => {
                     const c = BatteryCal.unitCal(b.id);
                     const cap = c.capacity_mah;
-                    return { ...b, offset_mv: c.offset_mv, r_ohm: c.resistance_ohm, cap_mah: cap,
-                             wh: cap ? cap/1000*nomV : null, track_h: cap ? cap/trkMa : null,
+                    const wh = cap ? cap/1000*nomV : null;       // capacity in Wh
+                    const rt = p => (wh && p) ? wh/p : null;      // runtime hours = Wh / W
+                    return { ...b, cap_class: c.cap_class, offset_mv: c.offset_mv,
+                             r_ohm: c.resistance_ohm, cap_mah: cap, wh,
+                             track_h: rt(mp.track), idle_h: rt(mp.idle), sleep_h: rt(mp.sleep),
                              uncertain: !!c.uncertain, isdefault: !!c._default };
                 });
                 renderBattery();
@@ -1042,12 +1048,15 @@
             switch (key) {
                 case 'id':  return String(t.id || '').toLowerCase();
                 case 'fw':  return String(t.fw || '').toLowerCase();
+                case 'cls': return String(t.cap_class || '').toLowerCase();
                 case 'on':  return t.online ? 0 : 1;
                 case 'off': return t.offset_mv == null ? -1e9 : t.offset_mv;
                 case 'r':   return t.r_ohm == null ? -1 : t.r_ohm;
                 case 'cap': return t.cap_mah == null ? -1 : t.cap_mah;
                 case 'wh':  return t.wh == null ? -1 : t.wh;
                 case 'trk': return t.track_h == null ? -1 : t.track_h;
+                case 'idle':return t.idle_h == null ? -1 : t.idle_h;
+                case 'slp': return t.sleep_h == null ? -1 : t.sleep_h;
                 default:    return '';
             }
         }
@@ -1074,8 +1083,9 @@
                 const va = batSortVal(a, batSort.key), vb = batSortVal(b, batSort.key);
                 return (va < vb ? -1 : va > vb ? 1 : 0) * batSort.dir;
             });
-            const cols = [['id','ID / IMEI'],['fw','Firmware'],['on','St'],['off','Offset (mV)'],
-                ['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],['trk','Max track (h)']];
+            const cols = [['id','ID / IMEI'],['fw','Firmware'],['cls','Cap'],['on','St'],['off','Offset (mV)'],
+                ['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],
+                ['trk','Max track (h)'],['idle','Max idle (h)'],['slp','Max sleep (h)']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
                 + cols.map(([k, l]) => {
@@ -1088,17 +1098,21 @@
                 const fwShort = t.fw ? esc(t.fw.replace('_MG133_10F8G_B53', '')) : '—';
                 const off = t.offset_mv == null ? '—'
                           : (t.offset_mv > 0 ? '+' : '') + t.offset_mv.toFixed(0);
+                const hrs = h => h == null ? '—' : h.toFixed(1);
                 html += `<tr style="border-bottom:1px solid #eee;${rowStyle}">`
                     + `<td><b>${esc(t.id)}</b>${t.imei ? `<br><span style="color:#999">${esc(t.imei)}</span>` : ''}</td>`
                     + `<td>${fwShort}`
                         + `${t.uncertain ? ' <span style="color:#c60" title="uncertain fit">⚠</span>' : ''}`
                         + `${t.isdefault ? ' <span style="color:#888" title="no cal data; using defaults">(def)</span>' : ''}</td>`
+                    + `<td>${esc(t.cap_class || '—')}</td>`
                     + `<td>${t.online ? '\u{1F7E2}' : '⚪'}</td>`
                     + `<td>${off}</td>`
                     + `<td>${t.r_ohm == null ? '—' : t.r_ohm.toFixed(2)}</td>`
                     + `<td>${t.cap_mah == null ? '—' : t.cap_mah}</td>`
                     + `<td>${t.wh == null ? '—' : t.wh.toFixed(1)}</td>`
-                    + `<td>${t.track_h == null ? '—' : t.track_h.toFixed(1)}</td>`
+                    + `<td>${hrs(t.track_h)}</td>`
+                    + `<td>${hrs(t.idle_h)}${batIdlePrelim && t.idle_h != null ? ' <span style="color:#c60" title="preliminary: degraded idle measurement">*</span>' : ''}</td>`
+                    + `<td>${t.sleep_h == null ? '<span style="color:#888">pending</span>' : hrs(t.sleep_h)}</td>`
                     + `</tr>`;
             }
             html += '</table>';

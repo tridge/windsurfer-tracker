@@ -45,6 +45,14 @@ def main():
     ap.add_argument('--idle-ma', type=float, default=25.0)
     ap.add_argument('--nominal-v', type=float, default=3.7)
     ap.add_argument('--reference-v', type=float, default=4.17)
+    # Per-mode power draw (Watts), measured separately from the discharge windows.
+    # track defaults to track_ma*nominal_v; idle/sleep are None until measured from
+    # a clean off-charge window. idle_preliminary flags a degraded/contaminated read.
+    ap.add_argument('--track-w', type=float, default=None)
+    ap.add_argument('--idle-w', type=float, default=None)
+    ap.add_argument('--sleep-w', type=float, default=None)
+    ap.add_argument('--idle-preliminary', action='store_true',
+                    help='mark idle power as a degraded/upper-bound estimate')
     ap.add_argument('--generated', required=True, help='YYYY-MM-DD stamp for the file')
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
@@ -153,6 +161,16 @@ def main():
         "capacity_mah": NOMINAL['6Ah'],
         "cap_class": "6Ah",
     }
+    # Per-mode power (W). Max runtime per mode = capacity_Wh / power_W. Assumed
+    # uniform across units (device draw, not battery). track from the test; idle
+    # from a degraded off-charge window (preliminary); sleep pending a clean
+    # off-charge MODE5 overnight.
+    mode_power_w = {
+        "track": round(a.track_w if a.track_w else a.track_ma/1000*a.nominal_v, 3),
+        "idle": round(a.idle_w, 3) if a.idle_w else None,
+        "sleep": round(a.sleep_w, 3) if a.sleep_w else None,
+        "idle_preliminary": bool(a.idle_preliminary),
+    }
     doc = {
         "version": 2,
         "generated": a.generated,
@@ -160,8 +178,10 @@ def main():
         "model": "V = OCV(Q) + b - I*R; per-unit offset_mv (b), resistance_ohm (R), capacity_mah",
         "track_current_ma": a.track_ma,
         "nominal_voltage": a.nominal_v,
+        "mode_power_w": mode_power_w,
         "note": ("offsets = volts to ADD to raw bat_v (= -offset_mv, uncertain capped at "
-                 "+-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians)."),
+                 "+-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians). "
+                 "mode_power_w: per-mode draw (W); max runtime = capacity_Wh / power."),
         "defaults": defaults,
         "offsets": dict(sorted(offsets.items())),
         "units": dict(sorted(units.items())),
