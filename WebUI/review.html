@@ -1543,6 +1543,41 @@
             return null;
         }
 
+        // Stream a log file (gzip or plain) line-by-line via a callback, without
+        // ever materializing the whole file as one string. Required for very large
+        // all-day logs (hundreds of MB / >1M lines) that exceed the JS max string
+        // length and break fetchLogFile()'s .text()+split. Returns false if neither
+        // the .gz nor the plain URL loads.
+        async function streamLogLines(url, onLine) {
+            let body = null;
+            if (typeof DecompressionStream !== 'undefined') {
+                try {
+                    const r = await fetch(url + '.gz', { cache: 'no-cache' });
+                    if (r.ok) body = r.body.pipeThrough(new DecompressionStream('gzip'));
+                } catch (e) { body = null; }
+            }
+            if (!body) {
+                const r = await fetch(url, { cache: 'no-cache' });
+                if (!r.ok) return false;
+                body = r.body;
+            }
+            const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+            let buf = '';
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += value;
+                let nl;
+                while ((nl = buf.indexOf('\n')) >= 0) {
+                    const line = buf.slice(0, nl);
+                    buf = buf.slice(nl + 1);
+                    if (line) onLine(line);
+                }
+            }
+            if (buf.trim()) onLine(buf);
+            return true;
+        }
+
         // Load a specific race/log file (phase 2)
         async function loadRace(logEntry) {
             document.getElementById('loading').style.display = 'block';
@@ -1557,12 +1592,7 @@
             selectedUsers = new Set();
 
             try {
-                const text = await fetchLogFile(`${DATA_BASE}logs/${logEntry.file}`);
-                if (!text) throw new Error('Failed to load');
-
-                const lines = text.trim().split('\n');
-
-                for (const line of lines) {
+                const ok = await streamLogLines(`${DATA_BASE}logs/${logEntry.file}`, (line) => {
                     try {
                         const entry = JSON.parse(line);
                         // Expand pos array entries (new format) or use directly (old format)
@@ -1573,7 +1603,8 @@
                             }
                         }
                     } catch (e) {}
-                }
+                });
+                if (!ok) throw new Error('Failed to load');
 
                 if (allData.length === 0) {
                     document.getElementById('loading').style.display = 'none';
