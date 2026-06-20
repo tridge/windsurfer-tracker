@@ -373,6 +373,10 @@ def generate_log_summaries(log_dir: Path) -> int:
 
         # Generate summary for this date
         logs_data = []
+        # Day-level last-seen display name per tracker, persisted across the day's
+        # rotation files, so a record that transiently lacks displayid folds into
+        # the tracker's current name instead of spawning a separate G-id entry.
+        last_displayid: dict[str, str] = {}
 
         for log_file in sorted(log_files, key=lambda f: f.name):
             # Parse rotation index from filename
@@ -383,11 +387,13 @@ def generate_log_summaries(log_dir: Path) -> int:
             start_ts = None
             end_ts = None
             point_count = 0
-            sailors: dict[str, dict] = {}  # sailor_id -> {points, first_ts, last_ts, id, displayid}
-            # Key on the stable sailor_id (NOT displayid): a tracker whose display
-            # name was assigned/changed mid-log must stay one entry, else it is
-            # counted twice (once as G###### before naming, once as the name after).
-            # The latest displayid seen is kept for the label/search.
+            sailors: dict[str, dict] = {}  # key -> {points, first_ts, last_ts, id, displayid}
+            # Key on the display name (displayid) so a tracker reassigned from one
+            # sailor to another mid-day shows as TWO entries (track review can pick
+            # each separately). A record that transiently lacks displayid is keyed
+            # by the tracker's last-seen name (forward-fill via last_displayid), so
+            # it folds into the current name instead of creating a spurious G-id
+            # entry — only a never-yet-named tracker keys by sailor_id.
 
             try:
                 with open(log_file, 'r') as f:
@@ -406,7 +412,9 @@ def generate_log_summaries(log_dir: Path) -> int:
 
                             # Count no-GPS entries separately
                             if entry.get('nogps'):
-                                key = sailor_id
+                                if displayid:
+                                    last_displayid[sailor_id] = displayid
+                                key = displayid or last_displayid.get(sailor_id, sailor_id)
                                 if key not in sailors:
                                     sailors[key] = {
                                         'points': 0,
@@ -430,9 +438,13 @@ def generate_log_summaries(log_dir: Path) -> int:
                             if end_ts is None or ts > end_ts:
                                 end_ts = ts
 
-                            # Key on the stable sailor_id so a tracker stays one
-                            # entry even if its display name was assigned mid-log.
-                            key = sailor_id
+                            # Key on the display name; a record that transiently
+                            # lacks displayid uses the tracker's last-seen name
+                            # (forward-fill), falling back to sailor_id only if the
+                            # tracker has not been named yet.
+                            if displayid:
+                                last_displayid[sailor_id] = displayid
+                            key = displayid or last_displayid.get(sailor_id, sailor_id)
 
                             if key not in sailors:
                                 sailors[key] = {

@@ -50,16 +50,18 @@ def test_generate_summary(tmp_path):
     assert log_entry["sailors"]["S02"]["points"] == 1
 
 
-def test_display_name_change_counts_once(tmp_path):
-    """A tracker renamed mid-log (displayid null -> name) must be ONE sailor,
-    keyed by sailor_id, with the latest display name kept (regression: it used
-    to split into two entries and double the sailor count)."""
+def test_transient_missing_displayid_folds_into_name(tmp_path):
+    """A named tracker whose displayid is transiently absent on a few records
+    must stay ONE entry (keyed by the name), not spawn a spurious G-id entry.
+    Regression: 41 trackers showed as 82 because ~6 null-displayid records each
+    created a G-id entry alongside the name entry."""
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     log_file = log_dir / "2026_02_02.jsonl"
     entries = [
-        {"id": "G226122", "ts": 1000000, "lat": -36.85, "lon": 174.76, "role": "sailor"},
-        {"id": "G226122", "ts": 1000010, "lat": -36.85, "lon": 174.76, "role": "sailor"},
+        {"id": "G226122", "ts": 1000000, "lat": -36.85, "lon": 174.76, "role": "sailor",
+         "displayid": "T3Ah-V663-1"},
+        {"id": "G226122", "ts": 1000010, "lat": -36.85, "lon": 174.76, "role": "sailor"},  # null
         {"id": "G226122", "ts": 1000020, "lat": -36.85, "lon": 174.76, "role": "sailor",
          "displayid": "T3Ah-V663-1"},
     ]
@@ -68,11 +70,36 @@ def test_display_name_change_counts_once(tmp_path):
             f.write(json.dumps(e) + "\n")
 
     generate_log_summaries(log_dir)
-    summary = json.loads((log_dir / "2026_02_02_summary.json").read_text())
-    sailors = summary["logs"][0]["sailors"]
-    assert list(sailors.keys()) == ["G226122"]               # one entry, keyed by sailor_id
-    assert sailors["G226122"]["points"] == 3                 # all points together
-    assert sailors["G226122"]["displayid"] == "T3Ah-V663-1"  # latest name kept
+    sailors = json.loads((log_dir / "2026_02_02_summary.json").read_text())["logs"][0]["sailors"]
+    assert list(sailors.keys()) == ["T3Ah-V663-1"]   # one entry, keyed by the name
+    assert sailors["T3Ah-V663-1"]["points"] == 3     # the null record folded in
+    assert sailors["T3Ah-V663-1"]["id"] == "G226122"
+
+
+def test_reassigned_tracker_lists_both_names(tmp_path):
+    """A tracker handed from sailor A to sailor B mid-day (displayid A then B)
+    must produce TWO entries so track review can pick each separately. Nulls
+    fold into whichever name was active at the time."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "2026_02_03.jsonl"
+    entries = [
+        {"id": "G226122", "ts": 1000000, "lat": -36.85, "lon": 174.76, "role": "sailor",
+         "displayid": "Alice"},
+        {"id": "G226122", "ts": 1000010, "lat": -36.85, "lon": 174.76, "role": "sailor"},  # null -> Alice
+        {"id": "G226122", "ts": 1000020, "lat": -36.85, "lon": 174.76, "role": "sailor",
+         "displayid": "Bob"},
+        {"id": "G226122", "ts": 1000030, "lat": -36.85, "lon": 174.76, "role": "sailor"},  # null -> Bob
+    ]
+    with open(log_file, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+    generate_log_summaries(log_dir)
+    sailors = json.loads((log_dir / "2026_02_03_summary.json").read_text())["logs"][0]["sailors"]
+    assert set(sailors.keys()) == {"Alice", "Bob"}   # both names listed separately
+    assert sailors["Alice"]["points"] == 2           # Alice's record + its trailing null
+    assert sailors["Bob"]["points"] == 2             # Bob's record + its trailing null
 
 
 def test_summary_per_sailor_stats(tmp_path):
