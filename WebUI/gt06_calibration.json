@@ -4,7 +4,7 @@
  "reference_v": 4.17,
  "model": "per-unit offset_mv (reads high) + capacity_mah; bat% = discharge_curve lookup of (raw - offset). 3Ah from full-discharge 2026-06; 6Ah pending.",
  "track_current_ma": 115.0,
- "nominal_voltage": 3.7,
+ "nominal_voltage": 3.68,
  "mode_power_w": {
   "track": 0.381,
   "idle": 0.277,

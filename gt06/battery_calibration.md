@@ -35,9 +35,14 @@ It tracked continuously at 1 Hz the whole 29 h (verified in the full event-8 log
 ~3600 fixes/h). So:
 
 ```
-Energy = capacity × midpoint_voltage = 3.0 Ah × 3.680 V = 11.04 Wh
+Energy = capacity × average_voltage = 3.0 Ah × 3.680 V = 11.04 Wh
 Power  = Energy / runtime            = 11.04 Wh / 29.0 h = 0.381 W
 ```
+
+(3.680 V is the charge-weighted average discharge voltage — the corrected
+100-point curve below averages 3.6798 V. Here it coincides with the 14.5 h
+midpoint voltage, but the quantity that converts Ah→Wh is the average, not the
+midpoint per se.)
 
 **→ Tracking power ≈ 0.381 W, assumed identical for every tracker** (same GPS +
 modem hardware). This is the constant used for all downstream runtime/capacity work.
@@ -112,7 +117,8 @@ Offset spread −60 … +40 mV (100 mV total). Fleet nominal 50%-SoC voltage: **
 
 Built from the median tracker **G375539** (offset +10 mV → correction −10 mV). Its
 29 h discharge is split into 100 equal-time sections; since power is constant,
-each section is **1% of capacity**. For each section take the median **corrected**
+each section is **1% of runtime/energy** (so remaining-% means remaining
+runtime/Wh under tracking load). For each section take the median **corrected**
 voltage (raw + correction). The result is a 100-point table of corrected voltage
 vs remaining-capacity %, assumed common to all trackers (apply each unit's offset
 first, then look up). 50% reads 3.670 V by construction; the curve is monotonic.
