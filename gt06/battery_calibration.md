@@ -244,23 +244,39 @@ own offset) and compared to the median tracker G375539.
 fine to adopt. A per-unit gain term would tighten the two outliers at the extremes
 (future work if needed).
 
+## Step 6 — 6 Ah units (capacity + the 3 Ah↔6 Ah IR correction)
+
+Same method: 0.381 W constant power, start 17:30 06-18, capacity = 0.381 W ×
+runtime ÷ 3.68 V. Of the 30 6 Ah units, 17 fully drained and 13 were still live.
+
+**17 drained (firm):** ran 50–59 h → **5181–6131 mAh**.
+
+**3 Ah↔6 Ah IR correction.** At 50% SoC both cell sizes share the same OCV, so the
+difference in their median *terminal* voltage is the IR-sag difference. The 17
+drained 6 Ah units' half-way-to-death 5-min-median voltage (raw) is **3.720 V**
+(tight cluster 3.71–3.74) vs the 3 Ah median **3.670 V** → 6 Ah cells sag ~50 mV
+less (lower internal resistance). So **a 6 Ah voltage must be reduced by 50 mV
+before looking it up in the (3 Ah-derived) discharge curve**. Validated: with
+−50 mV the 6 Ah halfway maps to the curve's 50%.
+
+**13 live (estimated):** current raw voltage − 50 mV → curve → remaining % R;
+total runtime = elapsed × 100/(100−R); capacity = 0.381 × total ÷ 3.68. They were
+~60 h in with 0–18 h left → **6237–8101 mAh** (the IR correction cut the top end
+from ~8771 to ~8101). These firm up to exact runtime capacity as they die.
+
+**All 30 6 Ah: median ~6.05 Ah ≈ nominal, range 5.2–8.1 Ah** (genuinely wider than
+3 Ah's 2.5–3.8 Ah; the live high-end is still soft).
+
+**Applied to the UI** (`gt06_calibration.json` v4 + `battery_cal.js`):
+`class_curve_offset_mv = {3Ah:0, 6Ah:50}` is subtracted before the curve lookup
+(`percentForUnit` / `correct`). 6 Ah per-unit divider offsets are set to 0 for now
+(uncharacterised — measure them via the halfway method once all 6 Ah are dead).
+
 ## Pending
 
-- **6 Ah units:** capacity ∝ runtime at 0.381 W once they finish discharging;
-  offsets via the same halfway method; consider a separate 6 Ah curve.
-- **Idle / sleep power:** idle preliminary ~0.28 W (modem-dominated — LTE link
-  stays up; GPS-off saves little); sleep unmeasured (needs a clean off-charge MODE5
-  overnight).
-- **Cross-check the curve** by building it from a few other 3 Ah units and comparing.
-  — done, Step 5.
-- **WebUI adoption — done:** `gt06_calibration.json` v3 carries the 100-point
-  `discharge_curve`, `nominal_v_50` = 3.670, the per-unit 3 Ah offsets/capacities,
-  and `mode_power_w.track` = 0.381. `WebUI/js/battery_cal.js` corrects GT06 records
-  at display time only (`corrected_v = raw − offset`, then `remainingPercent()`
-  looks up the curve); used by event/review/finish/manage. Logs stay raw
-  (display-layer policy). The server keeps its own `_W07C_DISCHARGE` for the `bat`
-  it writes; the UI recomputes from `bat_v`, so the server value isn't used for
-  display.
-- **6 Ah units:** still on the old 3-param offsets (full-charge anchored) + the
-  3 Ah curve as an approximation, until they finish discharging and get the same
-  runtime→capacity + halfway-offset + curve treatment.
+- **Finalise 6 Ah:** replace the 13 live estimates with true runtime capacities once
+  they die (≤~18 h), and derive per-unit 6 Ah divider offsets via the halfway method.
+- **Idle / sleep power:** idle preliminary ~0.28 W (modem-dominated — LTE link stays
+  up; GPS-off saves little); sleep unmeasured (needs a clean off-charge MODE5 night).
+- **Deploy:** v4 calibration + battery_cal.js (class offset) + the still-pending
+  server restart (summary + STATUS-voltage fixes) land together at the next restart.

@@ -87,6 +87,22 @@ const BatteryCal = {
         return 0;
     },
 
+    // Volts to subtract before the curve lookup to map a cap-class onto the
+    // 3Ah-derived discharge curve (6Ah cells sag ~50mV less under load, so they
+    // read high vs the curve). Keyed by cap_class.
+    classCurveOffset(id) {
+        const cls = this.unitCal(id).cap_class;
+        const m = (this.doc && this.doc.class_curve_offset_mv) || {};
+        return (m[cls] || 0) / 1000;
+    },
+
+    // Remaining % from a raw device voltage for one unit: applies the per-unit
+    // divider offset and the cap-class curve offset, then looks up the curve.
+    percentForUnit(id, rawv) {
+        if (rawv == null) return null;
+        return this.remainingPercent(rawv + this.offsetFor(id) - this.classCurveOffset(id));
+    },
+
     // Per-unit calibration; falls back to the file's defaults (`_default:true`).
     unitCal(id) {
         const u = this.doc && this.doc.units && this.doc.units[id];
@@ -105,7 +121,7 @@ const BatteryCal = {
         if (rec.bat_v === undefined || rec.bat_v === null) return rec;
         const off = this.offsetFor(rec.id);
         if (off) rec.bat_v = Math.round((rec.bat_v + off) * 1000) / 1000;
-        rec.bat = this.remainingPercent(rec.bat_v);
+        rec.bat = this.remainingPercent(rec.bat_v - this.classCurveOffset(rec.id));
         return rec;
     },
 };
