@@ -383,9 +383,11 @@ def generate_log_summaries(log_dir: Path) -> int:
             start_ts = None
             end_ts = None
             point_count = 0
-            sailors: dict[str, dict] = {}  # key -> {points, first_ts, last_ts, id, displayid}
-            # Key is displayid if present, otherwise id. This allows the same tracker
-            # to appear as multiple entries if its display name changed during the log.
+            sailors: dict[str, dict] = {}  # sailor_id -> {points, first_ts, last_ts, id, displayid}
+            # Key on the stable sailor_id (NOT displayid): a tracker whose display
+            # name was assigned/changed mid-log must stay one entry, else it is
+            # counted twice (once as G###### before naming, once as the name after).
+            # The latest displayid seen is kept for the label/search.
 
             try:
                 with open(log_file, 'r') as f:
@@ -404,7 +406,7 @@ def generate_log_summaries(log_dir: Path) -> int:
 
                             # Count no-GPS entries separately
                             if entry.get('nogps'):
-                                key = displayid if displayid else sailor_id
+                                key = sailor_id
                                 if key not in sailors:
                                     sailors[key] = {
                                         'points': 0,
@@ -412,8 +414,8 @@ def generate_log_summaries(log_dir: Path) -> int:
                                         'last_ts': ts,
                                         'id': sailor_id
                                     }
-                                    if displayid:
-                                        sailors[key]['displayid'] = displayid
+                                if displayid:
+                                    sailors[key]['displayid'] = displayid
                                 sailors[key]['nogps_points'] = sailors[key].get('nogps_points', 0) + 1
                                 if ts < sailors[key]['first_ts']:
                                     sailors[key]['first_ts'] = ts
@@ -428,9 +430,9 @@ def generate_log_summaries(log_dir: Path) -> int:
                             if end_ts is None or ts > end_ts:
                                 end_ts = ts
 
-                            # Use displayid as the key if present, otherwise sailor_id
-                            # This groups entries by their display name at the time of logging
-                            key = displayid if displayid else sailor_id
+                            # Key on the stable sailor_id so a tracker stays one
+                            # entry even if its display name was assigned mid-log.
+                            key = sailor_id
 
                             if key not in sailors:
                                 sailors[key] = {
@@ -439,9 +441,9 @@ def generate_log_summaries(log_dir: Path) -> int:
                                     'last_ts': ts,
                                     'id': sailor_id  # Store original tracker ID
                                 }
-                                # Store displayid if present (for search)
-                                if displayid:
-                                    sailors[key]['displayid'] = displayid
+                            # Keep the latest display name seen (for label/search)
+                            if displayid:
+                                sailors[key]['displayid'] = displayid
 
                             sailors[key]['points'] += 1
                             if ts < sailors[key]['first_ts']:

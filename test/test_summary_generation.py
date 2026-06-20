@@ -50,6 +50,31 @@ def test_generate_summary(tmp_path):
     assert log_entry["sailors"]["S02"]["points"] == 1
 
 
+def test_display_name_change_counts_once(tmp_path):
+    """A tracker renamed mid-log (displayid null -> name) must be ONE sailor,
+    keyed by sailor_id, with the latest display name kept (regression: it used
+    to split into two entries and double the sailor count)."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "2026_02_02.jsonl"
+    entries = [
+        {"id": "G226122", "ts": 1000000, "lat": -36.85, "lon": 174.76, "role": "sailor"},
+        {"id": "G226122", "ts": 1000010, "lat": -36.85, "lon": 174.76, "role": "sailor"},
+        {"id": "G226122", "ts": 1000020, "lat": -36.85, "lon": 174.76, "role": "sailor",
+         "displayid": "T3Ah-V663-1"},
+    ]
+    with open(log_file, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+    generate_log_summaries(log_dir)
+    summary = json.loads((log_dir / "2026_02_02_summary.json").read_text())
+    sailors = summary["logs"][0]["sailors"]
+    assert list(sailors.keys()) == ["G226122"]               # one entry, keyed by sailor_id
+    assert sailors["G226122"]["points"] == 3                 # all points together
+    assert sailors["G226122"]["displayid"] == "T3Ah-V663-1"  # latest name kept
+
+
 def test_summary_per_sailor_stats(tmp_path):
     """Summary should have correct per-sailor stats."""
     log_dir = tmp_path / "logs"
