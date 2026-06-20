@@ -1,17 +1,17 @@
 {
- "version": 2,
- "generated": "2026-06-19",
+ "version": 3,
+ "generated": "2026-06-20",
  "reference_v": 4.17,
- "model": "V = OCV(Q) + b - I*R; per-unit offset_mv (b), resistance_ohm (R), capacity_mah",
+ "model": "per-unit offset_mv (reads high) + capacity_mah; bat% = discharge_curve lookup of (raw - offset). 3Ah from full-discharge 2026-06; 6Ah pending.",
  "track_current_ma": 115.0,
  "nominal_voltage": 3.7,
  "mode_power_w": {
-  "track": 0.426,
+  "track": 0.381,
   "idle": 0.277,
   "sleep": null,
   "idle_preliminary": true
  },
- "note": "offsets = volts to ADD to raw bat_v (= -offset_mv, uncertain capped at +-50mV). units = full 3-param fit. Unseen units use defaults (6Ah medians). mode_power_w: per-mode draw (W); max runtime = capacity_Wh / power.",
+ "note": "GT06-only display-layer correction (never applied to logs). corrected_v = raw_bat_v - offset_mv/1000; remaining% = lookup corrected_v in discharge_curve (index 0=100%..99=1%). offsets[] kept for back-compat (= -offset_mv/1000).",
  "defaults": {
   "offset_mv": 0.0,
   "resistance_ohm": 0.554,
@@ -20,16 +20,17 @@
  },
  "offsets": {
   "G187547": -0.012,
-  "G226122": 0.005,
+  "G226122": -0.02,
   "G304307": -0.022,
   "G306088": 0.008,
   "G306161": 0.043,
-  "G312243": -0.02,
-  "G312268": 0.01,
+  "G312243": -0.04,
+  "G312268": 0.02,
+  "G312292": -0.01,
   "G312300": 0.023,
   "G312326": -0.037,
   "G312334": 0.018,
-  "G312342": 0.03,
+  "G312342": -0.01,
   "G312359": -0.047,
   "G334023": -0.017,
   "G334189": -0.007,
@@ -42,13 +43,13 @@
   "G370977": -0.027,
   "G371074": -0.007,
   "G375349": 0.01,
-  "G375356": -0.035,
-  "G375372": -0.015,
-  "G375430": 0.05,
-  "G375539": 0.035,
+  "G375356": 0.01,
+  "G375372": 0.06,
+  "G375430": 0.083,
+  "G375539": -0.01,
   "G375547": 0.023,
-  "G378517": 0.05,
-  "G378657": -0.02,
+  "G375562": 0.01,
+  "G378517": 0.083,
   "G378723": -0.017,
   "G378830": -0.027,
   "G378848": -0.032,
@@ -65,15 +66,17 @@
    "capacity_mah": 7939,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.7,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G226122": {
-   "offset_mv": -5.0,
+   "offset_mv": 20,
    "resistance_ohm": 0.337,
-   "capacity_mah": 2636,
+   "capacity_mah": 2685,
    "cap_class": "3Ah",
    "fit_rms_mv": 11.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G304307": {
    "offset_mv": 22.2,
@@ -81,7 +84,8 @@
    "capacity_mah": 4482,
    "cap_class": "6Ah",
    "fit_rms_mv": 11.8,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G306088": {
    "offset_mv": -7.8,
@@ -89,7 +93,8 @@
    "capacity_mah": 6446,
    "cap_class": "6Ah",
    "fit_rms_mv": 11.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G306161": {
    "offset_mv": -42.8,
@@ -97,31 +102,35 @@
    "capacity_mah": 8653,
    "cap_class": "6Ah",
    "fit_rms_mv": 12.5,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G312243": {
-   "offset_mv": 20.0,
+   "offset_mv": 40,
    "resistance_ohm": 0.561,
-   "capacity_mah": 3064,
+   "capacity_mah": 3245,
    "cap_class": "3Ah",
    "fit_rms_mv": 10.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G312268": {
-   "offset_mv": -10.0,
+   "offset_mv": -20,
    "resistance_ohm": 0.724,
-   "capacity_mah": 3180,
+   "capacity_mah": 3482,
    "cap_class": "3Ah",
    "fit_rms_mv": 11.4,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G312292": {
-   "offset_mv": -0.0,
+   "offset_mv": 10,
    "resistance_ohm": 0.886,
-   "capacity_mah": 2990,
+   "capacity_mah": 3000,
    "cap_class": "3Ah",
    "fit_rms_mv": 12.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G312300": {
    "offset_mv": -22.8,
@@ -129,7 +138,8 @@
    "capacity_mah": 4731,
    "cap_class": "6Ah",
    "fit_rms_mv": 11.1,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G312326": {
    "offset_mv": 37.2,
@@ -137,7 +147,8 @@
    "capacity_mah": 5866,
    "cap_class": "6Ah",
    "fit_rms_mv": 14.8,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G312334": {
    "offset_mv": -17.8,
@@ -145,15 +156,17 @@
    "capacity_mah": 5147,
    "cap_class": "6Ah",
    "fit_rms_mv": 8.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G312342": {
-   "offset_mv": -30.0,
+   "offset_mv": 10,
    "resistance_ohm": 0.453,
-   "capacity_mah": 2768,
+   "capacity_mah": 2807,
    "cap_class": "3Ah",
    "fit_rms_mv": 9.8,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G312359": {
    "offset_mv": 47.2,
@@ -161,7 +174,8 @@
    "capacity_mah": 5924,
    "cap_class": "6Ah",
    "fit_rms_mv": 16.0,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G334023": {
    "offset_mv": 17.2,
@@ -169,7 +183,8 @@
    "capacity_mah": 5990,
    "cap_class": "6Ah",
    "fit_rms_mv": 16.3,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G334189": {
    "offset_mv": 7.2,
@@ -177,7 +192,8 @@
    "capacity_mah": 4995,
    "cap_class": "6Ah",
    "fit_rms_mv": 12.2,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G341846": {
    "offset_mv": 42.2,
@@ -185,7 +201,8 @@
    "capacity_mah": 5475,
    "cap_class": "6Ah",
    "fit_rms_mv": 17.2,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G341887": {
    "offset_mv": 7.2,
@@ -193,7 +210,8 @@
    "capacity_mah": 6958,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G347082": {
    "offset_mv": -32.8,
@@ -201,7 +219,8 @@
    "capacity_mah": 5011,
    "cap_class": "6Ah",
    "fit_rms_mv": 8.3,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G348635": {
    "offset_mv": -32.8,
@@ -209,7 +228,8 @@
    "capacity_mah": 8005,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.4,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G370498": {
    "offset_mv": -7.8,
@@ -217,7 +237,8 @@
    "capacity_mah": 6010,
    "cap_class": "6Ah",
    "fit_rms_mv": 13.3,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G370589": {
    "offset_mv": 32.2,
@@ -225,7 +246,8 @@
    "capacity_mah": 6715,
    "cap_class": "6Ah",
    "fit_rms_mv": 12.5,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G370977": {
    "offset_mv": 27.2,
@@ -233,7 +255,8 @@
    "capacity_mah": 5318,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G371074": {
    "offset_mv": 7.2,
@@ -241,7 +264,8 @@
    "capacity_mah": 5236,
    "cap_class": "6Ah",
    "fit_rms_mv": 7.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G371116": {
    "offset_mv": -2.8,
@@ -249,31 +273,35 @@
    "capacity_mah": 4905,
    "cap_class": "6Ah",
    "fit_rms_mv": 9.5,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G375349": {
-   "offset_mv": -10.0,
+   "offset_mv": -10,
    "resistance_ohm": 0.558,
-   "capacity_mah": 3038,
+   "capacity_mah": 3443,
    "cap_class": "3Ah",
    "fit_rms_mv": 9.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G375356": {
-   "offset_mv": 35.0,
+   "offset_mv": -10,
    "resistance_ohm": 0.912,
-   "capacity_mah": 2477,
+   "capacity_mah": 2825,
    "cap_class": "3Ah",
    "fit_rms_mv": 8.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G375372": {
-   "offset_mv": 15.0,
+   "offset_mv": -60,
    "resistance_ohm": 0.58,
-   "capacity_mah": 1993,
+   "capacity_mah": 2509,
    "cap_class": "3Ah",
    "fit_rms_mv": 8.8,
-   "uncertain": true
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G375430": {
    "offset_mv": -82.8,
@@ -281,15 +309,17 @@
    "capacity_mah": 8548,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.8,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G375539": {
-   "offset_mv": -35.0,
+   "offset_mv": 10,
    "resistance_ohm": 0.587,
-   "capacity_mah": 3000,
+   "capacity_mah": 3001,
    "cap_class": "3Ah",
    "fit_rms_mv": 11.8,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G375547": {
    "offset_mv": -22.8,
@@ -297,15 +327,17 @@
    "capacity_mah": 8313,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.1,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G375562": {
-   "offset_mv": -0.0,
+   "offset_mv": -10,
    "resistance_ohm": 0.649,
-   "capacity_mah": 3013,
+   "capacity_mah": 3303,
    "cap_class": "3Ah",
    "fit_rms_mv": 9.9,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G378517": {
    "offset_mv": -82.8,
@@ -313,15 +345,17 @@
    "capacity_mah": 7983,
    "cap_class": "6Ah",
    "fit_rms_mv": 7.7,
-   "uncertain": true
+   "uncertain": true,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G378657": {
-   "offset_mv": 20.0,
+   "offset_mv": 0,
    "resistance_ohm": 0.722,
-   "capacity_mah": 3305,
+   "capacity_mah": 3758,
    "cap_class": "3Ah",
    "fit_rms_mv": 11.3,
-   "uncertain": false
+   "uncertain": false,
+   "source": "discharge-2026-06"
   },
   "G378723": {
    "offset_mv": 17.2,
@@ -329,7 +363,8 @@
    "capacity_mah": 4655,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.7,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G378830": {
    "offset_mv": 27.2,
@@ -337,7 +372,8 @@
    "capacity_mah": 6267,
    "cap_class": "6Ah",
    "fit_rms_mv": 16.0,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G378848": {
    "offset_mv": 32.2,
@@ -345,7 +381,8 @@
    "capacity_mah": 5322,
    "cap_class": "6Ah",
    "fit_rms_mv": 14.0,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G380521": {
    "offset_mv": -22.8,
@@ -353,7 +390,8 @@
    "capacity_mah": 5801,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.4,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G388862": {
    "offset_mv": 27.2,
@@ -361,7 +399,8 @@
    "capacity_mah": 6596,
    "cap_class": "6Ah",
    "fit_rms_mv": 11.6,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G388920": {
    "offset_mv": -17.8,
@@ -369,7 +408,8 @@
    "capacity_mah": 6852,
    "cap_class": "6Ah",
    "fit_rms_mv": 10.5,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G594715": {
    "offset_mv": 57.2,
@@ -377,7 +417,8 @@
    "capacity_mah": 6970,
    "cap_class": "6Ah",
    "fit_rms_mv": 13.1,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   },
   "G623050": {
    "offset_mv": -22.8,
@@ -385,7 +426,111 @@
    "capacity_mah": 6491,
    "cap_class": "6Ah",
    "fit_rms_mv": 12.2,
-   "uncertain": false
+   "uncertain": false,
+   "source": "3param-fit (pending discharge re-cal)"
   }
- }
+ },
+ "nominal_v_50": 3.67,
+ "discharge_curve": [
+  4.06,
+  4.05,
+  4.04,
+  4.03,
+  4.02,
+  4.01,
+  4.0,
+  3.99,
+  3.98,
+  3.97,
+  3.96,
+  3.94,
+  3.93,
+  3.92,
+  3.91,
+  3.9,
+  3.9,
+  3.89,
+  3.89,
+  3.88,
+  3.88,
+  3.88,
+  3.87,
+  3.86,
+  3.86,
+  3.85,
+  3.84,
+  3.84,
+  3.83,
+  3.82,
+  3.81,
+  3.81,
+  3.8,
+  3.79,
+  3.78,
+  3.77,
+  3.76,
+  3.75,
+  3.74,
+  3.73,
+  3.72,
+  3.71,
+  3.71,
+  3.706,
+  3.7,
+  3.69,
+  3.68,
+  3.673,
+  3.67,
+  3.67,
+  3.67,
+  3.66,
+  3.65,
+  3.65,
+  3.64,
+  3.64,
+  3.63,
+  3.63,
+  3.62,
+  3.62,
+  3.61,
+  3.61,
+  3.6,
+  3.6,
+  3.59,
+  3.59,
+  3.58,
+  3.58,
+  3.57,
+  3.57,
+  3.56,
+  3.56,
+  3.55,
+  3.54,
+  3.53,
+  3.53,
+  3.52,
+  3.51,
+  3.51,
+  3.5,
+  3.49,
+  3.49,
+  3.48,
+  3.46,
+  3.46,
+  3.45,
+  3.44,
+  3.43,
+  3.42,
+  3.41,
+  3.41,
+  3.4,
+  3.39,
+  3.37,
+  3.33,
+  3.3,
+  3.29,
+  3.29,
+  3.29,
+  3.29
+ ]
 }

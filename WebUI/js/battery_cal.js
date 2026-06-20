@@ -1,19 +1,24 @@
 /**
- * GT06 battery voltage calibration (display-time) for Windsurfer Tracker WebUI.
+ * GT06 battery calibration (display-time) for Windsurfer Tracker WebUI.
  *
- * Each unit's voltage divider has a small fixed offset, so the raw bat_v it
- * reports (and the % derived from it) is biased by up to ~50mV. This module
- * loads a public per-unit offset table (/gt06_calibration.json) and corrects
- * records as they are ingested: bat_v += offset, and bat is recomputed from the
- * corrected voltage. Correcting in the UI (not at capture) means historical logs
- * are corrected too, and the raw logged data stays untouched.
+ * GT06 ONLY. Each unit's voltage divider has a small fixed offset, so the raw
+ * bat_v it reports is biased by up to ~50mV. This module loads a public
+ * calibration table (/gt06_calibration.json) and corrects records as they are
+ * displayed: corrected_v = raw_bat_v - offset, then battery % = remaining
+ * capacity from the empirical discharge curve (corrected voltage -> remaining %).
+ * Correction happens in the UI, never when recording to logs, so historical logs
+ * stay raw and any display reads the same corrected value.
  *
- * voltageToPercent() is a direct port of voltage_to_percent() in
- * server/protocol_GT06.py (the W07C 24h-turntable discharge curve) so an
- * offset of 0 reproduces the server's stored %.
+ * NOT applied to phone/app trackers (they own their own %). Gated on GT06 ids
+ * (G######) / ver==='gt06'.
+ *
+ * discharge_curve (in the JSON) is the offset-corrected tracking-voltage curve
+ * built from the 2026-06 full discharge; voltageToPercent() below is the legacy
+ * single-unit fallback used only if the JSON has no curve.
  */
 
-// (voltage, percent), descending voltage, evenly spaced in time.
+// Legacy fallback curve (single V6.63 unit, 24h turntable) — only used if the
+// calibration JSON provides no discharge_curve.
 const _W07C_DISCHARGE = [
     [4.14, 100], [4.03, 95], [3.99, 90], [3.97, 85], [3.93, 80],
     [3.89, 75],  [3.86, 70], [3.82, 65], [3.77, 60], [3.72, 55],
@@ -36,14 +41,19 @@ function voltageToPercent(voltage) {
     return 0;
 }
 
+// True iff this record is a GT06 tracker (corrections apply only to those).
+function isGt06Record(rec) {
+    if (!rec) return false;
+    if (rec.ver === 'gt06') return true;
+    return /^G\d{6}/.test(String(rec.id || ''));
+}
+
 const BatteryCal = {
     offsets: {},
-    doc: null,          // full calibration document (v2: units, defaults, ...)
+    doc: null,          // full calibration document
     loaded: false,
     _loading: null,
 
-    // Fetch the global offset table once. Tolerates 404 (offsets stay empty,
-    // so every record passes through unchanged). Safe to await repeatedly.
     load() {
         if (this._loading) return this._loading;
         this._loading = fetch('/gt06_calibration.json', { cache: 'no-cache' })
@@ -58,8 +68,26 @@ const BatteryCal = {
         return this.offsets[id] || 0;
     },
 
-    // Per-unit 3-param calibration (v2). Falls back to the file's defaults
-    // (6Ah medians) for an unseen device; `_default:true` flags that case.
+    // Remaining-capacity % from a CORRECTED voltage, via the empirical discharge
+    // curve (curve[k] = corrected voltage at (100-k)% remaining, monotonic down).
+    // Falls back to the legacy curve if the JSON has none.
+    remainingPercent(v) {
+        const c = this.doc && this.doc.discharge_curve;
+        if (!c || !c.length) return voltageToPercent(v);
+        const n = c.length;
+        if (v >= c[0]) return 100;
+        if (v <= c[n - 1]) return 0;                            // at/below cutoff floor = empty
+        for (let k = 1; k < n; k++) {
+            if (v > c[k]) {                       // v in (c[k], c[k-1]]
+                const span = c[k - 1] - c[k];
+                const frac = span > 0 ? (c[k - 1] - v) / span : 0;
+                return Math.round((100 - (k - 1)) - frac);
+            }
+        }
+        return 0;
+    },
+
+    // Per-unit calibration; falls back to the file's defaults (`_default:true`).
     unitCal(id) {
         const u = this.doc && this.doc.units && this.doc.units[id];
         if (u) return u;
@@ -69,13 +97,15 @@ const BatteryCal = {
                  _default: true };
     },
 
-    // Correct one record in place. No-op when bat_v is absent (old records keep
-    // their stored bat). Returns the same record for chaining.
+    // Correct one record in place (GT06 only). Applies the divider offset and
+    // recomputes bat % from the corrected voltage via the discharge curve.
+    // No-op for non-GT06 records or when bat_v is absent.
     correct(rec) {
-        if (!rec || rec.bat_v === undefined || rec.bat_v === null) return rec;
+        if (!isGt06Record(rec)) return rec;
+        if (rec.bat_v === undefined || rec.bat_v === null) return rec;
         const off = this.offsetFor(rec.id);
         if (off) rec.bat_v = Math.round((rec.bat_v + off) * 1000) / 1000;
-        rec.bat = voltageToPercent(rec.bat_v);
+        rec.bat = this.remainingPercent(rec.bat_v);
         return rec;
     },
 };

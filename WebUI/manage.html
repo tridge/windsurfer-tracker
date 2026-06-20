@@ -1319,7 +1319,7 @@
                 await BatteryCal.load();
                 for (const t of gt06Trackers) {
                     const bt = (t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null;
-                    if (bt) t.battery = voltageToPercent(bt + BatteryCal.offsetFor(t.sailor_id));
+                    if (bt) t.battery = BatteryCal.remainingPercent(bt + BatteryCal.offsetFor(t.sailor_id));
                 }
                 window._trackers = gt06Trackers;
                 renderTrackers();
