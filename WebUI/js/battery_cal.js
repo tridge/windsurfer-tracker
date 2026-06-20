@@ -45,7 +45,7 @@ function voltageToPercent(voltage) {
 function isGt06Record(rec) {
     if (!rec) return false;
     if (rec.ver === 'gt06') return true;
-    return /^G\d{6}/.test(String(rec.id || ''));
+    return /^G\d{6}$/.test(String(rec.id || ''));   // GT06 sailor_id = G + 6 digits, exactly
 }
 
 const BatteryCal = {

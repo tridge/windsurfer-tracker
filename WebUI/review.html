@@ -1615,11 +1615,15 @@
                 // Sort by timestamp
                 allData.sort((a, b) => a.ts - b.ts);
 
-                // Group by user - use displayid if present, otherwise id
-                // This allows the same tracker to appear as multiple entries if
-                // its display name was changed during the log session
+                // Group by display name (so a tracker reassigned to a different
+                // sailor mid-log appears as two entries). A record that transiently
+                // lacks displayid forward-fills to the tracker's last-seen name
+                // (allData is ts-sorted above), so it folds into the current name
+                // instead of spawning a spurious G-id entry.
+                const lastNameById = {};
                 for (const entry of allData) {
-                    const key = entry.displayid || entry.id;
+                    if (entry.displayid) lastNameById[entry.id] = entry.displayid;
+                    const key = entry.displayid || lastNameById[entry.id] || entry.id;
                     if (!userData[key]) {
                         userData[key] = [];
                     }
@@ -1743,11 +1747,13 @@
             // Sort by timestamp
             allData.sort((a, b) => a.ts - b.ts);
 
-            // Group by user - use displayid if present, otherwise id
-            // This allows the same tracker to appear as multiple entries if
-            // its display name was changed during the log session
+            // Group by display name (reassigned tracker -> two entries); a record
+            // that transiently lacks displayid forward-fills to the tracker's
+            // last-seen name (allData is ts-sorted) instead of spawning a G-id entry.
+            const lastNameById = {};
             for (const entry of allData) {
-                const key = entry.displayid || entry.id;
+                if (entry.displayid) lastNameById[entry.id] = entry.displayid;
+                const key = entry.displayid || lastNameById[entry.id] || entry.id;
                 if (!userData[key]) {
                     userData[key] = [];
                 }

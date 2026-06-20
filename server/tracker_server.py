@@ -378,7 +378,16 @@ def generate_log_summaries(log_dir: Path) -> int:
         # the tracker's current name instead of spawning a separate G-id entry.
         last_displayid: dict[str, str] = {}
 
-        for log_file in sorted(log_files, key=lambda f: f.name):
+        # Process oldest rotation first (highest .N), the live base file (.0) last,
+        # so last_displayid forward-fills chronologically — a name assigned later
+        # must not fill earlier-file null records. (clear_today rotates the old
+        # file to .1 and writes new points to the base, so filename order alone is
+        # not chronological.)
+        def _rotation_idx(f):
+            m = date_pattern.match(f.name)
+            return int(m.group(3)) if m and m.group(3) else 0
+
+        for log_file in sorted(log_files, key=_rotation_idx, reverse=True):
             # Parse rotation index from filename
             match = date_pattern.match(log_file.name)
             rotation_idx = int(match.group(3)) if match.group(3) else 0
