@@ -714,6 +714,9 @@ class GT06Listener:
             pass
         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
         self._log(f"[GT06] Disconnected: {label} ({gt_conn.addr[0]}:{gt_conn.addr[1]})")
+        # Persist the in-memory device snapshot (incl. the last STATUS voltage and
+        # last-contact) so a now-offline unit keeps its freshest reading on disk.
+        self._save_device_state()
 
     def _send(self, gt_conn, data):
         """Best-effort send to a GT06 connection."""
@@ -1837,6 +1840,18 @@ class GT06Listener:
                 gt_conn.battery_voltage = float(vmatch.group(1))
                 gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
                 gt_conn.status_miss_count = 0
+                # STATUS# carries fresh battery voltage ~once/min during tracking,
+                # far fresher than the occasional cxzt# that fills settings.BT.
+                # Reflect it (+ last-contact) in the device snapshot the management
+                # UI reads — in memory only here; persisted on disconnect to avoid a
+                # full state write every ~60s per unit.
+                st = self.device_state.get(gt_conn.imei)
+                if st is not None:
+                    now_w = time.time()
+                    st['battery_voltage'] = gt_conn.battery_voltage
+                    st['battery'] = gt_conn.battery
+                    st['last_seen'] = now_w
+                    st['last_seen_iso'] = datetime.fromtimestamp(now_w).isoformat()
                 self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
             # Detect GPS still active during idle — re-assert the GPS-off setting,
             # but rate-limited: firing on every STATUS# (~60s) was a second churn
@@ -2011,6 +2026,11 @@ class GT06Listener:
                 "last_seen_iso": last_seen_iso,
                 "battery": (conn.battery if conn and conn.battery is not None
                             and conn.battery >= 0 else st.get("battery")),
+                # Freshest voltage: live connection (updated by cxzt# AND STATUS#)
+                # for online units, else the persisted snapshot. settings.BT below
+                # is cxzt#-only and can be stale; prefer this.
+                "battery_voltage": (conn.battery_voltage if conn and conn.battery_voltage is not None
+                                    else st.get("battery_voltage")),
                 "signal": (conn.signal if conn and conn.signal is not None
                            and conn.signal >= 0 else st.get("signal")),
                 "idle": (conn.idle if conn else st.get("idle")),

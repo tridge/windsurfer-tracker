@@ -1026,7 +1026,9 @@
                 for (const t of (data.trackers || []))
                     byId[t.sailor_id] = { id: t.sailor_id, imei: t.imei, fw: t.firmware || '',
                         online: !!t.online,
-                        rawv: (t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null };
+                        // freshest device voltage (cxzt# or STATUS#); settings.BT is cxzt-only
+                        rawv: (t.battery_voltage != null) ? t.battery_voltage
+                              : ((t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null) };
                 for (const id of Object.keys(doc.units || {}))
                     if (!byId[id]) byId[id] = { id, imei: '', fw: '', online: false, rawv: null };
                 batRows = Object.values(byId).map(b => {
@@ -1318,7 +1320,8 @@
                 // is millivolts) so the table and sort match the corrected UI.
                 await BatteryCal.load();
                 for (const t of gt06Trackers) {
-                    const bt = (t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null;
+                    const bt = (t.battery_voltage != null) ? t.battery_voltage
+                             : ((t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null);
                     if (bt) t.battery = BatteryCal.remainingPercent(bt + BatteryCal.offsetFor(t.sailor_id));
                 }
                 window._trackers = gt06Trackers;
