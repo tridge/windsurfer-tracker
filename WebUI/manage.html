@@ -1089,7 +1089,9 @@
             countEl.textContent = (q ? rows.length + ' of ' : '') + batRows.length + ' units';
             rows.sort((a, b) => {
                 const va = batSortVal(a, batSort.key), vb = batSortVal(b, batSort.key);
-                return (va < vb ? -1 : va > vb ? 1 : 0) * batSort.dir;
+                const c = (va < vb ? -1 : va > vb ? 1 : 0) * batSort.dir;
+                // stable tiebreak by id so tied rows don't reshuffle on refresh
+                return c || String(a.id || a.imei).localeCompare(String(b.id || b.imei));
             });
             const cols = [['id','ID / IMEI'],['fw','Firmware'],['cls','Cap'],['on','St'],['off','Offset (mV)'],
                 ['rawv','Raw V'],['corrv','Corr V'],['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],
@@ -1386,7 +1388,9 @@
             }
             trackers.sort((a, b) => {
                 const va = gt06SortVal(a, gt06Sort.key), vb = gt06SortVal(b, gt06Sort.key);
-                return (va < vb ? -1 : va > vb ? 1 : 0) * gt06Sort.dir;
+                const c = (va < vb ? -1 : va > vb ? 1 : 0) * gt06Sort.dir;
+                // stable tiebreak by id so tied rows don't reshuffle on refresh
+                return c || String(a.sailor_id || a.imei).localeCompare(String(b.sailor_id || b.imei));
             });
             const evOpts = (sel) => gt06Events.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
@@ -1588,7 +1592,10 @@
             }
             sims.sort((a, b) => {
                 const va = simSortVal(a, simSort.key), vb = simSortVal(b, simSort.key);
-                return (va < vb ? -1 : va > vb ? 1 : 0) * simSort.dir;
+                const c = (va < vb ? -1 : va > vb ? 1 : 0) * simSort.dir;
+                // stable tiebreak by iccid so tied rows don't reshuffle on refresh
+                if (c) return c;
+                return String(a.iccid || a.msisdn || '').localeCompare(String(b.iccid || b.msisdn || ''));
             });
             const cols = [['st', 'St'], ['name', 'Name'], ['iccid', 'ICCID'], ['msisdn', 'MSISDN'],
                 ['imei6', 'IMEI6'], ['carrier', 'Carrier'], ['tags', 'Tags'], ['state', 'State']];

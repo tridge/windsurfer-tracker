@@ -922,13 +922,15 @@ function sortByDistance() {
         const ka = sortKey(a), kb = sortKey(b);
         if (ka !== kb) return ka - kb;
         // Same group
-        if (ka === 0) return distToFinish(a) - distToFinish(b);  // racing: by distance
-        if (ka === 1) {  // finished: by finish order
+        let c = 0;
+        if (ka === 0) c = distToFinish(a) - distToFinish(b);  // racing: by distance
+        else if (ka === 1) {  // finished: by finish order
             const ai = race.finishers.findIndex(f => f.sailor_id === a);
             const bi = race.finishers.findIndex(f => f.sailor_id === b);
-            return ai - bi;
+            c = ai - bi;
         }
-        return 0;  // DNF/DNS: keep current order
+        // stable tiebreak by sailor id (incl. DNF/DNS) so order doesn't reshuffle
+        return c || String(a).localeCompare(String(b));
     });
     renderSailorList();
 }
