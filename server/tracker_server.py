@@ -4716,7 +4716,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     _GT06_INT_KEYS = {
         "default_eid", "idle_hbt_interval", "idle_poll_interval",
         "idle_loc_interval", "idle_keepalive_interval", "overnight_interval_min",
-        "idle_gps_rst_time", "idle_gps_off_resend_sec",
+        "idle_gps_rst_time", "idle_gps_off_resend_sec", "cxzt_poll_min",
+        "reconnect_grace_sec", "idle_stuck_bounce", "idle_stuck_loc_per_min",
+        "idle_stuck_max_bounces", "idle_stuck_window_sec",
         "idle_acc_on_interval", "idle_acc_off_interval",
         "slow_speed_seconds", "slow_loc_interval", "lag_remediation_sec",
         "lag_drain_interval", "lag_restore_sec", "lag_remediation_cooldown_sec",

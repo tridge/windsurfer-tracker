@@ -65,15 +65,26 @@ OVERNIGHT_FREQ_MAX_RETRIES = 3
 # reconnects, login handler sends MODE1 again, repeat. MODE1 persists on
 # the device across reboots, so it should be set once per device via a
 # separate first-time-setup path.
-def _idle_cmds(interval):
+def _idle_cmds(interval, gps_rst=60):
     # TIMER T1=60 (ACC-ON, the documented 5-60s max), T2=interval as the
     # ACC-OFF/parked cadence (clamped to the 5-1800s range). A symmetric
     # TIMER,{interval},{interval} put T1 out of range for any interval >60,
     # which made the device ignore it and fall back to ~30s GPS-on uploads.
+    # ACCLINE=1 = derive ACC from the voltage/ACC line, NOT vibration, so an
+    # off-charge idle unit being knocked/rocked doesn't flip to ACC-ON (T1 + GPS
+    # on). Vendor default is already 1, but pin it so a unit that ever got 0
+    # (or shipped 0) is corrected. The ~5V charge doesn't cross the ACC-line
+    # threshold, so this leaves charging-as-ACC off too; charge detection
+    # (heartbeat bit2) is unaffected. Probed live 2026-06-21.
     return ["SZCS#SLPDISCONNECT=0",
             f"TIMER,60,{min(1800, max(5, interval))}#",
             "SENDS,1#", "SENALM,OFF#", "MOVING,OFF#",
-            "SZCS#GPS_RST_TIME=0", "SZCS#GPSCODEWAIT=10", "SZCS#VIBCHK=0:16"]
+            # GPS_RST_TIME>0 so a wedged/no-fix receiver auto-resets instead of
+            # hanging GPS-on (sat=0, 5s no-fix replay). 0 = never reset = the
+            # hang we saw. Only bites the no-lock path; outdoors it locks well
+            # inside the timeout. Defaults to idle_gps_rst_time.
+            f"SZCS#GPS_RST_TIME={gps_rst}", "SZCS#GPSCODEWAIT=10",
+            "SZCS#VIBCHK=0:16", "SZCS#ACCLINE=1"]
 
 
 def _active_cmds(interval):
@@ -407,6 +418,23 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
                                          cfg.get("idle_hbt_interval", 15)),
             "idle_keepalive_interval": cfg.get("idle_keepalive_interval",
                                                cfg.get("idle_poll_interval", 60)),
+            # Periodic cxzt# poll interval in MINUTES (idle AND tracking), 0 = off.
+            # cxzt# carries mV-resolution battery (*BT) vs STATUS#'s 10mV, so this
+            # gives fine-grained battery sampling for drain/calibration analysis.
+            "cxzt_poll_min": cfg.get("cxzt_poll_min", 0),
+            # After login, hold off keepalive/cxzt polling and stuck-detection for
+            # this many seconds so the device's state machine settles once before
+            # we probe it (per codex). 0 = no grace.
+            "reconnect_grace_sec": cfg.get("reconnect_grace_sec", 60),
+            # Detect-and-remediate a unit stuck GPS-on in idle (continuous LOC that
+            # never drops to parked after a reconnect — a firmware runtime-state
+            # latch only a MODE re-entry clears). 1 = on. When an idle unit uploads
+            # >= idle_stuck_loc_per_min over a window past the grace period, bounce
+            # it once with MODE1; give up + flag after idle_stuck_max_bounces.
+            "idle_stuck_bounce": cfg.get("idle_stuck_bounce", 1),
+            "idle_stuck_loc_per_min": cfg.get("idle_stuck_loc_per_min", 5),
+            "idle_stuck_max_bounces": cfg.get("idle_stuck_max_bounces", 3),
+            "idle_stuck_window_sec": cfg.get("idle_stuck_window_sec", 60),
             # Idle parked-upload interval = TIMER T2 (ACC-OFF), the GPS-off lever.
             # Vendor range 5-1800s; at the 1800s max the parked device uploads a
             # position only every 30 min, so GPS stays powered down between (the
@@ -421,9 +449,9 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "idle_acc_off_interval": min(1800, max(5,
                 cfg.get("idle_acc_off_interval", 1800))),
             # GPS no-fix timeout for idle (seconds). 0 = the firmware never
-            # powers GPS down, so a unit that can't lock (indoors) hunts forever
-            # and burns battery; a positive value gives it a give-up timeout.
-            "idle_gps_rst_time": cfg.get("idle_gps_rst_time", 0),
+            # resets GPS, so a wedged/no-lock receiver hangs GPS-on forever
+            # (sat=0, 5s no-fix replay — observed 2026-06-21); 60 auto-resets it.
+            "idle_gps_rst_time": cfg.get("idle_gps_rst_time", 60),
             "idle_gps_off_resend_sec": cfg.get("idle_gps_off_resend_sec", 300),
             "firmware_overrides": cfg.get("firmware_overrides", {}),
             "overnight_interval_min": cfg.get("overnight_interval_min", 15),
@@ -566,6 +594,13 @@ class GT06Connection:
         # HBT command but never actually emit heartbeats — without an
         # active probe the connection would die at the no-traffic timeout.
         self.last_idle_poll_time = 0
+        # Last time the periodic cxzt# battery-sampling poll fired for this device.
+        self.last_cxzt_poll_time = 0
+        # Monotonic time this connection finished login (reconnect grace window).
+        self.login_mono = 0
+        # Windowed idle-LOC counter for the stuck-GPS-on detector.
+        self.idle_loc_count = 0
+        self.idle_loc_window_start = 0
 
         # Firmware version string reported by the device in response to
         # VERSION# (e.g. "NT19D_MG133_10F8G_B53_V667 2026-04-13"). Captured
@@ -639,11 +674,20 @@ class GT06Listener:
         self.idle_loc_interval = cfg.get("idle_loc_interval", self.idle_hbt_interval)
         self.idle_keepalive_interval = cfg.get("idle_keepalive_interval",
                                                self.idle_poll_interval)
+        # Periodic cxzt# poll (minutes; 0 = off) for mV battery sampling. Read
+        # live by the run loop, so a config edit applies without restart.
+        self.cxzt_poll_min = cfg.get("cxzt_poll_min", 0)
+        # Reconnect grace + stuck-GPS-on idle remediation (read live by run loop).
+        self.reconnect_grace_sec = cfg.get("reconnect_grace_sec", 60)
+        self.idle_stuck_bounce = cfg.get("idle_stuck_bounce", 1)
+        self.idle_stuck_loc_per_min = cfg.get("idle_stuck_loc_per_min", 5)
+        self.idle_stuck_max_bounces = cfg.get("idle_stuck_max_bounces", 3)
+        self.idle_stuck_window_sec = cfg.get("idle_stuck_window_sec", 60)
         self.idle_acc_on_interval = min(1800, max(5,
             cfg.get("idle_acc_on_interval", 60)))
         self.idle_acc_off_interval = min(1800, max(5,
             cfg.get("idle_acc_off_interval", 1800)))
-        self.idle_gps_rst_time = cfg.get("idle_gps_rst_time", 0)
+        self.idle_gps_rst_time = cfg.get("idle_gps_rst_time", 60)
         self.idle_gps_off_resend_sec = cfg.get("idle_gps_off_resend_sec", 300)
         self.firmware_overrides = cfg.get("firmware_overrides", {})
         self.overnight_interval_min = cfg.get("overnight_interval_min", 15)
@@ -657,11 +701,41 @@ class GT06Listener:
     def reload_config(self, new_config):
         """Swap in a freshly-loaded gt06_config and re-derive cached attrs.
         Lets the management UI edit gt06.json and apply it with no restart."""
+        old_idle_hbt = self.idle_hbt_interval
         self._apply_config(new_config)
         self._log("[GT06] Config reloaded (live, no restart): "
                   f"{len(new_config.get('devices', {}))} device(s), "
                   f"overnight MODE{self.overnight_mode_number}/"
                   f"{self.overnight_interval_min}min")
+        # A plain config edit only re-derives the cached value — it would not
+        # reach units already connected (HBT is otherwise pushed only at login,
+        # an idle transition, or a reconcile). Re-push the new idle heartbeat to
+        # live race-idle units that still hold the old value.
+        if self.idle_hbt_interval != old_idle_hbt:
+            self._repush_idle_hbt()
+
+    def _repush_idle_hbt(self):
+        """Push the current idle HBT interval to connected race-idle units whose
+        last-applied value differs (i.e. changed since the connection set it).
+
+        Runs on the HTTP/reload thread while the listener's select loop may
+        add/remove connections, so iterate a snapshot (like set_idle)."""
+        hbt = self.idle_hbt_interval
+        n = 0
+        for gt_conn in list(self.connections.values()):
+            # Race-idle only: active units use the tracking HBT; overnight units
+            # run their own scheduled-wake cadence (expected_hbt_interval = mins).
+            if not gt_conn.idle or gt_conn.overnight:
+                continue
+            if gt_conn.expected_hbt_interval == hbt:
+                continue  # device already holds this value
+            self._queue_commands(gt_conn, [f"HBT,{hbt},{hbt}#"])
+            gt_conn.expected_hbt_interval = hbt
+            n += 1
+            self._log(f"[GT06] Re-pushed HBT,{hbt},{hbt}# to "
+                      f"{gt_conn.sailor_id or gt_conn.imei} (idle HBT changed)")
+        if n:
+            self._log(f"[GT06] Idle HBT={hbt}s applied live to {n} idle unit(s)")
 
     def _log_packet(self, gt_conn, frame, outgoing=False):
         """Log a raw GT06 frame with v2 header (ts + conn_id + length).
@@ -752,10 +826,14 @@ class GT06Listener:
         if gt_conn.cmd_pending is not None:
             return  # waiting for current command
         if not gt_conn.cmd_queue:
-            # Queue drained — let the reconciler advance its phase (this may
-            # queue the corrective sets), then fall through to send them.
+            # Queue drained — let the reconciler advance its phase. NB
+            # _reconcile_advance -> _reconcile_apply -> _queue_commands ALREADY
+            # sends the first corrective command (setting cmd_pending). Re-check
+            # cmd_pending here: without it we fall through and send a SECOND
+            # command without waiting for the first's ACK, and a later stray ACK
+            # then marks the reconcile complete before that command is acked.
             self._reconcile_advance(gt_conn)
-            if not gt_conn.cmd_queue:
+            if gt_conn.cmd_pending is not None or not gt_conn.cmd_queue:
                 return
         cmd_str = gt_conn.cmd_queue.pop(0)
         frame = gt06_make_command(cmd_str, gt_conn.next_cmd_serial())
@@ -780,12 +858,15 @@ class GT06Listener:
         if state == "idle":
             # T1=idle_acc_on_interval (ACC-ON, moving) + T2=idle_acc_off_interval
             # (ACC-OFF, parked). Parked units use T2 → upload rarely → GPS stays off.
+            # ACCLINE=1: ACC follows the voltage/ACC line, not vibration, so
+            # movement on an off-charge idle unit doesn't assert ACC-ON (→ GPS).
             return {"SLPDISCONNECT": 0,
                     "TIMER": f"{self.idle_acc_on_interval},{self.idle_acc_off_interval}",
                     "SENDS": 1,
                     "SENALM": "OFF", "MOVING": "OFF",
                     "GPS_RST_TIME": self.idle_gps_rst_time,
-                    "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": self.idle_hbt_interval}
+                    "GPSCODEWAIT": 10, "VIBCHK": "0:16", "ACCLINE": 1,
+                    "HBT": self.idle_hbt_interval}
         return {}
 
     def _reconcile_begin(self, gt_conn, state):
@@ -1133,6 +1214,7 @@ class GT06Listener:
                 "eid",
                 sim_eid if sim_eid is not None else self.gt06_config["default_eid"])
             self._log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
+            gt_conn.login_mono = time.monotonic()   # start the reconnect grace window
             self._send(gt_conn, gt06_make_response(protocol, serial))
 
             # Close any stale connections for the same device
@@ -1440,6 +1522,19 @@ class GT06Listener:
             gt_conn.last_ts = loc["ts"]
             gt_conn.last_loc_mono = time.monotonic()
 
+            # Surface idle LOC in tracker.log. A parked idle unit should only
+            # upload at the T2 (~30 min) interval with GPS off between, so a
+            # stream of these = a unit stuck GPS-on in idle — the issue is then
+            # obvious in the log instead of only in a packet capture. tracker.log
+            # is private (same as gt06.log), so logging lat/lon here is fine.
+            if gt_conn.idle:
+                gt_conn.idle_loc_count += 1   # feeds the stuck-GPS-on detector
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                fix = (f"sats={loc['satellites']}" if loc["gps_valid"]
+                       else f"NO-FIX sats={loc['satellites']}")
+                self._log(f"[GT06] {label} IDLE LOC {loc['lat']:.5f},"
+                          f"{loc['lon']:.5f} {fix}")
+
             tracker = self.get_tracker(gt_conn.eid)
             if tracker is None:
                 return
@@ -1732,7 +1827,7 @@ class GT06Listener:
                                 if (gt_conn.overnight_freq_retries
                                         < OVERNIGHT_FREQ_MAX_RETRIES):
                                     gt_conn.overnight_freq_retries += 1
-                                    push_cmds = (_idle_cmds(loc_int)
+                                    push_cmds = (_idle_cmds(loc_int, self.idle_gps_rst_time)
                                         + [f"HBT,{loc_int},{loc_int}#"])
                                     self._log(f"[GT06] {label} overnight MODE1: "
                                         f"F={f_val}, want {loc_int} — applying "
@@ -2455,6 +2550,64 @@ class GT06Listener:
                     if alive_gap >= self.idle_keepalive_interval and poll_gap >= self.idle_keepalive_interval:
                         gt_conn.last_idle_poll_time = now
                         self._queue_commands(gt_conn, ["STATUS#"])
+
+                # Periodic cxzt# battery-sampling poll (idle AND tracking). cxzt#
+                # returns mV-resolution battery (*BT) — far finer than STATUS#'s
+                # 10mV — so a poll every cxzt_poll_min minutes gives clean drain
+                # samples for calibration. Off by default (0). Skip overnight
+                # (deep-sleep units have their own cxzt-on-wake flow) and while a
+                # command is in flight so it never disturbs a reconcile.
+                if (self.cxzt_poll_min
+                        and not gt_conn.overnight
+                        and gt_conn.cmd_pending is None
+                        and not gt_conn.cmd_queue
+                        and now - gt_conn.login_mono >= self.reconnect_grace_sec
+                        and now - gt_conn.last_cxzt_poll_time >= self.cxzt_poll_min * 60):
+                    gt_conn.last_cxzt_poll_time = now
+                    self._queue_commands(gt_conn, ["cxzt#"])
+
+                # Detect-and-remediate a unit stuck GPS-on in idle. A parked idle
+                # unit uploads ~once per T2 (30 min); a stream of LOC means it
+                # latched into continuous-tracking on reconnect — a firmware
+                # runtime-state latch that config re-pushes do NOT clear, only a
+                # MODE re-entry does (confirmed on hardware 2026-06-21). Past the
+                # grace period, if idle LOC rate is high, bounce once with MODE1;
+                # cap at idle_stuck_max_bounces then flag idle-degraded and leave
+                # it alone (never churn forever — the MODE4-storm lesson). The
+                # bounce drops TCP -> reconnect, so the bounce count + degraded
+                # flag live in device_state (survive the reconnect; the per-conn
+                # window resets naturally on the new connection).
+                if (self.idle_stuck_bounce and gt_conn.idle and not gt_conn.overnight
+                        and gt_conn.cmd_pending is None and not gt_conn.cmd_queue
+                        and now - gt_conn.login_mono >= self.reconnect_grace_sec):
+                    if gt_conn.idle_loc_window_start == 0:
+                        gt_conn.idle_loc_window_start = now
+                    elif now - gt_conn.idle_loc_window_start >= self.idle_stuck_window_sec:
+                        span = now - gt_conn.idle_loc_window_start
+                        per_min = gt_conn.idle_loc_count * 60.0 / span if span > 0 else 0
+                        st = self.device_state.get(gt_conn.imei)
+                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                        if st is not None and per_min >= self.idle_stuck_loc_per_min:
+                            n = st.get("idle_stuck_bounces", 0)
+                            if st.get("idle_degraded"):
+                                pass
+                            elif n < self.idle_stuck_max_bounces:
+                                st["idle_stuck_bounces"] = n + 1
+                                self._log(f"[GT06] {label} stuck GPS-on in idle "
+                                          f"({per_min:.0f} LOC/min) — MODE1 bounce "
+                                          f"{n + 1}/{self.idle_stuck_max_bounces}")
+                                self._queue_commands(gt_conn, ["MODE1,60,600#"])
+                            else:
+                                st["idle_degraded"] = True
+                                self._log(f"[GT06] {label} still stuck GPS-on after "
+                                          f"{self.idle_stuck_max_bounces} MODE1 bounces "
+                                          f"— idle-degraded, leaving alone")
+                        elif st is not None and (st.get("idle_stuck_bounces")
+                                                 or st.get("idle_degraded")):
+                            st["idle_stuck_bounces"] = 0   # recovered to parked
+                            st["idle_degraded"] = False
+                        gt_conn.idle_loc_window_start = now
+                        gt_conn.idle_loc_count = 0
 
                 # Disconnect if no frame received from the device for too long.
                 # We use last_alive_time (any received frame) rather than

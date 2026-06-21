@@ -720,3 +720,127 @@ def test_idle_uses_asymmetric_parked_timer(gt06_sim_factory, server):
             time.sleep(0.3)
         ok = _wait_for(lambda: sim.freq == 60 and sim.freq_off == 1800, timeout=4.0)
     assert ok, f"idle didn't push TIMER,60,1800 (T1={sim.freq}, T2={sim.freq_off})"
+
+
+def test_idle_hbt_config_edit_repushes_to_live_unit(gt06_sim_factory, server):
+    """Editing idle_hbt_interval in gt06.json must hot-apply to already-connected
+    race-idle units: reload_config re-pushes HBT live, without an idle toggle or a
+    manual cxzt# reconcile. A plain config edit otherwise only reaches future
+    logins/transitions (the surprise that prompted this)."""
+    # Pin a known starting idle HBT, then connect an idle device and let the idle
+    # reconcile settle it to 15 (sim default is 300).
+    status, _ = _mgr_post(server, "/api/manage/gt06/config", {"idle_hbt_interval": 15})
+    assert status == 200
+    sim = gt06_sim_factory("999010000071001")
+    _wait_for_login(server, sim.sailor_id)
+    ok = _wait_for(lambda: sim.hbt_interval == 15, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.hbt_interval == 15, timeout=4.0)
+    assert ok, f"baseline idle HBT,15 not applied (hbt={sim.hbt_interval})"
+
+    # Change ONLY the config — no idle toggle, no cxzt# nudge. The live re-push
+    # should reach the connected idle unit on its own.
+    status, _ = _mgr_post(server, "/api/manage/gt06/config", {"idle_hbt_interval": 30})
+    assert status == 200
+    assert _wait_for(lambda: sim.hbt_interval == 30, timeout=4.0), \
+        f"config edit did not live-re-push HBT to idle unit (hbt={sim.hbt_interval})"
+
+
+def test_idle_pins_accline_to_voltage_source(gt06_sim_factory, server):
+    """Idle reconcile must push SZCS#ACCLINE=1 so ACC follows the voltage/ACC line,
+    not vibration. With ACCLINE=1 an off-charge idle unit that's knocked or rocked
+    won't flip to ACC-ON (T1 cadence + GPS on) — it stays ACC-OFF/parked with GPS
+    off. Sim defaults to ACCLINE=0, so idle must correct it. Probed on real V667
+    hardware 2026-06-21: ACCLINE=1, and a charging unit then reads ACC:OFF/GPS:OFF
+    while still reporting chg=True (charge detect is independent of ACC)."""
+    sim = gt06_sim_factory("999010000081001")  # sim default accline=0
+    _wait_for_login(server, sim.sailor_id)
+    ok = _wait_for(lambda: sim.accline == 1, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.accline == 1, timeout=4.0)
+    assert ok, f"idle didn't push ACCLINE=1 (accline={sim.accline})"
+
+
+def test_idle_pushes_nonzero_gps_rst_time(gt06_sim_factory, server):
+    """Idle reconcile must push a nonzero SZCS#GPS_RST_TIME so a wedged/no-fix GPS
+    receiver auto-resets instead of hanging GPS-on (sat=0, 5s no-fix replay — the
+    real-hardware hang on 2026-06-21 that needed a manual reboot because
+    GPS_RST_TIME=0 never resets). Default is now 60; sim defaults to 300, so idle
+    must correct it to the configured value."""
+    status, _ = _mgr_post(server, "/api/manage/gt06/config", {"idle_gps_rst_time": 60})
+    assert status == 200
+    sim = gt06_sim_factory("999010000082001")  # sim default gps_rst_time=300
+    _wait_for_login(server, sim.sailor_id)
+    ok = _wait_for(lambda: sim.gps_rst_time == 60, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.gps_rst_time == 60, timeout=4.0)
+    assert ok, f"idle didn't push GPS_RST_TIME=60 (gps_rst_time={sim.gps_rst_time})"
+
+
+def test_periodic_cxzt_poll_samples_battery(gt06_sim_factory, server):
+    """cxzt_poll_min>0 makes the server poll cxzt# every N minutes for
+    mV-resolution battery sampling (*BT); 0 = off. Live-settable — enabling it
+    starts polling with no reconnect. cxzt# fires immediately when first enabled
+    (last poll time = 0)."""
+    try:
+        # reconnect_grace_sec=0 so the poll isn't held off by the grace window.
+        _mgr_post(server, "/api/manage/gt06/config",
+                  {"cxzt_poll_min": 0, "reconnect_grace_sec": 0})
+        sim = gt06_sim_factory("999010000083001")
+        _wait_for_login(server, sim.sailor_id)
+        time.sleep(3.0)               # let the login reconcile (incl. its cxzt#) drain
+        base = sim.cxzt_count
+        # With the poll off, no further cxzt# should arrive.
+        time.sleep(2.0)
+        assert sim.cxzt_count == base, \
+            f"cxzt poll fired while disabled (count {base} -> {sim.cxzt_count})"
+        # Enable live; the first periodic cxzt# should land within a few seconds.
+        status, _ = _mgr_post(server, "/api/manage/gt06/config", {"cxzt_poll_min": 1})
+        assert status == 200
+        assert _wait_for(lambda: sim.cxzt_count > base, timeout=8.0), \
+            f"periodic cxzt poll didn't fire after enabling (stuck at {sim.cxzt_count})"
+    finally:
+        # Don't leave the 1-min poll on for the rest of the session.
+        _mgr_post(server, "/api/manage/gt06/config",
+                  {"cxzt_poll_min": 0, "reconnect_grace_sec": 60})
+
+
+def test_idle_stuck_gps_on_mode1_bounce_and_cap(gt06_sim_factory, server):
+    """A unit stuck GPS-on in idle (continuous LOC that won't drop to parked) gets
+    a one-shot MODE1 bounce to break the firmware runtime-state latch (the only
+    lever that works — confirmed on real hardware 2026-06-21), capped at
+    idle_stuck_max_bounces then flagged idle-degraded so it never churns forever."""
+    _mgr_post(server, "/api/manage/gt06/config", {
+        "reconnect_grace_sec": 1, "idle_stuck_window_sec": 2,
+        "idle_stuck_loc_per_min": 5, "idle_stuck_bounce": 1,
+        "idle_stuck_max_bounces": 2})
+    try:
+        # Emit idle LOC fast (~every 0.4 s = ~150/min, well over the threshold).
+        sim = gt06_sim_factory("999010000084001", loc_interval_override=0.4)
+        _wait_for_login(server, sim.sailor_id)
+        assert _wait_for(lambda: sim.mode1_count >= 1, timeout=14.0), \
+            f"no MODE1 bounce for stuck idle unit (mode1_count={sim.mode1_count})"
+        # Must cap at idle_stuck_max_bounces (=2), not churn forever.
+        _wait_for(lambda: sim.mode1_count >= 2, timeout=10.0)
+        time.sleep(6.0)        # several more windows would over-bounce if uncapped
+        assert sim.mode1_count == 2, \
+            f"MODE1 bounce not capped at 2 (mode1_count={sim.mode1_count})"
+    finally:
+        _mgr_post(server, "/api/manage/gt06/config", {
+            "reconnect_grace_sec": 60, "idle_stuck_window_sec": 60,
+            "idle_stuck_max_bounces": 3})

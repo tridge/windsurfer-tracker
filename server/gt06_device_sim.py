@@ -188,6 +188,8 @@ class GT06DeviceSim:
         self.slp_disconnect = 1
         self.accline = 0
         self.gps_rst_time = 300
+        self.cxzt_count = 0      # number of cxzt# queries received (test introspection)
+        self.mode1_count = 0     # number of MODE1 commands received (test introspection)
         self.vibchk = "0:16"
         self.gpscodewait = 10                   # GPS lock-wait timeout; factory default 10
         # Other tunables touched by server commands.
@@ -435,6 +437,7 @@ class GT06DeviceSim:
         """
         # cxzt# — return the rich device-info line our cxzt# handler parses.
         if cmd == "cxzt#":
+            self.cxzt_count += 1
             resp = (
                 f"{self.firmware}-GT06 MCU:{self.mcu}*ID:{self.imei}*"
                 f"{self.server_addr}*A:{self.apn}*G:A*4G:14*"
@@ -482,6 +485,7 @@ class GT06DeviceSim:
 
         # MODE1,F,H#  → switch to MODE1, set freq + heartbeat.
         if cmd.startswith("MODE1,"):
+            self.mode1_count += 1   # test introspection (stuck-idle bounce)
             parts = cmd.rstrip("#").split(",")
             try:
                 self.mode = 1
