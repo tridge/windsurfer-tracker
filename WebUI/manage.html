@@ -1178,9 +1178,11 @@
                     <div style="color:#888;margin-top:6px;font-size:12px">Per-tracker overrides are on the GT06 Trackers tab.</div>
                 </div>
 
-                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
-                    <b>Overnight sleep schedule (global default)</b>
-                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px">
+                <!-- SLEEP state: overnight deep sleep (modem/MCU off between wakes) -->
+                <div style="background:#eef2fb;border:1px solid #d3def2;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Sleep settings &mdash; overnight deep sleep</b>
+                    <div style="color:#666;margin:4px 0 10px;font-size:12px">Night-time deep sleep: modem/MCU off between scheduled wakes (no live tracking). Only <b>idle</b> trackers are slept &mdash; actively-tracked units are never auto-slept.</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
                         <label><input type="checkbox" id="cfgSchedEnabled" ${s.enabled ? 'checked' : ''}> Enable night sleep</label>
                         <label>From <input type="time" id="cfgSchedStart" value="${s.start || '22:00'}"></label>
                         <label>to <input type="time" id="cfgSchedEnd" value="${s.end || '06:00'}"> <span style="color:#999">(each event's timezone)</span></label>
@@ -1189,18 +1191,24 @@
                             <option value="4" ${String(s.overnight_mode_number||5)==='4'?'selected':''}>MODE4 (vibration)</option></select></label>
                         <label>Wake every ${num('cfgSchedInterval', s.overnight_interval_min || 60, 60)} min</label>
                     </div>
-                    <div style="color:#888;margin-top:8px;font-size:12px">Only <b>idle</b> trackers are slept; actively-tracked units are never auto-slept. Per-event overrides set on each event.</div>
-                </div>
-
-                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
-                    <b>Overnight / idle defaults</b>
-                    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;align-items:flex-end">
+                    <div style="border-top:1px dashed #d3def2;margin-top:12px;padding-top:10px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
+                        <span style="width:100%;color:#666;font-size:12px;margin-bottom:-2px">Fallback / manual-sleep defaults (used when an event has no per-event schedule override):</span>
                         <label style="display:inline-flex;flex-direction:column;gap:2px;font-size:13px"><span>Overnight mode&nbsp;<span onclick="showGt06Tip(event)" title="Deep-sleep mode used during the night-sleep window (MODE5 = timed deep sleep, recommended)." style="color:#3b82f6;cursor:pointer;font-weight:bold">&#9432;</span></span><span style="white-space:nowrap"><select id="cfgOvMode" style="font-size:13px">${[1,4,5].map(m=>`<option value="${m}" ${String(c.overnight_mode_number||4)===String(m)?'selected':''}>MODE${m}</option>`).join('')}</select> <span style="color:#999;font-size:11px">def 5</span></span></label>
                         ${fld('cfgOvInterval','Overnight wake (min)', c.overnight_interval_min, 30, 'How often sleeping units wake to report a position, in minutes (vendor minimum 5).')}
+                    </div>
+                    <div style="color:#888;margin-top:8px;font-size:12px">Per-event schedule overrides are set on each event (Events tab).</div>
+                </div>
+
+                <!-- IDLE state: race-day idle — still connected (TCP up), GPS off when parked -->
+                <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Idle settings &mdash; race-day idle (still connected)</b>
+                    <div style="color:#666;margin:4px 0 10px;font-size:12px">A separate state from Sleep: the unit stays on the platform (TCP open, reachable) but GPS is powered down while parked &mdash; brief uploads only. Used for support boats / between-race standby.</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
                         ${fld('cfgIdleHbt','Idle heartbeat (s)', c.idle_hbt_interval, 15, 'Expected heartbeat interval. Sets the no-traffic disconnect threshold (~3x this + 30s); the Idle keepalive poll must be faster than that or units drop before being pinged.')}
                         ${fld('cfgIdleAccOn','Idle moving LOC (s)', c.idle_acc_on_interval, 60, 'TIMER T1 (ACC-ON): upload interval when the unit is MOVING. Vendor range 5-60s (device accepts higher). Does not affect responsiveness.')}
                         ${fld('cfgIdleAccOff','Idle parked LOC (s)', c.idle_acc_off_interval, 1800, 'TIMER T2 (ACC-OFF): how often a PARKED unit uploads a position = the GPS-off lever. Range 5-1800s; 1800 = every 30 min, GPS stays powered down between uploads.')}
                         ${fld('cfgIdleKeepalive','Idle keepalive (s)', c.idle_keepalive_interval, 60, 'How often the server pings each unit (STATUS#) to hold the TCP open for ~1s operator response. Bigger = less battery, but must stay under both the disconnect threshold (3x heartbeat + 30s) and the carrier NAT idle-timeout.')}
+                        ${fld('cfgCxztPoll','Battery cxzt poll (min)', c.cxzt_poll_min, 0, 'Poll cxzt# every N MINUTES (idle AND tracking) for mV-resolution battery (*BT) — far finer than STATUS# 10mV — for drain/calibration sampling. 0 = off. Applies live to all connected units.')}
                     </div>
                     <div id="gt06TipBox" style="display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;padding:12px 14px;background:#1f3a5f;color:#fff;border-radius:8px;font-size:13px;line-height:1.45;box-shadow:0 2px 14px rgba(0,0,0,0.35);cursor:pointer" onclick="this.style.display='none'"></div>
                     <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Values clamp to 5-1800s server-side; invalid combinations are flagged on Save. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
@@ -1277,6 +1285,7 @@
                 idle_acc_on_interval: iv('cfgIdleAccOn'),
                 idle_acc_off_interval: iv('cfgIdleAccOff'),
                 idle_keepalive_interval: iv('cfgIdleKeepalive'),
+                cxzt_poll_min: iv('cfgCxztPoll'),
                 lag_remediation_sec: iv('cfgLagSec'),
                 lag_drain_interval: iv('cfgLagDrain'),
                 lag_restore_sec: iv('cfgLagRestore'),
