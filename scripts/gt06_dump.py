@@ -364,55 +364,56 @@ def main():
         print(f"Error: {logpath} not found", file=sys.stderr)
         sys.exit(1)
 
-    # First pass for v2 logs when --imei or --list-streams is requested: build
-    # conn_id → IMEI map by scanning LOGIN packets.
-    matching_conn_ids = None
-    conn_to_imei = {}
-    if args.imei or args.list_streams:
+    if (args.imei or args.list_streams):
         with open(logpath, "rb") as f:
-            fmt = detect_format(f)
-            if fmt == "v1":
+            if detect_format(f) == "v1":
                 print("Error: --imei / --list-streams require a v2 log "
                       "(no per-packet stream IDs in v1).", file=sys.stderr)
                 sys.exit(2)
+
+    if args.list_streams:
+        # Print EVERY login with its timestamp so conn_id reuse is visible. Conn
+        # ids reset to low numbers on each server restart, so one conn_id maps to
+        # different devices over time — dedup here would hide that.
+        with open(logpath, "rb") as f:
+            fmt = detect_format(f)
             for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
                 if outgoing or not conn_id:
                     continue
                 result = validate_frame(frame)
-                if result is None:
-                    continue
-                protocol, data, _serial, _crc_ok = result
-                if protocol == 0x01:
-                    imei = gt06_parse_login(data)
-                    if imei and conn_id not in conn_to_imei:
-                        conn_to_imei[conn_id] = imei
-        if args.list_streams:
-            for cid in sorted(conn_to_imei):
-                print(f"conn_id={cid}  IMEI={conn_to_imei[cid]}")
-            return
-        matching_conn_ids = {cid for cid, imei in conn_to_imei.items()
-                              if _imei_matches(args.imei, imei)}
-        if not matching_conn_ids:
-            print(f"No streams matched IMEI {args.imei!r}", file=sys.stderr)
-            sys.exit(0)
+                if result and result[0] == 0x01:
+                    print(f"{fmt_time(ts)}  conn_id={conn_id}  "
+                          f"IMEI={gt06_parse_login(result[1])}")
+        return
 
-    def _emit(f, fmt):
+    # Attribute each frame to whoever MOST-RECENTLY logged in on its conn_id
+    # (updated live as we stream), not first-login-wins. Conn ids are reused
+    # across server restarts, so a static conn->IMEI map mixes devices.
+    def _emit(f, fmt, conn_cur):
         for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
-            if matching_conn_ids is not None and conn_id not in matching_conn_ids:
-                continue
+            result = validate_frame(frame)
+            if result and result[0] == 0x01 and not outgoing:
+                imei = gt06_parse_login(result[1])
+                if imei:
+                    conn_cur[conn_id] = imei
+            if args.imei is not None:
+                cur = conn_cur.get(conn_id)
+                if not cur or not _imei_matches(args.imei, cur):
+                    continue
             dump_packet(ts, frame, verbose=args.verbose,
                         conn_id=conn_id, outgoing=outgoing)
 
+    conn_cur = {}
     try:
         with open(logpath, "rb") as f:
             fmt = detect_format(f)
             if args.follow:
-                _emit(f, fmt)
+                _emit(f, fmt, conn_cur)
                 while True:
-                    _emit(f, fmt)
+                    _emit(f, fmt, conn_cur)
                     time.sleep(0.5)
             else:
-                _emit(f, fmt)
+                _emit(f, fmt, conn_cur)
     except KeyboardInterrupt:
         pass
 
