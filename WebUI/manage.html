@@ -567,6 +567,20 @@
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="enableSimulator" style="width:auto;margin:0;">
+                        <span>Enable Simulator</span>
+                    </label>
+                    <small>When on, the "Start Simulator" button appears in the event admin panel.</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="enableSleep" style="width:auto;margin:0;">
+                        <span>Enable Sleep Control</span>
+                    </label>
+                    <small>When on, the "All SLEEP" button appears in the event admin panel.</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                         <input type="checkbox" id="evSchedOverride" style="width:auto;margin:0;" onchange="document.getElementById('evSchedFields').style.display=this.checked?'block':'none'">
                         <span>Override night-sleep schedule for this event</span>
                     </label>
@@ -819,6 +833,8 @@
             document.getElementById('eventTimezone').value = 'Australia/Sydney';  // Reset to default
             setLocationFromTimezone('Australia/Sydney');  // Set default location
             document.getElementById('assistEnabled').checked = true;  // Default to enabled
+            document.getElementById('enableSimulator').checked = false;  // Default off
+            document.getElementById('enableSleep').checked = false;  // Default off
             document.getElementById('idleInterval').value = 0;
             setEventSchedFields(null);
             document.getElementById('modalError').style.display = 'none';
@@ -864,6 +880,8 @@
                 document.getElementById('homeLat').value = event.home_lat || '';
                 document.getElementById('homeLon').value = event.home_lon || '';
                 document.getElementById('assistEnabled').checked = event.assist_enabled !== false;  // Default true
+                document.getElementById('enableSimulator').checked = event.enable_simulator === true;  // Default off
+                document.getElementById('enableSleep').checked = event.enable_sleep === true;  // Default off
                 document.getElementById('idleInterval').value = event.idle_interval || 0;
                 setEventSchedFields(event.sleep_schedule || null);
                 // If no location set, default from timezone
@@ -915,6 +933,8 @@
                 home_lat: homeLat ? parseFloat(homeLat) : null,
                 home_lon: homeLon ? parseFloat(homeLon) : null,
                 assist_enabled: document.getElementById('assistEnabled').checked,
+                enable_simulator: document.getElementById('enableSimulator').checked,
+                enable_sleep: document.getElementById('enableSleep').checked,
                 idle_interval: parseInt(document.getElementById('idleInterval').value) || 0,
                 sleep_schedule: document.getElementById('evSchedOverride').checked ? {
                     enabled: document.getElementById('evSchedEnabled').checked,

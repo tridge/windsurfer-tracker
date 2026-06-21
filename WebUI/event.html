@@ -614,6 +614,8 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             width: 280px;
+            max-height: calc(100dvh - 80px);
+            overflow-y: auto;
             display: none;
         }
         
@@ -1364,7 +1366,7 @@
                 <button class="admin-action-btn danger" onclick="stopAllUsers()">
                     ⏹ All IDLE
                 </button>
-                <button class="admin-action-btn danger" onclick="sleepAllUsers()" title="Overnight SLEEP — MODE5 deep sleep, wakes every ~15 min">
+                <button class="admin-action-btn danger" id="sleepAllBtn" onclick="sleepAllUsers()" title="Overnight SLEEP — MODE5 deep sleep, wakes every ~15 min">
                     💤 All SLEEP
                 </button>
                 <button class="admin-action-btn primary" onclick="startAllIdleUsers()">
@@ -1922,6 +1924,14 @@
         // Store event info for modal (used by modal.js)
         let currentEventInfo = null;
 
+        // Show/hide optional admin controls based on per-event flags (default off)
+        function applyAdminFeatureFlags() {
+            const sim = document.getElementById('simSection');
+            if (sim) sim.style.display = (currentEventInfo && currentEventInfo.enable_simulator) ? '' : 'none';
+            const sleepBtn = document.getElementById('sleepAllBtn');
+            if (sleepBtn) sleepBtn.style.display = (currentEventInfo && currentEventInfo.enable_sleep) ? '' : 'none';
+        }
+
         // Fetch event name and update page title + banner
         (async function() {
             try {
@@ -1934,6 +1944,7 @@
                         document.title = `${event.name} - Windsurfer Tracker`;
                         document.getElementById('eventBannerName').textContent = event.name;
                         document.getElementById('eventBanner').style.display = 'block';
+                        applyAdminFeatureFlags();
 
                         // Center map on event home location if available
                         if (event.home_lat && event.home_lon) {
