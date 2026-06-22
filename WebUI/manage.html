@@ -1376,11 +1376,21 @@
             return e ? e.name : '';
         }
 
+        // Compact firmware label "<cap>-<Vx.yz>" e.g. 6Ah-V6.68 / 3Ah-V667, for grouping
+        // by capacity + firmware. Cap from gt06_calibration.json; version keeps the dot.
+        function gt06FwLabel(t) {
+            if (!t.firmware) return '—';
+            const cap = (typeof BatteryCal !== 'undefined' && BatteryCal.unitCal)
+                ? (BatteryCal.unitCal(t.sailor_id).cap_class || '?') : '?';
+            const ver = (String(t.firmware).match(/V[\d.]+/) || [t.firmware])[0];
+            return cap + '-' + ver;
+        }
+
         function gt06SortVal(t, key) {
             switch (key) {
                 case 'st': return t.online ? 0 : 1;
                 case 'id': return String(t.sailor_id || t.imei || '').toLowerCase();
-                case 'fw': return String(t.firmware || '').toLowerCase();
+                case 'fw': return gt06FwLabel(t).toLowerCase();
                 case 'event': return gt06EventName(t.eid).toLowerCase();
                 case 'name': return String(t.name || '').toLowerCase();
                 case 'hide': return t.hidden ? 0 : 1;
@@ -1436,10 +1446,7 @@
                 + '<th>Actions</th></tr>';
             for (const t of trackers) {
                 const dot = t.online ? '\u{1F7E2}' : '⚪';
-                // Compact firmware label: "<cap>-<Vxxx>" e.g. 6Ah-V667 (cap from gt06_calibration.json).
-                const cap = (typeof BatteryCal !== 'undefined' && BatteryCal.unitCal) ? (BatteryCal.unitCal(t.sailor_id).cap_class || '?') : '?';
-                const ver = (String(t.firmware || '').match(/V\d+/) || [])[0] || (t.firmware || '');
-                const fwShort = t.firmware ? (cap + '-' + ver) : '—';
+                const fwShort = gt06FwLabel(t);
                 const isV667 = String(t.firmware || '').indexOf('V667') >= 0;
                 const fwStyle = (t.firmware && !isV667) ? 'color:#c60;font-weight:bold' : '';
                 const batt = (t.battery == null) ? '—' : (t.battery + '%');
