@@ -1064,6 +1064,7 @@
                              track_h: rt(mp.track), idle_h: rt(mp.idle), sleep_h: rt(mp.sleep),
                              uncertain: !!c.uncertain, isdefault: !!c._default };
                 });
+                sortBatInPlace();
                 renderBattery();
             } catch (e) {
                 errEl.textContent = 'Could not load battery calibration: ' + e.message;
@@ -1090,9 +1091,20 @@
             }
         }
 
+        // Stable in-place sort of batRows by the current key (JS sort is stable, no id
+        // tiebreak), so successive column clicks compose as a true stable sort.
+        function sortBatInPlace() {
+            const k = batSort.key, dir = batSort.dir;
+            batRows.sort((a, b) => {
+                const va = batSortVal(a, k), vb = batSortVal(b, k);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+            });
+        }
+
         function sortBattery(key) {
             if (batSort.key === key) batSort.dir = -batSort.dir;
             else batSort = { key, dir: 1 };
+            sortBatInPlace();
             renderBattery();
         }
 
@@ -1108,12 +1120,8 @@
             const rows = !q ? batRows.slice() : batRows.filter(t =>
                 [t.id, t.imei, t.fw].some(v => String(v || '').toLowerCase().indexOf(q) >= 0));
             countEl.textContent = (q ? rows.length + ' of ' : '') + batRows.length + ' units';
-            rows.sort((a, b) => {
-                const va = batSortVal(a, batSort.key), vb = batSortVal(b, batSort.key);
-                const c = (va < vb ? -1 : va > vb ? 1 : 0) * batSort.dir;
-                // stable tiebreak by id so tied rows don't reshuffle on refresh
-                return c || String(a.id || a.imei).localeCompare(String(b.id || b.imei));
-            });
+            // No sort here — batRows is kept sorted in place (sortBatInPlace) so clicks
+            // compose as a stable sort.
             const cols = [['id','ID / IMEI'],['fw','Firmware'],['cls','Cap'],['on','St'],['off','Offset (mV)'],
                 ['rawv','Raw V'],['corrv','Corr V'],['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],
                 ['trk','Max track (h)'],['idle','Max idle (h)'],['slp','Max sleep (h)']];
@@ -1347,15 +1355,27 @@
                         '<p style="color:#888">GT06 listener is not running on this server.</p>';
                     return;
                 }
-                gt06Trackers = data.trackers || [];
+                const incoming = data.trackers || [];
                 // Correct each unit's % from its calibrated voltage (settings.BT
                 // is millivolts) so the table and sort match the corrected UI.
                 await BatteryCal.load();
-                for (const t of gt06Trackers) {
+                for (const t of incoming) {
                     const bt = (t.battery_voltage != null) ? t.battery_voltage
                              : ((t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null);
                     if (bt) t.battery = BatteryCal.percentForUnit(t.sailor_id, bt);
                 }
+                // Merge into the existing display order so a refresh doesn't reshuffle
+                // or reset the user's sort: update rows in place by imei, append new,
+                // drop gone. Then re-apply the current sort (stable, keeps sub-orders).
+                const byImei = {};
+                for (const t of incoming) byImei[t.imei] = t;
+                const merged = [], seen = {};
+                for (const old of gt06Trackers) {
+                    if (byImei[old.imei]) { merged.push(byImei[old.imei]); seen[old.imei] = 1; }
+                }
+                for (const t of incoming) if (!seen[t.imei]) merged.push(t);
+                gt06Trackers = merged;
+                sortGt06InPlace();
                 window._trackers = gt06Trackers;
                 renderTrackers();
             } catch (e) {
@@ -1401,9 +1421,21 @@
             }
         }
 
+        // Stable in-place sort of gt06Trackers by the current key. JS Array.sort is
+        // stable, and we do NOT add an id tiebreak, so equal-key rows keep their prior
+        // order — letting clicks compose (prior sort preserved within ties).
+        function sortGt06InPlace() {
+            const k = gt06Sort.key, dir = gt06Sort.dir;
+            gt06Trackers.sort((a, b) => {
+                const va = gt06SortVal(a, k), vb = gt06SortVal(b, k);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+            });
+        }
+
         function sortTrackers(key) {
             if (gt06Sort.key === key) gt06Sort.dir = -gt06Sort.dir;
             else gt06Sort = { key: key, dir: 1 };
+            sortGt06InPlace();
             renderTrackers();
         }
 
@@ -1427,12 +1459,10 @@
                     '<p style="color:#888">No trackers match the search.</p>';
                 return;
             }
-            trackers.sort((a, b) => {
-                const va = gt06SortVal(a, gt06Sort.key), vb = gt06SortVal(b, gt06Sort.key);
-                const c = (va < vb ? -1 : va > vb ? 1 : 0) * gt06Sort.dir;
-                // stable tiebreak by id so tied rows don't reshuffle on refresh
-                return c || String(a.sailor_id || a.imei).localeCompare(String(b.sailor_id || b.imei));
-            });
+            // No sort here: gt06Trackers is kept sorted in place (sortGt06InPlace), so
+            // successive header clicks compose as a TRUE stable sort (e.g. sort by
+            // battery, then by firmware -> firmware groups stay in battery order), and
+            // refreshes preserve order via the merge in loadTrackers.
             const evOpts = (sel) => gt06Events.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
             const cols = [['st', 'St'], ['id', 'ID / IMEI'], ['fw', 'Firmware'], ['event', 'Event'],
@@ -1597,6 +1627,7 @@
                 }
                 simSims = data.sims || [];
                 simBalance = data.balance || null;
+                sortSimInPlace();
                 renderSims();
             } catch (e) {
                 document.getElementById('simList').innerHTML = '';
@@ -1619,9 +1650,20 @@
             }
         }
 
+        // Stable in-place sort of simSims by the current key (stable, no iccid tiebreak)
+        // so successive column clicks compose as a true stable sort.
+        function sortSimInPlace() {
+            const k = simSort.key, dir = simSort.dir;
+            simSims.sort((a, b) => {
+                const va = simSortVal(a, k), vb = simSortVal(b, k);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+            });
+        }
+
         function sortSims(key) {
             if (simSort.key === key) simSort.dir = -simSort.dir;
             else simSort = { key: key, dir: 1 };
+            sortSimInPlace();
             renderSims();
         }
 
@@ -1656,13 +1698,8 @@
                     '<p style="color:#888">No SIMs match the search.</p>';
                 return;
             }
-            sims.sort((a, b) => {
-                const va = simSortVal(a, simSort.key), vb = simSortVal(b, simSort.key);
-                const c = (va < vb ? -1 : va > vb ? 1 : 0) * simSort.dir;
-                // stable tiebreak by iccid so tied rows don't reshuffle on refresh
-                if (c) return c;
-                return String(a.iccid || a.msisdn || '').localeCompare(String(b.iccid || b.msisdn || ''));
-            });
+            // No sort here — simSims is kept sorted in place (sortSimInPlace) so clicks
+            // compose as a stable sort.
             const cols = [['st', 'St'], ['name', 'Name'], ['iccid', 'ICCID'], ['msisdn', 'MSISDN'],
                 ['imei6', 'IMEI6'], ['carrier', 'Carrier'], ['tags', 'Tags'], ['state', 'State']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
