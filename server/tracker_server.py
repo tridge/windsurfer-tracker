@@ -4819,6 +4819,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 except ValueError as e:
                     self._send_json({"error": str(e)}, 400)
                     return
+            if "night_idle" in disk:
+                try:
+                    disk["night_idle"] = {**(disk.get("night_idle") or {}),
+                                          **clean_night_idle(disk["night_idle"])}
+                except ValueError as e:
+                    self._send_json({"error": str(e)}, 400)
+                    return
         else:
             # Structured partial merge into the current on-disk config.
             try:
@@ -4853,6 +4860,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": str(e)}, 400)
                     return
                 disk['sleep_schedule'] = {**(disk.get('sleep_schedule') or {}), **clean}
+            if 'night_idle' in body and isinstance(body['night_idle'], dict):
+                try:
+                    clean = clean_night_idle(body['night_idle'])
+                except ValueError as e:
+                    self._send_json({"error": str(e)}, 400)
+                    return
+                disk['night_idle'] = {**(disk.get('night_idle') or {}), **clean}
         try:
             _atomic_write_json(path, disk)
         except Exception as e:
@@ -5341,6 +5355,39 @@ def clean_sleep_schedule(s):
     return out
 
 
+# night_idle interval bounds (seconds unless noted). hbt/keepalive allow very long
+# values (overnight); acc_off is firmware-clamped 5-1800; cxzt is in minutes.
+_NIGHT_IDLE_BOUNDS = {
+    "hbt_interval": (5, 86400),
+    "keepalive_interval": (5, 86400),
+    "cxzt_poll_min": (0, 1440),
+    "acc_off_interval": (5, 1800),
+    "gps_rst_time": (0, 86400),
+}
+
+
+def clean_night_idle(s):
+    """Validate + coerce a night_idle dict (only the keys present). Returns a
+    cleaned dict; raises ValueError on any invalid value."""
+    if not isinstance(s, dict):
+        raise ValueError("night_idle must be an object")
+    out = {}
+    if "enabled" in s:
+        if not isinstance(s["enabled"], bool):
+            raise ValueError("night_idle.enabled must be true or false")
+        out["enabled"] = s["enabled"]
+    for k, (lo, hi) in _NIGHT_IDLE_BOUNDS.items():
+        if k in s:
+            try:
+                v = int(s[k])
+            except (ValueError, TypeError):
+                raise ValueError(f"night_idle.{k} must be an integer")
+            if not (lo <= v <= hi):
+                raise ValueError(f"night_idle.{k} must be between {lo} and {hi}")
+            out[k] = v
+    return out
+
+
 def event_sleep_schedule(eid):
     """Effective night-sleep schedule for an event: per-event override merged
     over the global default (gt06.json). Returns the merged dict (or None)."""
@@ -5385,11 +5432,10 @@ def event_next_window_end(eid):
     return end_dt.timestamp()
 
 
-def event_sleep_window_active(eid):
-    """If event `eid` is currently inside its scheduled night-sleep window,
-    return its effective (overnight_mode_number, overnight_interval_min);
-    else None. Times are in the event's own timezone; start > end wraps
-    midnight. None when disabled or no GT06 listener."""
+def _event_sleep_window_state(eid):
+    """Resolve event `eid`'s sleep-schedule window in its own timezone. Returns
+    {"in_window", "now", "start", "end", "sched"} or None when there's no usable
+    (enabled, valid, non-zero-width) window. start > end wraps midnight."""
     sched = event_sleep_schedule(eid)
     if not sched or not sched.get("enabled"):
         return None
@@ -5405,8 +5451,38 @@ def event_sleep_window_active(eid):
     now = datetime.now(tz)
     cur = now.hour * 60 + now.minute
     in_window = (start <= cur < end) if start < end else (cur >= start or cur < end)
-    if not in_window:
+    return {"in_window": in_window, "now": now, "start": start, "end": end,
+            "sched": sched}
+
+
+def night_idle_enabled():
+    """True when the global night_idle feature is on (gt06.json night_idle.enabled).
+    When on, the sleep-schedule window drives long MODE1 night-idle, not MODE5."""
+    ni = getattr(_gt06_listener, "night_idle", None) or {}
+    return bool(ni.get("enabled"))
+
+
+def event_night_idle_active(eid):
+    """True when event `eid`'s idle units should use the long NIGHT idle intervals:
+    night_idle enabled AND the event is currently inside its sleep-schedule
+    window. The window is per-event/timezone, so this is resolved per connection."""
+    if _gt06_listener is None or not night_idle_enabled():
+        return False
+    st = _event_sleep_window_state(eid)
+    return bool(st and st["in_window"])
+
+
+def event_sleep_window_active(eid):
+    """MODE5 deep-sleep window: returns (overnight_mode_number,
+    overnight_interval_min) when event `eid` is inside its sleep window, else None.
+    Disabled entirely when night_idle is enabled — the same window then drives
+    long MODE1 night-idle (see event_night_idle_active), not deep-sleep."""
+    if _gt06_listener is None or night_idle_enabled():
         return None
+    st = _event_sleep_window_state(eid)
+    if not st or not st["in_window"]:
+        return None
+    sched, now, end = st["sched"], st["now"], st["end"]
     try:
         mode = int(sched.get("overnight_mode_number") or _gt06_listener.overnight_mode_number)
         interval = int(sched.get("overnight_interval_min") or _gt06_listener.overnight_interval_min)
@@ -5430,34 +5506,60 @@ def run_sleep_scheduler(event_manager: EventManager, check_interval: int = 60):
     connect mid-window are handled by the login handler via
     get_event_sleep_active. On startup the scheduler only *sleeps* (never wakes)
     so a manual /admin/sleep survives a restart."""
-    log("[SLEEP-SCHED] Night-sleep scheduler started")
-    last = {}  # eid -> bool (last observed in-window)
+    log("[SLEEP-SCHED] Night scheduler started")
+    last = {}        # eid -> bool: last in MODE5 sleep window
+    last_night = {}  # eid -> bool: last in night-idle window
     while True:
         try:
             if _gt06_listener is not None:
+                night_mode = night_idle_enabled()
                 for eid in event_manager.list_events():
-                    params = event_sleep_window_active(eid)  # (mode,int) or None
-                    active = params is not None
-                    prev = last.get(eid)
-                    if prev is None:
-                        if active:
-                            n = _gt06_listener.scheduled_sleep_apply(
-                                eid, True, params[0], params[1])
-                            if n:
-                                log(f"[SLEEP-SCHED] Event {eid}: startup in window "
-                                    f"(MODE{params[0]}/{params[1]}min) — slept {n} idle unit(s)")
-                        last[eid] = active
-                    elif active != prev:
-                        if active:
-                            n = _gt06_listener.scheduled_sleep_apply(
-                                eid, True, params[0], params[1])
-                            log(f"[SLEEP-SCHED] Event {eid}: window START → overnight "
-                                f"MODE{params[0]}/{params[1]}min ({n} unit(s))")
-                        else:
-                            n = _gt06_listener.scheduled_sleep_apply(eid, False)
-                            log(f"[SLEEP-SCHED] Event {eid}: window END → race-idle "
+                    if night_mode:
+                        # Night-idle: at a day↔night window edge, re-reconcile idle
+                        # units so the new (long night / short day) intervals apply.
+                        active = event_night_idle_active(eid)
+                        prev = last_night.get(eid)
+                        if prev is None:
+                            # Startup: only act if already in the night window
+                            # (mirrors the sleep scheduler — no needless day churn).
+                            if active:
+                                n = _gt06_listener.scheduled_night_idle_apply(eid)
+                                if n:
+                                    log(f"[SLEEP-SCHED] Event {eid}: startup in night-idle "
+                                        f"window → night idle ({n} unit(s))")
+                            last_night[eid] = active
+                        elif active != prev:
+                            n = _gt06_listener.scheduled_night_idle_apply(eid)
+                            log(f"[SLEEP-SCHED] Event {eid}: night-idle window "
+                                f"{'START → night' if active else 'END → day'} idle "
                                 f"({n} unit(s))")
-                        last[eid] = active
+                            last_night[eid] = active
+                        last.pop(eid, None)
+                    else:
+                        # MODE5 deep-sleep schedule (night_idle disabled).
+                        params = event_sleep_window_active(eid)  # (mode,int) or None
+                        active = params is not None
+                        prev = last.get(eid)
+                        if prev is None:
+                            if active:
+                                n = _gt06_listener.scheduled_sleep_apply(
+                                    eid, True, params[0], params[1])
+                                if n:
+                                    log(f"[SLEEP-SCHED] Event {eid}: startup in window "
+                                        f"(MODE{params[0]}/{params[1]}min) — slept {n} idle unit(s)")
+                            last[eid] = active
+                        elif active != prev:
+                            if active:
+                                n = _gt06_listener.scheduled_sleep_apply(
+                                    eid, True, params[0], params[1])
+                                log(f"[SLEEP-SCHED] Event {eid}: window START → overnight "
+                                    f"MODE{params[0]}/{params[1]}min ({n} unit(s))")
+                            else:
+                                n = _gt06_listener.scheduled_sleep_apply(eid, False)
+                                log(f"[SLEEP-SCHED] Event {eid}: window END → race-idle "
+                                    f"({n} unit(s))")
+                            last[eid] = active
+                        last_night.pop(eid, None)
         except Exception as e:
             log(f"[SLEEP-SCHED] Error: {e}")
         time.sleep(check_interval)
@@ -5595,7 +5697,8 @@ def run_server(port: int, http_port: int | None = None,
                                       get_event_state_func=_gt06_get_event_state,
                                       get_event_idle_submode_func=_gt06_get_event_idle_submode,
                                       gt06_config_path=gt06_config_path,
-                                      get_event_sleep_active_func=event_sleep_window_active)
+                                      get_event_sleep_active_func=event_sleep_window_active,
+                                      get_event_night_active_func=event_night_idle_active)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")
