@@ -48,6 +48,28 @@ def log(msg: str) -> None:
     print(f"{ts} {msg}")
 
 
+def _schedule_server_restart(delay: float = 0.7) -> None:
+    """Re-exec this process after a short delay (so the HTTP restart response flushes
+    to the client first). os.execv keeps the same PID — clean under systemd — and
+    reloads all code + config; on-disk state (positions, gt06_state, etc.) is restored
+    on startup. All listeners set SO_REUSEADDR and sockets are close-on-exec, so the
+    ports rebind cleanly."""
+    def _do_restart() -> None:
+        log("[MANAGE] re-execing server now (os.execv)")
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            # Fall back to a hard exit so systemd's Restart= brings us back.
+            log(f"[MANAGE] execv failed ({e}); exiting for systemd restart")
+            os._exit(1)
+    threading.Timer(delay, _do_restart).start()
+
+
 def rotate_file(filepath: Path) -> Path | None:
     """Rotate a file to FILENAME.1, FILENAME.2, etc. Returns new path or None if file doesn't exist."""
     if not filepath.exists():
