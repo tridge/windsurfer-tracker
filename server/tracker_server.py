@@ -831,19 +831,23 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
     display_positions = {}
     for sailor_id, pos in positions.items():
         display_pos = pos.copy()
+        # Merge the global GT06 default (name/hide) UNDER the per-event override, so a
+        # per-event users.json entry wins but gt06_users.json provides the default.
+        default = _gt06_user_defaults.get(sailor_id)
         override = get_user_override(user_overrides, sailor_id, pos.get("did"))
-        if override:
-            if 'name' in override:
-                display_pos['name'] = override['name']
-                display_pos['displayid'] = override['name']
-            if 'role' in override:
-                display_pos['role'] = override['role']
-            if override.get('hidden'):
+        merged = {**(default or {}), **(override or {})}
+        if merged:
+            if merged.get('name'):
+                display_pos['name'] = merged['name']
+                display_pos['displayid'] = merged['name']
+            if 'role' in merged:
+                display_pos['role'] = merged['role']
+            if merged.get('hidden'):
                 display_pos['hidden'] = True
             else:
                 display_pos.pop('hidden', None)
-            if 'info' in override:
-                display_pos['info'] = override['info']
+            if 'info' in merged:
+                display_pos['info'] = merged['info']
         # Add position tail if available (last 20 seconds of positions)
         if position_tails and sailor_id in position_tails:
             display_pos['tail'] = position_tails[sailor_id]
@@ -1421,10 +1425,11 @@ class PositionTracker:
                     track_entry["hac"] = horizontal_accuracy
                 if nsats is not None:
                     track_entry["nsats"] = nsats
-                # Add displayid if user has a name mapping
+                # Add displayid: per-event override name, else the gt06_users default
                 override = get_user_override(user_overrides, sailor_id, did)
-                if override and override.get('name'):
-                    track_entry["displayid"] = override['name']
+                dispname = (override or {}).get('name') or _gt06_user_defaults.get(sailor_id, {}).get('name')
+                if dispname:
+                    track_entry["displayid"] = dispname
                 self.daily_logger.write(track_entry)
 
         return not is_dup
@@ -1522,10 +1527,11 @@ class EventTracker:
                 track_entry["hac"] = horizontal_accuracy
             if nsats is not None:
                 track_entry["nsats"] = nsats
-            # Add displayid if user has a name mapping
+            # Add displayid: per-event override name, else the gt06_users default
             override = get_user_override(self.user_overrides, sailor_id, did)
-            if override and override.get('name'):
-                track_entry["displayid"] = override['name']
+            dispname = (override or {}).get('name') or _gt06_user_defaults.get(sailor_id, {}).get('name')
+            if dispname:
+                track_entry["displayid"] = dispname
             self.daily_logger.write(track_entry)
 
         # Process through position tracker
@@ -1966,6 +1972,24 @@ def save_user_overrides(users_file: Path, overrides: dict[str, dict]):
     log(f"[ADMIN] Saved user overrides: {len(overrides)} users")
 
 
+def _gt06_users_path() -> Path | None:
+    """Path to the global GT06 default name/hide store (html/gt06_users.json)."""
+    return (_static_dir / "gt06_users.json") if _static_dir else None
+
+
+def load_gt06_user_defaults() -> dict[str, dict]:
+    """Load the global GT06 default name/hide store — a fallback for per-event
+    users.json, keyed by sailor_id -> {name?, hidden?}. Returns {} if absent."""
+    p = _gt06_users_path()
+    if p and p.exists():
+        try:
+            with open(p) as f:
+                return json.load(f).get('users', {}) or {}
+        except Exception as e:
+            log(f"Warning: could not load gt06_users.json: {e}")
+    return {}
+
+
 def load_races(data_dir: Path) -> tuple[int, list]:
     """Load races from results.jsonl. Returns (next_id, races_list)."""
     races_file = data_dir / "results.jsonl"
@@ -2049,6 +2073,9 @@ def _resolve_did_overrides(user_overrides: dict, current_positions: dict) -> dic
 
 
 _static_dir: Path | None = None
+# Global GT06 default name/hide store (html/gt06_users.json), a fallback for per-event
+# users.json: sailor_id -> {name?, hidden?}. Loaded at startup, hot-reloaded on edit.
+_gt06_user_defaults: dict[str, dict] = {}
 
 def send_confirmation_email(to_email: str, code: str, event_name: str = "", confirm_url: str = "") -> bool:
     """Send a registration confirmation email with the 6-digit code.
@@ -2472,8 +2499,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if _gt06_listener is None:
                 self._send_json({"trackers": [], "gt06_running": False})
                 return
+            trackers = _gt06_listener.get_device_inventory()
+            for t in trackers:   # merge the global default name/hide (gt06_users.json)
+                d = _gt06_user_defaults.get(t.get('sailor_id')) or {}
+                t['name'] = d.get('name', '')
+                t['hidden'] = bool(d.get('hidden'))
             self._send_json({
-                "trackers": _gt06_listener.get_device_inventory(),
+                "trackers": trackers,
                 "gt06_running": True,
                 "events": _event_manager.get_all_events() if _event_manager else [],
             })
@@ -4831,6 +4863,70 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         log("[MANAGE] GT06 config updated via web UI (hot-applied)")
         self._send_json({"success": True, "config": _gt06_listener.gt06_config})
 
+    def _handle_gt06_users_post(self):
+        """POST /api/manage/gt06/users — edit the global GT06 default name/hide store
+        (html/gt06_users.json), a fallback for per-event users.json. Body:
+        {"users": {sailor_id: {"name": str, "hidden": bool}}}. Persists atomically,
+        hot-reloads, and refreshes every event's current_positions.json so the new
+        names/hides apply live. Manager-authed by the caller."""
+        global _gt06_user_defaults
+        try:
+            n = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send_json({"error": "Invalid JSON"}, 400)
+            return
+        users_in = body.get('users')
+        if not isinstance(users_in, dict):
+            self._send_json({"error": "users must be an object"}, 400)
+            return
+        # MERGE into the existing store (don't replace): only the posted sids are
+        # touched, so saving a search-filtered subset never drops other trackers'
+        # defaults. An empty entry (no name, not hidden) clears that sid.
+        store = {k: dict(v) for k, v in _gt06_user_defaults.items()}
+        for sid, v in users_in.items():
+            if not isinstance(v, dict):
+                continue
+            name = str(v.get('name') or '').strip()
+            hidden = bool(v.get('hidden'))
+            if not name and not hidden:
+                store.pop(str(sid), None)
+                continue
+            entry = {}
+            if name:
+                entry['name'] = name
+            if hidden:
+                entry['hidden'] = True
+            store[str(sid)] = entry
+        p = _gt06_users_path()
+        if not p:
+            self._send_json({"error": "No static dir configured"}, 400)
+            return
+        try:
+            _atomic_write_json(p, {"updated": time.time(),
+                                   "updated_iso": datetime.now().isoformat(),
+                                   "users": store})
+        except Exception as e:
+            self._send_json({"error": f"Could not write gt06_users.json: {e}"}, 500)
+            return
+        _gt06_user_defaults = store
+        # Refresh every event's positions so the new names/hides take effect live.
+        # Snapshot each event's positions UNDER its lock (positions are mutated by
+        # the listener threads), then write outside the lock — avoids racing the
+        # live dict (RuntimeError: dict changed size during iteration).
+        for eid, tr in list(_event_trackers.items()):
+            try:
+                pt = tr.position_tracker
+                with pt._lock:
+                    snap = {sid: dict(pos) for sid, pos in pt.current_positions.items()}
+                    tails = dict(pt.position_tails)
+                write_current_positions(snap, tr.positions_file, tr.user_overrides, tails)
+            except Exception as e:
+                log(f"[MANAGE] gt06_users refresh failed for event {eid}: {e}")
+        log(f"[MANAGE] gt06_users.json updated ({len(store)} entries), "
+            f"refreshed {len(_event_trackers)} events")
+        self._send_json({"success": True, "count": len(store)})
+
     def _handle_gt06_manage_post(self, path):
         """Manager-level GT06 device management + server restart.
 
@@ -4864,6 +4960,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         if path == '/api/manage/gt06/config':
             self._handle_gt06_config_post()
+            return
+
+        if path == '/api/manage/gt06/users':
+            self._handle_gt06_users_post()
             return
 
         from urllib.parse import unquote
@@ -5432,7 +5532,7 @@ def run_server(port: int, http_port: int | None = None,
     Each event has its own data directory under static_dir/{eid}/.
     Per-event admin and tracker passwords are used.
     """
-    global _static_dir, _event_manager, _udp_sock, _server_port
+    global _static_dir, _event_manager, _udp_sock, _server_port, _gt06_user_defaults
 
     if not manager_password:
         log("[ERROR] manager_password is required")
@@ -5459,6 +5559,7 @@ def run_server(port: int, http_port: int | None = None,
     _event_manager = EventManager(events_file, static_dir)
     _event_manager.manager_password = manager_password
     _static_dir = static_dir
+    _gt06_user_defaults = load_gt06_user_defaults()
 
     log(f"[EVENTS] Loaded {len(_event_manager.events)} events\n")
 
