@@ -1,0 +1,40 @@
+{
+ "_comment": "Manifest for the three GT06 battery datasets (tracking / idle / sleep). Top-level keys (unplug_epoch, power_w, track_current_ma, bin_seconds) describe the TRACKING dataset and are read by the SoC/R fit scripts; per-dataset detail is under 'datasets'. See METHOD.md.",
+ "unplug_epoch": 1781767800,
+ "unplug_local": "2026-06-18 17:30",
+ "tz_offset_h": 10.0,
+ "power_w": 0.381,
+ "track_current_ma": 115.0,
+ "bin_seconds": 60,
+ "n_units": 41,
+ "datasets": {
+  "tracking": {
+   "file": "tracking.csv.gz",
+   "mode": "constant-power tracking discharge (~115 mA)",
+   "source": "event-8 daily position logs 2026_06_18..21.jsonl.gz (bat_v, 60 s median bins)",
+   "columns": "id,ts,bat_v,chg,spd,nsats,n",
+   "window": "2026-06-18 17:30 (unplug) -> per-unit low-voltage cutoff",
+   "note": "bat_v = per-bin median terminal V (10 mV grid); chg=1 if any sample in the bin charged. SoC is reconstructed by the fitter (constant-power charge integration). Units reaching cutoff are the firm anchors."
+  },
+  "idle": {
+   "file": "idle.csv.gz",
+   "mode": "parked race-idle (~6 mA, GPS off, 30-min uploads)",
+   "source": "GT06 binary packet log (cxzt# *BT 1 mV + STATUS# Battery 10 mV)",
+   "columns": "id,ts,source,v_mv",
+   "window_epoch": [1782020506, 1782057600],
+   "window_local": "2026-06-21 15:41 (server restart) -> 02:00 (MODE5 sleep)",
+   "note": "Low-noise idle voltage trajectory (~1 mV/h). idle_voltages.csv is the per-unit median summary derived from this, used as the R-fit low-load anchor."
+  },
+  "sleep": {
+   "file": "sleep.csv.gz",
+   "mode": "MODE5 overnight deep-sleep (hourly wakes) bracketed by idle endpoints",
+   "source": "GT06 binary packet log (cxzt# *BT)",
+   "columns": "id,ts,source,v_mv,phase",
+   "phases": "pre_idle (parked, before 02:00) | sleep_wake (hourly MODE5 wake reads, noisy) | post_idle (settled race-idle after ~08:00 wake)",
+   "sleep_start_epoch": 1782057600,
+   "wake_end_epoch": 1782079200,
+   "window_local": "2026-06-22 ~01:45 -> ~08:35 (sleep 02:00->08:00 between the two idle endpoints)",
+   "note": "The sleep-power estimate uses the two low-noise idle endpoints (last pre_idle, first settled post_idle); the sleep_wake reads are noisy (load transient at each wake) and kept only as evidence/validation."
+  }
+ }
+}

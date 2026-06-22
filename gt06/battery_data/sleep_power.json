@@ -1,0 +1,257 @@
+{
+ "method": "two low-noise idle endpoints bracketing MODE5 sleep",
+ "sleep_hours": 6.0,
+ "idle_tail_ma": 6.0,
+ "per_class_mw": {
+  "3Ah": 73.4,
+  "6Ah": 49.4
+ },
+ "units": {
+  "G187547": {
+   "sleep_mw": 54.2,
+   "sleep_ma": 15.36,
+   "dmv": 17.0,
+   "cap_class": "6Ah"
+  },
+  "G226122": {
+   "sleep_mw": 73.4,
+   "sleep_ma": 21.81,
+   "dmv": 127.0,
+   "cap_class": "3Ah"
+  },
+  "G304307": {
+   "sleep_mw": 10.4,
+   "sleep_ma": 3.02,
+   "dmv": 6.0,
+   "cap_class": "6Ah"
+  },
+  "G306088": {
+   "sleep_mw": 56.5,
+   "sleep_ma": 16.03,
+   "dmv": 15.0,
+   "cap_class": "6Ah"
+  },
+  "G306161": {
+   "sleep_mw": -1.1,
+   "sleep_ma": -0.31,
+   "dmv": 0.0,
+   "cap_class": "6Ah"
+  },
+  "G312243": {
+   "sleep_mw": 22.5,
+   "sleep_ma": 6.57,
+   "dmv": 19.0,
+   "cap_class": "3Ah"
+  },
+  "G312268": {
+   "sleep_mw": 217.0,
+   "sleep_ma": 58.5,
+   "dmv": 64.0,
+   "cap_class": "3Ah"
+  },
+  "G312292": {
+   "sleep_mw": 87.3,
+   "sleep_ma": 23.74,
+   "dmv": 29.0,
+   "cap_class": "3Ah"
+  },
+  "G312300": {
+   "sleep_mw": -10.7,
+   "sleep_ma": -2.97,
+   "dmv": -2.0,
+   "cap_class": "6Ah"
+  },
+  "G312326": {
+   "sleep_mw": 48.0,
+   "sleep_ma": 13.66,
+   "dmv": 15.0,
+   "cap_class": "6Ah"
+  },
+  "G312334": {
+   "sleep_mw": 210.8,
+   "sleep_ma": 59.65,
+   "dmv": 55.0,
+   "cap_class": "6Ah"
+  },
+  "G312342": {
+   "sleep_mw": 13.0,
+   "sleep_ma": 3.57,
+   "dmv": 5.0,
+   "cap_class": "3Ah"
+  },
+  "G312359": {
+   "sleep_mw": 63.6,
+   "sleep_ma": 18.91,
+   "dmv": 74.0,
+   "cap_class": "6Ah"
+  },
+  "G334023": {
+   "sleep_mw": 131.9,
+   "sleep_ma": 38.04,
+   "dmv": 53.0,
+   "cap_class": "6Ah"
+  },
+  "G334189": {
+   "sleep_mw": 18.4,
+   "sleep_ma": 5.17,
+   "dmv": 5.0,
+   "cap_class": "6Ah"
+  },
+  "G341846": {
+   "sleep_mw": 75.3,
+   "sleep_ma": 21.39,
+   "dmv": 27.0,
+   "cap_class": "6Ah"
+  },
+  "G341887": {
+   "sleep_mw": 11.8,
+   "sleep_ma": 3.23,
+   "dmv": 2.0,
+   "cap_class": "6Ah"
+  },
+  "G347082": {
+   "sleep_mw": 202.7,
+   "sleep_ma": 57.93,
+   "dmv": 52.0,
+   "cap_class": "6Ah"
+  },
+  "G348635": {
+   "sleep_mw": 63.2,
+   "sleep_ma": 17.22,
+   "dmv": 8.0,
+   "cap_class": "6Ah"
+  },
+  "G370498": {
+   "sleep_mw": 145.8,
+   "sleep_ma": 42.02,
+   "dmv": 64.0,
+   "cap_class": "6Ah"
+  },
+  "G370589": {
+   "sleep_mw": -6.7,
+   "sleep_ma": -1.85,
+   "dmv": -1.0,
+   "cap_class": "6Ah"
+  },
+  "G370977": {
+   "sleep_mw": 48.0,
+   "sleep_ma": 13.61,
+   "dmv": 13.0,
+   "cap_class": "6Ah"
+  },
+  "G371074": {
+   "sleep_mw": 65.8,
+   "sleep_ma": 18.6,
+   "dmv": 20.0,
+   "cap_class": "6Ah"
+  },
+  "G371116": {
+   "sleep_mw": -10.7,
+   "sleep_ma": -2.95,
+   "dmv": -2.0,
+   "cap_class": "6Ah"
+  },
+  "G375349": {
+   "sleep_mw": 8.9,
+   "sleep_ma": 2.48,
+   "dmv": 3.0,
+   "cap_class": "3Ah"
+  },
+  "G375356": {
+   "sleep_mw": 248.8,
+   "sleep_ma": 70.86,
+   "dmv": 118.0,
+   "cap_class": "3Ah"
+  },
+  "G375372": {
+   "sleep_mw": 153.7,
+   "sleep_ma": 43.44,
+   "dmv": 72.0,
+   "cap_class": "3Ah"
+  },
+  "G375430": {
+   "sleep_mw": 290.1,
+   "sleep_ma": 79.52,
+   "dmv": 40.0,
+   "cap_class": "6Ah"
+  },
+  "G375539": {
+   "sleep_mw": 68.8,
+   "sleep_ma": 18.69,
+   "dmv": 23.0,
+   "cap_class": "3Ah"
+  },
+  "G375547": {
+   "sleep_mw": 40.9,
+   "sleep_ma": 11.01,
+   "dmv": 5.0,
+   "cap_class": "6Ah"
+  },
+  "G375562": {
+   "sleep_mw": 223.3,
+   "sleep_ma": 61.2,
+   "dmv": 67.0,
+   "cap_class": "3Ah"
+  },
+  "G378517": {
+   "sleep_mw": 50.8,
+   "sleep_ma": 13.77,
+   "dmv": 7.0,
+   "cap_class": "6Ah"
+  },
+  "G378657": {
+   "sleep_mw": 48.7,
+   "sleep_ma": 13.37,
+   "dmv": 13.0,
+   "cap_class": "3Ah"
+  },
+  "G378723": {
+   "sleep_mw": 21.3,
+   "sleep_ma": 6.43,
+   "dmv": 34.0,
+   "cap_class": "6Ah"
+  },
+  "G378830": {
+   "sleep_mw": 73.6,
+   "sleep_ma": 20.93,
+   "dmv": 17.0,
+   "cap_class": "6Ah"
+  },
+  "G378848": {
+   "sleep_mw": 25.5,
+   "sleep_ma": 7.12,
+   "dmv": 5.0,
+   "cap_class": "6Ah"
+  },
+  "G380521": {
+   "sleep_mw": -25.3,
+   "sleep_ma": -7.04,
+   "dmv": -5.0,
+   "cap_class": "6Ah"
+  },
+  "G388862": {
+   "sleep_mw": 6.2,
+   "sleep_ma": 1.68,
+   "dmv": 1.0,
+   "cap_class": "6Ah"
+  },
+  "G388920": {
+   "sleep_mw": 194.7,
+   "sleep_ma": 54.92,
+   "dmv": 47.0,
+   "cap_class": "6Ah"
+  },
+  "G594715": {
+   "sleep_mw": 37.1,
+   "sleep_ma": 10.56,
+   "dmv": 9.0,
+   "cap_class": "6Ah"
+  },
+  "G623050": {
+   "sleep_mw": 66.6,
+   "sleep_ma": 18.97,
+   "dmv": 21.0,
+   "cap_class": "6Ah"
+  }
+ }
+}

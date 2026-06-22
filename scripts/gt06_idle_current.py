@@ -63,7 +63,16 @@ def walk(path):
 def load_cal(path):
     c = json.load(open(path))
     return (c.get('discharge_curve') or [], c.get('offsets') or {},
-            c.get('class_curve_offset_mv') or {}, c.get('units') or {})
+            c.get('class_curve_offset_mv') or {}, c.get('units') or {},
+            c.get('track_current_ma') or 115.0,
+            c.get('nominal_v_50') or c.get('nominal_voltage') or 3.67)
+
+
+def soc_model(v, c1, c2, c3, c4):
+    """Parametric resting-voltage -> SoC (Roho/BattEstimate form). See
+    scripts/gt06_fit_soc_curve.py and gt06/battery_data/soc_fit.json."""
+    s = c1 * (1.0 - 1.0 / (1.0 + (v / c2) ** c4) ** c3)
+    return max(0.0, min(100.0, s))
 
 
 def remaining_pct(curve, v):
@@ -82,10 +91,14 @@ def remaining_pct(curve, v):
     return 0.0
 
 
-def soc(curve, offsets, class_off_mv, units, sid, rawv):
+def soc(curve, offsets, class_off_mv, units, sid, rawv, off_scale=1.0):
     off = offsets.get(sid, 0.0)
     cls = units.get(sid, {}).get('cap_class')
-    coff = (class_off_mv.get(cls, 0) or 0) / 1000.0
+    # The cap-class offset is an IR-sag correction calibrated at the tracking load
+    # (track_current_ma). IR sag scales with current, so for a lighter regime
+    # (idle/sleep) it must be scaled down by load/track_current_ma; off_scale=1.0
+    # (default) keeps the full tracking-load offset.
+    coff = (class_off_mv.get(cls, 0) or 0) / 1000.0 * off_scale
     return remaining_pct(curve, rawv + off - coff)
 
 
@@ -109,9 +122,31 @@ def main():
     ap.add_argument('--settle-min', type=float, default=10.0)
     ap.add_argument('--min-points', type=int, default=5)
     ap.add_argument('--prefix', default='G')
+    ap.add_argument('--load-ma', type=float, default=None,
+                    help='regime load (mA) used to scale the cap-class IR-sag offset '
+                         'down from the tracking-load calibration; pass the rough '
+                         'idle/sleep current (e.g. 6). Omit to keep the full '
+                         'tracking-load offset (legacy behaviour).')
+    ap.add_argument('--soc-fit', default=None,
+                    help='parametric resting-V->SoC fit JSON (gt06/battery_data/'
+                         'soc_fit.json). When set, use the smooth OCV curve instead of '
+                         'the 10mV-quantized lookup. Idle V ~ rest, so applied directly.')
+    ap.add_argument('--cxzt-only', action='store_true',
+                    help='use only 1mV cxzt readings, ignoring 10mV-quantized STATUS')
     args = ap.parse_args()
 
-    curve, offsets, class_off_mv, units = load_cal(args.cal)
+    curve, offsets, class_off_mv, units, track_ma, vnom = load_cal(args.cal)
+    off_scale = 1.0 if args.load_ma is None else args.load_ma / track_ma
+    socfit = json.load(open(args.soc_fit)) if args.soc_fit else None
+    # Use the curve's OWN per-unit offsets (same gauge it was fitted in), not the old
+    # display offsets, so the idle SoC lookup matches the fit (codex review).
+    fit_off = {g: mv / 1000.0 for g, mv in (socfit.get('offsets_mv', {}) if socfit else {}).items()}
+
+    def soc_of(sid, v):
+        if socfit:                         # parametric OCV curve; idle V ~= rest
+            c = socfit['coeffs']
+            return soc_model(v + fit_off.get(sid, 0.0), c['c1'], c['c2'], c['c3'], c['c4'])
+        return soc(curve, offsets, class_off_mv, units, sid, v, off_scale)
     conn_sid = {}                          # conn_id -> sailor_id (latest login)
     series = defaultdict(list)             # sailor_id -> [(ts, rawv, src)]
     wstart = args.start + args.settle_min * 60
@@ -133,6 +168,8 @@ def main():
         if m:
             series[sid].append((ts, int(m.group(1)) / 1000.0, 'cxzt'))
             continue
+        if args.cxzt_only:
+            continue
         m = _BATT.search(data)
         if m:
             series[sid].append((ts, float(m.group(1)), 'status'))
@@ -145,7 +182,7 @@ def main():
             continue
         t0 = pts[0][0]
         xs = [(t - t0) / 3600.0 for t, _, _ in pts]   # hours
-        socs = [soc(curve, offsets, class_off_mv, units, sid, v) for _, v, _ in pts]
+        socs = [soc_of(sid, v) for _, v, _ in pts]
         if any(s is None for s in socs):
             continue
         slope = linfit(xs, socs)                       # %/h (negative = draining)
@@ -156,22 +193,43 @@ def main():
         ma = (-slope) / 100.0 * cap if cap else None
         span_h = xs[-1] - xs[0]
         dv = pts[-1][1] - pts[0][1]
-        rows.append((sid, cls, len(pts), span_h, dv, slope, cap, ma))
+        v0 = pts[0][1]                                  # starting voltage
+        soc0 = socs[0]                                  # starting SoC (where on the curve)
+        rows.append((sid, cls, len(pts), span_h, dv, slope, cap, ma, v0, soc0))
         if ma is not None:
             per_class[cls].append(ma)
 
     rows.sort(key=lambda r: (r[1], r[0]))
-    print(f"{'unit':8} {'cls':4} {'n':>3} {'hrs':>5} {'dV':>7} {'%/h':>7} {'cap':>5} {'mA':>7}")
-    for sid, cls, n, h, dv, sl, cap, ma in rows:
-        print(f"{sid:8} {cls:4} {n:>3} {h:>5.1f} {dv:>+7.3f} {sl:>+7.2f} "
-              f"{cap if cap else '?':>5} {ma if ma is not None else float('nan'):>7.1f}")
+    note = (f"(offset scaled x{off_scale:.3f} for {args.load_ma:.0f}mA load)"
+            if args.load_ma is not None else "(full tracking-load offset)")
+    print(f"power at Vnom={vnom:.3f}V  {note}")
+    print(f"{'unit':8} {'cls':4} {'n':>3} {'hrs':>5} {'startV':>7} {'startSoC':>8} "
+          f"{'dV':>7} {'%/h':>7} {'cap':>5} {'mA':>7} {'mW':>7}")
+    for sid, cls, n, h, dv, sl, cap, ma, v0, soc0 in rows:
+        mw = ma / 1000.0 * vnom * 1000.0 if ma is not None else float('nan')
+        print(f"{sid:8} {cls:4} {n:>3} {h:>5.1f} {v0:>7.3f} {soc0:>7.1f}% "
+              f"{dv:>+7.3f} {sl:>+7.2f} "
+              f"{cap if cap else '?':>5} {ma if ma is not None else float('nan'):>7.1f} "
+              f"{mw:>7.1f}")
 
     import statistics as St
-    print("\nPer-class idle current (median across units):")
+    print("\nPer-class current & power (mean / sd / median across units):")
     for cls, vals in sorted(per_class.items()):
-        if vals:
-            print(f"  {cls}: n={len(vals)}  median={St.median(vals):.1f} mA  "
-                  f"mean={St.mean(vals):.1f} mA  range {min(vals):.1f}-{max(vals):.1f}")
+        if not vals:
+            continue
+        pw = [v / 1000.0 * vnom for v in vals]   # W
+        sd = St.stdev(vals) if len(vals) > 1 else 0.0
+        psd = St.stdev(pw) * 1000 if len(pw) > 1 else 0.0
+        print(f"  {cls}: n={len(vals)}  "
+              f"current mean={St.mean(vals):.1f} sd={sd:.1f} median={St.median(vals):.1f} mA  "
+              f"range {min(vals):.1f}-{max(vals):.1f}  |  "
+              f"power mean={St.mean(pw)*1000:.0f} sd={psd:.0f} mW")
+    allv = [v for vals in per_class.values() for v in vals]
+    if allv:
+        pw = [v / 1000.0 * vnom for v in allv]
+        print(f"  ALL: n={len(allv)}  current mean={St.mean(allv):.1f} "
+              f"sd={St.stdev(allv):.1f} median={St.median(allv):.1f} mA  |  "
+              f"power mean={St.mean(pw)*1000:.0f} sd={St.stdev(pw)*1000:.0f} mW")
 
 
 if __name__ == '__main__':

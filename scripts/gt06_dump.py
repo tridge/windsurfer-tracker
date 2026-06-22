@@ -357,6 +357,11 @@ def main():
                              "Match by full IMEI, trailing digits, or G-prefixed sailor ID.")
     parser.add_argument("--list-streams", action="store_true",
                         help="List all connection streams (conn_id → IMEI) and exit")
+    parser.add_argument("--start", type=float, default=None,
+                        help="Only dump packets at/after this unix epoch. Logins are "
+                             "still tracked before --start so conn_id→IMEI stays correct.")
+    parser.add_argument("--end", type=float, default=None,
+                        help="Only dump packets at/before this unix epoch.")
     args = parser.parse_args()
 
     logpath = Path(args.logfile)
@@ -400,6 +405,11 @@ def main():
                 cur = conn_cur.get(conn_id)
                 if not cur or not _imei_matches(args.imei, cur):
                     continue
+            # Time window filtered AFTER login tracking so conn_id→IMEI is correct.
+            if args.start is not None and ts < args.start:
+                continue
+            if args.end is not None and ts > args.end:
+                continue
             dump_packet(ts, frame, verbose=args.verbose,
                         conn_id=conn_id, outgoing=outgoing)
 

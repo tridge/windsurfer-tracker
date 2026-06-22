@@ -1,0 +1,9 @@
+{
+ "method": "two-load: idle(~6mA, cxzt) vs tracking-discharge(~115mA), SoC-matched via the OCV curve; solved jointly with the curve (scripts/gt06_fit_joint.py)",
+ "per_unit_identifiable": false,
+ "finding": "Per-unit R is NOT reliably identifiable from these two SEPARATE test runs. The joint curve+R iteration converges for the curve but R oscillates and yields unphysical values (incl. negative R). Cause: idle and discharge are different runs (recharge + ~3 days + possible temperature delta between them), and the SoC-matching error (curve RMS ~2.5% + per-unit divider offset) maps to +/-0.15-0.3 ohm of R noise, swamping the IR signal. Only class-median R is meaningful, and it is soft.",
+ "class_median_ohm": {"3Ah": 0.40, "6Ah": 0.52},
+ "class_median_note": "stable across damping 0.5/0.2/0.15 and curve iterations; treat as ~+/-0.15 ohm. Old shallow-window R in gt06_calibration.json was ~0.6 (3Ah median) -- same order, also soft.",
+ "to_get_per_unit_R": "Need a SAME-RUN two-load measurement: toggle GPS/tracking on and off within a few minutes on a parked unit and read cxzt at both loads (same SoC, same temperature). That removes the cross-run SoC-matching error that defeats the idle-vs-discharge approach.",
+ "curve_robustness": "The OCV curve is essentially independent of the R assumption (it depends on R only through the small IR add-back, and the stable class-median dominates); 50% anchor stays 3.75-3.77 V regardless. So the SoC curve is trustworthy even though per-unit R is not."
+}

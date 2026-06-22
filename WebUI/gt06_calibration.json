@@ -8,8 +8,11 @@
  "mode_power_w": {
   "track": 0.381,
   "idle": 0.277,
-  "sleep": null,
-  "idle_preliminary": true
+  "idle_parked": 0.022,
+  "sleep": 0.054,
+  "idle_preliminary": true,
+  "sleep_preliminary": true,
+  "note": "idle=0.277 is the old degraded eid=1 window; idle_parked=0.022 is the clean parked race-idle (~6mA, 3Ah, 2026-06-21). sleep=0.054 is MODE5 overnight with 60-min GPS-reporting wakes (fleet-median two-endpoint estimate over a 6h sleep, 2026-06-22). KEY: sleep (54mW) EXCEEDS clean parked idle (22mW) because the hourly GPS-lock-seek wakes dominate -> MODE5-with-frequent-reporting-wakes does NOT save power vs idle. Per-unit sleep is highly variable (per-wake GPS-seek time); 6h dV is near the cxzt floor + overnight temp/cell confounders, so sleep is order-of-magnitude/preliminary."
  },
  "note": "GT06-only display-layer correction (never applied to logs). corrected_v = raw_bat_v - offset_mv/1000; remaining% = lookup corrected_v in discharge_curve (index 0=100%..99=1%). offsets[] kept for back-compat (= -offset_mv/1000). v4: 6Ah from full discharge (alive ones extrapolated); class_curve_offset_mv subtracted before curve lookup to map a cap-class onto the 3Ah-derived curve (6Ah sags ~50mV less under load).",
  "defaults": {
