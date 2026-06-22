@@ -614,6 +614,8 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             width: 280px;
+            box-sizing: border-box;
+            max-height: calc(100vh - 80px);
             max-height: calc(100dvh - 80px);
             overflow-y: auto;
             display: none;
@@ -1931,6 +1933,7 @@
             const sleepBtn = document.getElementById('sleepAllBtn');
             if (sleepBtn) sleepBtn.style.display = (currentEventInfo && currentEventInfo.enable_sleep) ? '' : 'none';
         }
+        applyAdminFeatureFlags();  // hide by default until/unless an event enables them
 
         // Fetch event name and update page title + banner
         (async function() {
