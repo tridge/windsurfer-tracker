@@ -1233,14 +1233,14 @@
                     <b>Idle settings &mdash; race-day idle (still connected)</b>
                     <div style="color:#666;margin:4px 0 10px;font-size:12px">A separate state from Sleep: the unit stays on the platform (TCP open, reachable) but GPS is powered down while parked &mdash; brief uploads only. Used for support boats / between-race standby.</div>
                     <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
-                        ${fld('cfgIdleHbt','Idle heartbeat (s)', c.idle_hbt_interval, 15, 'Expected heartbeat interval. Sets the no-traffic disconnect threshold (~3x this + 30s); the Idle keepalive poll must be faster than that or units drop before being pinged.')}
+                        ${fld('cfgIdleHbt','Idle heartbeat (s)', c.idle_hbt_interval, 15, 'Device heartbeat (HBT) interval, seconds. Sets the no-traffic disconnect threshold (~3x this + 30s). For an overnight low-power test you can set this very long (minutes), but the device firmware may cap HBT around 600s so a longer value may not be honored. Applied live to connected idle units.')}
                         ${fld('cfgIdleAccOn','Idle moving LOC (s)', c.idle_acc_on_interval, 60, 'TIMER T1 (ACC-ON): upload interval when the unit is MOVING. Vendor range 5-60s (device accepts higher). Does not affect responsiveness.')}
                         ${fld('cfgIdleAccOff','Idle parked LOC (s)', c.idle_acc_off_interval, 1800, 'TIMER T2 (ACC-OFF): how often a PARKED unit uploads a position = the GPS-off lever. Range 5-1800s; 1800 = every 30 min, GPS stays powered down between uploads.')}
-                        ${fld('cfgIdleKeepalive','Idle keepalive (s)', c.idle_keepalive_interval, 60, 'How often the server pings each unit (STATUS#) to hold the TCP open for ~1s operator response. Bigger = less battery, but must stay under both the disconnect threshold (3x heartbeat + 30s) and the carrier NAT idle-timeout.')}
+                        ${fld('cfgIdleKeepalive','Idle keepalive (s)', c.idle_keepalive_interval, 60, 'How often the server pings each unit (STATUS#) to hold the TCP open for ~1s operator response. Bigger = less battery. For an overnight low-power test you can set this very long: the carrier may drop the NAT/connection (units reconnect; the battery cxzt poll then waits for a reconnection). The 3x-heartbeat+30s disconnect threshold is a non-blocking warning here, not a hard limit.')}
                         ${fld('cfgCxztPoll','Battery cxzt poll (min)', c.cxzt_poll_min, 0, 'Poll cxzt# every N MINUTES (idle AND tracking) for mV-resolution battery (*BT) — far finer than STATUS# 10mV — for drain/calibration sampling. 0 = off. Applies live to all connected units.')}
                     </div>
                     <div id="gt06TipBox" style="display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;padding:12px 14px;background:#1f3a5f;color:#fff;border-radius:8px;font-size:13px;line-height:1.45;box-shadow:0 2px 14px rgba(0,0,0,0.35);cursor:pointer" onclick="this.style.display='none'"></div>
-                    <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Values clamp to 5-1800s server-side; invalid combinations are flagged on Save. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
+                    <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Moving/parked LOC (TIMER) clamp to 5-1800s (firmware); heartbeat &amp; keepalive allow very long values for overnight low-power testing (connection may drop &amp; reconnect). Invalid TIMER values block Save; a too-long keepalive is a warning only. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
                 <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:14px 16px;margin-bottom:16px">
@@ -1289,21 +1289,28 @@
 
         function validateGt06Settings() {
             const iv = id => { const n = parseInt(document.getElementById(id).value, 10); return isNaN(n) ? null : n; };
-            const issues = [];
-            for (const [id, name] of [['cfgIdleHbt','Idle heartbeat'], ['cfgIdleAccOn','Idle moving LOC'],
-                                      ['cfgIdleAccOff','Idle parked LOC'], ['cfgIdleKeepalive','Idle keepalive']]) {
+            const errors = [], warnings = [];
+            // TIMER T1/T2 are firmware-bounded (5–1800 s) — keep them clamped.
+            for (const [id, name] of [['cfgIdleAccOn','Idle moving LOC'], ['cfgIdleAccOff','Idle parked LOC']]) {
                 const val = iv(id);
-                if (val !== null && (val < 5 || val > 1800)) issues.push(`${name} (${val}) must be 5–1800 s`);
+                if (val !== null && (val < 5 || val > 1800)) errors.push(`${name} (${val}) must be 5–1800 s (firmware TIMER limit)`);
             }
+            // Heartbeat + server keepalive: relaxed (up to 24 h) to allow long-period idle as an
+            // overnight low-power test. The device firmware may still cap HBT (~600 s).
+            for (const [id, name] of [['cfgIdleHbt','Idle heartbeat'], ['cfgIdleKeepalive','Idle keepalive']]) {
+                const val = iv(id);
+                if (val !== null && (val < 5 || val > 86400)) errors.push(`${name} (${val}) must be 5–86400 s`);
+            }
+            // NAT-keepalive guard — advisory only: overnight we accept the connection dropping.
             const hbt = iv('cfgIdleHbt'), ka = iv('cfgIdleKeepalive');
             if (hbt !== null && ka !== null && ka >= hbt * 3 + 30)
-                issues.push(`Idle keepalive (${ka}s) ≥ disconnect threshold (${hbt * 3 + 30}s = 3×heartbeat+30) — units would drop before the poll. Lower keepalive or raise Idle heartbeat.`);
-            return issues;
+                warnings.push(`Idle keepalive (${ka}s) ≥ disconnect threshold (${hbt * 3 + 30}s = 3×heartbeat+30): units will drop between pings and reconnect — fine for an overnight low-power test, not for race-day reachability.`);
+            return { errors, warnings };
         }
 
         async function saveGt06Settings() {
-            const problems = validateGt06Settings();
-            if (problems.length) { gt06CfgMsg('⚠ ' + problems.join(' · '), false); return; }
+            const { errors, warnings } = validateGt06Settings();
+            if (errors.length) { gt06CfgMsg('⚠ ' + errors.join(' · '), false); return; }
             const v = id => document.getElementById(id).value;
             const iv = id => { const n = parseInt(v(id), 10); return isNaN(n) ? undefined : n; };
             const body = {
@@ -1327,7 +1334,10 @@
                 }
             };
             Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
-            try { await postGt06Config(body); gt06CfgMsg('Saved — applied live', true); }
+            try {
+                await postGt06Config(body);
+                gt06CfgMsg('Saved — applied live' + (warnings.length ? ' · ⚠ ' + warnings.join(' · ') : ''), true);
+            }
             catch (e) { gt06CfgMsg('Error: ' + e.message, false); }
         }
 
