@@ -395,6 +395,21 @@ DEFAULT_SLEEP_SCHEDULE = {
     "overnight_interval_min": 60,
 }
 
+# Night-idle: instead of MODE5 deep-sleep, keep idle units in MODE1 idle but with
+# long intervals overnight (heartbeat/keepalive/cxzt). Proven ~18mW (≈ parked-idle
+# floor, ~1/3 of MODE5 sleep) while staying connected & GPS-reportable (2026-06-23
+# overnight test). When enabled it REPLACES the MODE5 sleep-schedule path: the same
+# sleep_schedule window now switches idle units between day (short) and night (long)
+# idle intervals. MODE5 deep-sleep remains available via a manual /admin/sleep.
+DEFAULT_NIGHT_IDLE = {
+    "enabled": False,
+    "hbt_interval": 900,       # device heartbeat (HBT), seconds
+    "keepalive_interval": 1800,  # server STATUS# poll, seconds
+    "cxzt_poll_min": 30,       # cxzt# battery poll, minutes (0 = off)
+    "acc_off_interval": 1800,  # TIMER T2 (ACC-off parked upload), seconds (5-1800)
+    "gps_rst_time": 60,        # idle GPS no-fix reset, seconds (0 = never)
+}
+
 
 def load_gt06_config(config_path: Path, log_func=None) -> dict:
     """Load GT06 device config from JSON file.
@@ -473,6 +488,8 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
             "lag_drain_max_sec": cfg.get("lag_drain_max_sec", 180),
             "sleep_schedule": {**DEFAULT_SLEEP_SCHEDULE,
                                **(cfg.get("sleep_schedule") or {})},
+            "night_idle": {**DEFAULT_NIGHT_IDLE,
+                           **(cfg.get("night_idle") or {})},
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
@@ -629,7 +646,8 @@ class GT06Listener:
                  log_file=None, log_func=None, save_overrides_func=None,
                  write_positions_func=None, get_event_state_func=None,
                  get_event_idle_submode_func=None, gt06_config_path=None,
-                 get_event_sleep_active_func=None):
+                 get_event_sleep_active_func=None,
+                 get_event_night_active_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
@@ -642,6 +660,10 @@ class GT06Listener:
         # night-sleep window? Used so an idle tracker that connects during the
         # window goes straight to overnight deep-sleep (sticky on reconnect).
         self.get_event_sleep_active = get_event_sleep_active_func
+        # callable(eid) -> bool: is the event currently inside its night-idle
+        # window (night_idle enabled AND in the sleep_schedule window)? When true,
+        # idle units use the long night intervals instead of the day ones.
+        self.get_event_night_active = get_event_night_active_func
         self._apply_config(gt06_config or {"default_eid": 1, "idle_hbt_interval": 15,
                                            "devices": {}})
         self.connections = {}  # fd -> GT06Connection
@@ -697,11 +719,43 @@ class GT06Listener:
         self.slow_loc_interval = cfg.get("slow_loc_interval", 3)
         self.sleep_schedule = {**DEFAULT_SLEEP_SCHEDULE,
                                **(cfg.get("sleep_schedule") or {})}
+        # Night-idle: long idle intervals applied during the sleep_schedule window
+        # (replaces MODE5 sleep when enabled). acc_off clamped to firmware 5-1800.
+        ni = {**DEFAULT_NIGHT_IDLE, **(cfg.get("night_idle") or {})}
+        ni["acc_off_interval"] = min(1800, max(5, int(ni.get("acc_off_interval", 1800))))
+        self.night_idle = ni
+
+    def _idle_intervals(self, gt_conn):
+        """Effective idle intervals for `gt_conn`: the long NIGHT set when the
+        unit's event is inside its night-idle window, else the day (race) set.
+        The night switch is per-event (timezone-aware), so it must be resolved
+        per connection — different events can be in night vs day at once."""
+        night = False
+        if self.get_event_night_active and self.night_idle.get("enabled"):
+            try:
+                night = bool(self.get_event_night_active(gt_conn.eid))
+            except Exception:
+                night = False
+        if night:
+            ni = self.night_idle
+            return {"hbt": int(ni["hbt_interval"]),
+                    "keepalive": int(ni["keepalive_interval"]),
+                    "cxzt_min": int(ni["cxzt_poll_min"]),
+                    "acc_off": int(ni["acc_off_interval"]),
+                    "acc_on": self.idle_acc_on_interval,
+                    "gps_rst": int(ni["gps_rst_time"]),
+                    "night": True}
+        return {"hbt": self.idle_hbt_interval,
+                "keepalive": self.idle_keepalive_interval,
+                "cxzt_min": self.cxzt_poll_min,
+                "acc_off": self.idle_acc_off_interval,
+                "acc_on": self.idle_acc_on_interval,
+                "gps_rst": self.idle_gps_rst_time,
+                "night": False}
 
     def reload_config(self, new_config):
         """Swap in a freshly-loaded gt06_config and re-derive cached attrs.
         Lets the management UI edit gt06.json and apply it with no restart."""
-        old_idle_hbt = self.idle_hbt_interval
         self._apply_config(new_config)
         self._log("[GT06] Config reloaded (live, no restart): "
                   f"{len(new_config.get('devices', {}))} device(s), "
@@ -709,24 +763,25 @@ class GT06Listener:
                   f"{self.overnight_interval_min}min")
         # A plain config edit only re-derives the cached value — it would not
         # reach units already connected (HBT is otherwise pushed only at login,
-        # an idle transition, or a reconcile). Re-push the new idle heartbeat to
-        # live race-idle units that still hold the old value.
-        if self.idle_hbt_interval != old_idle_hbt:
-            self._repush_idle_hbt()
+        # an idle transition, or a reconcile). Re-push the effective idle heartbeat
+        # to live race-idle units that still hold an old value (idempotent).
+        self._repush_idle_hbt()
 
     def _repush_idle_hbt(self):
-        """Push the current idle HBT interval to connected race-idle units whose
-        last-applied value differs (i.e. changed since the connection set it).
+        """Push each connected race-idle unit's EFFECTIVE idle HBT (day or, in its
+        night-idle window, the long night value) when it differs from what the
+        device last got. Idempotent — units already holding the right value are
+        skipped. Used after a live config edit and at a night-idle window edge.
 
-        Runs on the HTTP/reload thread while the listener's select loop may
-        add/remove connections, so iterate a snapshot (like set_idle)."""
-        hbt = self.idle_hbt_interval
+        Runs on the HTTP/reload/scheduler thread while the listener's select loop
+        may add/remove connections, so iterate a snapshot (like set_idle)."""
         n = 0
         for gt_conn in list(self.connections.values()):
             # Race-idle only: active units use the tracking HBT; overnight units
             # run their own scheduled-wake cadence (expected_hbt_interval = mins).
             if not gt_conn.idle or gt_conn.overnight:
                 continue
+            hbt = self._idle_intervals(gt_conn)["hbt"]
             if gt_conn.expected_hbt_interval == hbt:
                 continue  # device already holds this value
             self._queue_commands(gt_conn, [f"HBT,{hbt},{hbt}#"])
@@ -735,7 +790,7 @@ class GT06Listener:
             self._log(f"[GT06] Re-pushed HBT,{hbt},{hbt}# to "
                       f"{gt_conn.sailor_id or gt_conn.imei} (idle HBT changed)")
         if n:
-            self._log(f"[GT06] Idle HBT={hbt}s applied live to {n} idle unit(s)")
+            self._log(f"[GT06] Idle HBT applied live to {n} idle unit(s)")
 
     def _log_packet(self, gt_conn, frame, outgoing=False):
         """Log a raw GT06 frame with v2 header (ts + conn_id + length).
@@ -856,17 +911,19 @@ class GT06Listener:
             return {"SLPDISCONNECT": 0, "TIMER": f"{interval},{interval}", "SENDS": 0,
                     "GPS_RST_TIME": 300, "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": 15}
         if state == "idle":
-            # T1=idle_acc_on_interval (ACC-ON, moving) + T2=idle_acc_off_interval
-            # (ACC-OFF, parked). Parked units use T2 → upload rarely → GPS stays off.
-            # ACCLINE=1: ACC follows the voltage/ACC line, not vibration, so
-            # movement on an off-charge idle unit doesn't assert ACC-ON (→ GPS).
+            # T1=acc_on (ACC-ON, moving) + T2=acc_off (ACC-OFF, parked). Parked
+            # units use T2 → upload rarely → GPS stays off. ACCLINE=1: ACC follows
+            # the voltage/ACC line, not vibration, so movement on an off-charge idle
+            # unit doesn't assert ACC-ON (→ GPS). Intervals are the day set, or the
+            # long night set when this unit's event is in its night-idle window.
+            eff = self._idle_intervals(gt_conn)
             return {"SLPDISCONNECT": 0,
-                    "TIMER": f"{self.idle_acc_on_interval},{self.idle_acc_off_interval}",
+                    "TIMER": f"{eff['acc_on']},{eff['acc_off']}",
                     "SENDS": 1,
                     "SENALM": "OFF", "MOVING": "OFF",
-                    "GPS_RST_TIME": self.idle_gps_rst_time,
+                    "GPS_RST_TIME": eff["gps_rst"],
                     "GPSCODEWAIT": 10, "VIBCHK": "0:16", "ACCLINE": 1,
-                    "HBT": self.idle_hbt_interval}
+                    "HBT": eff["hbt"]}
         return {}
 
     def _reconcile_begin(self, gt_conn, state):
@@ -1166,7 +1223,9 @@ class GT06Listener:
         if gt_conn.last_hbt_time > 0 and gt_conn.loc_count > 0:
             hbt_gap = now - gt_conn.last_hbt_time
             if hbt_gap > gt_conn.expected_hbt_interval * 3:
-                hbt_int = self.idle_hbt_interval if gt_conn.idle else 15
+                # Effective idle HBT (day or night-window long value), not the bare
+                # day default — else a night-idle unit gets bounced back to HBT,15.
+                hbt_int = self._idle_intervals(gt_conn)["hbt"] if gt_conn.idle else 15
                 self._log(f"[GT06] No heartbeat from {label} for {hbt_gap:.0f}s — re-queuing HBT")
                 self._queue_commands(gt_conn, [f"HBT,{hbt_int},{hbt_int}#"])
                 gt_conn.last_hbt_time = now  # prevent repeated re-queuing
@@ -1382,9 +1441,12 @@ class GT06Listener:
                     gt_conn.sched_overnight_mode = None
                     gt_conn.sched_overnight_interval = None
                     gt_conn.overnight_until = None
-                    # Race-day idle: table/state-driven reconcile (see active).
-                    gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                    self._reset_rate_monitoring(gt_conn, self.idle_acc_off_interval)
+                    # Race-day idle: table/state-driven reconcile (see active). The
+                    # effective intervals are day, or the long set when this unit's
+                    # event is inside its night-idle window.
+                    eff = self._idle_intervals(gt_conn)
+                    gt_conn.expected_hbt_interval = eff["hbt"]
+                    self._reset_rate_monitoring(gt_conn, eff["acc_off"])
                     self._reconcile_begin(gt_conn, "idle")
                     cmds = None
             if cmds:
@@ -1956,10 +2018,13 @@ class GT06Listener:
                 if (now_mono - gt_conn.last_gps_off_resend
                         >= self.idle_gps_off_resend_sec):
                     gt_conn.last_gps_off_resend = now_mono
+                    # Effective idle GPS-reset (day or night-window value), so this
+                    # remediation can't overwrite the night no-fix policy with the day one.
+                    gps_rst = self._idle_intervals(gt_conn)["gps_rst"]
                     self._log(f"[GT06] {label} idle but GPS active — re-asserting "
-                              f"GPS_RST_TIME={self.idle_gps_rst_time}")
+                              f"GPS_RST_TIME={gps_rst}")
                     self._queue_commands(gt_conn, [
-                        f"SZCS#GPS_RST_TIME={self.idle_gps_rst_time}",
+                        f"SZCS#GPS_RST_TIME={gps_rst}",
                         "SZCS#VIBCHK=0:16"])
             gt_conn.cmd_pending = None
             gt_conn.cmd_pending_frame = None
@@ -2240,6 +2305,22 @@ class GT06Listener:
                           overnight_interval_min=overnight_interval_min)
         return len(targets)
 
+    def scheduled_night_idle_apply(self, eid):
+        """At a night-idle window edge (day↔night), re-reconcile connected IDLE
+        units in `eid` so the new effective intervals are pushed to the device.
+
+        The keepalive/cxzt cadence switches on its own (read live by the run loop);
+        this re-pushes the device-side settings (HBT, TIMER, GPS_RST). Re-running
+        the idle reconcile diffs every setting and sends only what changed. ONLY
+        idle (non-overnight, non-assist) units are touched — an actively-tracked
+        tracker is never auto-changed. Returns the number re-reconciled."""
+        targets = [c.sailor_id for c in list(self.connections.values())
+                   if c.eid == eid and c.sailor_id and c.idle
+                   and not c.overnight and not c.assist_active]
+        for sid in targets:
+            self.set_idle(eid, sid, True, submode="race")
+        return len(targets)
+
     def set_idle(self, eid, sailor_id, idle, submode="race",
                  overnight_mode=None, overnight_interval_min=None,
                  overnight_until=None):
@@ -2313,8 +2394,9 @@ class GT06Listener:
                         gt_conn.sched_overnight_mode = None
                         gt_conn.sched_overnight_interval = None
                         gt_conn.desired_mode = 1
-                        gt_conn.expected_hbt_interval = self.idle_hbt_interval
-                        self._reset_rate_monitoring(gt_conn, self.idle_acc_off_interval)
+                        eff = self._idle_intervals(gt_conn)
+                        gt_conn.expected_hbt_interval = eff["hbt"]
+                        self._reset_rate_monitoring(gt_conn, eff["acc_off"])
                         self._reconcile_begin(gt_conn, "idle")
                         cmds = None
                 else:
@@ -2540,14 +2622,17 @@ class GT06Listener:
                 # response keeps the modem awake (and the carrier NAT
                 # mapping alive) and updates last_alive_time so the
                 # disconnect check below stays satisfied.
+                # Effective idle intervals: day, or the long night set when this
+                # unit's event is inside its night-idle window.
+                eff_idle = self._idle_intervals(gt_conn) if gt_conn.idle else None
                 if (gt_conn.idle
-                        and self.idle_keepalive_interval
+                        and eff_idle["keepalive"]
                         and gt_conn.cmd_pending is None
                         and not gt_conn.cmd_queue
                         and gt_conn.last_alive_time > 0):
                     alive_gap = now - gt_conn.last_alive_time
                     poll_gap = now - gt_conn.last_idle_poll_time
-                    if alive_gap >= self.idle_keepalive_interval and poll_gap >= self.idle_keepalive_interval:
+                    if alive_gap >= eff_idle["keepalive"] and poll_gap >= eff_idle["keepalive"]:
                         gt_conn.last_idle_poll_time = now
                         self._queue_commands(gt_conn, ["STATUS#"])
 
@@ -2557,12 +2642,13 @@ class GT06Listener:
                 # samples for calibration. Off by default (0). Skip overnight
                 # (deep-sleep units have their own cxzt-on-wake flow) and while a
                 # command is in flight so it never disturbs a reconcile.
-                if (self.cxzt_poll_min
+                cxzt_min = eff_idle["cxzt_min"] if gt_conn.idle else self.cxzt_poll_min
+                if (cxzt_min
                         and not gt_conn.overnight
                         and gt_conn.cmd_pending is None
                         and not gt_conn.cmd_queue
                         and now - gt_conn.login_mono >= self.reconnect_grace_sec
-                        and now - gt_conn.last_cxzt_poll_time >= self.cxzt_poll_min * 60):
+                        and now - gt_conn.last_cxzt_poll_time >= cxzt_min * 60):
                     gt_conn.last_cxzt_poll_time = now
                     self._queue_commands(gt_conn, ["cxzt#"])
 
