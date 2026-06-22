@@ -1193,6 +1193,7 @@
 
         function renderGt06Settings() {
             const c = gt06Cfg, s = c.sleep_schedule || {};
+            const ni = c.night_idle || {};
             const evOpts = (sel) => gt06CfgEvents.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)} (#${e.eid})</option>`).join('');
             const num = (id, v, w) => `<input type="number" id="${id}" value="${esc(v == null ? '' : v)}" style="width:${w || 70}px;font-size:13px">`;
@@ -1243,6 +1244,20 @@
                     <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Moving/parked LOC (TIMER) clamp to 5-1800s (firmware); heartbeat &amp; keepalive allow very long values for overnight low-power testing (connection may drop &amp; reconnect). Invalid TIMER values block Save; a too-long keepalive is a warning only. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
+                <!-- NIGHT IDLE: long MODE1 idle intervals during the sleep-schedule window -->
+                <div style="background:#eef7f0;border:1px solid #cfe7d6;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Night idle &mdash; long intervals overnight (stays connected)</b>
+                    <div style="color:#666;margin:4px 0 10px;font-size:12px">When enabled, the <b>night-sleep schedule window above</b> switches idle units to these long MODE1 intervals instead of MODE5 deep-sleep &mdash; ~18mW (about a third of MODE5 sleep) while staying connected &amp; GPS-reportable. Day uses the race-idle settings above; the window switches day&harr;night per event (its timezone). Only <b>idle</b> units switch; active trackers are untouched. MODE5 deep-sleep is still available via manual sleep. <b>Enable the schedule window above</b> for this to take effect.</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
+                        <label><input type="checkbox" id="cfgNightIdleEnabled" ${ni.enabled ? 'checked' : ''}> Use night idle (not deep sleep)</label>
+                        ${fld('cfgNiHbt','Night heartbeat (s)', ni.hbt_interval, 900, 'Device heartbeat (HBT) during the night window, seconds. 900 = 15 min. Firmware may cap HBT around 600s.')}
+                        ${fld('cfgNiKeepalive','Night keepalive (s)', ni.keepalive_interval, 1800, 'Server STATUS# poll during the night window, seconds. 1800 = 30 min. The carrier may drop the NAT/connection between pings overnight; units reconnect (fine when nobody is watching).')}
+                        ${fld('cfgNiCxzt','Night cxzt poll (min)', ni.cxzt_poll_min, 30, 'cxzt# battery poll during the night window, MINUTES. 0 = off. 30 = every 30 min.')}
+                        ${fld('cfgNiAccOff','Night parked LOC (s)', ni.acc_off_interval, 1800, 'TIMER T2 (ACC-OFF) during the night window: parked upload interval = GPS-off lever. 5-1800s; 1800 = every 30 min.')}
+                        ${fld('cfgNiGpsRst','Night GPS reset (s)', ni.gps_rst_time, 60, 'Idle GPS no-fix reset during the night window, seconds. 0 = firmware never resets GPS (a wedged receiver hangs GPS-on); 60 auto-recovers.')}
+                    </div>
+                </div>
+
                 <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:14px 16px;margin-bottom:16px">
                     <b>Lag catch-up (LTE reconnect)</b>
                     <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;align-items:flex-end">
@@ -1290,14 +1305,14 @@
         function validateGt06Settings() {
             const iv = id => { const n = parseInt(document.getElementById(id).value, 10); return isNaN(n) ? null : n; };
             const errors = [], warnings = [];
-            // TIMER T1/T2 are firmware-bounded (5–1800 s) — keep them clamped.
-            for (const [id, name] of [['cfgIdleAccOn','Idle moving LOC'], ['cfgIdleAccOff','Idle parked LOC']]) {
+            // TIMER T1/T2 are firmware-bounded (5–1800 s) — keep them clamped (day + night parked LOC).
+            for (const [id, name] of [['cfgIdleAccOn','Idle moving LOC'], ['cfgIdleAccOff','Idle parked LOC'], ['cfgNiAccOff','Night parked LOC']]) {
                 const val = iv(id);
                 if (val !== null && (val < 5 || val > 1800)) errors.push(`${name} (${val}) must be 5–1800 s (firmware TIMER limit)`);
             }
-            // Heartbeat + server keepalive: relaxed (up to 24 h) to allow long-period idle as an
-            // overnight low-power test. The device firmware may still cap HBT (~600 s).
-            for (const [id, name] of [['cfgIdleHbt','Idle heartbeat'], ['cfgIdleKeepalive','Idle keepalive']]) {
+            // Heartbeat + server keepalive: relaxed (up to 24 h) to allow long-period idle
+            // (race-day idle or the night-idle window). The device firmware may still cap HBT (~600 s).
+            for (const [id, name] of [['cfgIdleHbt','Idle heartbeat'], ['cfgIdleKeepalive','Idle keepalive'], ['cfgNiHbt','Night heartbeat'], ['cfgNiKeepalive','Night keepalive']]) {
                 const val = iv(id);
                 if (val !== null && (val < 5 || val > 86400)) errors.push(`${name} (${val}) must be 5–86400 s`);
             }
@@ -1331,6 +1346,14 @@
                     start: v('cfgSchedStart'), end: v('cfgSchedEnd'),
                     overnight_mode_number: parseInt(v('cfgSchedMode'), 10),
                     overnight_interval_min: iv('cfgSchedInterval') || 60
+                },
+                night_idle: {
+                    enabled: document.getElementById('cfgNightIdleEnabled').checked,
+                    hbt_interval: iv('cfgNiHbt'),
+                    keepalive_interval: iv('cfgNiKeepalive'),
+                    cxzt_poll_min: iv('cfgNiCxzt'),
+                    acc_off_interval: iv('cfgNiAccOff'),
+                    gps_rst_time: iv('cfgNiGpsRst')
                 }
             };
             Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
