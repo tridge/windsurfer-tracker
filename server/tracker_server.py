@@ -650,6 +650,8 @@ class EventManager:
                         "home_lat": event.get("home_lat"),
                         "home_lon": event.get("home_lon"),
                         "has_registration": bool(event.get("admin_emails")),
+                        "enable_simulator": event.get("enable_simulator", False),
+                        "enable_sleep": event.get("enable_sleep", False),
                     })
             # Sort by name
             result.sort(key=lambda e: e.get("name", ""))
@@ -692,6 +694,8 @@ class EventManager:
                 "archived": False,
                 "assist_enabled": True,  # Whether assist button is available to users
                 "idle_interval": 0,  # Idle heartbeat interval in seconds (0=disabled)
+                "enable_simulator": False,  # Show "Start Simulator" in the admin panel
+                "enable_sleep": False,  # Show "All SLEEP" in the admin panel
                 "created": time.time(),
                 "created_iso": datetime.now().isoformat()
             }
@@ -717,7 +721,7 @@ class EventManager:
             event = self.events[eid]
             # Only allow updating certain fields (sleep_schedule handled below)
             allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
-                              'idle_interval', 'admin_emails',
+                              'idle_interval', 'admin_emails', 'enable_simulator', 'enable_sleep',
                               'admin_password', 'tracker_password', 'timezone',
                               'home_location', 'home_lat', 'home_lon']
             for field in allowed_fields:
@@ -5030,6 +5034,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 extra['assist_enabled'] = data['assist_enabled']
             if data.get('idle_interval') is not None:
                 extra['idle_interval'] = data['idle_interval']
+            if data.get('enable_simulator') is not None:
+                extra['enable_simulator'] = data['enable_simulator']
+            if data.get('enable_sleep') is not None:
+                extra['enable_sleep'] = data['enable_sleep']
             if 'sleep_schedule' in data:
                 extra['sleep_schedule'] = data['sleep_schedule']
             if extra:
