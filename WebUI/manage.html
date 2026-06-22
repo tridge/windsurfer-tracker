@@ -1054,7 +1054,7 @@
                         ? Math.round((b.rawv + BatteryCal.offsetFor(b.id)) * 1000) / 1000 : null;
                     return { ...b, cap_class: c.cap_class, offset_mv: c.offset_mv, corr_v: corrv,
                              r_ohm: c.resistance_ohm, cap_mah: cap, wh,
-                             track_h: rt(mp.track), idle_h: rt(mp.idle), sleep_h: rt(mp.sleep),
+                             track_h: rt(mp.track), idle_h: rt(mp.idle),
                              uncertain: !!c.uncertain, isdefault: !!c._default };
                 });
                 sortBatInPlace();
@@ -1079,7 +1079,6 @@
                 case 'wh':  return t.wh == null ? -1 : t.wh;
                 case 'trk': return t.track_h == null ? -1 : t.track_h;
                 case 'idle':return t.idle_h == null ? -1 : t.idle_h;
-                case 'slp': return t.sleep_h == null ? -1 : t.sleep_h;
                 default:    return '';
             }
         }
@@ -1117,7 +1116,7 @@
             // compose as a stable sort.
             const cols = [['id','ID / IMEI'],['fw','Firmware'],['cls','Cap'],['on','St'],['off','Offset (mV)'],
                 ['rawv','Raw V'],['corrv','Corr V'],['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],
-                ['trk','Max track (h)'],['idle','Max idle (h)'],['slp','Max sleep (h)']];
+                ['trk','Max track (h)'],['idle','Max idle (h)']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
                 + cols.map(([k, l]) => {
@@ -1145,8 +1144,7 @@
                     + `<td>${t.cap_mah == null ? '—' : t.cap_mah}</td>`
                     + `<td>${t.wh == null ? '—' : t.wh.toFixed(1)}</td>`
                     + `<td>${hrs(t.track_h)}</td>`
-                    + `<td>${hrs(t.idle_h)}${batIdlePrelim && t.idle_h != null ? ' <span style="color:#c60" title="preliminary: degraded idle measurement">*</span>' : ''}</td>`
-                    + `<td>${t.sleep_h == null ? '<span style="color:#888">pending</span>' : hrs(t.sleep_h)}</td>`
+                    + `<td>${hrs(t.idle_h)}${batIdlePrelim && t.idle_h != null ? ' <span style="color:#c60" title="preliminary idle measurement">*</span>' : ''}</td>`
                     + `</tr>`;
             }
             html += '</table>';

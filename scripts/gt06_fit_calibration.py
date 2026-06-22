@@ -163,12 +163,11 @@ def main():
     }
     # Per-mode power (W). Max runtime per mode = capacity_Wh / power_W. Assumed
     # uniform across units (device draw, not battery). track from the test; idle
-    # from a degraded off-charge window (preliminary); sleep pending a clean
-    # off-charge MODE5 overnight.
+    # is the measured MODE1 idle floor (modem up, GPS off; ~18mW). MODE5 deep-sleep
+    # is retired (it drew more than idle), so there is no sleep column.
     mode_power_w = {
         "track": round(a.track_w if a.track_w else a.track_ma/1000*a.nominal_v, 3),
         "idle": round(a.idle_w, 3) if a.idle_w else None,
-        "sleep": round(a.sleep_w, 3) if a.sleep_w else None,
         "idle_preliminary": bool(a.idle_preliminary),
     }
     doc = {
