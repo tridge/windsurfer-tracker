@@ -583,15 +583,12 @@
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                         <input type="checkbox" id="evSchedOverride" style="width:auto;margin:0;" onchange="document.getElementById('evSchedFields').style.display=this.checked?'block':'none'">
-                        <span>Override night-sleep schedule for this event</span>
+                        <span>Override night-idle schedule for this event</span>
                     </label>
-                    <small>Otherwise this event uses the global GT06 sleep schedule.</small>
+                    <small>Otherwise this event uses the global GT06 night-idle schedule.</small>
                     <div id="evSchedFields" style="display:none;margin-top:8px;padding:8px;background:#f7f8fa;border-radius:5px;font-size:13px">
-                        <label><input type="checkbox" id="evSchedEnabled"> Enable night sleep</label><br>
-                        <label style="display:inline-block;margin-top:6px">From <input type="time" id="evSchedStart" value="22:00"> to <input type="time" id="evSchedEnd" value="06:00"> (this event's timezone)</label><br>
-                        <label style="display:inline-block;margin-top:6px">MODE
-                            <select id="evSchedMode"><option value="5">5 (timed)</option><option value="4">4 (vibration)</option></select>,
-                            wake every <input type="number" id="evSchedInterval" value="60" min="1" style="width:55px"> min</label>
+                        <label><input type="checkbox" id="evSchedEnabled"> Enable night idle</label><br>
+                        <label style="display:inline-block;margin-top:6px">From <input type="time" id="evSchedStart" value="22:00"> to <input type="time" id="evSchedEnd" value="06:00"> (this event's timezone)</label>
                     </div>
                 </div>
                 <div class="form-group">
@@ -850,8 +847,6 @@
             document.getElementById('evSchedEnabled').checked = !!s.enabled;
             document.getElementById('evSchedStart').value = s.start || '22:00';
             document.getElementById('evSchedEnd').value = s.end || '06:00';
-            document.getElementById('evSchedMode').value = String(s.overnight_mode_number || 5);
-            document.getElementById('evSchedInterval').value = s.overnight_interval_min || 60;
         }
 
         async function editEvent(eid) {
@@ -940,9 +935,7 @@
                 sleep_schedule: document.getElementById('evSchedOverride').checked ? {
                     enabled: document.getElementById('evSchedEnabled').checked,
                     start: document.getElementById('evSchedStart').value,
-                    end: document.getElementById('evSchedEnd').value,
-                    overnight_mode_number: parseInt(document.getElementById('evSchedMode').value, 10),
-                    overnight_interval_min: parseInt(document.getElementById('evSchedInterval').value, 10) || 60
+                    end: document.getElementById('evSchedEnd').value
                 } : null
             };
 
@@ -1196,7 +1189,6 @@
             const ni = c.night_idle || {};
             const evOpts = (sel) => gt06CfgEvents.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)} (#${e.eid})</option>`).join('');
-            const num = (id, v, w) => `<input type="number" id="${id}" value="${esc(v == null ? '' : v)}" style="width:${w || 70}px;font-size:13px">`;
             // labelled numeric field: tooltip on hover (ⓘ), value defaults to `def`, shows "def N" hint for easy restore
             const fld = (id, label, val, def, tip) => `<label style="display:inline-flex;flex-direction:column;gap:2px;font-size:13px"><span>${label}&nbsp;<span onclick="showGt06Tip(event)" title="${esc(tip)}" style="color:#3b82f6;cursor:pointer;font-weight:bold">&#9432;</span></span><span style="white-space:nowrap"><input type="number" id="${id}" value="${esc(val == null ? def : val)}" style="width:80px;font-size:13px"> <span style="color:#999;font-size:11px">def ${def}</span></span></label>`;
             document.getElementById('gt06SettingsBody').innerHTML = `
@@ -1206,27 +1198,6 @@
                         <select id="cfgDefaultEid" style="font-size:13px">${evOpts(c.default_eid)}</select>
                     </div>
                     <div style="color:#888;margin-top:6px;font-size:12px">Per-tracker overrides are on the GT06 Trackers tab.</div>
-                </div>
-
-                <!-- SLEEP state: overnight deep sleep (modem/MCU off between wakes) -->
-                <div style="background:#eef2fb;border:1px solid #d3def2;border-radius:6px;padding:14px 16px;margin-bottom:16px">
-                    <b>Sleep settings &mdash; overnight deep sleep</b>
-                    <div style="color:#666;margin:4px 0 10px;font-size:12px">Night-time deep sleep: modem/MCU off between scheduled wakes (no live tracking). Only <b>idle</b> trackers are slept &mdash; actively-tracked units are never auto-slept.</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
-                        <label><input type="checkbox" id="cfgSchedEnabled" ${s.enabled ? 'checked' : ''}> Enable night sleep</label>
-                        <label>From <input type="time" id="cfgSchedStart" value="${s.start || '22:00'}"></label>
-                        <label>to <input type="time" id="cfgSchedEnd" value="${s.end || '06:00'}"> <span style="color:#999">(each event's timezone)</span></label>
-                        <label>Mode <select id="cfgSchedMode" style="font-size:13px">
-                            <option value="5" ${String(s.overnight_mode_number||5)==='5'?'selected':''}>MODE5 (timed, recommended)</option>
-                            <option value="4" ${String(s.overnight_mode_number||5)==='4'?'selected':''}>MODE4 (vibration)</option></select></label>
-                        <label>Wake every ${num('cfgSchedInterval', s.overnight_interval_min || 60, 60)} min</label>
-                    </div>
-                    <div style="border-top:1px dashed #d3def2;margin-top:12px;padding-top:10px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
-                        <span style="width:100%;color:#666;font-size:12px;margin-bottom:-2px">Fallback / manual-sleep defaults (used when an event has no per-event schedule override):</span>
-                        <label style="display:inline-flex;flex-direction:column;gap:2px;font-size:13px"><span>Overnight mode&nbsp;<span onclick="showGt06Tip(event)" title="Deep-sleep mode used during the night-sleep window (MODE5 = timed deep sleep, recommended)." style="color:#3b82f6;cursor:pointer;font-weight:bold">&#9432;</span></span><span style="white-space:nowrap"><select id="cfgOvMode" style="font-size:13px">${[1,4,5].map(m=>`<option value="${m}" ${String(c.overnight_mode_number||4)===String(m)?'selected':''}>MODE${m}</option>`).join('')}</select> <span style="color:#999;font-size:11px">def 5</span></span></label>
-                        ${fld('cfgOvInterval','Overnight wake (min)', c.overnight_interval_min, 30, 'How often sleeping units wake to report a position, in minutes (vendor minimum 5).')}
-                    </div>
-                    <div style="color:#888;margin-top:8px;font-size:12px">Per-event schedule overrides are set on each event (Events tab).</div>
                 </div>
 
                 <!-- IDLE state: race-day idle — still connected (TCP up), GPS off when parked -->
@@ -1244,12 +1215,16 @@
                     <div style="color:#888;margin-top:10px;font-size:12px"><b>Idle parked LOC</b> = GPS-off lever. <b>Idle keepalive</b> = reachability vs battery. Moving/parked LOC (TIMER) clamp to 5-1800s (firmware); heartbeat &amp; keepalive allow very long values for overnight low-power testing (connection may drop &amp; reconnect). Invalid TIMER values block Save; a too-long keepalive is a warning only. Tap any <span style="color:#3b82f6;font-weight:bold">&#9432;</span> for details.</div>
                 </div>
 
-                <!-- NIGHT IDLE: long MODE1 idle intervals during the sleep-schedule window -->
+                <!-- NIGHT IDLE: long MODE1 idle intervals during the night schedule window -->
                 <div style="background:#eef7f0;border:1px solid #cfe7d6;border-radius:6px;padding:14px 16px;margin-bottom:16px">
                     <b>Night idle &mdash; long intervals overnight (stays connected)</b>
-                    <div style="color:#666;margin:4px 0 10px;font-size:12px">When enabled, the <b>night-sleep schedule window above</b> switches idle units to these long MODE1 intervals instead of MODE5 deep-sleep &mdash; ~18mW (about a third of MODE5 sleep) while staying connected &amp; GPS-reportable. Day uses the race-idle settings above; the window switches day&harr;night per event (its timezone). Only <b>idle</b> units switch; active trackers are untouched. MODE5 deep-sleep is still available via manual sleep. <b>Enable the schedule window above</b> for this to take effect.</div>
+                    <div style="color:#666;margin:4px 0 10px;font-size:12px">During the night schedule window below, idle units switch from the race-idle settings above to these long MODE1 intervals &mdash; ~18mW (about a third of deep-sleep) while staying connected &amp; GPS-reportable. The window switches day&harr;night per event (its timezone). Only <b>idle</b> units switch; actively-tracked units are never touched. Per-event window overrides are on the Events tab.</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px">
+                        <label><input type="checkbox" id="cfgNightIdleEnabled" ${ni.enabled ? 'checked' : ''}> Enable night idle</label>
+                        <label>From <input type="time" id="cfgSchedStart" value="${s.start || '22:00'}"></label>
+                        <label>to <input type="time" id="cfgSchedEnd" value="${s.end || '06:00'}"> <span style="color:#999">(each event's timezone)</span></label>
+                    </div>
                     <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">
-                        <label><input type="checkbox" id="cfgNightIdleEnabled" ${ni.enabled ? 'checked' : ''}> Use night idle (not deep sleep)</label>
                         ${fld('cfgNiHbt','Night heartbeat (s)', ni.hbt_interval, 900, 'Device heartbeat (HBT) during the night window, seconds. 900 = 15 min. Firmware may cap HBT around 600s.')}
                         ${fld('cfgNiKeepalive','Night keepalive (s)', ni.keepalive_interval, 1800, 'Server STATUS# poll during the night window, seconds. 1800 = 30 min. The carrier may drop the NAT/connection between pings overnight; units reconnect (fine when nobody is watching).')}
                         ${fld('cfgNiCxzt','Night cxzt poll (min)', ni.cxzt_poll_min, 30, 'cxzt# battery poll during the night window, MINUTES. 0 = off. 30 = every 30 min.')}
@@ -1328,10 +1303,12 @@
             if (errors.length) { gt06CfgMsg('⚠ ' + errors.join(' · '), false); return; }
             const v = id => document.getElementById(id).value;
             const iv = id => { const n = parseInt(v(id), 10); return isNaN(n) ? undefined : n; };
+            // Night idle owns the schedule window now (deep-sleep MODE5/4 retired
+            // from this page): one "Enable night idle" toggle gates both the
+            // night_idle feature and the sleep_schedule window; From/To are the window.
+            const nightOn = document.getElementById('cfgNightIdleEnabled').checked;
             const body = {
                 default_eid: iv('cfgDefaultEid'),
-                overnight_mode_number: parseInt(v('cfgOvMode'), 10),
-                overnight_interval_min: iv('cfgOvInterval'),
                 idle_hbt_interval: iv('cfgIdleHbt'),
                 idle_acc_on_interval: iv('cfgIdleAccOn'),
                 idle_acc_off_interval: iv('cfgIdleAccOff'),
@@ -1342,13 +1319,11 @@
                 lag_restore_sec: iv('cfgLagRestore'),
                 lag_drain_max_sec: iv('cfgLagMax'),
                 sleep_schedule: {
-                    enabled: document.getElementById('cfgSchedEnabled').checked,
-                    start: v('cfgSchedStart'), end: v('cfgSchedEnd'),
-                    overnight_mode_number: parseInt(v('cfgSchedMode'), 10),
-                    overnight_interval_min: iv('cfgSchedInterval') || 60
+                    enabled: nightOn,
+                    start: v('cfgSchedStart'), end: v('cfgSchedEnd')
                 },
                 night_idle: {
-                    enabled: document.getElementById('cfgNightIdleEnabled').checked,
+                    enabled: nightOn,
                     hbt_interval: iv('cfgNiHbt'),
                     keepalive_interval: iv('cfgNiKeepalive'),
                     cxzt_poll_min: iv('cfgNiCxzt'),
