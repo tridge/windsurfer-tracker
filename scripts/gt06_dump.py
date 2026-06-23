@@ -384,6 +384,9 @@ def main():
     parser.add_argument("--lag", type=float, default=0.0,
                         help="Only show LOC packets whose receive-minus-GPS lag "
                              "exceeds N seconds (0 = off). Suppresses non-LOC frames.")
+    parser.add_argument("--out", default=None,
+                        help="Write matching raw records to a new v2 gt06.log "
+                             "(use with --imei to extract one unit's stream).")
     args = parser.parse_args()
 
     logpath = Path(args.logfile)
@@ -413,6 +416,12 @@ def main():
                           f"IMEI={gt06_parse_login(result[1])}")
         return
 
+    # Optional extraction: write matching raw records to a new v2 gt06.log.
+    out_fd = open(args.out, "wb") if args.out else None
+    if out_fd is not None:
+        out_fd.write(GT06_LOG_MAGIC_V2)
+    written = [0]
+
     # Attribute each frame to whoever MOST-RECENTLY logged in on its conn_id
     # (updated live as we stream), not first-login-wins. Conn ids are reused
     # across server restarts, so a static conn->IMEI map mixes devices.
@@ -432,6 +441,13 @@ def main():
                 continue
             if args.end is not None and ts > args.end:
                 continue
+            # Extraction writes the faithful v2 record (re-OR the direction bit);
+            # independent of --lag/--verbose, which are display-only.
+            if out_fd is not None:
+                raw_conn = (conn_id | GT06_LOG_DIR_OUT) if outgoing else conn_id
+                out_fd.write(struct.pack("<dIH", ts, raw_conn & 0xFFFFFFFF, len(frame)))
+                out_fd.write(frame)
+                written[0] += 1
             dump_packet(ts, frame, verbose=args.verbose,
                         conn_id=conn_id, outgoing=outgoing, lag_filter=args.lag)
 
@@ -448,6 +464,10 @@ def main():
                 _emit(f, fmt, conn_cur)
     except KeyboardInterrupt:
         pass
+    finally:
+        if out_fd is not None:
+            out_fd.close()
+            print(f"wrote {written[0]} records to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
