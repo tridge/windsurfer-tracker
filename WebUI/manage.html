@@ -120,6 +120,12 @@
             border-radius: 4px;
             cursor: pointer;
         }
+        .btn:disabled {
+            background: #d1d5db;
+            color: #6b7280;
+            cursor: default;
+            opacity: 1;
+        }
 
         .btn-primary {
             background: #1e40af;
@@ -353,12 +359,23 @@
             <div class="section-header">
                 <h2>GT06 Trackers <span id="gt06Count" style="font-size:14px;font-weight:normal;color:#888"></span></h2>
                 <div>
-                    <input type="text" id="gt06Search" placeholder="Search name / ID / IMEI / firmware / event"
-                           oninput="gt06Filter = this.value; renderTrackers()"
-                           style="padding:6px 8px;margin-right:8px;border:1px solid #ccc;border-radius:4px;font-size:13px;width:230px">
-                    <button class="btn" onclick="saveTrackerNames()" title="Save name + hide for all trackers">Save</button>
-                    <button class="btn" onclick="loadTrackers()">Refresh</button>
-                    <button class="btn btn-danger" onclick="restartServer()">Restart Server</button>
+                    <!-- Row 1: actions that don't need a selection -->
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <input type="text" id="gt06Search" placeholder="Search name / ID / IMEI / firmware / event"
+                               oninput="gt06Filter = this.value; renderTrackers()"
+                               style="padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;width:230px">
+                        <button class="btn" onclick="saveTrackerNames()" title="Save names for all trackers">Save</button>
+                        <button class="btn" onclick="loadTrackers()">Refresh</button>
+                        <button class="btn btn-danger" onclick="restartServer()">Restart Server</button>
+                    </div>
+                    <!-- Row 2: actions that operate on the selected rows -->
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+                        <button class="btn btn-primary" id="btnRegister" onclick="registerSelected()" disabled title="Onboard (assign TERIID) the selected trackers">Register</button>
+                        <button class="btn" id="btnHide" onclick="hideSelected(true)" disabled title="Hide selected from the event map">Hide</button>
+                        <button class="btn" id="btnUnhide" onclick="hideSelected(false)" disabled title="Unhide selected">Unhide</button>
+                        <button class="btn btn-danger" id="btnClean" onclick="cleanSelected()" disabled title="Remove the record of selected trackers (stale/ghost rows)">Clean</button>
+                        <span id="gt06SelCount" style="color:#888;font-size:12px;margin-left:4px"></span>
+                    </div>
                 </div>
             </div>
             <div id="gt06Error" class="error-message" style="display:none"></div>
@@ -1373,13 +1390,14 @@
                 // Merge into the existing display order so a refresh doesn't reshuffle
                 // or reset the user's sort: update rows in place by imei, append new,
                 // drop gone. Then re-apply the current sort (stable, keeps sub-orders).
+                const _k = t => t.imei || t.login_id;   // pending rows key by login_id
                 const byImei = {};
-                for (const t of incoming) byImei[t.imei] = t;
+                for (const t of incoming) byImei[_k(t)] = t;
                 const merged = [], seen = {};
                 for (const old of gt06Trackers) {
-                    if (byImei[old.imei]) { merged.push(byImei[old.imei]); seen[old.imei] = 1; }
+                    if (byImei[_k(old)]) { merged.push(byImei[_k(old)]); seen[_k(old)] = 1; }
                 }
-                for (const t of incoming) if (!seen[t.imei]) merged.push(t);
+                for (const t of incoming) if (!seen[_k(t)]) merged.push(t);
                 gt06Trackers = merged;
                 sortGt06InPlace();
                 window._trackers = gt06Trackers;
@@ -1471,11 +1489,12 @@
             // refreshes preserve order via the merge in loadTrackers.
             const evOpts = (sel) => gt06Events.map(e =>
                 `<option value="${e.eid}" ${String(e.eid) === String(sel) ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
-            const cols = [['st', 'St'], ['id', 'ID / IMEI'], ['fw', 'Firmware'], ['event', 'Event'],
-                ['name', 'Name'], ['hide', 'Hide'], ['batt', 'Batt'], ['modef', 'Mode/F'], ['seen', 'Last seen']];
+            const cols = [['sel', ''], ['st', 'St'], ['id', 'ID / IMEI'], ['fw', 'Firmware'], ['event', 'Event'],
+                ['name', 'Name'], ['batt', 'Batt'], ['modef', 'Mode/F'], ['seen', 'Last seen']];
             let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
                 + cols.map(([k, label]) => {
+                    if (k === 'sel') return `<th style="text-align:center"><input type="checkbox" onchange="toggleAllGt06Sel(this)" title="Select all"></th>`;
                     const arrow = gt06Sort.key === k ? (gt06Sort.dir > 0 ? ' ▲' : ' ▼') : '';
                     return `<th style="cursor:pointer;user-select:none" onclick="sortTrackers('${k}')">${label}${arrow}</th>`;
                 }).join('')
@@ -1488,20 +1507,33 @@
                 const batt = (t.battery == null) ? '—' : (t.battery + '%');
                 const modef = (t.mode == null ? '—' : ('M' + t.mode)) + (t.freq == null ? '' : ('/' + t.freq));
                 const seenIso = t.last_seen_iso ? t.last_seen_iso.replace('T', ' ').slice(0, 19) : '';
-                html += `<tr style="border-bottom:1px solid #eee">`
-                    + `<td>${dot}</td>`
-                    + `<td><b>${esc(t.sailor_id || '')}</b><br><span style="color:#999">${esc(t.imei)}</span></td>`
+                const tgt = t.imei || t.login_id || '';
+                const pending = t.authenticated === false && !t.sailor_id;  // unauth (no event)
+                const badge = gt06StatusBadge(t);
+                const liveConfirmed = t.authenticated && t.auth_status === 'auth';
+                // Onboard offered for any online unit not yet LIVE-confirmed (legacy fleet
+                // rows, onboarding candidates, and prov? retries) — never a spoof or sim.
+                const canOnboard = t.online && !liveConfirmed && t.auth_status !== 'sim'
+                                   && t.auth_status !== 'spoof_alert' && tgt;
+                const idCell = pending
+                    ? `<span style="color:#a00">login&nbsp;…${esc(String(t.login_id || '').slice(-6))}</span>`
+                      + `<br><span style="color:#999">${t.resolved_imei ? 'claims …' + esc(String(t.resolved_imei).slice(-6)) : 'unknown'}${t.src_ip ? ' @' + esc(t.src_ip) : ''}</span>`
+                    : `<b>${esc(t.sailor_id || '')}</b><br><span style="color:#999">${esc(t.imei || '')}</span>`;
+                const hiddenAttr = t.hidden ? ' title="currently hidden" style="outline:2px solid #d97706;border-radius:2px"' : '';
+                html += `<tr style="border-bottom:1px solid #eee${pending ? ';background:#fff7f7' : ''}">`
+                    + `<td style="text-align:center"><input type="checkbox" class="gt06sel" data-sid="${esc(t.sailor_id || '')}" data-target="${esc(tgt)}" data-onboard="${canOnboard ? 1 : 0}"${hiddenAttr} onchange="updateBulkButtons()"></td>`
+                    + `<td>${dot}${badge}</td>`
+                    + `<td>${idCell}</td>`
                     + `<td style="${fwStyle}">${esc(fwShort)}</td>`
-                    + `<td><select onchange="setTrackerConfig('${esc(t.imei)}','eid',this.value)">${evOpts(t.eid)}</select></td>`
-                    + `<td><input class="gt06name" data-sid="${esc(t.sailor_id || '')}" value="${esc(t.name || '')}" placeholder="—" style="width:8.5em;padding:2px 4px;font-size:13px"></td>`
-                    + `<td style="text-align:center"><input type="checkbox" class="gt06hide" data-sid="${esc(t.sailor_id || '')}" ${t.hidden ? 'checked' : ''} title="Hide from the event map (still shown here)"></td>`
+                    + `<td>${pending ? '—' : `<select onchange="setTrackerConfig('${esc(t.imei)}','eid',this.value)">${evOpts(t.eid)}</select>`}</td>`
+                    + `<td>${pending ? '' : `<input class="gt06name" data-sid="${esc(t.sailor_id || '')}" value="${esc(t.name || '')}" placeholder="—" style="width:8.5em;padding:2px 4px;font-size:13px">`}${t.hidden ? ' <span style="color:#d97706;font-size:11px">(hidden)</span>' : ''}</td>`
                     + `<td>${batt}</td>`
                     + `<td>${esc(modef)}</td>`
                     + `<td style="color:#777" title="${esc(seenIso)}">${seenAge(t.last_seen)}</td>`
                     + `<td style="white-space:nowrap">`
-                    + `<button class="btn" style="padding:2px 7px" title="Refresh (cxzt#)" onclick="refreshTracker('${esc(t.imei)}')" ${t.online ? '' : 'disabled'}>↻</button> `
-                    + `<button class="btn" style="padding:2px 7px" title="Settings" onclick="showTrackerSettings('${esc(t.imei)}')">⚙</button> `
-                    + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(t.imei)}')" ${t.online ? '' : 'disabled'}>⏻</button>`
+                    + `<button class="btn" style="padding:2px 7px" title="Refresh (cxzt#)" onclick="refreshTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>↻</button> `
+                    + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Settings" onclick="showTrackerSettings('${esc(t.imei)}')">⚙</button> `)
+                    + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⏻</button>`
                     + `</td></tr>`;
             }
             html += '</table>';
@@ -1511,6 +1543,7 @@
                 + 'Name / Hide are default per-tracker values (a per-event override still wins) — '
                 + 'edit then click <b>Save</b>; they apply live.</p>';
             document.getElementById('trackerList').innerHTML = html;
+            updateBulkButtons();   // selections cleared on re-render → reset the bar
         }
 
         async function setTrackerConfig(imei, field, value) {
@@ -1551,6 +1584,99 @@
                     await loadTrackers();
                 } else alert('Save failed: ' + (d.error || r.status));
             } catch (e) { alert('Save failed: ' + e.message); }
+        }
+
+        function gt06StatusBadge(t) {
+            const s = t.auth_status, live = t.authenticated && s === 'auth';
+            const bdg = (label, color) => ` <span style="font-size:10px;color:${color};border:1px solid ${color};border-radius:3px;padding:0 3px;white-space:nowrap">${label}</span>`;
+            // Live state first: a config-provisioned unit only counts as confirmed once
+            // it has actually reconnected and authenticated with its TERIID.
+            if (live) return bdg('prov ✓', '#16a34a');
+            if (t.provisioned) return bdg('prov?', '#d97706');   // persisted but not live-confirmed
+            if (s === 'spoof_alert') return bdg('⚠ spoof', '#dc2626');
+            if (s === 'recovery') return bdg('recover', '#dc2626');
+            if (s === 'onboard' || (t.authenticated === false && !t.sailor_id)) return bdg('new', '#d97706');
+            if (s === 'legacy_raw') return bdg('legacy', '#999');
+            if (s === 'sim') return bdg('sim', '#999');
+            if (t.authenticated) return bdg('auth', '#16a34a');
+            return '';
+        }
+
+        function updateBulkButtons() {
+            const sels = [...document.querySelectorAll('#trackerList .gt06sel:checked')];
+            const cnt = document.getElementById('gt06SelCount');
+            if (cnt) cnt.textContent = sels.length ? sels.length + ' selected' : '';
+            const anySid = sels.some(c => c.dataset.sid);
+            const anyOnboard = sels.some(c => c.dataset.onboard === '1');
+            const set = (id, on) => { const b = document.getElementById(id); if (b) b.disabled = !on; };
+            set('btnRegister', anyOnboard); set('btnHide', anySid); set('btnUnhide', anySid);
+            set('btnClean', sels.length > 0);   // Clean works on any selected row
+        }
+
+        function toggleAllGt06Sel(master) {
+            document.querySelectorAll('#trackerList .gt06sel').forEach(c => { c.checked = master.checked; });
+            updateBulkButtons();
+        }
+
+        async function registerSelected() {
+            const sels = [...document.querySelectorAll('#trackerList .gt06sel:checked')].filter(c => c.dataset.onboard === '1');
+            if (!sels.length) return;
+            if (!confirm('Register (onboard) ' + sels.length + ' tracker(s)? Each gets a TERIID and reboots.')) return;
+            let ok = 0; const fail = [];
+            for (const c of sels) {
+                const tr = c.closest('tr'); const sel = tr && tr.querySelector('select');
+                const eid = sel ? parseInt(sel.value, 10) : NaN;
+                if (isNaN(eid)) { fail.push((c.dataset.target || '?') + ': no event'); continue; }
+                try {
+                    const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(c.dataset.target)}/onboard`, {
+                        method: 'POST', headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ eid })
+                    });
+                    const d = await r.json();
+                    if (d.success) ok++; else fail.push((c.dataset.target || '?') + ': ' + (d.error || r.status));
+                } catch (e) { fail.push((c.dataset.target || '?') + ': ' + e.message); }
+                await new Promise(res => setTimeout(res, 500));   // pace to avoid a reboot storm
+            }
+            alert('Registered ' + ok + ' tracker(s).' + (fail.length ? '\nFailed:\n' + fail.join('\n') : '')
+                  + '\nThey reboot and should show prov ✓ in ~30s.');
+            setTimeout(loadTrackers, 4000);
+        }
+
+        async function cleanSelected() {
+            const sels = [...document.querySelectorAll('#trackerList .gt06sel:checked')];
+            if (!sels.length) return;
+            if (!confirm('Remove the record of ' + sels.length + ' tracker(s)? This forgets device-state + provisioning + map row. A still-connected unit reappears on its next check-in.')) return;
+            let ok = 0; const fail = [];
+            for (const c of sels) {
+                try {
+                    const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(c.dataset.target)}/clean`, {
+                        method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                    });
+                    const d = await r.json();
+                    if (d.success) ok++; else fail.push((c.dataset.target || '?') + ': ' + (d.error || r.status));
+                } catch (e) { fail.push((c.dataset.target || '?') + ': ' + e.message); }
+            }
+            alert('Cleaned ' + ok + ' record(s).' + (fail.length ? '\nFailed:\n' + fail.join('\n') : ''));
+            loadTrackers();
+        }
+
+        async function hideSelected(hide) {
+            const sels = [...document.querySelectorAll('#trackerList .gt06sel:checked')].filter(c => c.dataset.sid);
+            if (!sels.length) return;
+            const users = {};
+            for (const c of sels) {
+                const tr = c.closest('tr'); const nameInp = tr && tr.querySelector('.gt06name');
+                users[c.dataset.sid] = { hidden: hide };
+                if (nameInp) users[c.dataset.sid].name = nameInp.value.trim();   // preserve the name
+            }
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/users`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ users })
+                });
+                const d = await r.json();
+                if (d.success) await loadTrackers(); else alert((hide ? 'Hide' : 'Unhide') + ' failed: ' + (d.error || r.status));
+            } catch (e) { alert('Failed: ' + e.message); }
         }
 
         async function refreshTracker(imei) {
