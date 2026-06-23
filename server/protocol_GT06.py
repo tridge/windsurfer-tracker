@@ -6,6 +6,8 @@ All server interactions happen through callbacks passed to GT06Listener.
 """
 
 import fcntl
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -237,6 +239,19 @@ def voltage_to_percent(voltage):
 def _default_log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{ts} {msg}")
+
+
+# Mask the 9-digit credential prefix of a 15-digit terminal id wherever it appears:
+# `TERIID=<15>` (set/read commands + ACKs) and `ID:<15>` (cxzt# *ID field). Keeps the
+# last 6 (public IMEI suffix = the label). For a non-provisioned unit ID: is the real
+# IMEI (public); masking its prefix is harmless and keeps logs consistent.
+_REDACT_RE = re.compile(r"(TERIID=|ID:)(\d{9})(\d{6})")
+
+
+def _redact_teriid(msg):
+    if not msg:
+        return msg
+    return _REDACT_RE.sub(lambda m: m.group(1) + "***" + m.group(3), msg)
 
 
 def gt06_crc_itu(data):
@@ -490,6 +505,7 @@ def load_gt06_config(config_path: Path, log_func=None) -> dict:
                                **(cfg.get("sleep_schedule") or {})},
             "night_idle": {**DEFAULT_NIGHT_IDLE,
                            **(cfg.get("night_idle") or {})},
+            "login_strict": bool(cfg.get("login_strict", False)),
             "devices": cfg.get("devices", {}),
         }
         _log(f"[GT06] Loaded config from {config_path}: {len(result['devices'])} device(s), default_eid={result['default_eid']}")
@@ -510,6 +526,10 @@ class GT06Connection:
         self.imei = None
         self.sailor_id = None
         self.eid = None
+        self.login_id = None        # raw terminal id sent in the 0x01 login (= TERIID)
+        self.authenticated = False  # passed TERIID/HMAC check → may map to an event
+        self.auth_status = None     # "auth"|"legacy_raw"|"sim"|"spoof_alert"|"onboard"|"recovery"
+        self.resolved_imei = None   # real IMEI inferred for an UNAUTH conn (display only)
         self.battery = -1
         self.signal = -1
         self.charging = None
@@ -652,6 +672,11 @@ class GT06Listener:
         self.interval = interval
         self.id_prefix = id_prefix
         self.get_tracker = get_tracker_func
+        # Logger first (so _apply_config below can log). Redact the TERIID secret
+        # from all log output, keeping the last 6 (public IMEI suffix = label).
+        _base_log = log_func or _default_log
+        self._log = lambda msg: _base_log(_redact_teriid(msg)
+                                          if msg and ("TERIID" in msg or "ID:" in msg) else msg)
         self.get_event_state = get_event_state_func  # callable(eid) -> "tracking" | "idle"
         # callable(eid) -> "race" | "overnight" — when an idle tracker
         # reconnects, picks the command set. Default "race" if unset.
@@ -674,12 +699,20 @@ class GT06Listener:
         self.idle_sailors = set()
         self.active_sailors = set()
         self._sticky_assist: set = set()
-        self._log = log_func or _default_log
         self._save_overrides = save_overrides_func
         self._write_positions = write_positions_func
         # Path to gt06.json so the management page can persist per-device config
         # (event assignment, overnight mode). None disables config writes.
         self.gt06_config_path = Path(gt06_config_path) if gt06_config_path else None
+        # Now that the config path is known, (re)load the server-only login master
+        # key (the init _apply_config above ran before the path was set) and
+        # re-evaluate strict (the no-key guard would have forced it off pre-load).
+        self._login_master_key = self._load_master_key()
+        self.login_strict = bool(self.gt06_config.get("login_strict")) and bool(self._login_master_key)
+        # Unauthenticated connections (no valid TERIID) keyed by raw login_id, so
+        # they show in the management UI for recovery/onboarding without clobbering
+        # the real units' device_state (which is keyed by IMEI).
+        self.pending_devices = {}
         # Persisted per-device state (firmware, last cxzt# snapshot, battery,
         # last-seen) so the management page shows offline devices too. Sidecar
         # gt06_state.json next to the config; survives restart.
@@ -724,6 +757,152 @@ class GT06Listener:
         ni = {**DEFAULT_NIGHT_IDLE, **(cfg.get("night_idle") or {})}
         ni["acc_off_interval"] = min(1800, max(5, int(ni.get("acc_off_interval", 1800))))
         self.night_idle = ni
+        # TERIID anti-spoofing. login_strict gates whether un-provisioned raw-IMEI
+        # logins still route to an event (False = legacy, during rollout). The
+        # master key is loaded separately (server-only, never in this cfg dict).
+        self.login_strict = bool(cfg.get("login_strict", False))
+        self._login_master_key = self._load_master_key()
+        # Strict without a master key would lock out the whole fleet — refuse it.
+        if self.login_strict and not self._login_master_key:
+            self._log("[GT06] login_strict requested but no master key loaded — "
+                      "forcing NON-strict to avoid a fleet lockout")
+            self.login_strict = False
+        # Warn on last6 collisions among provisioned units (would mis-resolve a TERIID).
+        seen = {}
+        for im, c in (cfg.get("devices") or {}).items():
+            if isinstance(c, dict) and c.get("provisioned") and isinstance(im, str) and len(im) >= 6:
+                seen.setdefault(im[-6:], []).append(im)
+        for s6, ims in seen.items():
+            if len(ims) > 1:
+                self._log(f"[GT06] WARNING: last6 collision among provisioned units {ims} "
+                          f"— TERIID resolution for suffix {s6} is ambiguous")
+
+    # ---- TERIID auth (anti-spoofing) ----------------------------------------
+
+    def _load_master_key(self):
+        """Server-only login master key, from `gt06_master_key` next to gt06.json
+        (NEVER part of gt06_config, so it can't leak via the config API/UI).
+        Returns bytes, or None when absent → feature off (legacy behaviour)."""
+        path = getattr(self, "gt06_config_path", None)
+        if not path:
+            return None
+        try:
+            keyfile = Path(path).parent / "gt06_master_key"
+            if keyfile.exists():
+                data = keyfile.read_text().strip()
+                return data.encode() if data else None
+        except Exception as e:
+            self._log(f"[GT06] master key load failed: {e}")
+        return None
+
+    def _hmac_prefix(self, imei):
+        """9-digit decimal HMAC(master_key, imei) in [100000000, 998999999] — no
+        leading zero (clean 15-digit parse), never 999… (sim range). None when no
+        master key (feature off)."""
+        if not self._login_master_key or not imei:
+            return None
+        d = hmac.new(self._login_master_key, imei.encode(), hashlib.sha256).digest()
+        return 100000000 + (int.from_bytes(d, "big") % 899000000)
+
+    def _teriid_for(self, imei):
+        """Provisioned terminal id for `imei`: prefix9 + imei[-6:] (15 digits)."""
+        p = self._hmac_prefix(imei)
+        if p is None or not imei or len(imei) < 6:
+            return None
+        return f"{p}{imei[-6:]}"
+
+    def _is_provisioned(self, imei):
+        dev = self.gt06_config.get("devices", {})
+        d = dev.get(imei) if isinstance(dev, dict) else None
+        return bool(isinstance(d, dict) and d.get("provisioned"))
+
+    def _provisioned_imeis(self):
+        """Real IMEIs we've ONBOARDED (gt06.json devices with provisioned=true).
+        This is the auth TRUST ANCHOR — operator-controlled, NOT device_state (which
+        a non-strict-window spoofer could pollute with fake 'known' IMEIs)."""
+        dev = self.gt06_config.get("devices", {})
+        if not isinstance(dev, dict):
+            return set()
+        return {im for im, c in dev.items()
+                if isinstance(im, str) and im.isdigit() and len(im) >= 6
+                and not im.startswith("999") and isinstance(c, dict) and c.get("provisioned")}
+
+    def _assigned_imeis(self):
+        """IMEIs the operator has added to gt06.json devices (provisioned or not) —
+        the onboarding candidates under strict."""
+        dev = self.gt06_config.get("devices", {})
+        if not isinstance(dev, dict):
+            return set()
+        return {im for im in dev if isinstance(im, str) and im.isdigit()
+                and len(im) >= 6 and not im.startswith("999")}
+
+    def _provisioned_index(self):
+        """last6 → provisioned IMEI (collisions warned at config load)."""
+        return {im[-6:]: im for im in self._provisioned_imeis()}
+
+    def _resolve_login(self, login_id):
+        """Map a raw login terminal id → (authenticated, imei, status). `imei` is
+        the real device IMEI when resolvable (display/routing), else None.
+        status ∈ auth | legacy_raw | sim | spoof_alert | onboard | recovery.
+
+        Trust anchor = PROVISIONED units (gt06.json devices, provisioned=true), never
+        device_state. NON-STRICT (rollout default) preserves legacy routing: any clean
+        15-digit id routes, plus provisioned TERIIDs resolve. STRICT accepts only a
+        valid TERIID (and sim in dev); everything else is unauthenticated and listed
+        for onboarding/recovery (never event-mapped)."""
+        # sim convention: 999-prefixed ids carry the eid (dev/test only)
+        if login_id.startswith("999") and len(login_id) >= 5:
+            return (True, login_id, "sim")
+        is15 = len(login_id) == 15 and login_id.isdigit()
+        prov = self._provisioned_index()
+        # provisioned TERIID: 15-digit, suffix→provisioned unit, prefix == HMAC
+        if is15:
+            imei = prov.get(login_id[-6:])
+            if imei and self._teriid_for(imei) == login_id:
+                return (True, imei, "auth")
+        if not self.login_strict:
+            # legacy: any clean 15-digit id routes (= current behaviour). Garbled /
+            # non-decimal can't form a sailor → recovery.
+            if is15:
+                return (True, login_id, "legacy_raw")
+            return (False, None, "recovery")
+        # STRICT:
+        if is15:
+            pim = prov.get(login_id[-6:])
+            if pim:                                   # provisioned suffix, not its TERIID → forged
+                return (False, pim, "spoof_alert")    # (covers the unit's raw IMEI too)
+            if login_id in self._assigned_imeis():    # operator-added, awaiting onboarding
+                return (False, login_id, "onboard")
+        return (False, None, "recovery")
+
+    def _publishes(self, gt_conn):
+        """Whether this connection should be mapped to a public event (event.html).
+        When the TERIID feature is OFF (no master key) everything publishes — full
+        legacy behaviour (dev/tests + pre-onboarding fleet). When it's ON, only
+        TERIID-registered ('auth') and simulator ('sim') units publish; an
+        un-onboarded 'legacy_raw' unit stays connected + manageable but off the map
+        until it is Registered. (Unauthenticated connections never reach here.)"""
+        if not self._login_master_key:
+            return True
+        return gt_conn.auth_status in ("auth", "sim")
+
+    def _unpublish_sailor(self, gt_conn):
+        """Remove a non-publishing unit's sailor from its event current_positions so
+        it disappears from event.html (it stays in the admin trackers page). Called
+        at login for legacy/un-onboarded units."""
+        if not gt_conn.sailor_id:
+            return
+        tracker = self.get_tracker(gt_conn.eid)
+        if not tracker:
+            return
+        pt = (tracker.position_tracker if hasattr(tracker, "position_tracker") else tracker)
+        removed = False
+        with pt._lock:
+            if pt.current_positions.pop(gt_conn.sailor_id, None) is not None:
+                removed = True
+        if removed and pt.positions_file and self._write_positions:
+            self._write_positions(pt.current_positions, pt.positions_file,
+                                  getattr(tracker, "user_overrides", {}), pt.position_tails)
 
     def _idle_intervals(self, gt_conn):
         """Effective idle intervals for `gt_conn`: the long NIGHT set when the
@@ -1253,15 +1432,31 @@ class GT06Listener:
 
         if protocol == 0x01:
             # Login
-            imei = gt06_parse_login(data)
+            # Resolve the raw terminal id (= TERIID) to a real device + auth status.
+            # Unauthenticated logins are recorded for the management UI (recovery /
+            # onboarding) but get NO sailor_id, event mapping, reconcile,
+            # incumbent-kick, or position publishing.
+            login_id = gt06_parse_login(data)
+            gt_conn.login_id = login_id
+            gt_conn.login_mono = time.monotonic()   # start the reconnect grace window
+            authd, imei, status = self._resolve_login(login_id)
+            gt_conn.auth_status = status
+            gt_conn.authenticated = authd
+            self._send(gt_conn, gt06_make_response(protocol, serial))  # ACK → stays connected
+            if not authd:
+                # Stays fully inert in the imei/sailor-keyed paths (imei=None) so it
+                # can't clobber real units or publish; only recorded for the UI.
+                gt_conn.resolved_imei = imei   # display only; imei stays None
+                gt_conn.eid = None
+                self._record_pending(gt_conn)
+                self._log(f"[GT06] Login UNAUTH ({status}): id=***{login_id[-6:]} "
+                          f"imei={imei} ip={gt_conn.addr[0] if gt_conn.addr else '?'}")
+                return
+            # Authenticated → real IMEI (or sim/legacy login_id), sailor_id, event.
             gt_conn.imei = imei
             gt_conn.sailor_id = self._imei_to_sailor_id(imei)
-
-            # Look up IMEI in gt06_config for event routing.
-            # Sim convention: IMEIs starting with 999 carry the eid in
-            # positions 3..5 (two decimal digits), so WebUI-launched sim
-            # fleets route to their owning event without any config edits.
-            # Real GT06 hardware never uses 999 as a TAC prefix.
+            # Event routing. Sim convention: 999-prefixed ids carry the eid in
+            # positions 3..5; real GT06 hardware never uses 999 as a TAC prefix.
             dev_cfg = self.gt06_config["devices"].get(imei, {})
             sim_eid = None
             if "eid" not in dev_cfg and imei.startswith("999") and len(imei) >= 5:
@@ -1272,9 +1467,9 @@ class GT06Listener:
             gt_conn.eid = dev_cfg.get(
                 "eid",
                 sim_eid if sim_eid is not None else self.gt06_config["default_eid"])
-            self._log(f"[GT06] Login: IMEI {imei} -> {gt_conn.sailor_id} (eid={gt_conn.eid})")
-            gt_conn.login_mono = time.monotonic()   # start the reconnect grace window
-            self._send(gt_conn, gt06_make_response(protocol, serial))
+            # Mask the credential prefix; keep last6 (label) + sailor for ID.
+            self._log(f"[GT06] Login: id ***{login_id[-6:]} -> {gt_conn.sailor_id} "
+                      f"(eid={gt_conn.eid}, {status})")
 
             # Close any stale connections for the same device
             my_fd = gt_conn.sock.fileno()
@@ -1456,6 +1651,11 @@ class GT06Listener:
             # even before its first cxzt# response lands.
             self._record_device_state(gt_conn)
 
+            # An un-onboarded (legacy_raw) unit is manageable but stays OFF the public
+            # event map until Registered — drop any stale current_positions entry.
+            if not self._publishes(gt_conn):
+                self._unpublish_sailor(gt_conn)
+
             # Restore sticky SOS across TCP reconnects
             if imei in self._sticky_assist:
                 gt_conn.assist_active = True
@@ -1598,8 +1798,8 @@ class GT06Listener:
                           f"{loc['lon']:.5f} {fix}")
 
             tracker = self.get_tracker(gt_conn.eid)
-            if tracker is None:
-                return
+            if tracker is None or not self._publishes(gt_conn):
+                return   # un-onboarded (legacy_raw) units don't go on the public map
 
             tracker.process_position(
                 sailor_id=gt_conn.sailor_id,
@@ -1673,7 +1873,7 @@ class GT06Listener:
             # Update tracker on heartbeat only when GPS is stale (no LOC for 15s+)
             # to avoid overwriting satellite/position data from recent LOC packets
             gps_stale = gt_conn.last_ts is None or (time.time() - gt_conn.last_ts) >= 15
-            if gt_conn.sailor_id and gps_stale:
+            if gt_conn.sailor_id and gps_stale and self._publishes(gt_conn):
                 tracker = self.get_tracker(gt_conn.eid)
                 if tracker:
                     lat = gt_conn.last_lat if gt_conn.last_lat is not None else 0.0
@@ -1721,7 +1921,7 @@ class GT06Listener:
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
             self._log(f"[GT06] Alarm from {label}: {alarm_type}")
 
-            if is_sos:
+            if is_sos and self._publishes(gt_conn) and gt_conn.sailor_id:
                 imei = gt_conn.imei
                 if imei not in self._sticky_assist:
                     gt_conn.assist_active = True
@@ -1734,7 +1934,7 @@ class GT06Listener:
                 else:
                     self._log(f"[GT06] SOS already active, ignoring repeat press from {label}")
 
-            if loc and gt_conn.sailor_id and loc["gps_valid"]:
+            if loc and gt_conn.sailor_id and loc["gps_valid"] and self._publishes(gt_conn):
                 speed_knots = loc["speed_kmh"] / 1.852
                 tracker = self.get_tracker(gt_conn.eid)
                 if tracker:
@@ -2133,8 +2333,12 @@ class GT06Listener:
         if cxzt_text:
             settings = self._parse_cxzt(cxzt_text)
             if settings:
+                # Redact the terminal-id (TERIID) credential before persisting /
+                # returning it via the inventory API — keep last6 (label).
+                if isinstance(settings.get('ID'), str) and len(settings['ID']) == 15 and settings['ID'].isdigit():
+                    settings['ID'] = '***' + settings['ID'][-6:]
                 st['settings'] = settings
-                st['raw_cxzt'] = cxzt_text.strip()
+                st['raw_cxzt'] = _redact_teriid(cxzt_text.strip())
                 if 'M' in settings:
                     st['mode'] = settings['M'].split('|')[0]
                 if 'F' in settings:
@@ -2142,9 +2346,91 @@ class GT06Listener:
         self.device_state[gt_conn.imei] = st
         self._save_device_state()
 
+    def _record_pending(self, gt_conn):
+        """Record an UNAUTHENTICATED connection (no valid TERIID) keyed by raw
+        login_id, so it shows in the management UI for recovery/onboarding without
+        clobbering the real units' IMEI-keyed device_state. Bounded (flood guard)."""
+        lid = gt_conn.login_id
+        if not lid:
+            return
+        now = time.time()
+        p = self.pending_devices.get(lid, {})
+        p.update({
+            "login_id": lid,
+            "imei": gt_conn.resolved_imei,    # resolved real imei, or None
+            "status": gt_conn.auth_status,
+            "src_ip": gt_conn.addr[0] if gt_conn.addr else None,
+            "firmware": gt_conn.firmware or p.get("firmware"),
+            "last_seen": now,
+            "last_seen_iso": datetime.fromtimestamp(now).isoformat(),
+        })
+        p.setdefault("first_seen", now)
+        self.pending_devices[lid] = p
+        if len(self.pending_devices) > 200:   # cap (per-IP rate-limit deferred)
+            for k, _ in sorted(self.pending_devices.items(),
+                               key=lambda kv: kv[1].get("last_seen", 0))[:-200]:
+                self.pending_devices.pop(k, None)
+
+    def _conn_for_login_id(self, login_id):
+        for gt_conn in self.connections.values():
+            if gt_conn.login_id == login_id:
+                return gt_conn
+        return None
+
+    def queue_command_by_login_id(self, login_id, cmd_str):
+        """Queue a command to a connected device by its raw login_id (for
+        recovery/onboarding of unauthenticated units). True if queued."""
+        conns = [c for c in self.connections.values() if c.login_id == login_id]
+        if not conns:
+            return False
+        if len(conns) > 1:
+            self._log(f"[GT06] WARNING: {len(conns)} connections share login_id "
+                      f"***{login_id[-6:]}; commanding the first")
+        self._queue_commands(conns[0], [cmd_str])
+        self._log(f"[GT06] Manager command to login_id ***{login_id[-6:]}: {cmd_str}")
+        return True
+
+    def queue_command_any(self, target, cmd_str):
+        """Command a unit by IMEI (authenticated) OR raw login_id (pending recovery)."""
+        return (self.queue_command_by_imei(target, cmd_str)
+                or self.queue_command_by_login_id(target, cmd_str))
+
+    def _real_imei_of(self, conn):
+        """Best-effort real hardware IMEI for a connection: the authenticated imei,
+        else the resolved imei, else the raw login_id when it's a 15-digit number."""
+        for cand in (conn.imei, conn.resolved_imei, conn.login_id):
+            if cand and isinstance(cand, str) and cand.isdigit() and len(cand) == 15:
+                return cand
+        return None
+
+    def onboard_unit(self, target, eid):
+        """Provision a CONNECTED unit over its live TCP link: compute its TERIID,
+        push SZCS#TERIID + RESET#. `target` = the unit's imei (authenticated) or raw
+        login_id (pending). Single-connection guarded (refuse if 0 or >1 live
+        connections claim this identity — possible spoof). Returns
+        {ok, imei, teriid} | {ok:False, error}. Caller persists provisioned+eid."""
+        conn = self._conn_for_imei(target) or self._conn_for_login_id(target)
+        if conn is None:
+            return {"ok": False, "error": "device not connected"}
+        real_imei = self._real_imei_of(conn)
+        if not real_imei:
+            return {"ok": False, "error": f"no real IMEI resolvable for {target}"}
+        teriid = self._teriid_for(real_imei)
+        if not teriid:
+            return {"ok": False, "error": "no master key loaded — cannot compute TERIID"}
+        # Single-connection guard: exactly one live connection must claim this unit.
+        n = sum(1 for c in self.connections.values() if self._real_imei_of(c) == real_imei)
+        if n != 1:
+            return {"ok": False,
+                    "error": f"refusing onboard: {n} live connections claim {real_imei} "
+                             f"(expected exactly 1 — possible spoof)"}
+        self._queue_commands(conn, [f"SZCS#TERIID={teriid}", "RESET#"])
+        self._log(f"[GT06] Onboarding {real_imei} -> eid {eid}: pushed TERIID + RESET#")
+        return {"ok": True, "imei": real_imei, "teriid": teriid}
+
     def _conn_for_imei(self, imei):
         for gt_conn in self.connections.values():
-            if gt_conn.imei == imei:
+            if gt_conn.imei == imei and gt_conn.authenticated:
                 return gt_conn
         return None
 
@@ -2201,12 +2487,34 @@ class GT06Listener:
                                           if isinstance(cfg, dict) else None),
                 "settings": st.get("settings", {}),
                 "raw_cxzt": st.get("raw_cxzt"),
+                "authenticated": (conn.authenticated if conn else None),
+                "provisioned": self._is_provisioned(imei),
+                "auth_status": (conn.auth_status if conn else None),
             }
             # Effective overnight mode resolution (what the device would get).
             if conn is not None:
                 entry["effective_overnight_mode"] = self._resolve_setting(
                     conn, "overnight_mode_number", self.overnight_mode_number)
             out.append(entry)
+        # Unauthenticated connections — separate rows keyed by login_id, NEVER mapped
+        # to an event; shown so the operator can recover/onboard them.
+        for lid, p in self.pending_devices.items():
+            live = self._conn_for_login_id(lid) is not None
+            out.append({
+                "login_id": lid,
+                "imei": None,                    # pending rows key by login_id, NEVER imei
+                "resolved_imei": p.get("imei"),  # the real imei this login claims (display)
+                "sailor_id": None,
+                "eid": None,
+                "online": live,
+                "authenticated": False,
+                "auth_status": p.get("status"),   # spoof_alert | onboard | recovery
+                "provisioned": False,
+                "src_ip": p.get("src_ip"),
+                "firmware": p.get("firmware"),
+                "last_seen": p.get("last_seen"),
+                "last_seen_iso": p.get("last_seen_iso"),
+            })
         return out
 
     def queue_command_by_imei(self, imei, cmd_str):
@@ -2221,11 +2529,11 @@ class GT06Listener:
 
     def refresh_device(self, imei):
         """Queue a cxzt# probe so the device re-reports its full settings."""
-        return self.queue_command_by_imei(imei, "cxzt#")
+        return self.queue_command_any(imei, "cxzt#")
 
     def reboot_device(self, imei):
         """Ask a device to reboot (GT06 RESET#)."""
-        return self.queue_command_by_imei(imei, "RESET#")
+        return self.queue_command_any(imei, "RESET#")
 
     def set_device_config(self, imei, updates):
         """Persist per-device config (e.g. {"eid": 3, "overnight_mode_number": 1}
@@ -2234,7 +2542,7 @@ class GT06Listener:
         next reconnect; overnight_mode_number on its next cxzt# probe."""
         if not self.gt06_config_path:
             return False, "no gt06 config path configured"
-        allowed = {"eid", "overnight_mode_number", "overnight_interval_min", "name"}
+        allowed = {"eid", "overnight_mode_number", "overnight_interval_min", "name", "provisioned"}
         clean = {k: v for k, v in (updates or {}).items() if k in allowed}
         if not clean:
             return False, "no recognised fields to update"
@@ -2262,8 +2570,67 @@ class GT06Listener:
                 mem_dev.pop(k, None)
             else:
                 mem_dev[k] = v
+        # Apply an event (eid) change to the LIVE connection so the tracker moves
+        # immediately (next report ~15s) without a reboot or server restart: update
+        # gt_conn.eid and drop the stale entry from the OLD event's map.
+        if "eid" in clean:
+            conn = self._conn_for_imei(imei)
+            if conn is not None and conn.eid != clean["eid"]:
+                old_eid = conn.eid
+                ot = self.get_tracker(old_eid)
+                if ot and conn.sailor_id:
+                    pt = (ot.position_tracker if hasattr(ot, "position_tracker") else ot)
+                    with pt._lock:
+                        gone = pt.current_positions.pop(conn.sailor_id, None) is not None
+                    if gone and pt.positions_file and self._write_positions:
+                        self._write_positions(pt.current_positions, pt.positions_file,
+                                              getattr(ot, "user_overrides", {}), pt.position_tails)
+                conn.eid = clean["eid"]   # live route to the new event
+                self._log(f"[GT06] Live event change for {conn.sailor_id}: "
+                          f"{old_eid} -> {clean['eid']} (moves on its next report)")
         self._log(f"[GT06] Manager set config for {imei}: {clean}")
         return True, None
+
+    def forget_device(self, target):
+        """Remove ALL record of a device — its event current_positions row,
+        device_state, pending entry, and gt06.json devices entry. For stale/ghost
+        rows (e.g. test artifacts). `target` = imei (device row) or login_id (pending
+        row). Returns True if anything was removed. A still-connected unit reappears
+        on its next login."""
+        removed = False
+        # current_positions (use the device_state eid+sailor before we drop it)
+        st = self.device_state.get(target)
+        if st and st.get("sailor_id") and st.get("eid") is not None:
+            tracker = self.get_tracker(st["eid"])
+            if tracker:
+                pt = (tracker.position_tracker if hasattr(tracker, "position_tracker") else tracker)
+                with pt._lock:
+                    gone = pt.current_positions.pop(st["sailor_id"], None) is not None
+                if gone and pt.positions_file and self._write_positions:
+                    self._write_positions(pt.current_positions, pt.positions_file,
+                                          getattr(tracker, "user_overrides", {}), pt.position_tails)
+        if target in self.device_state:
+            del self.device_state[target]
+            self._save_device_state()
+            removed = True
+        if target in self.pending_devices:
+            del self.pending_devices[target]
+            removed = True
+        dev = self.gt06_config.get("devices", {})
+        if isinstance(dev, dict) and target in dev:
+            del dev[target]
+            if self.gt06_config_path:
+                try:
+                    disk = json.load(open(self.gt06_config_path)) if self.gt06_config_path.exists() else {}
+                    if isinstance(disk.get("devices"), dict) and target in disk["devices"]:
+                        del disk["devices"][target]
+                        _atomic_write_json(self.gt06_config_path, disk)
+                except Exception as e:
+                    self._log(f"[GT06] forget_device config persist failed: {e}")
+            removed = True
+        if removed:
+            self._log(f"[GT06] Forgot device record: {target}")
+        return removed
 
     def cancel_assist(self, eid, sailor_id):
         """Cancel SOS assist for a GT06 device matching (eid, sailor_id)."""
@@ -2588,18 +2955,25 @@ class GT06Listener:
 
             # Periodic checks on all connections
             now = time.monotonic()
-            PRELOGIN_DEADLINE_S = 30  # accept→LOGIN must complete within this
+            PRELOGIN_DEADLINE_S = 30   # accept→LOGIN must complete within this
+            PENDING_DEADLINE_S = 600   # logged-in but UNAUTHENTICATED (pending
+                                       # recovery/onboarding): keep it commandable a
+                                       # while, but bounded so spoofers don't camp
             for fd in list(self.connections):
                 gt_conn = self.connections.get(fd)
                 if gt_conn is None:
                     continue
-                # Expire pre-login connections that never sent a LOGIN frame.
-                # Without this a client can accept a socket and sit there
-                # forever, holding an fd and a slot in self.connections.
+                # Expire connections without an event mapping. Never-logged-in
+                # (login_id None) get the short pre-login deadline. Logged-in-but-
+                # UNAUTHENTICATED (pending recovery/onboarding) get a longer one so
+                # they stay listed + commandable, but bounded so spoofers can't camp.
                 if gt_conn.sailor_id is None:
-                    if now - gt_conn.connected_at > PRELOGIN_DEADLINE_S:
-                        self._log(f"[GT06] Pre-login timeout ({PRELOGIN_DEADLINE_S}s) "
-                                  f"for {gt_conn.addr[0]}:{gt_conn.addr[1]} (conn_id={gt_conn.conn_id})")
+                    deadline = (PRELOGIN_DEADLINE_S if gt_conn.login_id is None
+                                else PENDING_DEADLINE_S)
+                    if now - gt_conn.connected_at > deadline:
+                        kind = "pre-login" if gt_conn.login_id is None else "pending"
+                        self._log(f"[GT06] {kind} timeout ({deadline}s) for "
+                                  f"{gt_conn.addr[0]}:{gt_conn.addr[1]} (conn_id={gt_conn.conn_id})")
                         self._disconnect(fd)
                     continue
                 # Check SIOCOUTQ for pending commands
