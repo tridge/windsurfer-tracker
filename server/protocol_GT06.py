@@ -2535,6 +2535,22 @@ class GT06Listener:
         """Ask a device to reboot (GT06 RESET#)."""
         return self.queue_command_any(imei, "RESET#")
 
+    def disconnect_device(self, imei):
+        """Force-close a device's TCP socket so it reconnects (no reboot).
+        Shutdown (not close) from the HTTP thread → the select loop sees EOF and
+        runs the normal _disconnect on its own thread, so we never touch the
+        selector cross-thread. Used to reproduce the post-reconnect blind-buffer
+        replay, and to recover a wedged socket."""
+        gt_conn = self._conn_for_imei(imei)
+        if gt_conn is None:
+            return False
+        try:
+            gt_conn.sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        self._log(f"[GT06] {imei[-6:]} force-disconnect (manage)")
+        return True
+
     def set_device_config(self, imei, updates):
         """Persist per-device config (e.g. {"eid": 3, "overnight_mode_number": 1}
         or {"name": "..."}) to gt06.json and apply in memory. Returns

@@ -1551,7 +1551,8 @@
                     + `<td style="white-space:nowrap">`
                     + `<button class="btn" style="padding:2px 7px" title="Refresh (cxzt#)" onclick="refreshTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>↻</button> `
                     + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Settings" onclick="showTrackerSettings('${esc(t.imei)}')">⚙</button> `)
-                    + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⏻</button>`
+                    + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⏻</button> `
+                    + `<button class="btn" style="padding:2px 7px" title="Disconnect (close socket)" onclick="disconnectTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⊘</button>`
                     + `</td></tr>`;
             }
             html += '</table>';
@@ -1725,6 +1726,18 @@
                 const d = await r.json();
                 alert(d.success ? 'Reboot command sent.' : ('Reboot failed: ' + (d.error || r.status)));
             } catch (e) { alert('Reboot failed: ' + e.message); }
+        }
+
+        async function disconnectTracker(imei) {
+            if (!confirm('Force-close socket for ' + imei + '? It will reconnect.')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(imei)}/disconnect`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                });
+                const d = await r.json();
+                if (!d.success) { alert('Disconnect failed: ' + (d.error || r.status)); return; }
+                setTimeout(loadTrackers, 2000);
+            } catch (e) { alert('Disconnect failed: ' + e.message); }
         }
 
         function showTrackerSettings(imei) {

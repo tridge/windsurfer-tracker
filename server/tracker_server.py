@@ -4950,6 +4950,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
           POST /api/manage/gt06/tracker/{imei}            set per-device config
           POST /api/manage/gt06/tracker/{imei}/refresh    queue cxzt# probe
           POST /api/manage/gt06/tracker/{imei}/reboot     queue RESET#
+          POST /api/manage/gt06/tracker/{imei}/disconnect close the TCP socket
           POST /api/manage/gt06/tracker/{imei}/command    queue arbitrary command
           POST /api/manage/gt06/tracker/{imei}/firmware-update  (placeholder)
           POST /api/manage/server/restart                 restart the server
@@ -4998,6 +4999,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         if action == 'reboot':
             ok = _gt06_listener.reboot_device(imei)
+            self._send_json({"success": ok, "imei": imei,
+                             "error": None if ok else "device not connected"},
+                            200 if ok else 404)
+            return
+        if action == 'disconnect':
+            ok = _gt06_listener.disconnect_device(imei)
             self._send_json({"success": ok, "imei": imei,
                              "error": None if ok else "device not connected"},
                             200 if ok else 404)
