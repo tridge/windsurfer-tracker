@@ -164,9 +164,12 @@ def decode_terminal_info(info_byte):
     }
 
 
-def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False):
+def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False, lag_filter=0.0):
     """Format and print one packet."""
     result = validate_frame(frame)
+    # --lag mode: only LOC frames qualify; everything else is suppressed.
+    if lag_filter > 0 and (result is None or result[0] not in (0x12, 0x22)):
+        return
     # Prefix shows direction + conn_id when available (v2 format)
     if conn_id:
         prefix = f"c{conn_id:<4d} {'OUT' if outgoing else 'IN '}  "
@@ -192,13 +195,20 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False):
         loc = gt06_parse_location(data)
         proto_name = "LOC" if protocol == 0x12 else "LOC22"
         if loc is None:
+            if lag_filter > 0:
+                return
             print(f"{ts_str}  {proto_name:<7s} [parse error]{crc_tag}")
             return
+        gts = loc.get("ts")
+        lag = (ts - gts) if gts else None
+        if lag_filter > 0 and (lag is None or lag <= lag_filter):
+            return
+        lag_str = f" lag={lag:.0f}s" if lag is not None else ""
         spd_kn = loc["speed_kmh"] / 1.852
         valid = "" if loc["gps_valid"] else " [NO FIX]"
         print(f"{ts_str}  {proto_name:<7s} lat={loc['lat']:.8f} lon={loc['lon']:.8f} "
               f"spd={spd_kn:.1f}kn hdg={loc['heading']} sats={loc['satellites']} "
-              f"gps={gps_time_str(data)}{valid}{crc_tag}")
+              f"gps={gps_time_str(data)}{lag_str}{valid}{crc_tag}")
         if verbose:
             print(f"           speed_kmh={loc['speed_kmh']} gps_valid={loc['gps_valid']}")
             if len(data) >= 18:
@@ -362,6 +372,9 @@ def main():
                              "still tracked before --start so conn_id→IMEI stays correct.")
     parser.add_argument("--end", type=float, default=None,
                         help="Only dump packets at/before this unix epoch.")
+    parser.add_argument("--lag", type=float, default=0.0,
+                        help="Only show LOC packets whose receive-minus-GPS lag "
+                             "exceeds N seconds (0 = off). Suppresses non-LOC frames.")
     args = parser.parse_args()
 
     logpath = Path(args.logfile)
@@ -411,7 +424,7 @@ def main():
             if args.end is not None and ts > args.end:
                 continue
             dump_packet(ts, frame, verbose=args.verbose,
-                        conn_id=conn_id, outgoing=outgoing)
+                        conn_id=conn_id, outgoing=outgoing, lag_filter=args.lag)
 
     conn_cur = {}
     try:
