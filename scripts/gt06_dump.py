@@ -334,6 +334,15 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False, lag_filter=
         if verbose:
             print(f"           raw={data.hex()}  serial={serial}")
 
+    elif protocol == 0x80:
+        # Server -> device command — content_len(1) + server_flag(4) + ASCII command
+        cmd = ""
+        if len(data) >= 5:
+            cmd = data[5:].split(b"\x00")[0].decode("ascii", errors="replace")
+        print(f"{ts_str}  CMD     {cmd!r}{crc_tag}")
+        if verbose:
+            print(f"           raw={data.hex()}  serial={serial}")
+
     else:
         print(f"{ts_str}  0x{protocol:02X}    len={len(data)} data={data.hex()}{crc_tag}")
         if verbose:
