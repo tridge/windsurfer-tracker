@@ -1011,6 +1011,14 @@ class PositionTracker:
         self.last_sq: dict[str, int] = {}
         # Position tails: sailor_id -> list of [ts, lat, lon] for last 20 seconds
         self.position_tails: dict[str, list] = {}
+        # GT06 blind-buffer backlog: interleaved replay fixes arrive stamped with
+        # their old GPS time. They're "dup" vs the live high-water but are real,
+        # never-seen positions filling an outage gap — log them to the daily track
+        # (not the live map) so the recorded track has no hole.
+        self.log_blind_backlog = True
+        self.blind_backlog_min_lag = 5      # s; below this is a live near-dup
+        self.blind_backlog_max_lag = 1800   # s; above this is clock-glitch garbage
+        self.recent_logged_ts: dict[str, set] = {}  # sailor_id -> GPS-ts already in jsonl
         self._lock = threading.Lock()
         # Load existing state from positions file if it exists
         self._load_from_file()
@@ -1073,6 +1081,7 @@ class PositionTracker:
             self.last_timestamp.clear()
             self.last_sq.clear()
             self.position_tails.clear()
+            self.recent_logged_ts.clear()
         log("[ADMIN] Cleared internal position state")
 
     def process_position(self, sailor_id: str, lat: float, lon: float, speed: float,
@@ -1279,17 +1288,39 @@ class PositionTracker:
                 if ts <= self.last_timestamp[sailor_id]:
                     is_dup = True
 
+            # source is event-prefixed in production (e.g. "[E8]GT06"); match the suffix.
+            is_gt06 = source.endswith("GT06")
+
             if not is_dup:
                 self.last_timestamp[sailor_id] = ts
                 if sq > 0:
                     self.last_sq[sailor_id] = sq
+                # Note the logged ts for blind dedup, atomically with the high-water
+                # update so a concurrent backlog call can't double-log this fix.
+                if is_gt06 and self.log_blind_backlog and self.daily_logger and not skip_log:
+                    self._note_logged_ts(sailor_id, ts)
+
+            # GT06 blind-buffer backlog: a dup-by-timestamp GT06 fix that is a real,
+            # never-logged position sitting a sane amount behind wall-clock. Reserve
+            # it under the lock (atomic check-and-set vs threaded callers); the write
+            # happens below, outside the lock.
+            blind_log = False
+            if (self.log_blind_backlog and is_gt06 and is_dup
+                    and not stopped and not idle and not skip_log and not pos_array
+                    and self.daily_logger and lat and lon):
+                lag = recv_time - ts
+                seen = self.recent_logged_ts.setdefault(sailor_id, set())
+                if (self.blind_backlog_min_lag <= lag <= self.blind_backlog_max_lag
+                        and ts not in seen):
+                    blind_log = True
+                    self._note_logged_ts(sailor_id, ts)
 
         # If stopped=True, clear any assist request
         if stopped:
             assist = False
 
         # Format output
-        dup_marker = " [DUP]" if is_dup else ""
+        dup_marker = (" [BLIND-LOG]" if blind_log else " [DUP]") if is_dup else ""
         assist_marker = " *** ASSIST REQUESTED ***" if assist else ""
         stopped_marker = " [STOPPED]" if stopped else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1394,45 +1425,75 @@ class PositionTracker:
 
             # Write to daily track log (unless skip_log is True, e.g., for batch entries)
             if self.daily_logger and not skip_log:
-                track_entry = {
-                    "id": sailor_id,
-                    "ts": ts,
-                    "recv_ts": recv_time,
-                    "lat": lat,
-                    "lon": lon,
-                    "spd": speed,
-                    "hdg": heading,
-                    "ast": assist,
-                    "bat": battery,
-                    "sig": signal,
-                    "role": role,
-                    "ver": version,
-                    "flg": flags
-                }
-                if did:
-                    track_entry["did"] = did
-                if charging is not None:
-                    track_entry["chg"] = charging
-                if battery_voltage is not None:
-                    track_entry["bat_v"] = battery_voltage
-                if battery_drain_rate is not None:
-                    track_entry["bdr"] = battery_drain_rate
-                if heart_rate is not None and heart_rate > 0:
-                    track_entry["hr"] = heart_rate
-                if os_version:
-                    track_entry["os"] = os_version
-                if horizontal_accuracy is not None:
-                    track_entry["hac"] = horizontal_accuracy
-                if nsats is not None:
-                    track_entry["nsats"] = nsats
-                # Add displayid: per-event override name, else the gt06_users default
-                override = get_user_override(user_overrides, sailor_id, did)
-                dispname = (override or {}).get('name') or _gt06_user_defaults.get(sailor_id, {}).get('name')
-                if dispname:
-                    track_entry["displayid"] = dispname
-                self.daily_logger.write(track_entry)
+                self.daily_logger.write(self._build_track_entry(
+                    sailor_id, ts, recv_time, lat, lon, speed, heading, assist,
+                    battery, signal, role, version, flags, did, charging,
+                    battery_voltage, battery_drain_rate, heart_rate, os_version,
+                    horizontal_accuracy, nsats, user_overrides))
+
+        elif blind_log:
+            # GT06 blind-buffer backlog fix: fill the recorded track only. The live
+            # marker, tail and dedup high-water are deliberately left untouched so the
+            # map never regresses (ts was already reserved under the lock above).
+            self.daily_logger.write(self._build_track_entry(
+                sailor_id, ts, recv_time, lat, lon, speed, heading, assist,
+                battery, signal, role, version, flags, did, charging,
+                battery_voltage, battery_drain_rate, heart_rate, os_version,
+                horizontal_accuracy, nsats, user_overrides))
 
         return not is_dup
+
+    def _note_logged_ts(self, sailor_id, ts):
+        """Record a GPS-ts written to the daily jsonl, for blind-backlog dedup.
+        Caller must hold self._lock. Pruned to the max-lag window."""
+        seen = self.recent_logged_ts.setdefault(sailor_id, set())
+        seen.add(ts)
+        if len(seen) > 4000:
+            cutoff = ts - self.blind_backlog_max_lag
+            self.recent_logged_ts[sailor_id] = {t for t in seen if t >= cutoff}
+
+    def _build_track_entry(self, sailor_id, ts, recv_time, lat, lon, speed, heading,
+                           assist, battery, signal, role, version, flags, did,
+                           charging, battery_voltage, battery_drain_rate, heart_rate,
+                           os_version, horizontal_accuracy, nsats, user_overrides):
+        """Build one daily-jsonl track record (single-fix form)."""
+        track_entry = {
+            "id": sailor_id,
+            "ts": ts,
+            "recv_ts": recv_time,
+            "lat": lat,
+            "lon": lon,
+            "spd": speed,
+            "hdg": heading,
+            "ast": assist,
+            "bat": battery,
+            "sig": signal,
+            "role": role,
+            "ver": version,
+            "flg": flags
+        }
+        if did:
+            track_entry["did"] = did
+        if charging is not None:
+            track_entry["chg"] = charging
+        if battery_voltage is not None:
+            track_entry["bat_v"] = battery_voltage
+        if battery_drain_rate is not None:
+            track_entry["bdr"] = battery_drain_rate
+        if heart_rate is not None and heart_rate > 0:
+            track_entry["hr"] = heart_rate
+        if os_version:
+            track_entry["os"] = os_version
+        if horizontal_accuracy is not None:
+            track_entry["hac"] = horizontal_accuracy
+        if nsats is not None:
+            track_entry["nsats"] = nsats
+        # displayid: per-event override name, else the gt06_users default
+        override = get_user_override(user_overrides, sailor_id, did)
+        dispname = (override or {}).get('name') or _gt06_user_defaults.get(sailor_id, {}).get('name')
+        if dispname:
+            track_entry["displayid"] = dispname
+        return track_entry
 
 
 class EventTracker:
@@ -1618,6 +1679,7 @@ class EventTracker:
             pt.last_timestamp.clear()
             pt.last_sq.clear()
             pt.position_tails.clear()
+            pt.recent_logged_ts.clear()
         if self.positions_file:
             write_current_positions(pt.current_positions, self.positions_file,
                                     self.user_overrides)
