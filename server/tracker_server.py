@@ -5013,9 +5013,43 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not cmd:
                 self._send_json({"error": "cmd required"}, 400)
                 return
-            ok = _gt06_listener.queue_command_by_imei(imei, cmd)
+            # Route by IMEI (authenticated) OR raw login_id (pending recovery).
+            ok = _gt06_listener.queue_command_any(imei, cmd)
             self._send_json({"success": ok, "imei": imei, "cmd": cmd,
                              "error": None if ok else "device not connected"},
+                            200 if ok else 404)
+            return
+        if action == 'onboard':
+            # Provision a connected unit: compute+push its TERIID over the live link
+            # (single-connection guarded), then persist eid + provisioned=true so it
+            # authenticates when it reconnects with the TERIID. {imei} = the unit's
+            # imei (authenticated) or raw login_id (pending).
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+                eid = int(json.loads(body).get('eid'))
+            except (ValueError, TypeError, json.JSONDecodeError):
+                self._send_json({"error": "valid eid required"}, 400)
+                return
+            res = _gt06_listener.onboard_unit(imei, eid)
+            if not res.get("ok"):
+                self._send_json({"success": False, "error": res.get("error")}, 400)
+                return
+            real = res["imei"]
+            ok, err = _gt06_listener.set_device_config(real, {"eid": eid, "provisioned": True})
+            if not ok:
+                self._send_json({"success": False, "imei": real,
+                                 "error": f"TERIID pushed but persist failed: {err}"}, 500)
+                return
+            log(f"[MANAGE] Onboarded GT06 {real} -> event {eid} (TERIID pushed + RESET#)")
+            self._send_json({"success": True, "imei": real, "eid": eid})
+            return
+        if action == 'clean':
+            # Forget all record of a device (device_state + pending + gt06.json
+            # entry + map row) — for stale/ghost rows. {imei} = imei or login_id.
+            ok = _gt06_listener.forget_device(imei)
+            self._send_json({"success": ok, "imei": imei,
+                             "error": None if ok else "no record found"},
                             200 if ok else 404)
             return
         if action == 'firmware-update':
