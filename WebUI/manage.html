@@ -1215,6 +1215,20 @@
                     <div style="color:#888;margin-top:6px;font-size:12px">Per-tracker overrides are on the GT06 Trackers tab.</div>
                 </div>
 
+                <!-- Login security: TERIID anti-spoofing strict mode -->
+                <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:14px 16px;margin-bottom:16px">
+                    <b>Login security &mdash; strict TERIID auth</b>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                        <input type="checkbox" id="cfgLoginStrict" ${c.login_strict ? 'checked' : ''}>
+                        <span>Require a valid TERIID to connect (reject un-registered logins)</span>
+                    </label>
+                    <div style="color:#666;margin-top:8px;font-size:12px">
+                        <b>Off (now):</b> un-registered units still connect &amp; route internally (off the public map).
+                        <b>On:</b> only <b>Registered</b> (prov&nbsp;✓) units are accepted &mdash; raw-IMEI / guessed / forged logins are rejected (no routing, can't kick a real unit), shown as pending for onboarding/recovery only.
+                        <br><span style="color:#b91c1c"><b>⚠ Only enable once every unit shows live <code>prov ✓</code>.</b> Any unit not yet registered (incl. offline ones) will stop being tracked until you Register it. Needs the master key set on the server.</span>
+                    </div>
+                </div>
+
                 <!-- IDLE state: race-day idle — still connected (TCP up), GPS off when parked -->
                 <div style="background:#f7f8fa;border:1px solid #e2e6ea;border-radius:6px;padding:14px 16px;margin-bottom:16px">
                     <b>Idle settings &mdash; race-day idle (still connected)</b>
@@ -1322,7 +1336,11 @@
             // from this page): one "Enable night idle" toggle gates both the
             // night_idle feature and the sleep_schedule window; From/To are the window.
             const nightOn = document.getElementById('cfgNightIdleEnabled').checked;
+            const strictOn = document.getElementById('cfgLoginStrict').checked;
+            if (strictOn && !gt06Cfg.login_strict &&
+                !confirm('Enable STRICT login auth?\n\nUnits not registered with a valid TERIID (incl. any offline ones not yet prov ✓) will be REJECTED and stop being tracked until Registered. Make sure every unit shows prov ✓ first.\n\nContinue?')) return;
             const body = {
+                login_strict: strictOn,
                 default_eid: iv('cfgDefaultEid'),
                 idle_hbt_interval: iv('cfgIdleHbt'),
                 idle_acc_on_interval: iv('cfgIdleAccOn'),

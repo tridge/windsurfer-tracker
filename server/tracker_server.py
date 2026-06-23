@@ -4853,6 +4853,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 disk['overnight_mode_number'] = body['overnight_mode_number']
             if 'firmware_overrides' in body and isinstance(body['firmware_overrides'], dict):
                 disk['firmware_overrides'] = body['firmware_overrides']
+            if 'login_strict' in body:
+                disk['login_strict'] = bool(body['login_strict'])
             if 'sleep_schedule' in body and isinstance(body['sleep_schedule'], dict):
                 try:
                     clean = clean_sleep_schedule(body['sleep_schedule'])
