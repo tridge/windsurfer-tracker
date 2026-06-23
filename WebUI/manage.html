@@ -1521,7 +1521,7 @@
                     : `<b>${esc(t.sailor_id || '')}</b><br><span style="color:#999">${esc(t.imei || '')}</span>`;
                 const hiddenAttr = t.hidden ? ' title="currently hidden" style="outline:2px solid #d97706;border-radius:2px"' : '';
                 html += `<tr style="border-bottom:1px solid #eee${pending ? ';background:#fff7f7' : ''}">`
-                    + `<td style="text-align:center"><input type="checkbox" class="gt06sel" data-sid="${esc(t.sailor_id || '')}" data-target="${esc(tgt)}" data-onboard="${canOnboard ? 1 : 0}"${hiddenAttr} onchange="updateBulkButtons()"></td>`
+                    + `<td style="text-align:center"><input type="checkbox" class="gt06sel" data-sid="${esc(t.sailor_id || '')}" data-target="${esc(tgt)}" data-onboard="${canOnboard ? 1 : 0}" data-online="${t.online ? 1 : 0}" data-prov="${t.provisioned ? 1 : 0}"${hiddenAttr} onchange="updateBulkButtons()"></td>`
                     + `<td>${dot}${badge}</td>`
                     + `<td>${idCell}</td>`
                     + `<td style="${fwStyle}">${esc(fwShort)}</td>`
@@ -1625,7 +1625,12 @@
             let ok = 0; const fail = [];
             for (const c of sels) {
                 const tr = c.closest('tr'); const sel = tr && tr.querySelector('select');
-                const eid = sel ? parseInt(sel.value, 10) : NaN;
+                let eid = sel ? parseInt(sel.value, 10) : NaN;
+                if (isNaN(eid)) {   // pending rows have no event selector — ask
+                    const v = prompt('Event (eid) to onboard ' + (c.dataset.target || '') + ' into?');
+                    if (v == null) continue;
+                    eid = parseInt(v, 10);
+                }
                 if (isNaN(eid)) { fail.push((c.dataset.target || '?') + ': no event'); continue; }
                 try {
                     const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(c.dataset.target)}/onboard`, {
@@ -1645,7 +1650,10 @@
         async function cleanSelected() {
             const sels = [...document.querySelectorAll('#trackerList .gt06sel:checked')];
             if (!sels.length) return;
-            if (!confirm('Remove the record of ' + sels.length + ' tracker(s)? This forgets device-state + provisioning + map row. A still-connected unit reappears on its next check-in.')) return;
+            const liveProv = sels.filter(c => c.dataset.online === '1' && c.dataset.prov === '1');
+            let msg = 'Remove the record of ' + sels.length + ' tracker(s)? This forgets device-state + provisioning + map row. A still-connected unit reappears on its next check-in.';
+            if (liveProv.length) msg = '⚠ ' + liveProv.length + ' selected are ONLINE and registered — cleaning UN-REGISTERS them (they come back un-onboarded and must be Registered again). Intended for stale/ghost rows.\n\n' + msg;
+            if (!confirm(msg)) return;
             let ok = 0; const fail = [];
             for (const c of sels) {
                 try {
