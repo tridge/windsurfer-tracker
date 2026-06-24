@@ -8,7 +8,6 @@
 # Android
 # Build outputs
 # Claude Code local settings
-# Flutter/Dart
 # IDE
 # Logs and temp
 # OS
@@ -16,7 +15,6 @@
 **/ephemeral/
 *.apk
 *.cer
-*.dill
 *.iml
 *.ipa
 *.jks
@@ -29,12 +27,8 @@
 *.so
 .DS_Store
 .claude/settings.local.json
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
 .gradle/
 .idea/
-.packages
 /*.sh
 /generate_icons.py
 /increment_patch_version.py

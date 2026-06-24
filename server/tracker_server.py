@@ -4494,11 +4494,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._handle_tracker_post()
             return
 
-        # iOS UDID collection endpoint - no auth required
-        if path == '/api/udid':
-            self._handle_udid_collection()
-            return
-
         # Per-event endpoints
         if path.startswith('/api/event/'):
             self._handle_event_post(path)
@@ -4741,96 +4736,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except Exception as e:
             log(f"[POST] ERROR from {client_ip}: {e}")
             self._send_json({"error": str(e)}, 500)
-
-    def _handle_udid_collection(self):
-        """Handle iOS UDID collection from mobileconfig profile.
-
-        iOS sends device info as signed plist (PKCS#7/CMS envelope) when installing
-        a Profile Service profile. We need to extract the plist from the signature.
-        """
-        import plistlib
-        import subprocess
-        import tempfile
-        import os
-
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            # iOS UDID plist (signed PKCS#7 envelope) is a few KB; cap at
-            # 256 KB so a hostile client can't make us slurp arbitrary bytes.
-            MAX_UDID_BODY = 256 * 1024
-            if content_length > MAX_UDID_BODY:
-                client_ip = self.client_address[0] if self.client_address else "?"
-                log(f"[UDID] oversized body ({content_length} bytes) from {client_ip}")
-                self.send_response(413)
-                self.end_headers()
-                return
-            body = self.rfile.read(content_length)
-            content_type = self.headers.get('Content-Type', 'unknown')
-
-            log(f"[UDID] Received {content_length} bytes, Content-Type: {content_type}")
-            log(f"[UDID] First 100 bytes: {body[:100]}")
-
-            data = None
-
-            # Try parsing as raw plist first
-            try:
-                data = plistlib.loads(body)
-                log(f"[UDID] Parsed as raw plist")
-            except Exception:
-                pass
-
-            # If that failed, try extracting from PKCS#7/CMS envelope using openssl
-            if data is None:
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.der') as f:
-                        f.write(body)
-                        der_file = f.name
-
-                    # Use openssl to extract the signed content
-                    result = subprocess.run(
-                        ['openssl', 'cms', '-verify', '-noverify', '-inform', 'DER',
-                         '-in', der_file, '-out', '-'],
-                        capture_output=True
-                    )
-                    os.unlink(der_file)
-
-                    if result.returncode == 0:
-                        data = plistlib.loads(result.stdout)
-                        log(f"[UDID] Parsed from CMS envelope")
-                    else:
-                        log(f"[UDID] openssl failed: {result.stderr.decode()}")
-                except Exception as e:
-                    log(f"[UDID] CMS extraction failed: {e}")
-
-            if data is None:
-                log(f"[UDID] Could not parse plist from body")
-                self.send_response(302)
-                self.send_header('Location', '/install/flutter-ios.html?error=parse')
-                self.end_headers()
-                return
-
-            # Extract UDID and device info
-            udid = data.get('UDID', '')
-            product = data.get('PRODUCT', '')
-            version = data.get('VERSION', '')
-            serial = data.get('SERIAL', '')
-
-            log(f"[UDID] Received: UDID={udid}, Product={product}, Version={version}")
-
-            # Redirect back to install page with UDID in URL
-            redirect_url = f'/install/flutter-ios.html?udid={udid}&device={product}'
-
-            self.send_response(301)
-            self.send_header('Location', redirect_url)
-            self.end_headers()
-
-        except Exception as e:
-            log(f"[UDID] Error handling request: {e}")
-            import traceback
-            traceback.print_exc()
-            self.send_response(302)
-            self.send_header('Location', '/install/flutter-ios.html?error=unknown')
-            self.end_headers()
 
     # Top-level gt06.json keys editable from the settings tab, with coercion.
     _GT06_INT_KEYS = {

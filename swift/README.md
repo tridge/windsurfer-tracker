@@ -143,7 +143,7 @@ Code shared between iOS and watchOS:
 
 ## Protocol Compatibility
 
-Uses the same JSON packet format as Android/Flutter apps:
+Uses the same JSON packet format as the Android app:
 
 ```json
 {
