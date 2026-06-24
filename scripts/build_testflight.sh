@@ -39,15 +39,6 @@ rsync -av --delete \
 echo "=== Unlocking keychain ==="
 ssh "$MAC_HOST" "security unlock-keychain -p '$KEYCHAIN_PASSWORD' ~/Library/Keychains/build.keychain-db"
 
-# App Store build is iOS-only: drop the embedded watchOS app so the watch
-# (and its assist UI) is not part of the submission. The sideload build
-# (build_ios_sideload.sh) keeps the watch. This edits only the synced copy
-# on the build host; rsync above restores it from the repo each run.
-echo "=== Dropping embedded watch app (iOS-only App Store build) ==="
-ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
-    perl -0pi -e 's/\n      - target: WindsurferTrackerWatch\n        embed: true\n        codeSign: true//' project.yml && \
-    echo 'removed watch embed dependency from project.yml'"
-
 echo "=== Generating Xcode project ==="
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && /opt/homebrew/bin/xcodegen generate"
 
@@ -114,13 +105,13 @@ ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS='\$(inherited) APPSTORE' \
     OTHER_CODE_SIGN_FLAGS='--keychain ~/Library/Keychains/build.keychain-db'"
 
-echo "=== Verifying iOS-only archive (no embedded watch app) ==="
+echo "=== Verifying watch app is embedded in archive ==="
 # cd first so the remote shell expands ~ in $REMOTE_PROJECT_DIR, then use a
 # relative path (a quoted absolute ~ path would not be tilde-expanded).
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \
     if [ -d 'build/WindsurferTracker.xcarchive/Products/Applications/Windsurfer Tracker.app/Watch' ]; then \
-        echo 'ERROR: watch app present in archive — aborting before upload'; exit 1; \
-    else echo 'OK: no watch app in archive'; fi"
+        echo 'OK: watch app embedded in archive'; \
+    else echo 'ERROR: watch app missing from archive — aborting before upload'; exit 1; fi"
 
 echo "=== Exporting IPA ==="
 ssh "$MAC_HOST" "cd $REMOTE_PROJECT_DIR/WindsurferTracker && \

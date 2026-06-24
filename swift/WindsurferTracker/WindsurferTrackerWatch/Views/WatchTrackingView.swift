@@ -17,11 +17,14 @@ struct WatchTrackingView: View {
 
     var body: some View {
         ZStack {
-            // Red background when assist is active
+            // Red background when assist is active.
+            // Compiled out of App Store builds (sailor-side assist removed).
+            #if !APPSTORE
             if viewModel.assistRequested {
                 Color(red: 0.3, green: 0.05, blue: 0.05)
                     .ignoresSafeArea()
             }
+            #endif
 
             VStack(spacing: 4) {
                 // Header with settings gear - top left to avoid clock
@@ -53,7 +56,9 @@ struct WatchTrackingView: View {
                 .padding(.leading, 24)
                 .padding(.top, 16)
 
-                // Status title with ACK-based color coding
+                // Status title with ACK-based color coding.
+                // The ASSIST branch is compiled out of App Store builds.
+                #if !APPSTORE
                 if viewModel.assistRequested {
                     HStack(spacing: 4) {
                         Text("⚠")
@@ -76,6 +81,19 @@ struct WatchTrackingView: View {
                         .bold()
                         .foregroundColor(trackingStatusColor)
                 }
+                #else
+                if viewModel.isIdleMode {
+                    Text("IDLE")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.blue)
+                } else {
+                    Text(WKInterfaceDevice.current().isWaterLockEnabled ? "TRACKING(LOCKED)" : "TRACKING")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(trackingStatusColor)
+                }
+                #endif
 
                 // Status line (GPS wait, connecting, auth failure, or event name)
                 Text(viewModel.statusLine)
