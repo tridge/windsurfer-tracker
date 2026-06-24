@@ -4447,7 +4447,7 @@
 
             const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser('${id}')">Edit</button>` : '';
             const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser('${id}')">Stop</button>` : '';
-            const sleepBtn = adminMode ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
+            const sleepBtn = (adminMode && currentEventInfo && currentEventInfo.enable_sleep) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
             const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser('${id}')">Start</button>` : '';
             const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser('${id}')">Cancel Assist</button>` : '';
 
@@ -4626,7 +4626,7 @@
                 const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
                 const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="showEditUser('${id}')">Edit</button>` : '';
                 const stopBtn = (adminMode && !sailor.stopped) ? `<button class="popup-stop-btn" onclick="stopUser('${id}')">Stop</button>` : '';
-                const sleepBtn = adminMode ? `<button class="popup-stop-btn" onclick="sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
+                const sleepBtn = (adminMode && currentEventInfo && currentEventInfo.enable_sleep) ? `<button class="popup-stop-btn" onclick="sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
                 const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="cancelAssistUser('${id}')">Cancel Assist</button>` : '';
                 const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="startUser('${id}')">Start</button>` : '';
                 const versionStr = sailor.ver || 'Unknown';
