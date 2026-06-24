@@ -467,7 +467,8 @@ def main():
     finally:
         if out_fd is not None:
             out_fd.close()
-            print(f"wrote {written[0]} records to {args.out}", file=sys.stderr)
+            print(f"wrote {written[0]} records to {args.out} (from {args.logfile})",
+                  file=sys.stderr)
 
 
 if __name__ == "__main__":
