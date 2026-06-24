@@ -23,7 +23,10 @@ from zoneinfo import ZoneInfo
 EID = 10
 BASE = "http://localhost:41234"
 EVENTS_JSON = "/home/tracker/tracker/events.json"
-STATE_JSON = "/home/tracker/tracker/gt06_state.json"
+# current_positions.json is written in real time (every position), so it reflects
+# a transition immediately — unlike gt06_state.json which is flushed periodically
+# and can read stale right after a start.
+POS_JSON = f"/home/tracker/tracker/html/{EID}/current_positions.json"
 DIR = "/home/tracker/regatta_test"
 LOGFILE = os.path.join(DIR, "regatta_test.log")
 STOPFILE = os.path.join(DIR, "STOP")
@@ -64,19 +67,18 @@ def post(path):
 
 
 def fleet_state():
-    """(active, idle, offline) counts for event 10 from device_state."""
+    """(active, idle, offline) counts for the event from the real-time
+    current_positions.json (idle units carry idle/sleep/stopped; active ones don't)."""
     try:
-        devs = json.load(open(STATE_JSON))["devices"]
+        sailors = json.load(open(POS_JSON))["sailors"]
     except Exception:
         return None
     t = time.time()
     active = idle = offline = 0
-    for s in devs.values():
-        if s.get("eid") != EID:
-            continue
+    for s in sailors.values():
         if t - (s.get("last_seen") or 0) > 180:
             offline += 1
-        elif s.get("idle"):
+        elif s.get("idle") or s.get("sleep") or s.get("stopped"):
             idle += 1
         else:
             active += 1
