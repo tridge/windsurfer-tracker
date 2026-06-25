@@ -1403,7 +1403,7 @@
                 for (const t of incoming) {
                     const bt = (t.battery_voltage != null) ? t.battery_voltage
                              : ((t.settings && t.settings.BT) ? parseInt(t.settings.BT, 10) / 1000 : null);
-                    if (bt) t.battery = BatteryCal.percentForUnit(t.sailor_id, bt);
+                    if (bt) t.battery = BatteryCal.percentForUnit(t.sailor_id, bt, !!t.idle);
                 }
                 // Merge into the existing display order so a refresh doesn't reshuffle
                 // or reset the user's sort: update rows in place by imei, append new,
