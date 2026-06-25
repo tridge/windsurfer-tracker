@@ -15,6 +15,7 @@ import re
 import selectors
 import socket
 import struct
+import threading
 import time
 from calendar import timegm
 from datetime import datetime
@@ -674,6 +675,9 @@ class GT06Listener:
         self.sel = selectors.DefaultSelector()
         self.log_file = log_file
         self._log_fd = None
+        # Serialises packet-log writes (run() select thread) against rotation
+        # (LogRotator midnight thread) so a rotation never drops/corrupts a frame.
+        self._log_lock = threading.Lock()
         self._next_conn_id = 1   # monotonic per-connection ID for gt06.log v2 format
         self.idle_sailors = set()
         self.active_sailors = set()
@@ -1002,18 +1006,21 @@ class GT06Listener:
 
         conn_id high bit indicates direction (1 = server→device, 0 = device→server).
         """
-        if self._log_fd is None:
-            return
         ts = time.time()
         conn_id = (gt_conn.conn_id if gt_conn else 0)
         if outgoing:
             conn_id |= GT06_LOG_DIR_OUT
         header = struct.pack("<dIH", ts, conn_id & 0xFFFFFFFF, len(frame))
-        try:
-            self._log_fd.write(header + frame)
-            self._log_fd.flush()
-        except Exception as e:
-            self._log(f"[GT06] Packet log write error: {e}")
+        # Hold the lock across the fd read + write so a concurrent rotation can't
+        # swap/close the fd mid-write (no dropped or corrupted frame).
+        with self._log_lock:
+            if self._log_fd is None:
+                return
+            try:
+                self._log_fd.write(header + frame)
+                self._log_fd.flush()
+            except Exception as e:
+                self._log(f"[GT06] Packet log write error: {e}")
 
     def _imei_to_sailor_id(self, imei):
         """Map IMEI to sailor_id: prefix + last 6 digits."""
@@ -2931,36 +2938,48 @@ class GT06Listener:
             if head != GT06_LOG_MAGIC_V2:
                 archived = self._archive_legacy_log(path)
                 self._log(f"[GT06] Archived legacy v1 log {path} -> {archived}")
-        self._log_fd = open(path, "ab")
+        # Write the magic into the new file BEFORE publishing the fd, so a
+        # concurrent _log_packet never writes a frame ahead of the header.
+        fd = open(path, "ab")
         if path.stat().st_size == 0:
-            self._log_fd.write(GT06_LOG_MAGIC_V2)
-            self._log_fd.flush()
+            fd.write(GT06_LOG_MAGIC_V2)
+            fd.flush()
+        self._log_fd = fd
         self._log(f"[GT06] Packet logging to {path} (v2 format)")
 
     def rotate_log_to(self, archive_path):
         """Move the current packet log to archive_path and open a fresh log.
 
-        Safe to call from any thread: rename of an open file keeps the old fd
-        pointing to the archived inode; the new fd is opened atomically and
-        swapped in, so concurrent _log_packet calls may write to either file
-        across the swap but never lose or corrupt frames.
+        Safe to call from any thread WITHOUT losing frames: the old fd keeps
+        writing to the renamed (archived) inode and is only closed AFTER the fresh
+        fd is swapped into self._log_fd by a single atomic assignment (in
+        _open_log_v2). _log_fd is never set to None here, so a concurrent
+        _log_packet (run() thread) always sees a valid fd — frames at the instant
+        of rotation land in either the archived or the new file, never dropped.
         """
         if not self.log_file:
             return
         path = Path(self.log_file) if not isinstance(self.log_file, Path) else self.log_file
-        old_fd = self._log_fd
-        try:
-            if path.exists():
-                path.rename(archive_path)
-            self._log_fd = None
-            self._open_log_v2(path)
-        finally:
-            if old_fd is not None:
-                try:
-                    old_fd.flush()
-                    old_fd.close()
-                except Exception:
-                    pass
+        # Hold the log lock for the whole swap so no _log_packet runs against a
+        # half-rotated state (None fd, magic-less new file, or a just-closed fd).
+        with self._log_lock:
+            old_fd = self._log_fd
+            try:
+                if path.exists():
+                    path.rename(archive_path)
+                # old_fd still serves _log_packet (archived inode) until this swaps
+                # in the new fd. Do NOT clear _log_fd first — that window drops frames.
+                self._open_log_v2(path)
+            finally:
+                # Close the old fd only once the swap actually happened; if
+                # _open_log_v2 raised, _log_fd still points at old_fd (writes keep
+                # landing in the archived file — mis-filed but not lost) so leave it.
+                if old_fd is not None and old_fd is not self._log_fd:
+                    try:
+                        old_fd.flush()
+                        old_fd.close()
+                    except Exception:
+                        pass
 
     def run(self):
         """Main loop — runs in a daemon thread."""
