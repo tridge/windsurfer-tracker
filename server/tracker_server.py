@@ -5708,7 +5708,8 @@ def run_server(port: int, http_port: int | None = None,
                                       get_event_idle_submode_func=_gt06_get_event_idle_submode,
                                       gt06_config_path=gt06_config_path,
                                       get_event_sleep_active_func=event_sleep_window_active,
-                                      get_event_night_active_func=event_night_idle_active)
+                                      get_event_night_active_func=event_night_idle_active,
+                                      battery_cal_path=(static_dir / "gt06_calibration.json") if static_dir else None)
         _gt06_listener = gt06_listener
         _protocol_listeners.append(gt06_listener)
         gt06_thread = threading.Thread(target=gt06_listener.run, daemon=True, name="gt06-listener")

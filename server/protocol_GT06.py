@@ -31,14 +31,9 @@ _GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
 GT06_LOG_MAGIC_V2 = b"GT06LOG2"
 GT06_LOG_DIR_OUT = 0x80000000  # OR'd into conn_id for server→device packets
 
-# Empirical discharge curve for W07C (3000mAh), derived from 24h turntable test.
-# Pairs of (voltage, percentage), descending voltage, evenly spaced in time.
-_W07C_DISCHARGE = [
-    (4.14, 100), (4.03, 95), (3.99, 90), (3.97, 85), (3.93, 80),
-    (3.89, 75),  (3.86, 70), (3.82, 65), (3.77, 60), (3.72, 55),
-    (3.67, 50),  (3.65, 45), (3.62, 40), (3.60, 35), (3.58, 30),
-    (3.55, 25),  (3.52, 20), (3.47, 15), (3.44, 10), (3.37, 5),
-]
+# Battery % is computed from the parametric OCV fit in gt06_calibration.json
+# (load-aware), see GT06Listener._battery_percent. The old single-cell (G226122)
+# _W07C_DISCHARGE table was retired 2026-06-25.
 
 # Storm guard: how many times we re-push the overnight Freq when a device
 # reports the wrong value before giving up. Firmware that simply refuses the
@@ -218,22 +213,6 @@ def _atomic_write_json(path, obj):
             os.remove(tmp)
         except OSError:
             pass
-
-
-def voltage_to_percent(voltage):
-    """Convert voltage to battery percentage using linear interpolation."""
-    table = _W07C_DISCHARGE
-    if voltage >= table[0][0]:
-        return 100
-    if voltage < table[-1][0]:
-        return 0
-    for i in range(len(table) - 1):
-        v_hi, p_hi = table[i]
-        v_lo, p_lo = table[i + 1]
-        if voltage >= v_lo:
-            frac = (voltage - v_lo) / (v_hi - v_lo)
-            return round(p_lo + frac * (p_hi - p_lo))
-    return 0
 
 
 def _default_log(msg):
@@ -667,7 +646,7 @@ class GT06Listener:
                  write_positions_func=None, get_event_state_func=None,
                  get_event_idle_submode_func=None, gt06_config_path=None,
                  get_event_sleep_active_func=None,
-                 get_event_night_active_func=None):
+                 get_event_night_active_func=None, battery_cal_path=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
@@ -717,6 +696,53 @@ class GT06Listener:
         # last-seen) so the management page shows offline devices too. Sidecar
         # gt06_state.json next to the config; survives restart.
         self.device_state = self._load_device_state()
+        # Battery calibration (parametric OCV fit) for voltage -> % conversion.
+        self.battery_cal_path = Path(battery_cal_path) if battery_cal_path else None
+        self.battery_cal = self._load_battery_cal()
+
+    def _load_battery_cal(self):
+        """Load gt06_calibration.json (parametric OCV fit) for the battery %.
+        Returns {} if unavailable — % then reads -1 (unknown)."""
+        if not self.battery_cal_path:
+            return {}
+        try:
+            cal = json.loads(self.battery_cal_path.read_text())
+            self._log(f"[GT06] Battery calibration loaded (v{cal.get('version')}, "
+                      f"{len(cal.get('units', {}))} units, "
+                      f"soc_fit={'yes' if cal.get('soc_fit') else 'no'})")
+            return cal
+        except Exception as e:
+            self._log(f"[GT06] Battery calibration not loaded ({self.battery_cal_path}): {e}")
+            return {}
+
+    def _battery_percent(self, gt_conn, voltage):
+        """Remaining % from a terminal voltage via the parametric OCV fit, load-aware:
+        OCV = V + per-unit divider offset + I_load*R_class (I_load = idle vs tracking,
+        from gt_conn.idle), then SoC = c1*(1 - 1/(1+(OCV/c2)^c4)^c3). -1 if no fit."""
+        cal = self.battery_cal
+        sf = cal.get("soc_fit") if cal else None
+        if voltage is None or not sf:
+            return -1
+        c = sf["coeffs"]
+        sid = gt_conn.sailor_id
+        defaults = cal.get("defaults", {})
+        unit = cal.get("units", {}).get(sid) or {}
+        cap_class = unit.get("cap_class") or defaults.get("cap_class", "6Ah")
+        offset = sf.get("offsets_mv", {}).get(sid, 0) / 1000.0
+        r = sf.get("class_r_ohm", {}).get(cap_class, 0.0)
+        nom_v = cal.get("nominal_voltage", 3.7)
+        if gt_conn.idle:
+            i_load = (cal.get("mode_power_w", {}).get("idle", 0) / nom_v) if nom_v else 0.0
+        else:
+            i_load = cal.get("track_current_ma", 0) / 1000.0
+        ocv = voltage + offset + i_load * r
+        if ocv <= 0:   # (ocv/c2)**c4 with non-integer c4 needs a positive base
+            return -1
+        try:
+            s = c["c1"] * (1 - 1 / (1 + (ocv / c["c2"]) ** c["c4"]) ** c["c3"])
+        except (ZeroDivisionError, OverflowError, ValueError):
+            return -1
+        return int(round(max(0.0, min(100.0, s))))
 
     def _apply_config(self, cfg):
         """(Re)derive all config-cached attributes from a gt06_config dict.
@@ -2004,7 +2030,7 @@ class GT06Listener:
                 btmatch = re.search(r'\*BT:(\d+)', text)
                 if btmatch:
                     gt_conn.battery_voltage = int(btmatch.group(1)) / 1000.0
-                    gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
+                    gt_conn.battery = self._battery_percent(gt_conn, gt_conn.battery_voltage)
                 mode_match = re.search(r'\*M:(\d+)', text)
                 if mode_match:
                     mode = int(mode_match.group(1))
@@ -2195,7 +2221,7 @@ class GT06Listener:
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
                 gt_conn.battery_voltage = float(vmatch.group(1))
-                gt_conn.battery = voltage_to_percent(gt_conn.battery_voltage)
+                gt_conn.battery = self._battery_percent(gt_conn, gt_conn.battery_voltage)
                 gt_conn.status_miss_count = 0
                 # STATUS# carries fresh battery voltage ~once/min during tracking,
                 # far fresher than the occasional cxzt# that fills settings.BT.
