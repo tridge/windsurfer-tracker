@@ -133,7 +133,8 @@ def main():
     a = ap.parse_args()
 
     meta = json.load(open(os.path.join(a.data, 'meta.json')))
-    coeffs = json.load(open(a.soc_fit))['coeffs']
+    socfit = json.load(open(a.soc_fit))
+    coeffs = socfit['coeffs']
     cal = json.load(open(a.cal))
     P = meta['power_w']
 
@@ -142,10 +143,10 @@ def main():
     I_idle = a.idle_ma / 1000.0
 
     # SUPERSEDED by scripts/gt06_fit_joint.py, which solves R jointly with the curve and
-    # is offset-aware. This standalone is a first-pass illustration; it applies the cal
+    # is offset-aware. This standalone is a first-pass illustration; it applies the fit's
     # divider offset to the SoC match but still ignores per-unit gain. Per-unit R is NOT
     # identifiable cross-run (see gt06/battery_data/METHOD.md s6) — read class medians only.
-    cal_off = cal.get('offsets', {})
+    cal_off = {g: mv / 1000.0 for g, mv in socfit.get('offsets_mv', {}).items()}
     rows = []
     for g in sorted(set(vidle) & set(dis)):
         vi, n = vidle[g]

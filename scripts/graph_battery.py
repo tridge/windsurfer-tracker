@@ -2,6 +2,8 @@
 """Graph battery voltage versus time from gt06_dump CMDRESP Battery lines."""
 
 import argparse
+import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -9,30 +11,28 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-# Empirical discharge curve for W07C (3000mAh), derived from 24h turntable test.
-# Pairs of (voltage, percentage), descending voltage, evenly spaced in time.
-_W07C_DISCHARGE = [
-    (4.14, 100), (4.03, 95), (3.99, 90), (3.97, 85), (3.93, 80),
-    (3.89, 75),  (3.86, 70), (3.82, 65), (3.77, 60), (3.72, 55),
-    (3.67, 50),  (3.65, 45), (3.62, 40), (3.60, 35), (3.58, 30),
-    (3.55, 25),  (3.52, 20), (3.47, 15), (3.44, 10), (3.37, 5),
-]
+# Parametric OCV SoC fit (gt06/battery_data/soc_fit.json) — replaces the old
+# single-cell (G226122) discharge table. Approximate for graphing: default 6Ah
+# class R, tracking load, no per-unit divider offset.
+_SOC_FIT = None
+for _p in (os.path.join(os.path.dirname(__file__), "..", "gt06", "battery_data", "soc_fit.json"),
+           "gt06/battery_data/soc_fit.json"):
+    try:
+        _SOC_FIT = json.load(open(_p))
+        break
+    except OSError:
+        continue
 
 
-def voltage_to_percent(voltage):
-    """Convert voltage to battery percentage using linear interpolation of _W07C_DISCHARGE."""
-    table = _W07C_DISCHARGE
-    if voltage >= table[0][0]:
-        return 100.0
-    if voltage < table[-1][0]:
+def voltage_to_percent(voltage, idle=False):
+    """Parametric OCV SoC from a terminal voltage (default 6Ah, tracking load)."""
+    if not _SOC_FIT:
         return 0.0
-    for i in range(len(table) - 1):
-        v_hi, p_hi = table[i]
-        v_lo, p_lo = table[i + 1]
-        if voltage >= v_lo:
-            frac = (voltage - v_lo) / (v_hi - v_lo)
-            return p_lo + frac * (p_hi - p_lo)
-    return 0.0
+    c = _SOC_FIT["coeffs"]
+    r = _SOC_FIT.get("class_r_ohm", {}).get("6Ah", 0.0)
+    ocv = voltage + (0.005 if idle else 0.115) * r
+    s = c["c1"] * (1 - 1 / (1 + (ocv / c["c2"]) ** c["c4"]) ** c["c3"])
+    return max(0.0, min(100.0, s))
 
 
 def parse_lines(source):

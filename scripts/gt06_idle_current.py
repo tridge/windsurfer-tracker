@@ -5,9 +5,9 @@ No new capture needed: gt06.log already records every frame with a timestamp, so
 the battery-voltage trajectory is on disk. This walks that log, maps
 conn_id -> sailor_id via login frames, pulls every voltage reading from STATUS#
 (`Battery:X.XXV`, 10 mV) and cxzt# (`*BT:<mV>`, 1 mV), windows them, converts each
-to remaining-SoC via the empirical discharge curve (per-unit offset + cap-class
-offset, same maths as WebUI/js/battery_cal.js), least-squares-fits SoC vs time, and
-reports current = capacity_mah * (dSoC%/h) / 100.
+to remaining-SoC via the parametric OCV fit (gt06/battery_data/soc_fit.json, the
+fit's own per-unit divider offsets; idle V ~ rest so no IR add-back), least-squares-
+fits SoC vs time, and reports current = capacity_mah * (dSoC%/h) / 100.
 
 Usage (run where gt06.log lives, e.g. on the server):
   gt06_idle_current.py --log gt06.log --cal gt06_calibration.json \
@@ -62,9 +62,7 @@ def walk(path):
 
 def load_cal(path):
     c = json.load(open(path))
-    return (c.get('discharge_curve') or [], c.get('offsets') or {},
-            c.get('class_curve_offset_mv') or {}, c.get('units') or {},
-            c.get('track_current_ma') or 115.0,
+    return (c.get('units') or {}, c.get('track_current_ma') or 115.0,
             c.get('nominal_v_50') or c.get('nominal_voltage') or 3.67)
 
 
@@ -73,33 +71,6 @@ def soc_model(v, c1, c2, c3, c4):
     scripts/gt06_fit_soc_curve.py and gt06/battery_data/soc_fit.json."""
     s = c1 * (1.0 - 1.0 / (1.0 + (v / c2) ** c4) ** c3)
     return max(0.0, min(100.0, s))
-
-
-def remaining_pct(curve, v):
-    if not curve:
-        return None
-    n = len(curve)
-    if v >= curve[0]:
-        return 100.0
-    if v <= curve[-1]:
-        return 0.0
-    for k in range(1, n):
-        if v > curve[k]:
-            span = curve[k - 1] - curve[k]
-            frac = (curve[k - 1] - v) / span if span > 0 else 0
-            return (100 - (k - 1)) - frac
-    return 0.0
-
-
-def soc(curve, offsets, class_off_mv, units, sid, rawv, off_scale=1.0):
-    off = offsets.get(sid, 0.0)
-    cls = units.get(sid, {}).get('cap_class')
-    # The cap-class offset is an IR-sag correction calibrated at the tracking load
-    # (track_current_ma). IR sag scales with current, so for a lighter regime
-    # (idle/sleep) it must be scaled down by load/track_current_ma; off_scale=1.0
-    # (default) keeps the full tracking-load offset.
-    coff = (class_off_mv.get(cls, 0) or 0) / 1000.0 * off_scale
-    return remaining_pct(curve, rawv + off - coff)
 
 
 def linfit(xs, ys):
@@ -122,31 +93,22 @@ def main():
     ap.add_argument('--settle-min', type=float, default=10.0)
     ap.add_argument('--min-points', type=int, default=5)
     ap.add_argument('--prefix', default='G')
-    ap.add_argument('--load-ma', type=float, default=None,
-                    help='regime load (mA) used to scale the cap-class IR-sag offset '
-                         'down from the tracking-load calibration; pass the rough '
-                         'idle/sleep current (e.g. 6). Omit to keep the full '
-                         'tracking-load offset (legacy behaviour).')
-    ap.add_argument('--soc-fit', default=None,
-                    help='parametric resting-V->SoC fit JSON (gt06/battery_data/'
-                         'soc_fit.json). When set, use the smooth OCV curve instead of '
-                         'the 10mV-quantized lookup. Idle V ~ rest, so applied directly.')
+    ap.add_argument('--soc-fit', default='gt06/battery_data/soc_fit.json',
+                    help='parametric resting-V->SoC fit JSON. Idle V ~ rest, so the '
+                         'fit is applied directly (no IR add-back).')
     ap.add_argument('--cxzt-only', action='store_true',
                     help='use only 1mV cxzt readings, ignoring 10mV-quantized STATUS')
     args = ap.parse_args()
 
-    curve, offsets, class_off_mv, units, track_ma, vnom = load_cal(args.cal)
-    off_scale = 1.0 if args.load_ma is None else args.load_ma / track_ma
-    socfit = json.load(open(args.soc_fit)) if args.soc_fit else None
-    # Use the curve's OWN per-unit offsets (same gauge it was fitted in), not the old
-    # display offsets, so the idle SoC lookup matches the fit (codex review).
-    fit_off = {g: mv / 1000.0 for g, mv in (socfit.get('offsets_mv', {}) if socfit else {}).items()}
+    units, track_ma, vnom = load_cal(args.cal)
+    socfit = json.load(open(args.soc_fit))
+    # Use the fit's OWN per-unit offsets (same gauge it was fitted in), so the idle
+    # SoC matches the deployed gauge.
+    fit_off = {g: mv / 1000.0 for g, mv in socfit.get('offsets_mv', {}).items()}
 
-    def soc_of(sid, v):
-        if socfit:                         # parametric OCV curve; idle V ~= rest
-            c = socfit['coeffs']
-            return soc_model(v + fit_off.get(sid, 0.0), c['c1'], c['c2'], c['c3'], c['c4'])
-        return soc(curve, offsets, class_off_mv, units, sid, v, off_scale)
+    def soc_of(sid, v):                    # parametric OCV curve; idle V ~= rest
+        c = socfit['coeffs']
+        return soc_model(v + fit_off.get(sid, 0.0), c['c1'], c['c2'], c['c3'], c['c4'])
     conn_sid = {}                          # conn_id -> sailor_id (latest login)
     series = defaultdict(list)             # sailor_id -> [(ts, rawv, src)]
     wstart = args.start + args.settle_min * 60
@@ -200,9 +162,7 @@ def main():
             per_class[cls].append(ma)
 
     rows.sort(key=lambda r: (r[1], r[0]))
-    note = (f"(offset scaled x{off_scale:.3f} for {args.load_ma:.0f}mA load)"
-            if args.load_ma is not None else "(full tracking-load offset)")
-    print(f"power at Vnom={vnom:.3f}V  {note}")
+    print(f"power at Vnom={vnom:.3f}V  (parametric OCV fit, idle V ~ rest)")
     print(f"{'unit':8} {'cls':4} {'n':>3} {'hrs':>5} {'startV':>7} {'startSoC':>8} "
           f"{'dV':>7} {'%/h':>7} {'cap':>5} {'mA':>7} {'mW':>7}")
     for sid, cls, n, h, dv, sl, cap, ma, v0, soc0 in rows:

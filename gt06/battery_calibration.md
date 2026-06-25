@@ -1,5 +1,14 @@
 # GT06 Battery Calibration
 
+> **UPDATE 2026-06-25 — the deployed voltage→% gauge is now the parametric OCV fit**
+> (`gt06/battery_data/soc_fit.json`, fitted across 33 fully-discharged units), wired into
+> `WebUI/js/battery_cal.js` + `server/protocol_GT06.py` and embedded as `soc_fit` in
+> `WebUI/gt06_calibration.json` (v5). It is **load-aware**: `OCV = V + divider_offset +
+> I_load·R_class` (idle vs tracking), then `SoC = c1·(1−1/(1+(OCV/c2)^c4)^c3)`. The
+> single-cell (G226122) `discharge_curve` table + `class_curve_offset_mv` described in Step 4
+> below are **retired** (kept here for history). Capacities / per-mode power (Steps 1–6) are
+> unchanged and still used for the Max-track/idle hours.
+
 Empirical characterisation of the GT06 tracker batteries (capacity, per-mode power)
 from a full-discharge run. The method avoids circular reasoning by resting on a
 single assumption: **the median 3 Ah unit has exactly 3.0 Ah capacity.** Everything

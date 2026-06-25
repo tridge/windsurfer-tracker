@@ -13,8 +13,7 @@ window).
                      SoC = the parametric OCV fit (gt06/battery_data/soc_fit.json,
                      33-unit full-discharge) — each track-phase terminal voltage is
                      reconstructed to cell OCV (per-unit divider offset + class IR
-                     add-back at I_track) and run through the fitted curve. This is
-                     NOT the legacy single-cell discharge_curve (--table forces that).
+                     add-back at I_track) and run through the fitted curve.
                      V_start/V_end are the median of the first/last few TRACK-phase
                      voltages, so both are same-load — no idle-vs-track sag mixing.
 
@@ -41,25 +40,19 @@ TZ = ZoneInfo("Australia/Brisbane")
 class Cal:
     """Port of BatteryCal (WebUI/js/battery_cal.js) + the Battery-tab runtime math.
 
-    SoC: by default the parametric OCV fit (gt06/battery_data/soc_fit.json,
-    33-unit full-discharge) — NOT the legacy single-cell discharge_curve table,
-    which is just G226122 and over/under-reads the rest of the fleet. Pass a fit
-    of None to fall back to that table."""
-    def __init__(self, doc, fit=None):
+    SoC uses the parametric OCV fit (gt06/battery_data/soc_fit.json, 33-unit
+    full-discharge); the legacy single-cell (G226122) discharge_curve is retired."""
+    def __init__(self, doc, fit):
         self.doc = doc
-        self.offsets = doc.get("offsets", {})
-        self.curve = doc.get("discharge_curve") or []
-        self.ccoff = doc.get("class_curve_offset_mv", {})
         self.units = doc.get("units", {})
         self.defaults = doc.get("defaults", {})
         self.nomV = doc.get("nominal_voltage", 3.7)
         self.mp = doc.get("mode_power_w", {})
         self.i_track = (doc.get("track_current_ma") or 0) / 1000.0
         self.fit = fit
-        if fit:
-            self.fc = fit["coeffs"]
-            self.foff = fit.get("offsets_mv", {})   # fit's gauge-fixed divider offsets
-            self.fr = fit.get("class_r_ohm", {})
+        self.fc = fit["coeffs"]
+        self.foff = fit.get("offsets_mv", {})   # fit's gauge-fixed divider offsets
+        self.fr = fit.get("class_r_ohm", {})
 
     def _u(self, uid):
         return self.units.get(uid) or self.defaults
@@ -70,44 +63,17 @@ class Cal:
     def cap_class(self, uid):
         return self._u(uid).get("cap_class") or self.defaults.get("cap_class", "?")
 
-    def remaining_pct(self, v):
-        c = self.curve
-        if not c:
+    def soc(self, uid, v_term):
+        """SoC% from a TRACK-phase terminal voltage via the parametric OCV fit:
+        reconstruct cell OCV (per-unit divider offset + class IR add-back at
+        I_track), then SoC = c1*(1 - 1/(1+(OCV/c2)^c4)^c3), clamp [0,100]."""
+        if v_term is None:
             return None
-        n = len(c)
-        if v >= c[0]:
-            return 100.0
-        if v <= c[n - 1]:
-            return 0.0
-        for k in range(1, n):
-            if v > c[k]:
-                span = c[k - 1] - c[k]
-                frac = (c[k - 1] - v) / span if span > 0 else 0
-                return (100 - (k - 1)) - frac
-        return 0.0
-
-    def pct_for_unit(self, uid, rawv):
-        if rawv is None:
-            return None
-        return self.remaining_pct(rawv + self.offsets.get(uid, 0)
-                                  - self.ccoff.get(self.cap_class(uid), 0) / 1000.0)
-
-    def soc_param(self, uid, v_term):
-        """Parametric SoC from a TRACK-phase terminal voltage: reconstruct cell OCV
-        (per-unit divider offset + class IR add-back at I_track) then evaluate the
-        fitted curve SoC = c1*(1 - 1/(1+(OCV/c2)^c4)^c3), clamp [0,100]."""
         c = self.fc
         ocv = (v_term + self.foff.get(uid, 0.0) / 1000.0
                + self.i_track * self.fr.get(self.cap_class(uid), 0.0))
         s = c["c1"] * (1.0 - 1.0 / (1.0 + (ocv / c["c2"]) ** c["c4"]) ** c["c3"])
         return max(0.0, min(100.0, s))
-
-    def soc(self, uid, v_term):
-        """SoC% for a TRACK-phase terminal voltage — parametric fit if loaded,
-        else the legacy single-cell discharge table."""
-        if v_term is None:
-            return None
-        return self.soc_param(uid, v_term) if self.fit else self.pct_for_unit(uid, v_term)
 
     def wh(self, uid):
         cap = self.cap_mah(uid)
@@ -221,9 +187,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--calibration", default="WebUI/gt06_calibration.json")
     ap.add_argument("--soc-fit", default="gt06/battery_data/soc_fit.json",
-                    help="parametric OCV SoC fit (used by default)")
-    ap.add_argument("--table", action="store_true",
-                    help="use the legacy single-cell discharge_curve instead of the fit")
+                    help="parametric OCV SoC fit")
     ap.add_argument("--regatta-log", required=True, help="regatta controller log")
     ap.add_argument("--tracker-log", required=True,
                     help="tracker.log (or a grep extract of its 'battery voltage:' lines)")
@@ -236,9 +200,9 @@ def main():
     ap.add_argument("--flag", type=float, default=2.0, help="flag |actual-expected| over this %%")
     args = ap.parse_args()
 
-    fit = None
-    if not args.table and os.path.exists(args.soc_fit):
-        fit = json.load(open(args.soc_fit))
+    if not os.path.exists(args.soc_fit):
+        raise SystemExit(f"soc fit not found: {args.soc_fit}")
+    fit = json.load(open(args.soc_fit))
     cal = Cal(json.load(open(args.calibration)), fit)
     events = parse_schedule(args.regatta_log)
     series = voltage_series(args.tracker_log)
@@ -282,9 +246,8 @@ def main():
     win = statistics.median(r[2] for r in rows)
     tt0, ti0 = rows[0][3], rows[0][4]
     since_s = datetime.datetime.fromtimestamp(since, TZ).strftime("%Y-%m-%d %H:%M")
-    curve = "parametric OCV fit" if cal.fit else "legacy single-cell table"
     print(f"Regatta battery check — since {since_s}, window ~{win:.1f} h  "
-          f"(track {tt0:.2f} h + idle {ti0:.2f} h)  [SoC: {curve}]")
+          f"(track {tt0:.2f} h + idle {ti0:.2f} h)  [SoC: parametric OCV fit]")
     print(f"Expected drain% = T_track/MaxTrack + T_idle/MaxIdle ; Actual from voltage drop\n")
     print(f"{'unit':8s}{'cls':5s}{'win_h':>6s}{'trk_h':>6s}{'idl_h':>6s}"
           f"{'Vstart':>7s}{'Vend':>6s}{'act%':>6s}{'exp%':>6s}{'diff':>7s}")
