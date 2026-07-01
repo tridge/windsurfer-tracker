@@ -192,6 +192,7 @@ class GT06DeviceSim:
         self.mode1_count = 0     # number of MODE1 commands received (test introspection)
         self.vibchk = "0:16"
         self.gpscodewait = 10                   # GPS lock-wait timeout; factory default 10
+        self.blind_en = 1                       # offline store-and-replay; device default on
         # Other tunables touched by server commands.
         self.sends_mode = 0
         self.senalm = "ON"
@@ -468,7 +469,8 @@ class GT06DeviceSim:
             key = cmd[len("CXCS#"):].rstrip("#")
             vals = {"SLPDISCONNECT": self.slp_disconnect,
                     "GPS_RST_TIME": self.gps_rst_time, "GPSCODEWAIT": self.gpscodewait,
-                    "VIBCHK": self.vibchk, "ACCLINE": self.accline}
+                    "VIBCHK": self.vibchk, "ACCLINE": self.accline,
+                    "BLIND_EN": self.blind_en}
             self._reply(f"READOK: {key}={vals.get(key, 0)}", server_flag)
             return
 
@@ -580,6 +582,11 @@ class GT06DeviceSim:
                     pass
             elif key == "VIBCHK":
                 self.vibchk = val
+            elif key == "BLIND_EN":
+                try:
+                    self.blind_en = int(val)
+                except ValueError:
+                    pass
             self._reply(f"SETOK: {kv}", server_flag)
             return
 

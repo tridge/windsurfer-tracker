@@ -82,7 +82,10 @@ def _idle_cmds(interval, gps_rst=60):
             # hang we saw. Only bites the no-lock path; outdoors it locks well
             # inside the timeout. Defaults to idle_gps_rst_time.
             f"SZCS#GPS_RST_TIME={gps_rst}", "SZCS#GPSCODEWAIT=10",
-            "SZCS#VIBCHK=0:16", "SZCS#ACCLINE=1"]
+            # BLIND_EN=0: don't store/replay fixes while idle — an idle unit that
+            # loses coverage shouldn't run the GPS blind-spot capture (_active_cmds
+            # re-enables it for racing). Idle positions aren't recorded anyway.
+            "SZCS#VIBCHK=0:16", "SZCS#ACCLINE=1", "SZCS#BLIND_EN=0"]
 
 
 def _active_cmds(interval):
@@ -94,7 +97,10 @@ def _active_cmds(interval):
     """
     return ["SZCS#SLPDISCONNECT=0",
             f"TIMER,{interval},{interval}#", "SENDS,0#",
-            "SZCS#GPS_RST_TIME=300", "SZCS#GPSCODEWAIT=10", "SZCS#VIBCHK=0:16"]
+            "SZCS#GPS_RST_TIME=300", "SZCS#GPSCODEWAIT=10", "SZCS#VIBCHK=0:16",
+            # BLIND_EN=1: re-enable offline store-and-replay for racing so a
+            # coverage hole doesn't leave a gap in a sailor's track (idle sets 0).
+            "SZCS#BLIND_EN=1"]
 
 
 def _overnight_arg(interval_min, mode_number):
@@ -138,6 +144,10 @@ def _overnight_cmds(interval_min, mode_number=4):
     return ["SZCS#SLPDISCONNECT=0",
             "SZCS#ACCLINE=1",
             "SZCS#GPSCODEWAIT=2",
+            # Non-tracking, like idle: no offline blind-spot capture on a wake in a
+            # coverage hole. Set here too because overnight bypasses the idle
+            # reconciler, so an active->overnight unit would otherwise keep it on.
+            "SZCS#BLIND_EN=0",
             f"MODE{mode_number},{arg}#"]
 
 
@@ -172,6 +182,12 @@ _SETTINGS = {
     "GPSCODEWAIT":   (lambda v: f"SZCS#GPSCODEWAIT={v}",   "CXCS#GPSCODEWAIT"),
     "VIBCHK":        (lambda v: f"SZCS#VIBCHK={v}",        "CXCS#VIBCHK"),
     "ACCLINE":       (lambda v: f"SZCS#ACCLINE={v}",       "CXCS#ACCLINE"),
+    # Blind buffer (offline store-and-replay). 1 while tracking (preserve a
+    # racer's track through a coverage hole); 0 in every non-tracking state so an
+    # idle/overnight unit that loses coverage doesn't run the GPS blind-spot
+    # capture. If the CXCS#BLIND_EN query isn't answered it's just re-set each
+    # reconnect (harmless — reconcile is per-login, not periodic).
+    "BLIND_EN":      (lambda v: f"SZCS#BLIND_EN={v}",      "CXCS#BLIND_EN"),
     "SENDS":         (lambda v: f"SENDS,{v}#",             "SENDS#"),
     "SENALM":        (lambda v: f"SENALM,{v}#",            "SENALM#"),
     "MOVING":        (lambda v: f"MOVING,{v}#",            "MOVING#"),
@@ -183,7 +199,7 @@ _SETTINGS = {
 # Order in which corrective sets are applied (deterministic, mirrors the legacy
 # command order so any ordering dependence is preserved).
 _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
-                "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE", "HBT"]
+                "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE", "BLIND_EN", "HBT"]
 
 
 def _norm(v):
@@ -1121,7 +1137,8 @@ class GT06Listener:
         if state == "active":
             interval = self.slow_loc_interval if gt_conn.slow_mode else self.interval
             return {"SLPDISCONNECT": 0, "TIMER": f"{interval},{interval}", "SENDS": 0,
-                    "GPS_RST_TIME": 300, "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": 15}
+                    "GPS_RST_TIME": 300, "GPSCODEWAIT": 10, "VIBCHK": "0:16", "HBT": 15,
+                    "BLIND_EN": 1}
         if state == "idle":
             # T1=acc_on (ACC-ON, moving) + T2=acc_off (ACC-OFF, parked). Parked
             # units use T2 → upload rarely → GPS stays off. ACCLINE=1: ACC follows
@@ -1135,7 +1152,7 @@ class GT06Listener:
                     "SENALM": "OFF", "MOVING": "OFF",
                     "GPS_RST_TIME": eff["gps_rst"],
                     "GPSCODEWAIT": 10, "VIBCHK": "0:16", "ACCLINE": 1,
-                    "HBT": eff["hbt"]}
+                    "HBT": eff["hbt"], "BLIND_EN": 0}
         return {}
 
     def _reconcile_begin(self, gt_conn, state):

@@ -462,14 +462,21 @@ def test_overnight_freq_storm_is_capped(gt06_sim_factory, server):
     reached = _wait_for(
         lambda: sim.mode == OVERNIGHT_MODE and sim.freq == 120, timeout=4.0)
     assert reached, f"clamp sim mode={sim.mode} freq={sim.freq}"
-    for _ in range(OVERNIGHT_FREQ_MAX_RETRIES + 4):
+    # Probe until the storm-guard gives up (bounded). Condition-driven rather than
+    # a fixed count so it's robust to the overnight command set's length: let each
+    # re-push drain before the next cxzt# so a probe isn't queued behind it.
+    gave_up = []
+    for _ in range(OVERNIGHT_FREQ_MAX_RETRIES + 8):
         _http(server).get(
             f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23",
             headers={"X-Admin-Password": ADMIN_PW})
-        time.sleep(0.2)
+        time.sleep(0.5)
+        lines = _log_lines_for(server, sim.sailor_id, since_marker=marker)
+        gave_up = [l for l in lines if "giving up after" in l]
+        if gave_up:
+            break
     lines = _log_lines_for(server, sim.sailor_id, since_marker=marker)
     repushes = [l for l in lines if "re-pushing overnight setup" in l]
-    gave_up = [l for l in lines if "giving up after" in l]
     assert len(repushes) <= OVERNIGHT_FREQ_MAX_RETRIES, \
         f"re-pushed {len(repushes)}x (cap {OVERNIGHT_FREQ_MAX_RETRIES}): {repushes}"
     assert gave_up, "storm guard never gave up:\n" + "\n".join(lines)
@@ -790,6 +797,55 @@ def test_idle_pushes_nonzero_gps_rst_time(gt06_sim_factory, server):
             time.sleep(0.3)
         ok = _wait_for(lambda: sim.gps_rst_time == 60, timeout=4.0)
     assert ok, f"idle didn't push GPS_RST_TIME=60 (gps_rst_time={sim.gps_rst_time})"
+
+
+def test_idle_disables_blind_buffer(gt06_sim_factory, server):
+    """Idle reconcile pushes SZCS#BLIND_EN=0 so an idle unit that loses coverage
+    (driven out of range, or a coverage hole overnight) doesn't run the offline
+    blind-spot GPS capture that drains the battery. _active_cmds re-enables it
+    (BLIND_EN=1) for racing so a real coverage hole doesn't gap a sailor's track.
+    Sim defaults to blind_en=1 (device default), so idle must correct it to 0."""
+    sim = gt06_sim_factory("999010000084001")  # sim default blind_en=1
+    _wait_for_login(server, sim.sailor_id)
+    ok = _wait_for(lambda: sim.blind_en == 0, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.blind_en == 0, timeout=4.0)
+    assert ok, f"idle didn't push BLIND_EN=0 (blind_en={sim.blind_en})"
+
+
+def test_active_reenables_blind_buffer(gt06_sim_factory, server):
+    """The idle->active transition (start tracking) must re-enable the blind buffer
+    (BLIND_EN=1) so a coverage hole mid-race doesn't gap the sailor's track. Idle
+    first drives it to 0; /admin/start's active reconcile must bring it back to 1.
+    This is the transition a drive test exercises."""
+    sim = gt06_sim_factory("999010000085001")
+    _wait_for_login(server, sim.sailor_id)
+    assert _wait_for(lambda: sim.blind_en == 0, timeout=4.0), \
+        f"idle didn't disable blind buffer first (blind_en={sim.blind_en})"
+    _admin_post(server, f"/api/event/{EID}/admin/start/{sim.sailor_id}")
+    ok = _wait_for(lambda: sim.blind_en == 1, timeout=4.0)
+    if not ok:
+        for _ in range(3):
+            _admin_get(
+                server,
+                f"/api/event/{EID}/admin/gt06-cmd/{sim.sailor_id}?cmd=cxzt%23")
+            time.sleep(0.3)
+        ok = _wait_for(lambda: sim.blind_en == 1, timeout=4.0)
+    assert ok, f"active didn't re-enable blind buffer (blind_en={sim.blind_en})"
+
+
+def test_blind_en_command_sets():
+    """Active re-enables the blind buffer (BLIND_EN=1); idle/overnight disable it
+    (0). Pure check that the command sets stay in the right states."""
+    from protocol_GT06 import _idle_cmds, _active_cmds, _overnight_cmds
+    assert "SZCS#BLIND_EN=1" in _active_cmds(1)
+    assert "SZCS#BLIND_EN=0" in _idle_cmds(1800)
+    assert "SZCS#BLIND_EN=0" in _overnight_cmds(60, 5)
 
 
 def test_periodic_cxzt_poll_samples_battery(gt06_sim_factory, server):
