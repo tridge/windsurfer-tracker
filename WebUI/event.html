@@ -2699,7 +2699,7 @@
             const el = document.getElementById('courseLengthDisplay');
             if (courseData && courseData.start) {
                 const length = calculateCourseLength(courseData);
-                el.textContent = `Course: ${length.toFixed(1)} km`;
+                el.textContent = `Course: ${length.toFixed(1)} km / ${(length / 1.852).toFixed(1)} nm`;
             } else {
                 el.textContent = 'Course: No course';
             }
@@ -2789,7 +2789,7 @@
                 item.className = 'courses-list-item';
                 const label = document.createElement('span');
                 const len = calculateCourseLength(savedCourses[name]);
-                label.textContent = len > 0 ? `${name} (${len.toFixed(1)}km)` : name;
+                label.textContent = len > 0 ? `${name} (${len.toFixed(1)}km / ${(len / 1.852).toFixed(1)}nm)` : name;
                 label.onclick = () => loadNamedCourse(name);
 
                 const actions = document.createElement('span');
