@@ -98,6 +98,45 @@ def test_per_event_override_wins_then_clear(udp_client, server):
     assert sid not in saved
 
 
+def test_buoy_role_override_live_and_logged(udp_client, server):
+    """The admin endpoint must accept role=buoy, apply it live, write it into the
+    daily JSONL track log, and revert when the override is removed."""
+    sid = "G900003"
+    _send_pos(udp_client, sid)
+    assert _wait_for(lambda: _read_positions(server).get(sid)), "position not registered"
+
+    # _effective_role resolves a buoy override
+    from tracker_server import _effective_role
+    assert _effective_role({sid: {"role": "buoy"}}, sid, {"role": "sailor"}) == "buoy"
+
+    status, _ = _admin_post(server, f"/api/event/{EID}/admin/user/{sid}", {"role": "buoy"})
+    assert status == 200
+
+    # live display file picks up the override
+    assert _wait_for(lambda: _read_positions(server).get(sid, {}).get("role") == "buoy"), \
+        "buoy role did not propagate to current_positions.json"
+
+    # a subsequent position must be logged with the effective role
+    _send_pos(udp_client, sid, sq=2)
+
+    def buoy_logged():
+        log_dir = server.data_dir / "html" / str(EID) / "logs"
+        for f in log_dir.glob("*.jsonl"):
+            for line in f.read_text().splitlines():
+                entry = json.loads(line)
+                if entry.get("id") == sid and entry.get("role") == "buoy":
+                    return True
+        return False
+    assert _wait_for(buoy_logged), "buoy role not written to daily JSONL"
+
+    # removing the override reverts the live role to the raw packet role
+    status, _ = _http(server).delete(f"/api/event/{EID}/admin/user/{sid}",
+                                     headers={"X-Admin-Password": ADMIN_PW})
+    assert status == 200
+    assert _wait_for(lambda: _read_positions(server).get(sid, {}).get("role") == "sailor"), \
+        "role did not revert after override removal"
+
+
 def test_save_subset_merges_not_replaces(server):
     """A save that posts only a subset (e.g. a search-filtered view) must MERGE,
     not replace — other trackers' defaults must survive."""

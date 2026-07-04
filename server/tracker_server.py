@@ -1254,7 +1254,7 @@ class PositionTracker:
                     "nogps": True,
                     "bat": battery,
                     "sig": signal,
-                    "role": role,
+                    "role": _log_role(user_overrides, sailor_id, did, role),
                     "ver": version,
                     "flg": flags
                 }
@@ -1468,7 +1468,7 @@ class PositionTracker:
             "ast": assist,
             "bat": battery,
             "sig": signal,
-            "role": role,
+            "role": _log_role(user_overrides, sailor_id, did, role),
             "ver": version,
             "flg": flags
         }
@@ -1568,7 +1568,7 @@ class EventTracker:
                 "ast": assist,
                 "bat": battery,
                 "sig": signal,
-                "role": role,
+                "role": _log_role(self.user_overrides, sailor_id, did, role),
                 "ver": version,
                 "flg": flags
             }
@@ -2102,6 +2102,11 @@ def _effective_role(user_overrides: dict, sailor_id: str, pos: dict) -> str:
     if override and 'role' in override:
         return override['role']
     return pos.get('role', 'sailor')
+
+
+def _log_role(user_overrides: dict, sailor_id: str, did: str | None, role: str) -> str:
+    """Effective role for a track-log entry (admin override wins)."""
+    return _effective_role(user_overrides, sailor_id, {'did': did, 'role': role})
 
 
 def _resolve_did_overrides(user_overrides: dict, current_positions: dict) -> dict:
@@ -3318,7 +3323,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 override = {}
                 if 'name' in data:
                     override['name'] = str(data['name'])
-                if 'role' in data and data['role'] in ('sailor', 'support', 'spectator'):
+                if 'role' in data and data['role'] in ('sailor', 'support', 'spectator', 'buoy'):
                     override['role'] = data['role']
                 if 'hidden' in data:
                     override['hidden'] = bool(data['hidden'])
