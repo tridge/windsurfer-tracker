@@ -850,8 +850,8 @@
                         popup += `<br><em>${mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
+                    popup += legFromPrev(mark);
                     if (adminMode) {
-                        popup += legFromPrev(mark);
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
                         popup += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
@@ -876,8 +876,8 @@
                     popup += `<br><em>${course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
+                popup += legFromPrev(course.finish);
                 if (adminMode) {
-                    popup += legFromPrev(course.finish);
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
                     popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
