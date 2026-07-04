@@ -806,6 +806,13 @@
         function displayCourse(course) {
             clearCourseDisplay();
             const points = [];
+            // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
+            let prevPoint = null;
+            const legFromPrev = (pt) => {
+                if (!prevPoint) return '';
+                const km = haversineDistance(prevPoint.lat, prevPoint.lon, pt.lat, pt.lon);
+                return `<br><small>From previous: ${km.toFixed(2)} km / ${(km / 1.852).toFixed(2)} nm</small>`;
+            };
 
             // Start marker
             if (course.start) {
@@ -827,6 +834,7 @@
                 marker.bindPopup(popup);
                 courseMarkers.push(marker);
                 points.push([course.start.lat, course.start.lon]);
+                prevPoint = course.start;
             }
 
             // Mark markers
@@ -843,6 +851,7 @@
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
                     if (adminMode) {
+                        popup += legFromPrev(mark);
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
                         popup += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
@@ -852,6 +861,7 @@
                     marker.bindPopup(popup);
                     courseMarkers.push(marker);
                     points.push([mark.lat, mark.lon]);
+                    prevPoint = mark;
                 });
             }
 
@@ -867,6 +877,7 @@
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
                 if (adminMode) {
+                    popup += legFromPrev(course.finish);
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
                     popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
