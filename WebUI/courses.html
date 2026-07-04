@@ -471,6 +471,7 @@
         <div class="info-name" id="infoName"></div>
         <div class="info-detail" id="infoMarks"></div>
         <div class="info-detail" id="infoLength"></div>
+        <div class="info-detail" id="infoTime" style="display:none"></div>
     </div>
 
     <div class="drawing-mode-indicator" id="drawingIndicator">
@@ -526,6 +527,17 @@
             <div class="menu-submenu-item" data-maptype="roads" onclick="setMapType('roads')">Google Roads</div>
             <div class="menu-submenu-item" data-maptype="satellite" onclick="setMapType('satellite')">Google Satellite</div>
             <div class="menu-submenu-item selected" data-maptype="hybrid" onclick="setMapType('hybrid')">Google Hybrid</div>
+        </div>
+        <div class="menu-item" onclick="toggleWindSubmenu()">
+            <span>💨</span>
+            <span>Wind ▼</span>
+        </div>
+        <div class="menu-submenu" id="windSubmenu">
+            <div class="menu-submenu-item selected" data-wind="" onclick="setWindRange('')">None</div>
+            <div class="menu-submenu-item" data-wind="3-7" onclick="setWindRange('3-7')">3 to 7 knots</div>
+            <div class="menu-submenu-item" data-wind="8-12" onclick="setWindRange('8-12')">8 to 12 knots</div>
+            <div class="menu-submenu-item" data-wind="13-17" onclick="setWindRange('13-17')">13 to 17 knots</div>
+            <div class="menu-submenu-item" data-wind="18-25" onclick="setWindRange('18-25')">18 to 25 knots</div>
         </div>
         <div class="menu-item" onclick="refreshCourses()">
             <span>🔄</span>
@@ -615,6 +627,21 @@
             if (!isInit) {
                 document.getElementById('mapSubmenu').classList.remove('visible');
             }
+        }
+
+        function toggleWindSubmenu() {
+            document.getElementById('windSubmenu').classList.toggle('visible');
+        }
+
+        function setWindRange(key) {
+            selectedWind = key || null;
+            document.querySelectorAll('#windSubmenu .menu-submenu-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.wind === (key || ''));
+            });
+            document.getElementById('windSubmenu').classList.remove('visible');
+            document.getElementById('menuPanel').classList.remove('visible');
+            lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
+            loadCourses(false);
         }
 
         function refreshCourses() {
@@ -729,6 +756,28 @@
         // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm"
         function formatCourseLength(km, decimals = 1) {
             return `${km.toFixed(decimals)} km / ${(km / 1.852).toFixed(decimals)} nm`;
+        }
+
+        // Race-length benchmark: upwind leg per wind bracket of a triangle+windward-return
+        // course; full course ≈ 5x upwind, calibrated to a ~25 minute race.
+        // => pace (m/min) = 5*upwind/25 = upwind/5
+        const WIND_RANGES = [
+            { key: '3-7',   upwind: 500 },
+            { key: '8-12',  upwind: 650 },
+            { key: '13-17', upwind: 800 },
+            { key: '18-25', upwind: 1000 },
+        ];
+        let selectedWind = null;  // default: none selected, no time shown
+
+        // Approx race time for the selected wind, e.g. "Wind 3-7kn, 1hr 25min" ('' if none)
+        function formatCourseTime(km) {
+            if (!selectedWind) return '';
+            const range = WIND_RANGES.find(r => r.key === selectedWind);
+            if (!range || !(km > 0)) return '';
+            const minutes = Math.round(km * 1000 / (range.upwind / 5));
+            const h = Math.floor(minutes / 60), m = minutes % 60;
+            const dur = h > 0 ? `${h}hr ${m}min` : `${m}min`;
+            return `Wind ${range.key}kn, ${dur}`;
         }
 
         function darkenColor(hex) {
@@ -930,6 +979,10 @@
             document.getElementById('infoName').textContent = name;
             document.getElementById('infoMarks').textContent = `${numMarks} mark${numMarks !== 1 ? 's' : ''} + start/finish`;
             document.getElementById('infoLength').textContent = `Length: ${formatCourseLength(length, 2)}`;
+            const timeStr = formatCourseTime(length);
+            const infoTime = document.getElementById('infoTime');
+            infoTime.textContent = timeStr;
+            infoTime.style.display = timeStr ? '' : 'none';
             document.getElementById('courseInfoBox').style.display = 'block';
         }
 
@@ -1612,9 +1665,11 @@
                     const item = document.createElement('div');
                     item.className = 'course-item';
                     item.dataset.name = name;
+                    const timeStr = formatCourseTime(length);
                     item.innerHTML = `
                         <div class="course-name">${name}</div>
                         <div class="course-meta">${formatCourseLength(length)}</div>
+                        ${timeStr ? `<div class="course-meta">${timeStr}</div>` : ''}
                     `;
                     item.addEventListener('click', () => selectCourse(name, course, true));
                     listEl.appendChild(item);
