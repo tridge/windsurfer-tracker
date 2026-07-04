@@ -1285,6 +1285,23 @@
                     iconAnchor: [size/2, size/2]
                 });
                 return L.marker(latlng, { icon: icon, interactive: interactive });
+            } else if (role === 'buoy') {
+                // Diamond marker using divIcon with CSS clip-path
+                const size = radius * 2.2;
+                const icon = L.divIcon({
+                    className: 'role-marker-diamond',
+                    html: `<div style="
+                        width: ${size}px;
+                        height: ${size}px;
+                        background: ${color};
+                        border: ${weight}px solid ${borderColor};
+                        opacity: ${fillOpacity};
+                        clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+                    "></div>`,
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+                return L.marker(latlng, { icon: icon, interactive: interactive });
             } else {
                 // Default: circle marker (sailor)
                 return L.circleMarker(latlng, {
@@ -1822,7 +1839,7 @@
                 colorIdx++;
 
                 const role = getUserRole(userId);
-                const roleClass = role === 'support' ? 'role-support' : (role === 'spectator' ? 'role-spectator' : 'role-sailor');
+                const roleClass = role === 'support' ? 'role-support' : (role === 'spectator' ? 'role-spectator' : (role === 'buoy' ? 'role-buoy' : 'role-sailor'));
 
                 // Show original ID suffix for admins when displayid is set
                 const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';

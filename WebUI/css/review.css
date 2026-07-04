@@ -221,9 +221,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     clip-path: polygon(50% 0%, 0% 100%, 100% 100%);  /* Triangle */
 }
 
+.user-color.role-buoy {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);  /* Diamond */
+}
+
 /* Remove default Leaflet divIcon styling for role markers */
 .role-marker-square,
-.role-marker-triangle {
+.role-marker-triangle,
+.role-marker-diamond {
     background: transparent !important;
     border: none !important;
 }

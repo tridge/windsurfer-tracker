@@ -1150,6 +1150,13 @@
                 </div>
                 <div class="category-content" id="spectatorList"></div>
             </div>
+            <div class="category-section" id="buoySection">
+                <div class="category-header" onclick="toggleCategory('buoy')">
+                    <span>🛟 Buoys (<span id="buoyCount">0</span>)</span>
+                    <span id="buoyToggle">▼</span>
+                </div>
+                <div class="category-content" id="buoyList"></div>
+            </div>
             <div class="last-update" id="lastUpdate" style="padding:8px 12px;"></div>
             <div class="panel-legend">
                 <div class="legend-item">
@@ -1442,6 +1449,7 @@
                 <option value="sailor">Sailor</option>
                 <option value="support">Support Boat</option>
                 <option value="spectator">Spectator</option>
+                <option value="buoy">Buoy</option>
             </select>
             <div style="margin: 12px 0;">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -1665,7 +1673,7 @@
         let currentLogDate = null;    // Currently loaded log date
         let trackDataLoaded = false;
         let panelCollapsed = false;
-        const categoryCollapsed = { sailor: false, support: false, spectator: true };
+        const categoryCollapsed = { sailor: false, support: false, spectator: true, buoy: true };
         
         // Audio alert system for assist requests
         let audioContext = null;
@@ -3846,6 +3854,9 @@
                 case 'spectator':
                     iconData = { size: 40, anchor: 20, svg: createSpectatorSvg(heading, isRecent, needsAssist) };
                     break;
+                case 'buoy':
+                    iconData = { size: 36, anchor: 18, svg: createBuoySvg(isRecent, needsAssist) };
+                    break;
                 default:
                     iconData = { size: 44, anchor: 22, svg: createSurfboardSvg(heading, isRecent, needsAssist) };
             }
@@ -3932,6 +3943,25 @@
             `;
         }
         
+        // Buoy: fixed race mark, no heading rotation
+        function createBuoySvg(isRecent, needsAssist) {
+            const opacity = isRecent ? 1.0 : 0.6;
+            const assistRing = needsAssist ? `<circle cx="0" cy="0" r="16" fill="none" stroke="#ef4444" stroke-width="3" stroke-dasharray="4,2"/>` : '';
+
+            return `
+                <svg width="36" height="36" viewBox="-18 -18 36 36" xmlns="http://www.w3.org/2000/svg">
+                    <g opacity="${opacity}">
+                        ${assistRing}
+                        <ellipse cx="0" cy="9" rx="8" ry="3" fill="#0369a1" opacity="0.4"/>
+                        <rect x="-1" y="-12" width="2" height="8" fill="#78350f"/>
+                        <polygon points="1,-12 8,-9.5 1,-7" fill="#ff8800" stroke="#cc4400" stroke-width="0.75"/>
+                        <circle cx="0" cy="2" r="7" fill="#ff8800" stroke="#cc4400" stroke-width="1.5"/>
+                        <ellipse cx="-2.5" cy="-0.5" rx="2.5" ry="3" fill="#ffbb55" opacity="0.7"/>
+                    </g>
+                </svg>
+            `;
+        }
+
         // Get today's date in YYYY_MM_DD format
         function getTodayLogDate() {
             const d = new Date();
@@ -4304,9 +4334,10 @@
             const sailorList = all.filter(s => (s.role || 'sailor') === 'sailor');
             const supportList = all.filter(s => s.role === 'support');
             const spectatorList = all.filter(s => s.role === 'spectator');
-            
-            // Find assist requests
-            const assistList = all.filter(s => s.ast);
+            const buoyList = all.filter(s => s.role === 'buoy');
+
+            // Find assist requests (buoys can't request assistance)
+            const assistList = all.filter(s => s.ast && s.role !== 'buoy');
             const hadAssist = hasActiveAssist;
             hasActiveAssist = assistList.length > 0;
             
@@ -4322,11 +4353,13 @@
             document.getElementById('sailorCount').textContent = sailorList.length;
             document.getElementById('supportCount').textContent = supportList.length;
             document.getElementById('spectatorCount').textContent = spectatorList.length;
-            
+            document.getElementById('buoyCount').textContent = buoyList.length;
+
             // Show/hide sections
             document.getElementById('sailorSection').style.display = sailorList.length ? 'block' : 'none';
             document.getElementById('supportSection').style.display = supportList.length ? 'block' : 'none';
             document.getElementById('spectatorSection').style.display = spectatorList.length ? 'block' : 'none';
+            document.getElementById('buoySection').style.display = buoyList.length ? 'block' : 'none';
             
             // Render assist alerts (always visible)
             const alertsDiv = document.getElementById('assistAlerts');
@@ -4415,6 +4448,7 @@
             document.getElementById('sailorList').innerHTML = renderList(sailorList);
             document.getElementById('supportList').innerHTML = renderList(supportList);
             document.getElementById('spectatorList').innerHTML = renderList(spectatorList);
+            document.getElementById('buoyList').innerHTML = renderList(buoyList);
         }
         
         // Center map on a specific sailor
@@ -4584,7 +4618,7 @@
                     tailPoints.push(pos);  // Add current position to connect the trail
 
                     // Choose color based on role
-                    const tailColor = role === 'support' ? '#2196f3' : role === 'spectator' ? '#9c27b0' : '#e91e63';
+                    const tailColor = role === 'support' ? '#2196f3' : role === 'spectator' ? '#9c27b0' : role === 'buoy' ? '#ff8800' : '#e91e63';
 
                     if (sailorTails[id]) {
                         sailorTails[id].setLatLngs(tailPoints);
