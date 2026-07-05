@@ -641,7 +641,7 @@
             document.getElementById('windSubmenu').classList.remove('visible');
             document.getElementById('menuPanel').classList.remove('visible');
             lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
-            loadCourses(false);
+            loadCourses(true);  // display-only toggle: preserve the user's pan/zoom
         }
 
         function refreshCourses() {
