@@ -691,6 +691,22 @@
 
         // Default view (will be overridden when course is displayed)
         map.setView([-41.0, 174.0], 6);
+        let mapPositioned = false;  // set once the map has a real position (course fitBounds)
+
+        // With no course to show, fall back to the event's home location
+        async function loadEventHome() {
+            try {
+                const response = await fetch(`${API_BASE}/api/events`);
+                const data = await response.json();
+                const event = data.events.find(e => e.eid === EVENT_ID);
+                if (event && event.home_lat && event.home_lon && !mapPositioned) {
+                    map.setView([event.home_lat, event.home_lon], 13);
+                }
+            } catch (e) {
+                // Keep the default view
+            }
+        }
+        loadEventHome();
 
         // Scale bar
         map.on('zoomend', () => updateScale(map));
@@ -961,6 +977,7 @@
 
             // Auto-zoom to fit course
             if (points.length > 0) {
+                mapPositioned = true;
                 programmaticMove = true;
                 map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
                 setTimeout(() => { programmaticMove = false; }, 300);
