@@ -613,6 +613,11 @@
                     <input type="number" id="idleInterval" value="0" min="0" max="300" step="1" style="width:120px;">
                     <small>When a tracker stops, it stays connected sending heartbeats at this interval. 0 = disabled, typical = 30. Admins can then remotely start or shut down idle trackers.</small>
                 </div>
+                <div class="form-group">
+                    <label for="eventPriority">Priority</label>
+                    <input type="number" id="eventPriority" value="0" step="1" style="width:120px;">
+                    <small>Higher priority events show first on the main page. Default 0; equal priorities sort by name.</small>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
@@ -823,6 +828,7 @@
                             <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
                             <span style="${event.assist_enabled === false ? 'color:#c00;font-weight:bold' : ''}">Assist: ${event.assist_enabled === false ? 'Disabled' : 'Enabled'}</span>
                             <span style="${event.idle_interval ? 'color:#2563eb;font-weight:bold' : ''}">Idle: ${event.idle_interval ? event.idle_interval + 's' : 'Off'}</span>
+                            ${event.priority ? `<span style="color:#d97706;font-weight:bold">Pri: ${event.priority}</span>` : ''}
                             ${event.admin_emails ? `<span>Emails: ${escapeHtml(event.admin_emails)}</span>` : ''}
                         </div>
                         <div class="event-actions">
@@ -851,6 +857,7 @@
             document.getElementById('enableSimulator').checked = false;  // Default off
             document.getElementById('enableSleep').checked = false;  // Default off
             document.getElementById('idleInterval').value = 0;
+            document.getElementById('eventPriority').value = 0;
             setEventSchedFields(null);
             document.getElementById('modalError').style.display = 'none';
             document.getElementById('eventModal').classList.add('visible');
@@ -896,6 +903,7 @@
                 document.getElementById('enableSimulator').checked = event.enable_simulator === true;  // Default off
                 document.getElementById('enableSleep').checked = event.enable_sleep === true;  // Default off
                 document.getElementById('idleInterval').value = event.idle_interval || 0;
+                document.getElementById('eventPriority').value = event.priority || 0;
                 setEventSchedFields(event.sleep_schedule || null);
                 // If no location set, default from timezone
                 if (!event.home_location && !event.home_lat) {
@@ -949,6 +957,7 @@
                 enable_simulator: document.getElementById('enableSimulator').checked,
                 enable_sleep: document.getElementById('enableSleep').checked,
                 idle_interval: parseInt(document.getElementById('idleInterval').value) || 0,
+                priority: parseInt(document.getElementById('eventPriority').value) || 0,
                 sleep_schedule: document.getElementById('evSchedOverride').checked ? {
                     enabled: document.getElementById('evSchedEnabled').checked,
                     start: document.getElementById('evSchedStart').value,
