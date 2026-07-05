@@ -828,7 +828,7 @@
                             <span>Location: ${escapeHtml(event.home_location || '(default)')}</span>
                             <span style="${event.assist_enabled === false ? 'color:#c00;font-weight:bold' : ''}">Assist: ${event.assist_enabled === false ? 'Disabled' : 'Enabled'}</span>
                             <span style="${event.idle_interval ? 'color:#2563eb;font-weight:bold' : ''}">Idle: ${event.idle_interval ? event.idle_interval + 's' : 'Off'}</span>
-                            ${event.priority ? `<span style="color:#d97706;font-weight:bold">Pri: ${event.priority}</span>` : ''}
+                            ${Number(event.priority) ? `<span style="color:#d97706;font-weight:bold">Pri: ${Number(event.priority)}</span>` : ''}
                             ${event.admin_emails ? `<span>Emails: ${escapeHtml(event.admin_emails)}</span>` : ''}
                         </div>
                         <div class="event-actions">

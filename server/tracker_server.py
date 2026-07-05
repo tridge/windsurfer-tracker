@@ -602,6 +602,12 @@ class EventManager:
                     tp = event.get('tracker_password', '')
                     if isinstance(tp, str):
                         event['tracker_password'] = [tp] if tp else []
+                    # Normalize priority to int — a hand-edited non-int would
+                    # break the public list sort
+                    try:
+                        event['priority'] = int(event.get('priority', 0))
+                    except (TypeError, ValueError):
+                        event['priority'] = 0
                     self.events[eid] = event
                 except ValueError:
                     log(f"[EVENTS] Skipping invalid event ID: {eid_str}")
