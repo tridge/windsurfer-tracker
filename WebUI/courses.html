@@ -699,8 +699,11 @@
                 const response = await fetch(`${API_BASE}/api/events`);
                 const data = await response.json();
                 const event = data.events.find(e => e.eid === EVENT_ID);
-                if (event && event.home_lat && event.home_lon && !mapPositioned) {
+                if (event && event.home_lat != null && event.home_lon != null
+                        && !mapPositioned && !userInteracted) {
+                    programmaticMove = true;
                     map.setView([event.home_lat, event.home_lon], 13);
+                    setTimeout(() => { programmaticMove = false; }, 300);
                 }
             } catch (e) {
                 // Keep the default view
