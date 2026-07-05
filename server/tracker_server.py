@@ -652,9 +652,10 @@ class EventManager:
                         "has_registration": bool(event.get("admin_emails")),
                         "enable_simulator": event.get("enable_simulator", False),
                         "enable_sleep": event.get("enable_sleep", False),
+                        "priority": event.get("priority", 0),
                     })
-            # Sort by name
-            result.sort(key=lambda e: e.get("name", ""))
+            # Higher priority first, then by name
+            result.sort(key=lambda e: (-e.get("priority", 0), e.get("name", "")))
             return result
 
     def get_all_events(self) -> list[dict]:
@@ -694,6 +695,7 @@ class EventManager:
                 "archived": False,
                 "assist_enabled": True,  # Whether assist button is available to users
                 "idle_interval": 0,  # Idle heartbeat interval in seconds (0=disabled)
+                "priority": 0,  # Higher priority sorts first on the main page
                 "enable_simulator": False,  # Show "Start Simulator" in the admin panel
                 "enable_sleep": False,  # Show "All SLEEP" in the admin panel
                 "created": time.time(),
@@ -723,10 +725,16 @@ class EventManager:
             allowed_fields = ['name', 'description', 'archived', 'assist_enabled',
                               'idle_interval', 'admin_emails', 'enable_simulator', 'enable_sleep',
                               'admin_password', 'tracker_password', 'timezone',
-                              'home_location', 'home_lat', 'home_lon']
+                              'home_location', 'home_lat', 'home_lon', 'priority']
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
+            # Coerce priority to int — a non-int would break the public list sort
+            if 'priority' in updates:
+                try:
+                    event['priority'] = int(updates['priority'])
+                except (TypeError, ValueError):
+                    event['priority'] = 0
             # Per-event night-sleep override (None falls back to global default).
             if has_sched:
                 event['sleep_schedule'] = cleaned_sched
@@ -5163,6 +5171,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 extra['assist_enabled'] = data['assist_enabled']
             if data.get('idle_interval') is not None:
                 extra['idle_interval'] = data['idle_interval']
+            if data.get('priority') is not None:
+                extra['priority'] = data['priority']
             if data.get('enable_simulator') is not None:
                 extra['enable_simulator'] = data['enable_simulator']
             if data.get('enable_sleep') is not None:

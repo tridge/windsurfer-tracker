@@ -164,6 +164,71 @@ def test_update_idle_interval(http_client):
     assert event["idle_interval"] == 30
 
 
+def test_priority_default_zero(http_client):
+    """New event should have priority: 0."""
+    eid = create_event(http_client, name="Priority Default")
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event.get("priority", 0) == 0
+
+
+def test_priority_sorts_public_events(http_client):
+    """Higher priority sorts first on /api/events; equal priority falls back to name."""
+    # Names chosen so plain name-order would put the high-priority event LAST
+    eid_low = create_event(http_client, name="AAA Priority Low")
+    eid_high = create_event(http_client, name="ZZZ Priority High")
+
+    status, _ = http_client.patch(
+        f"/api/manage/event/{eid_high}",
+        data={"priority": 10},
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+
+    # Verify the value persisted
+    status, body = http_client.get(
+        "/api/manage/events",
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    event = [e for e in body["events"] if e["eid"] == eid_high][0]
+    assert event["priority"] == 10
+
+    # Public list: high-priority event sorts before the name-earlier one
+    status, body = http_client.get("/api/events")
+    assert status == 200
+    eids = [e["eid"] for e in body["events"]]
+    assert eids.index(eid_high) < eids.index(eid_low)
+
+    # Back to 0: name order applies again
+    http_client.patch(
+        f"/api/manage/event/{eid_high}",
+        data={"priority": 0},
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    status, body = http_client.get("/api/events")
+    eids = [e["eid"] for e in body["events"]]
+    assert eids.index(eid_low) < eids.index(eid_high)
+
+
+def test_priority_non_int_coerced(http_client):
+    """A malformed priority must not break the public list sort."""
+    eid = create_event(http_client, name="Priority Bad Value")
+    status, _ = http_client.patch(
+        f"/api/manage/event/{eid}",
+        data={"priority": "not-a-number"},
+        headers={"X-Manager-Password": MANAGER_PASSWORD},
+    )
+    assert status == 200
+    status, body = http_client.get("/api/events")
+    assert status == 200
+    event = [e for e in body["events"] if e["eid"] == eid][0]
+    assert event["priority"] == 0
+
+
 def test_event_data_directory_created(http_client, server):
     """Creating an event should create its data directory with logs subdir."""
     eid = create_event(http_client, name="Dir Test")
