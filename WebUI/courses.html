@@ -635,13 +635,22 @@
 
         function setWindRange(key) {
             selectedWind = key || null;
-            document.querySelectorAll('#windSubmenu .menu-submenu-item').forEach(item => {
-                item.classList.toggle('selected', item.dataset.wind === (key || ''));
-            });
+            if (key) {
+                localStorage.setItem('windRange', key);
+            } else {
+                localStorage.removeItem('windRange');
+            }
+            updateWindSubmenuSelection();
             document.getElementById('windSubmenu').classList.remove('visible');
             document.getElementById('menuPanel').classList.remove('visible');
             lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
             loadCourses(true);  // display-only toggle: preserve the user's pan/zoom
+        }
+
+        function updateWindSubmenuSelection() {
+            document.querySelectorAll('#windSubmenu .menu-submenu-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.wind === (selectedWind || ''));
+            });
         }
 
         function refreshCourses() {
@@ -767,7 +776,8 @@
             { key: '13-17', upwind: 800 },
             { key: '18-25', upwind: 1000 },
         ];
-        let selectedWind = null;  // default: none selected, no time shown
+        let selectedWind = localStorage.getItem('windRange') || null;  // remembered like mapType
+        updateWindSubmenuSelection();  // reflect the remembered selection on load
 
         // Approx race time for the selected wind, e.g. "Wind 3-7kn, 1hr 25min" ('' if none)
         function formatCourseTime(km) {
