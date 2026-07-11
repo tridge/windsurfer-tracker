@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GT06 fleet — 2026 regatta analysis</title>
+<style>
+:root{
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
+  --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --s-v667:#2a78d6; --s-v668:#1baf7a; --s-v663:#eda100; --s-bench:#4a3aa7;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --race:rgba(42,120,214,.10); --chg:rgba(237,161,0,.16);
+}
+@media (prefers-color-scheme: dark){:root{
+  --plane:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+  --s-v667:#3987e5; --s-v668:#199e70; --s-v663:#c98500; --s-bench:#9085e9;
+  --race:rgba(57,135,229,.16); --chg:rgba(201,133,0,.20);
+}}
+:root[data-theme="light"]{
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --s-v667:#2a78d6; --s-v668:#1baf7a; --s-v663:#eda100; --s-bench:#4a3aa7;
+  --race:rgba(42,120,214,.10); --chg:rgba(237,161,0,.16);
+}
+:root[data-theme="dark"]{
+  --plane:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+  --s-v667:#3987e5; --s-v668:#199e70; --s-v663:#c98500; --s-bench:#9085e9;
+  --race:rgba(57,135,229,.16); --chg:rgba(201,133,0,.20);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1060px;margin:0 auto;padding:28px 20px 80px}
+h1{font-size:26px;line-height:1.2;margin:4px 0 2px;text-wrap:balance}
+h2{font-size:19px;margin:40px 0 6px}
+h3{font-size:16px;margin:26px 0 4px}
+p{max-width:72ch;color:var(--ink2);margin:6px 0}
+p strong,li strong{color:var(--ink)}
+li{color:var(--ink2);margin:3px 0;max-width:75ch}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);font-weight:600}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;margin:22px 0}
+.tile{background:var(--surface);border:1px solid var(--ring);border-radius:6px;
+  padding:12px 14px}
+.tile .v{font-size:26px;font-weight:650;line-height:1.15}
+.tile .k{font-size:12px;color:var(--muted);margin-top:2px}
+.tile .sub{font-size:12px;color:var(--ink2)}
+figure{margin:14px 0;background:var(--surface);border:1px solid var(--ring);
+  border-radius:6px;padding:14px 14px 8px}
+figcaption{font-size:12.5px;color:var(--muted);padding:4px 2px 6px}
+.chartwrap{position:relative;overflow-x:auto}
+svg text{font:11px system-ui,sans-serif;fill:var(--muted)}
+svg .lbl{fill:var(--ink2)}
+.tip{position:absolute;pointer-events:none;background:var(--surface);
+  border:1px solid var(--ring);border-radius:4px;padding:4px 8px;font-size:12px;
+  color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.15);display:none;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);
+  padding:2px 2px 8px}
+.legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;
+  margin-right:5px;vertical-align:-1px}
+table{border-collapse:collapse;width:100%;font-size:13px;
+  font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--ring);
+  border-radius:6px;margin:12px 0}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  text-align:right;padding:9px 10px;border-bottom:1px solid var(--grid);
+  white-space:nowrap}
+td{padding:6px 10px;border-bottom:1px solid var(--grid);text-align:right;
+  white-space:nowrap;color:var(--ink2)}
+th:first-child,td:first-child{text-align:left}
+td:first-child{color:var(--ink);font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+tr:last-child td{border-bottom:none}
+.chip{display:inline-block;font-size:11px;font-weight:600;border-radius:99px;
+  padding:1px 8px;vertical-align:1px}
+.chip.fw{color:var(--ink)}
+.chip.c-crit{background:color-mix(in srgb,var(--crit) 18%,transparent);color:var(--crit)}
+.chip.c-warn{background:color-mix(in srgb,var(--serious) 20%,transparent);color:var(--serious)}
+.chip.c-ok{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
+.note{font-size:13px;color:var(--muted);max-width:75ch}
+.fwdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;
+  vertical-align:0}
+.klist td{white-space:normal;text-align:left}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+@media (prefers-reduced-motion: no-preference){
+  .tile,figure{transition:border-color .15s}
+}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Windsurfer tracker · GT06 fleet · raw-log analysis</div>
+<h1>2026 regatta week: how the 41 trackers actually behaved</h1>
+<p>Every conclusion below is derived from the raw binary packet logs
+(<span class="mono">gt06.log 2026-07-05 → 07-11</span>), checked against a
+pre-event baseline week. Full data: <span class="mono">gt06/regatta2026_analysis/</span>
+(units.csv, anomalies.csv, summary.json, per-unit plots).</p>
+
+<div class="tiles">
+  <div class="tile"><div class="v">741,833</div><div class="k">position fixes received</div><div class="sub">1.08 fix/s while racing</div></div>
+  <div class="tile"><div class="v">3 s / 4 s</div><div class="k">GPS lag p50 / p95</div><div class="sub">no persistent lag all week</div></div>
+  <div class="tile"><div class="v">4</div><div class="k">blind-buffer replays</div><div class="sub">all caught up ≤ 3.5 min</div></div>
+  <div class="tile"><div class="v">~24</div><div class="k">units in the 07-07 mass reboot</div><div class="sub">cell outage, 15-min watchdog</div></div>
+  <div class="tile"><div class="v">0</div><div class="k">trackers lost mid-race</div><div class="sub">lowest finisher 1.5 % SoC</div></div>
+</div>
+
+<h2>Fleet battery through the week</h2>
+<figure>
+  <div class="legend" id="lg1"></div>
+  <div class="chartwrap" id="c1"></div>
+  <figcaption>Fleet-median resting voltage (GPS-off/ACC-off STATUS readings), hourly.
+  Shaded: charging waves during the practice days (amber), race-day active windows (blue).
+  The 07-10 long-distance day is the cliff — the fleet ran 07-08 → 07-11 on one charge.</figcaption>
+</figure>
+
+<h2>The 07-07 01:35 cellular outage &amp; mass device reboot</h2>
+<p>Contact fell from 40 to 16 units in minutes while the server kept serving the
+rest — a partial mobile-network outage, not a server or power event. Every
+affected unit returned at 01:50–02:01 with a frame-serial regression:
+<strong>the firmware watchdog reboots the whole device after ~15 minutes without
+network registration</strong>. Recovery was autonomous and identical across
+firmware families.</p>
+<figure>
+  <div class="chartwrap" id="c2"></div>
+  <figcaption>Trackers in contact per minute, 07-07 01:00–02:30 (of 40 connected before the event).</figcaption>
+</figure>
+
+<h2>Findings</h2>
+<h3>1 · Race-day battery burn ≈ 2× the bench model on the long-course day</h3>
+<ul>
+<li>07-09 racing: fleet median <strong>1.66 %/h ≈ 0.8×</strong> the calibrated 115 mA model.</li>
+<li>07-10 (long distance): fleet median <strong>3.15 %/h ≈ 1.4×</strong>, tails to 5–5.8 %/h (≈2×), on both firmware families; fleet median resting drop 180 mV that day vs 30 mV on 07-09.</li>
+<li>Ruled out: upload rate (1.08 LOC/s both days), GSM signal during racing (better on 07-10), overnight drain (~10 mV both nights).</li>
+<li><strong>Planning figure:</strong> budget ~2 full race days per 6 Ah charge on long courses; recharge after any long-distance day. Six units finished the week under 15 % SoC.</li>
+</ul>
+<h3>2 · Idle GPS-restart flurries are an NT19D-V667 signature</h3>
+<ul>
+<li>49 idle-LOC burst episodes: <strong>46 on V667</strong> (0.142/10 idle-h), 3 on V6.68 (0.010/10 h), zero on V6.63/V665 — a 14× firmware gap under identical idle config.</li>
+<li>Pattern: off-schedule no-fix LOC → server re-asserts GPS-off → GPS resets, briefly acquires (sats 10–13), uploads 4–6 fixes, settles. Self-limiting; only 2 episodes reached the ≥5 LOC/min “stuck” rate; none needed a MODE1 bounce.</li>
+</ul>
+<h3>3 · Blind buffer worked exactly as designed</h3>
+<ul>
+<li>Both mid-race reboots (G347082 &amp; G341846, 07-10, V667, ~2 min offline) were fully covered: backlog replayed on reconnect (max lag 136 s / 114 s) and drained to live in 3m14s / 2m14s. <strong>No track data lost.</strong></li>
+<li>V667 drains the buffer <em>interleaved</em> — live fixes slotted between backlog fixes (135/74 GPS-time backward steps). Messy on the wire, harmless after server timestamp handling; V6.68 drains in order.</li>
+<li>Server lag remediation (TIMER,2 drain) never engaged and was never needed; no replay stalled.</li>
+</ul>
+<h3>4 · Reboots &amp; resets</h3>
+<ul>
+<li>50 serial-regression reboots: ~24 in the 07-07 network event, 10 on the bench unit (G375356, USB surgery), 5 operator RESET#, 2 mid-race (above), several at 07-11 pack-up on nearly-flat cells.</li>
+<li><strong>~6 genuinely spontaneous</strong> single-unit reboots remain (≈1 per 1000 unit-h) — five of six on V667.</li>
+<li>9 server-restart socket resets (device serials continue across all of them) — freeze-week timestamps worth reconciling with ops notes: 07-05 12:07/12:17/20:08, 07-07 18:59, 07-08 05:41/18:13, 07-09 04:09/06:09/16:43.</li>
+</ul>
+<h3>5 · Battery-health outliers</h3>
+<ul>
+<li><strong>G312268 (3 Ah) is a suspect cell</strong>: 0.98 %/h idle drain on 07-11 (10× model), worst overnight drops both nights, −120 mV resting step — same fingerprint as the known-bad G375356 cell. Bench-test before the next event.</li>
+<li>G380521: double −110 mV step + reboot on 07-05 morning (handling); clean afterwards. G371116: −70 mV near its 07-08 reboot.</li>
+</ul>
+
+<h2>Firmware × capacity</h2>
+<div class="tablewrap"><table id="tabs"></table></div>
+<p class="note">Capacity class shows no anomaly correlation (G312268's bad cell aside) —
+3 Ah and 6 Ah behave alike per hour and differ only in endurance. Firmware is the
+discriminator: the idle GPS flurries, both mid-race reboots and nearly all spontaneous
+reboots are NT19D V667; the W07 V6.6x units were essentially silent.</p>
+
+<h2>End-of-week state of charge</h2>
+<figure>
+  <div class="legend" id="lg3"></div>
+  <div class="chartwrap" id="c3"></div>
+  <figcaption>Resting SoC at each unit's last clean reading, 07-11 (no fleet charging since 07-07). Bench unit excluded.</figcaption>
+</figure>
+
+<h2>Per-unit summary</h2>
+<div class="tablewrap"><table id="units"></table></div>
+<p class="note">di/dt = median measured idle/tracking drain %/h (model: idle 0.08–0.18,
+track 1.9–4.3 by capacity). p95 = GPS lag 95th percentile (s) while racing.
+Anoms = anomaly episodes attributed to the unit (see anomalies.csv for each).</p>
+
+<h2>Vendor follow-ups (V667)</h2>
+<ul>
+<li>Idle GPS-restart flurries: why does V667's GPS wake no-fix and upload off-schedule ~14× more than V6.68?</li>
+<li>Spontaneous reboots (6 of 7 on V667).</li>
+<li>Interleaved blind-buffer drain (live fixes mixed into backlog; V6.68 replays in order).</li>
+<li>Confirm the ~15-min no-registration watchdog reboot and whether the timeout is configurable.</li>
+</ul>
+</main>
+<script>
+const D = {"units":[{"gid":"G187547","name":"","fw":"V667","cap":"6Ah","act":0.7,"idle":167.1,"di":-0.076,"dt":1.621,"p95":2,"reb":1,"drop":3,"soc0":83.2,"soc1":86.9,"ac":{"idle-loc":1,"reboot":1,"dropout":3}},{"gid":"G226122","name":"(Layline) GregJ","fw":"V6.63","cap":"3Ah","act":2.2,"idle":165.6,"di":0.083,"dt":3.245,"p95":4,"reb":1,"drop":2,"soc0":91.4,"soc1":14.7,"ac":{"excess-drain":1,"reboot":1,"dropout":2}},{"gid":"G304307","name":"","fw":"V667","cap":"6Ah","act":7.52,"idle":160.3,"di":0.095,"dt":2.297,"p95":4,"reb":1,"drop":1,"soc0":91.9,"soc1":50.0,"ac":{"idle-loc":3,"reboot":1,"dropout":1}},{"gid":"G306088","name":"","fw":"V667","cap":"6Ah","act":7.29,"idle":160.5,"di":0.117,"dt":1.798,"p95":4,"reb":1,"drop":1,"soc0":88.6,"soc1":30.6,"ac":{"excess-drain":1,"idle-loc":3,"reboot":1,"dropout":1}},{"gid":"G306161","name":"","fw":"V6.68","cap":"6Ah","act":2.1,"idle":165.7,"di":0.162,"dt":3.579,"p95":4,"reb":1,"drop":1,"soc0":85.5,"soc1":38.2,"ac":{"excess-drain":3,"reboot":1,"dropout":1}},{"gid":"G312243","name":"","fw":"V6.68","cap":"3Ah","act":2.14,"idle":165.7,"di":0.073,"dt":4.535,"p95":4,"reb":0,"drop":1,"soc0":94.1,"soc1":16.2,"ac":{"dropout":1}},{"gid":"G312268","name":"","fw":"V6.68","cap":"3Ah","act":2.2,"idle":165.6,"di":0.07,"dt":4.873,"p95":3,"reb":1,"drop":1,"soc0":88.1,"soc1":83.0,"ac":{"excess-drain":2,"voltage-drop":1,"reboot":1,"dropout":1}},{"gid":"G312292","name":"","fw":"V6.68","cap":"3Ah","act":2.14,"idle":165.7,"di":0.067,"dt":4.406,"p95":6,"reb":0,"drop":1,"soc0":93.8,"soc1":12.2,"ac":{"dropout":1}},{"gid":"G312300","name":"","fw":"V6.68","cap":"6Ah","act":2.2,"idle":165.6,"di":0.089,"dt":3.033,"p95":5,"reb":0,"drop":0,"soc0":88.4,"soc1":43.6,"ac":{"excess-drain":1}},{"gid":"G312326","name":"","fw":"V6.68","cap":"6Ah","act":2.09,"idle":165.7,"di":0.087,"dt":1.794,"p95":5,"reb":0,"drop":0,"soc0":88.1,"soc1":88.1,"ac":{"idle-loc":1}},{"gid":"G312334","name":"","fw":"V6.68","cap":"6Ah","act":2.11,"idle":165.7,"di":0.096,"dt":2.492,"p95":3,"reb":1,"drop":1,"soc0":85.5,"soc1":55.8,"ac":{"excess-drain":1,"reboot":1,"dropout":1}},{"gid":"G312342","name":"","fw":"V6.68","cap":"3Ah","act":2.98,"idle":164.8,"di":0.072,"dt":3.594,"p95":4,"reb":1,"drop":2,"soc0":92.1,"soc1":15.0,"ac":{"reboot":1,"dropout":2}},{"gid":"G312359","name":"","fw":"V6.68","cap":"6Ah","act":7.46,"idle":160.3,"di":0.105,"dt":2.728,"p95":3,"reb":1,"drop":0,"soc0":89.5,"soc1":38.1,"ac":{"excess-drain":2,"reboot":1}},{"gid":"G334023","name":"","fw":"V667","cap":"6Ah","act":8.47,"idle":159.3,"di":0.147,"dt":2.083,"p95":3,"reb":1,"drop":1,"soc0":88.4,"soc1":45.2,"ac":{"excess-drain":1,"idle-loc":1,"reboot":1,"dropout":1}},{"gid":"G334189","name":"","fw":"V667","cap":"6Ah","act":2.15,"idle":165.8,"di":0.097,"dt":1.827,"p95":3,"reb":1,"drop":1,"soc0":85.8,"soc1":53.4,"ac":{"idle-loc":3,"reboot":1,"dropout":1,"sos":1}},{"gid":"G341846","name":"","fw":"V667","cap":"6Ah","act":3.1,"idle":164.7,"di":0.094,"dt":1.832,"p95":5,"reb":1,"drop":0,"soc0":90.9,"soc1":48.6,"ac":{"idle-loc":2,"replay":1,"reboot":1}},{"gid":"G341887","name":"","fw":"V667","cap":"6Ah","act":15.22,"idle":152.6,"di":0.173,"dt":1.769,"p95":2,"reb":2,"drop":1,"soc0":87.6,"soc1":23.5,"ac":{"excess-drain":1,"replay":1,"reboot":2,"dropout":1}},{"gid":"G347082","name":"","fw":"V667","cap":"6Ah","act":2.83,"idle":165.0,"di":0.076,"dt":2.076,"p95":6,"reb":1,"drop":1,"soc0":86.2,"soc1":2.0,"ac":{"excess-drain":1,"replay":1,"reboot":1,"dropout":1}},{"gid":"G348635","name":"","fw":"V667","cap":"6Ah","act":2.73,"idle":165.1,"di":0.105,"dt":3.415,"p95":3,"reb":1,"drop":1,"soc0":84.7,"soc1":34.7,"ac":{"excess-drain":2,"idle-loc":2,"reboot":1,"dropout":1}},{"gid":"G370498","name":"","fw":"V667","cap":"6Ah","act":7.34,"idle":160.5,"di":0.082,"dt":2.522,"p95":3,"reb":1,"drop":1,"soc0":84.6,"soc1":37.9,"ac":{"excess-drain":1,"idle-loc":4,"reboot":1,"dropout":1}},{"gid":"G370589","name":"","fw":"V667","cap":"6Ah","act":2.11,"idle":165.7,"di":0.108,"dt":3.499,"p95":3,"reb":2,"drop":1,"soc0":88.8,"soc1":44.5,"ac":{"excess-drain":2,"idle-loc":1,"reboot":2,"dropout":1}},{"gid":"G370977","name":"","fw":"V667","cap":"6Ah","act":6.43,"idle":161.4,"di":0.075,"dt":1.918,"p95":6,"reb":0,"drop":0,"soc0":90.6,"soc1":90.6,"ac":{"excess-drain":1,"idle-loc":3}},{"gid":"G371074","name":"","fw":"V667","cap":"6Ah","act":2.1,"idle":165.7,"di":0.098,"dt":2.467,"p95":3,"reb":1,"drop":1,"soc0":85.3,"soc1":57.0,"ac":{"idle-loc":3,"reboot":1,"dropout":1}},{"gid":"G371116","name":"","fw":"V667","cap":"6Ah","act":7.35,"idle":160.5,"di":0.153,"dt":2.509,"p95":3,"reb":2,"drop":2,"soc0":90.4,"soc1":43.8,"ac":{"excess-drain":2,"voltage-drop":1,"idle-loc":1,"reboot":2,"dropout":2}},{"gid":"G375349","name":"","fw":"V6.68","cap":"3Ah","act":2.92,"idle":165.0,"di":0.084,"dt":3.483,"p95":4,"reb":1,"drop":2,"soc0":87.8,"soc1":16.0,"ac":{"reboot":1,"dropout":2}},{"gid":"G375356","name":"","fw":"V665","cap":"3Ah","act":0.0,"idle":167.8,"di":0.226,"dt":null,"p95":null,"reb":9,"drop":5,"soc0":64.3,"soc1":86.2,"ac":{"reboot":9,"dropout":5}},{"gid":"G375372","name":"","fw":"V6.68","cap":"3Ah","act":3.05,"idle":164.8,"di":0.072,"dt":3.748,"p95":3,"reb":2,"drop":3,"soc0":96.0,"soc1":13.0,"ac":{"reboot":2,"dropout":3}},{"gid":"G375430","name":"","fw":"V6.68","cap":"6Ah","act":2.64,"idle":165.2,"di":0.078,"dt":1.96,"p95":8,"reb":3,"drop":3,"soc0":83.2,"soc1":1.5,"ac":{"excess-drain":1,"idle-loc":1,"reboot":3,"dropout":3}},{"gid":"G375539","name":"","fw":"V6.68","cap":"3Ah","act":2.1,"idle":165.7,"di":0.07,"dt":5.075,"p95":7,"reb":0,"drop":1,"soc0":93.5,"soc1":13.6,"ac":{"dropout":1}},{"gid":"G375547","name":"","fw":"V6.68","cap":"6Ah","act":7.67,"idle":160.1,"di":0.115,"dt":1.898,"p95":5,"reb":0,"drop":0,"soc0":86.9,"soc1":33.0,"ac":{"excess-drain":2}},{"gid":"G375562","name":"","fw":"V6.68","cap":"3Ah","act":2.47,"idle":165.3,"di":0.074,"dt":5.112,"p95":3,"reb":1,"drop":2,"soc0":89.6,"soc1":10.5,"ac":{"excess-drain":1,"reboot":1,"dropout":2}},{"gid":"G378517","name":"","fw":"V667","cap":"6Ah","act":6.68,"idle":161.1,"di":0.085,"dt":2.38,"p95":4,"reb":0,"drop":1,"soc0":86.2,"soc1":41.4,"ac":{"excess-drain":2,"idle-loc":4,"dropout":1}},{"gid":"G378657","name":"","fw":"V6.68","cap":"3Ah","act":2.2,"idle":165.6,"di":0.225,"dt":4.055,"p95":4,"reb":2,"drop":2,"soc0":87.7,"soc1":21.0,"ac":{"voltage-drop":1,"reboot":2,"dropout":2}},{"gid":"G378723","name":"","fw":"V6.68","cap":"6Ah","act":11.87,"idle":155.9,"di":0.113,"dt":1.525,"p95":3,"reb":1,"drop":1,"soc0":84.2,"soc1":33.5,"ac":{"idle-loc":1,"replay":1,"reboot":1,"dropout":1}},{"gid":"G378830","name":"","fw":"V6.68","cap":"6Ah","act":3.07,"idle":164.7,"di":0.086,"dt":2.792,"p95":5,"reb":0,"drop":0,"soc0":85.5,"soc1":44.7,"ac":{"excess-drain":2}},{"gid":"G378848","name":"","fw":"V6.68","cap":"6Ah","act":7.47,"idle":160.3,"di":0.116,"dt":2.455,"p95":5,"reb":0,"drop":0,"soc0":92.3,"soc1":41.4,"ac":{"excess-drain":1}},{"gid":"G380521","name":"","fw":"V667","cap":"6Ah","act":7.59,"idle":160.2,"di":0.13,"dt":2.533,"p95":2,"reb":3,"drop":1,"soc0":90.2,"soc1":46.8,"ac":{"excess-drain":1,"voltage-drop":2,"idle-loc":3,"reboot":3,"dropout":1}},{"gid":"G388862","name":"","fw":"V667","cap":"6Ah","act":6.66,"idle":161.2,"di":0.13,"dt":2.249,"p95":3,"reb":3,"drop":1,"soc0":90.1,"soc1":26.6,"ac":{"excess-drain":2,"idle-loc":3,"reboot":3,"dropout":1}},{"gid":"G388920","name":"","fw":"V667","cap":"6Ah","act":5.58,"idle":162.2,"di":0.114,"dt":2.767,"p95":4,"reb":1,"drop":1,"soc0":84.7,"soc1":43.1,"ac":{"excess-drain":2,"idle-loc":4,"reboot":1,"dropout":1}},{"gid":"G594715","name":"","fw":"V667","cap":"6Ah","act":6.65,"idle":161.2,"di":0.085,"dt":1.67,"p95":8,"reb":0,"drop":0,"soc0":91.8,"soc1":51.2,"ac":{"excess-drain":1,"idle-loc":1}},{"gid":"G623050","name":"","fw":"V667","cap":"6Ah","act":6.39,"idle":161.4,"di":0.091,"dt":2.356,"p95":3,"reb":2,"drop":1,"soc0":86.2,"soc1":51.3,"ac":{"idle-loc":4,"reboot":2,"dropout":1}}],"tabs":{"V667/6Ah":{"units":20,"hours_active":114.88999999999999,"hours_idle":3241.39,"counts":{"idle-loc":46,"reboot":25,"dropout":20,"excess-drain":20,"sos":1,"replay":3,"voltage-drop":3},"gids":["G187547","G304307","G306088","G334023","G334189","G341846","G341887","G347082","G348635","G370498","G370589","G370977","G371074","G371116","G378517","G380521","G388862","G388920","G594715","G623050"],"idle_drain_med":0.098,"track_drain_med":2.273,"lag_p95_med":3.0,"rates_per_10h":{"idle-loc":0.142,"reboot":0.074,"dropout":0.06,"excess-drain":0.06,"sos":0.003,"replay":0.261,"voltage-drop":0.009}},"V6.63/3Ah":{"units":1,"hours_active":2.2,"hours_idle":165.61,"counts":{"excess-drain":1,"reboot":1,"dropout":2},"gids":["G226122"],"idle_drain_med":0.083,"track_drain_med":3.245,"lag_p95_med":4,"rates_per_10h":{"excess-drain":0.06,"reboot":0.06,"dropout":0.119}},"V6.68/6Ah":{"units":10,"hours_active":48.68,"hours_idle":1629.39,"counts":{"excess-drain":13,"reboot":7,"dropout":6,"idle-loc":3,"replay":1},"gids":["G306161","G312300","G312326","G312334","G312359","G375430","G375547","G378723","G378830","G378848"],"idle_drain_med":0.101,"track_drain_med":2.474,"lag_p95_med":5.0,"rates_per_10h":{"excess-drain":0.077,"reboot":0.042,"dropout":0.036,"idle-loc":0.018,"replay":0.205}},"V6.68/3Ah":{"units":9,"hours_active":22.2,"hours_idle":1488.19,"counts":{"dropout":15,"excess-drain":3,"voltage-drop":2,"reboot":8},"gids":["G312243","G312268","G312292","G312342","G375349","G375372","G375539","G375562","G378657"],"idle_drain_med":0.072,"track_drain_med":4.406,"lag_p95_med":4,"rates_per_10h":{"dropout":0.099,"excess-drain":0.02,"voltage-drop":0.013,"reboot":0.053}},"V665/3Ah":{"units":1,"hours_active":0.0,"hours_idle":167.81,"counts":{"reboot":9,"dropout":5},"gids":["G375356"],"idle_drain_med":0.226,"track_drain_med":null,"lag_p95_med":null,"rates_per_10h":{"reboot":0.536,"dropout":0.298}}},"events":[{"ts":"2026-07-05 12:07:53.484","end":"2026-07-05 12:08:23.654","kind":"server-restart","logins":41,"reboots":0},{"ts":"2026-07-05 12:17:37.643","end":"2026-07-05 12:18:08.982","kind":"server-restart","logins":41,"reboots":0},{"ts":"2026-07-05 20:08:34.948","end":"2026-07-05 20:08:57.491","kind":"server-restart","logins":5,"reboots":0},{"ts":"2026-07-07 01:53:17.621","end":"2026-07-07 02:01:10.339","kind":"mass-device-reboot","logins":17,"reboots":17},{"ts":"2026-07-07 18:59:27.492","end":"2026-07-07 18:59:58.057","kind":"server-restart","logins":19,"reboots":0},{"ts":"2026-07-08 05:41:18.786","end":"2026-07-08 05:43:08.288","kind":"server-restart","logins":8,"reboots":0},{"ts":"2026-07-08 18:13:37.542","end":"2026-07-08 18:14:10.037","kind":"server-restart","logins":32,"reboots":0},{"ts":"2026-07-09 04:09:48.418","end":"2026-07-09 04:10:16.228","kind":"server-restart","logins":32,"reboots":0},{"ts":"2026-07-09 06:09:49.746","end":"2026-07-09 06:10:04.193","kind":"server-restart","logins":39,"reboots":0},{"ts":"2026-07-09 16:43:09.402","end":"2026-07-09 16:43:51.197","kind":"server-restart","logins":4,"reboots":0}],"fleet_v":[[1783173600,4.1,41],[1783177200,4.1,41],[1783180800,4.1,41],[1783184400,4.09,41],[1783188000,4.09,41],[1783191600,4.09,41],[1783195200,4.09,41],[1783198800,4.09,41],[1783202400,4.09,41],[1783206000,4.09,41],[1783209600,4.08,41],[1783213200,4.08,41],[1783216800,4.08,41],[1783220400,4.08,41],[1783224000,4.06,41],[1783227600,4.11,41],[1783231200,4.15,41],[1783234800,4.17,41],[1783238400,4.16,41],[1783242000,4.15,41],[1783245600,4.15,41],[1783249200,4.15,41],[1783252800,4.15,41],[1783256400,4.15,41],[1783260000,4.15,41],[1783263600,4.15,41],[1783267200,4.15,41],[1783270800,4.14,41],[1783274400,4.14,41],[1783278000,4.14,41],[1783281600,4.13,41],[1783285200,4.16,41],[1783288800,4.16,41],[1783292400,4.16,41],[1783296000,4.15,41],[1783299600,4.15,41],[1783303200,4.16,40],[1783306800,4.16,41],[1783310400,4.15,40],[1783314000,4.15,40],[1783317600,4.15,40],[1783321200,4.15,40],[1783324800,4.15,40],[1783328400,4.17,40],[1783332000,4.16,40],[1783335600,4.15,40],[1783339200,4.15,40],[1783342800,4.14,40],[1783346400,4.14,40],[1783350000,4.14,40],[1783353600,4.12,40],[1783357200,4.115,40],[1783360800,4.11,40],[1783364400,4.11,40],[1783368000,4.11,40],[1783371600,4.11,40],[1783375200,4.155,40],[1783378800,4.162,40],[1783382400,4.15,39],[1783386000,4.145,40],[1783389600,4.14,40],[1783393200,4.14,40],[1783396800,4.16,40],[1783400400,4.165,40],[1783404000,4.16,40],[1783407600,4.16,40],[1783411200,4.16,40],[1783414800,4.16,40],[1783418400,4.16,40],[1783422000,4.16,39],[1783425600,4.15,39],[1783429200,4.15,39],[1783432800,4.15,39],[1783436400,4.15,39],[1783440000,4.15,39],[1783443600,4.14,39],[1783447200,4.14,39],[1783450800,4.14,39],[1783454400,4.14,39],[1783458000,4.14,39],[1783461600,4.14,39],[1783465200,4.13,39],[1783468800,4.13,39],[1783472400,4.13,39],[1783476000,4.13,36],[1783479600,4.13,37],[1783483200,4.13,37],[1783486800,4.12,39],[1783490400,4.12,39],[1783494000,4.12,39],[1783497600,4.12,39],[1783501200,4.12,39],[1783504800,4.12,39],[1783508400,4.12,39],[1783512000,4.12,39],[1783515600,4.11,39],[1783519200,4.11,39],[1783522800,4.11,39],[1783526400,4.11,39],[1783530000,4.11,39],[1783533600,4.11,39],[1783537200,4.11,39],[1783540800,4.11,39],[1783544400,4.1,40],[1783548000,4.1,40],[1783551600,4.1,40],[1783555200,4.1,23],[1783558800,4.06,40],[1783562400,4.06,40],[1783566000,4.06,40],[1783569600,4.09,25],[1783573200,4.055,40],[1783576800,4.05,40],[1783580400,4.05,40],[1783584000,4.05,40],[1783587600,4.04,40],[1783591200,4.045,40],[1783594800,4.045,40],[1783598400,4.045,40],[1783602000,4.045,40],[1783605600,4.045,40],[1783609200,4.04,40],[1783612800,4.04,40],[1783616400,4.04,40],[1783620000,4.035,40],[1783623600,4.035,40],[1783627200,4.035,40],[1783630800,4.035,40],[1783634400,4.02,39],[1783638000,4.02,39],[1783641600,3.75,33],[1783645200,3.76,39],[1783648800,3.76,39],[1783652400,3.76,20],[1783656000,3.73,39],[1783659600,3.75,39],[1783663200,3.75,38],[1783666800,3.75,37],[1783670400,3.75,36],[1783674000,3.75,36],[1783677600,3.745,36],[1783681200,3.745,36],[1783684800,3.745,36],[1783688400,3.745,36],[1783692000,3.745,36],[1783695600,3.745,36],[1783699200,3.745,36],[1783702800,3.74,35],[1783706400,3.74,35],[1783710000,3.74,35],[1783713600,3.74,35],[1783717200,3.75,33],[1783720800,3.75,32],[1783724400,3.75,30],[1783728000,3.75,30],[1783731600,3.75,31],[1783735200,3.75,30],[1783738800,3.75,29],[1783742400,3.75,27],[1783746000,3.75,27],[1783749600,3.74,27],[1783753200,3.74,27],[1783756800,3.74,27],[1783760400,3.74,27],[1783764000,3.74,27],[1783767600,3.74,27],[1783771200,3.74,27],[1783774800,3.73,27]],"outage":[[60,40],[61,40],[62,40],[63,40],[64,40],[65,40],[66,40],[67,40],[68,40],[69,40],[70,40],[71,40],[72,40],[73,40],[74,40],[75,40],[76,40],[77,40],[78,40],[79,40],[80,40],[81,40],[82,40],[83,40],[84,40],[85,40],[86,40],[87,40],[88,40],[89,40],[90,40],[91,40],[92,40],[93,40],[94,40],[95,37],[96,24],[97,22],[98,23],[99,23],[100,23],[101,20],[102,20],[103,18],[104,18],[105,17],[106,17],[107,16],[108,16],[109,16],[110,17],[111,19],[112,19],[113,25],[114,29],[115,31],[116,33],[117,35],[118,35],[119,35],[120,38],[121,40],[122,40],[123,40],[124,40],[125,40],[126,40],[127,40],[128,40],[129,40],[130,40],[131,40],[132,40],[133,40],[134,40],[135,40],[136,40],[137,40],[138,40],[139,40],[140,40],[141,40],[142,40],[143,40],[144,40],[145,40],[146,40],[147,40],[148,40],[149,40]]};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const FW = {"V667":"--s-v667","V6.68":"--s-v668","V6.63":"--s-v663","V665":"--s-bench"};
+const fwName = {"V667":"NT19D V667","V6.68":"W07 V6.68","V6.63":"W07 V6.63","V665":"V665 (bench)"};
+const NS="http://www.w3.org/2000/svg";
+function el(n,a,parent){const e=document.createElementNS(NS,n);
+  for(const k in a)e.setAttribute(k,a[k]); if(parent)parent.appendChild(e); return e;}
+function tip(wrap){const t=document.createElement('div');t.className='tip';
+  wrap.appendChild(t);return t;}
+function hm(ts){const d=new Date(ts*1000);
+  return String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+
+/* ---- chart 1: fleet median voltage over the week ---- */
+(function(){
+  const wrap=document.getElementById('c1'), W=1000, H=260,
+        m={l:46,r:12,t:10,b:26};
+  const pts=D.fleet_v;
+  const x0=pts[0][0], x1=pts[pts.length-1][0];
+  const vmin=3.55, vmax=4.2;
+  const X=t=>m.l+(t-x0)/(x1-x0)*(W-m.l-m.r);
+  const Y=v=>m.t+(vmax-v)/(vmax-vmin)*(H-m.t-m.b);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},wrap);
+  // race windows (approx: active-hour blocks) & charging waves for context
+  const races=[[1783545000,1783562000],[1783628700,1783648000],[1783715000,1783729000]];
+  const charg=[[1783190000,1783212000],[1783270000,1783302000],[1783359500,1783383000]];
+  charg.forEach(([a,b])=>el('rect',{x:X(a),y:m.t,width:X(b)-X(a),
+    height:H-m.t-m.b,fill:css('--chg')},svg));
+  races.forEach(([a,b])=>el('rect',{x:X(a),y:m.t,width:X(b)-X(a),
+    height:H-m.t-m.b,fill:css('--race')},svg));
+  for(let v=3.6;v<=4.2001;v+=0.1){
+    el('line',{x1:m.l,x2:W-m.r,y1:Y(v),y2:Y(v),stroke:css('--grid'),
+      'stroke-width':1},svg);
+    el('text',{x:m.l-6,y:Y(v)+4,'text-anchor':'end'},svg).textContent=v.toFixed(1);
+  }
+  const d0=new Date(x0*1000); d0.setHours(0,0,0,0);
+  for(let d=1;d<9;d++){
+    const t=d0.getTime()/1000+d*86400; if(t<x0||t>x1)continue;
+    el('line',{x1:X(t),x2:X(t),y1:m.t,y2:H-m.b,stroke:css('--axis'),
+      'stroke-width':1,'stroke-dasharray':'2 3'},svg);
+    el('text',{x:X(t)+4,y:H-m.b+16},svg).textContent=hm(t);
+  }
+  const path=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join('');
+  el('path',{d:path,fill:'none',stroke:css('--s-v667'),'stroke-width':2},svg);
+  const t=tip(wrap), cross=el('line',{y1:m.t,y2:H-m.b,stroke:css('--axis'),
+    'stroke-width':1,visibility:'hidden'},svg);
+  svg.addEventListener('mousemove',ev=>{
+    const r=svg.getBoundingClientRect(), fx=(ev.clientX-r.left)/r.width*W;
+    let best=pts[0];
+    for(const p of pts) if(Math.abs(X(p[0])-fx)<Math.abs(X(best[0])-fx)) best=p;
+    cross.setAttribute('x1',X(best[0]));cross.setAttribute('x2',X(best[0]));
+    cross.setAttribute('visibility','visible');
+    const d=new Date(best[0]*1000);
+    t.style.display='block';
+    t.style.left=Math.min(ev.clientX-r.left+14, r.width-150)+'px';
+    t.style.top=(ev.clientY-r.top-30)+'px';
+    t.textContent=`${hm(best[0])} ${String(d.getHours()).padStart(2,'0')}:00 — ${best[1].toFixed(2)} V (${best[2]} units)`;
+  });
+  svg.addEventListener('mouseleave',()=>{t.style.display='none';
+    cross.setAttribute('visibility','hidden');});
+  document.getElementById('lg1').innerHTML=
+    `<span><span class="sw" style="background:${css('--s-v667')}"></span>fleet median resting V</span>`+
+    `<span><span class="sw" style="background:${css('--chg')}"></span>charging waves</span>`+
+    `<span><span class="sw" style="background:${css('--race')}"></span>race windows</span>`;
+})();
+
+/* ---- chart 2: outage minute series ---- */
+(function(){
+  const wrap=document.getElementById('c2'), W=1000, H=220,
+        m={l:40,r:12,t:10,b:26};
+  const pts=D.outage;               // [minute-of-day, units]
+  const x0=pts[0][0], x1=pts[pts.length-1][0];
+  const X=mn=>m.l+(mn-x0)/(x1-x0)*(W-m.l-m.r);
+  const Y=n=>m.t+(42-n)/42*(H-m.t-m.b);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},wrap);
+  [0,10,20,30,40].forEach(n=>{
+    el('line',{x1:m.l,x2:W-m.r,y1:Y(n),y2:Y(n),stroke:css('--grid')},svg);
+    el('text',{x:m.l-6,y:Y(n)+4,'text-anchor':'end'},svg).textContent=n;});
+  for(let mn=60;mn<=150;mn+=15){
+    el('text',{x:X(mn),y:H-m.b+16,'text-anchor':'middle'},svg)
+      .textContent=`0${Math.floor(mn/60)}:${String(mn%60).padStart(2,'0')}`;}
+  const path=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join('');
+  el('path',{d:path,fill:'none',stroke:css('--s-v667'),'stroke-width':2},svg);
+  // annotate
+  el('text',{x:X(96),y:Y(16)-10,class:'lbl','text-anchor':'middle'},svg)
+    .textContent='16 units unaffected';
+  el('text',{x:X(113)+6,y:Y(30),class:'lbl'},svg)
+    .textContent='mass reboot & re-login 01:50–02:01';
+  const t=tip(wrap);
+  svg.addEventListener('mousemove',ev=>{
+    const r=svg.getBoundingClientRect(), fx=(ev.clientX-r.left)/r.width*W;
+    let best=pts[0];
+    for(const p of pts) if(Math.abs(X(p[0])-fx)<Math.abs(X(best[0])-fx)) best=p;
+    t.style.display='block';
+    t.style.left=Math.min(ev.clientX-r.left+14,r.width-140)+'px';
+    t.style.top=(ev.clientY-r.top-30)+'px';
+    t.textContent=`0${Math.floor(best[0]/60)}:${String(best[0]%60).padStart(2,'0')} — ${best[1]} units in contact`;
+  });
+  svg.addEventListener('mouseleave',()=>t.style.display='none');
+})();
+
+/* ---- cross-tab table ---- */
+(function(){
+  const tb=document.getElementById('tabs');
+  const order=["V6.63/3Ah","V6.68/3Ah","V6.68/6Ah","V667/6Ah","V665/3Ah"];
+  let h='<tr><th>group</th><th>units</th><th>active h</th><th>idle h</th>'+
+        '<th>idle-LOC /10h</th><th>replay /10h</th><th>idle drain %/h</th><th>lag p95 med</th></tr>';
+  for(const k of order){
+    const t=D.tabs[k]; if(!t)continue;
+    const fw=k.split('/')[0];
+    h+=`<tr><td><span class="fwdot" style="background:${css(FW[fw])}"></span>${fwName[fw]} · ${k.split('/')[1]}</td>`+
+       `<td>${t.units}</td><td>${t.hours_active.toFixed(0)}</td><td>${t.hours_idle.toFixed(0)}</td>`+
+       `<td>${(t.rates_per_10h['idle-loc']||0).toFixed(3)}</td>`+
+       `<td>${(t.rates_per_10h['replay']||0).toFixed(2)}</td>`+
+       `<td>${t.idle_drain_med==null?'—':t.idle_drain_med.toFixed(2)}</td>`+
+       `<td>${t.lag_p95_med==null?'—':t.lag_p95_med}</td></tr>`;
+  }
+  tb.innerHTML=h;
+})();
+
+/* ---- chart 3: end-of-week SoC bars ---- */
+(function(){
+  const wrap=document.getElementById('c3');
+  const rows=D.units.filter(u=>u.soc1!=null&&u.gid!=='G375356')
+                    .sort((a,b)=>a.soc1-b.soc1);
+  const W=1000, bh=13, gap=2, m={l:76,r:40,t:6,b:22},
+        H=m.t+m.b+rows.length*(bh+gap);
+  const X=v=>m.l+v/100*(W-m.l-m.r);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%'},wrap);
+  [0,25,50,75,100].forEach(v=>{
+    el('line',{x1:X(v),x2:X(v),y1:m.t,y2:H-m.b,stroke:css('--grid')},svg);
+    el('text',{x:X(v),y:H-m.b+14,'text-anchor':'middle'},svg).textContent=v+'%';});
+  const t=tip(wrap);
+  rows.forEach((u,i)=>{
+    const y=m.t+i*(bh+gap);
+    el('text',{x:m.l-6,y:y+bh-3,'text-anchor':'end',
+      style:'font-family:ui-monospace,monospace'},svg).textContent=u.gid;
+    const r=el('rect',{x:X(0),y:y,width:Math.max(2,X(u.soc1)-X(0)),height:bh,
+      rx:2,fill:css(FW[u.fw]||'--s-v667')},svg);
+    el('text',{x:X(u.soc1)+5,y:y+bh-3,class:'lbl'},svg)
+      .textContent=u.soc1.toFixed(0);
+    r.addEventListener('mousemove',ev=>{
+      const rc=svg.getBoundingClientRect();
+      t.style.display='block';
+      t.style.left=Math.min(ev.clientX-rc.left+14,rc.width-180)+'px';
+      t.style.top=(ev.clientY-rc.top-30)+'px';
+      t.textContent=`${u.gid} ${u.name||''} — ${u.soc1.toFixed(1)} % (${fwName[u.fw]}, ${u.cap})`;
+    });
+    r.addEventListener('mouseleave',()=>t.style.display='none');
+  });
+  document.getElementById('lg3').innerHTML=
+    Object.keys(FW).filter(f=>f!=='V665').map(f=>
+      `<span><span class="sw" style="background:${css(FW[f])}"></span>${fwName[f]}</span>`).join('');
+})();
+
+/* ---- per-unit table ---- */
+(function(){
+  const tb=document.getElementById('units');
+  let h='<tr><th>unit</th><th>fw</th><th>cap</th><th>act h</th><th>idle h</th>'+
+        '<th>di %/h</th><th>dt %/h</th><th>p95 s</th><th>reboots</th>'+
+        '<th>SoC end</th><th>anoms</th></tr>';
+  const rows=[...D.units].sort((a,b)=>{
+    const na=Object.values(a.ac).reduce((x,y)=>x+y,0),
+          nb=Object.values(b.ac).reduce((x,y)=>x+y,0);
+    return nb-na;});
+  for(const u of rows){
+    const n=Object.values(u.ac).reduce((x,y)=>x+y,0);
+    const chip = n>=6?'c-crit':(n>=3?'c-warn':'c-ok');
+    const acs=Object.entries(u.ac).map(([k,v])=>`${k}:${v}`).join(' ');
+    h+=`<tr><td>${u.gid}${u.gid==='G375356'?' (bench)':''}</td>`+
+       `<td><span class="fwdot" style="background:${css(FW[u.fw]||'--s-v667')}"></span>${u.fw}</td>`+
+       `<td>${u.cap}</td><td>${u.act.toFixed(1)}</td><td>${u.idle.toFixed(0)}</td>`+
+       `<td>${u.di==null?'—':u.di.toFixed(2)}</td><td>${u.dt==null?'—':u.dt.toFixed(2)}</td>`+
+       `<td>${u.p95==null?'—':u.p95}</td><td>${u.reb||'—'}</td>`+
+       `<td>${u.soc1==null?'—':u.soc1.toFixed(0)+'%'}</td>`+
+       `<td style="text-align:left"><span class="chip ${chip}" title="${acs}">${n||'0'}</span> <span class="note">${acs}</span></td></tr>`;
+  }
+  tb.innerHTML=h;
+})();
+</script>
+
+</body>
+</html>
