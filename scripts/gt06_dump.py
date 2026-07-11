@@ -361,6 +361,23 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False, lag_filter=
 CXZT_ID_RE = re.compile(r"\*ID:(\d+)\*")
 
 
+def identity_from_frame(proto, data, outgoing):
+    """IMEI digits carried by an incoming frame, else None.
+
+    Sources: LOGIN (0x01), the synthetic rotation marker (0xFA), and cxzt
+    command replies (0x15 with an *ID:<digits>* field). Lets every log reader
+    attribute rolled-over streams whose LOGIN is in the previous file."""
+    if outgoing:
+        return None
+    if proto in (0x01, GT06_PROTO_LOG_IMEI):
+        return gt06_parse_login(data) or None
+    if proto == 0x15 and len(data) >= 5:
+        m = CXZT_ID_RE.search(data[5:].decode("ascii", errors="replace"))
+        if m:
+            return m.group(1)
+    return None
+
+
 class ConnIdentityTracker:
     """conn_id -> IMEI map, most-recent-identity-wins (conn ids are reused
     across server restarts, so a static map would mix devices).
@@ -379,21 +396,14 @@ class ConnIdentityTracker:
     def feed(self, conn_id, outgoing, result):
         """result = validate_frame(frame). Returns the identity source name
         ('login'/'marker'/'cxzt') when this frame carried identity, else None."""
-        if result is None or outgoing:
+        if result is None:
             return None
         protocol, data = result[0], result[1]
-        if protocol in (0x01, GT06_PROTO_LOG_IMEI):
-            imei = gt06_parse_login(data)
-            if imei:
-                self.conn_cur[conn_id] = imei
-                return "login" if protocol == 0x01 else "marker"
-        elif protocol == 0x15 and len(data) >= 5:
-            text = data[5:].decode("ascii", errors="replace")
-            m = CXZT_ID_RE.search(text)
-            if m:
-                self.conn_cur[conn_id] = m.group(1)
-                return "cxzt"
-        return None
+        imei = identity_from_frame(protocol, data, outgoing)
+        if not imei:
+            return None
+        self.conn_cur[conn_id] = imei
+        return {0x01: "login", GT06_PROTO_LOG_IMEI: "marker"}.get(protocol, "cxzt")
 
     def get(self, conn_id):
         return self.conn_cur.get(conn_id)

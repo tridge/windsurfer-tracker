@@ -39,20 +39,23 @@ from gt06_frames import build_frame, build_login_data  # noqa: E402
 
 
 def scan(path):
-    """Single pass. Returns (has_marker, needs, no_identity, n_records) where
-    needs = [(conn_id, first_frame_ts, imei), ...] for connections whose first
-    frame is not a login but whose identity appears later in the file."""
+    """Single pass. Returns (has_marker, needs, no_identity, n_records,
+    file_first_ts) where needs = [(conn_id, imei), ...] for connections whose
+    first frame is not a login but whose identity appears later in the file."""
     first_ts = {}        # conn_id -> ts of its first frame in this file
     first_is_login = {}  # conn_id -> True if that first frame was a login
     identity = {}        # conn_id -> first identity seen (login or cxzt)
     has_marker = False
     n = 0
+    file_first_ts = None
     with open(path, "rb") as f:
         fmt = detect_format(f)
         if fmt != "v2":
             return None
         for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
             n += 1
+            if file_first_ts is None:
+                file_first_ts = ts
             result = validate_frame(frame)
             proto = result[0] if result else None
             if proto == GT06_PROTO_LOG_IMEI:
@@ -64,48 +67,65 @@ def scan(path):
                 imei = identity_from_frame(proto, result[1], outgoing)
                 if imei:
                     identity[conn_id] = imei
-    needs = [(cid, first_ts[cid], identity[cid])
+    needs = [(cid, identity[cid])
              for cid in sorted(first_ts, key=lambda c: first_ts[c])
              if not first_is_login[cid] and cid in identity]
     no_identity = [cid for cid in first_ts
                    if not first_is_login[cid] and cid not in identity]
-    return has_marker, needs, no_identity, n
+    return has_marker, needs, no_identity, n, file_first_ts
 
 
-def rewrite(path, needs, n_orig):
-    """Prepend one 0xFA record per entry in `needs`. Atomic + validated."""
+class RewriteError(Exception):
+    pass
+
+
+def rewrite(path, needs, n_orig, marker_ts):
+    """Prepend one 0xFA record per entry in `needs`, all timestamped with the
+    file's first record time (matching live rotation injection, and keeping
+    record timestamps ordered). Atomic + validated; the original file is never
+    touched until the fully-validated temp is renamed over it."""
     injected = b""
-    for conn_id, ts, imei in needs:
+    for conn_id, imei in needs:
         frame = build_frame(GT06_PROTO_LOG_IMEI, build_login_data(imei), 0)
-        injected += struct.pack("<dIH", ts, conn_id & 0x7FFFFFFF, len(frame)) + frame
+        injected += struct.pack("<dIH", marker_ts, conn_id & 0x7FFFFFFF,
+                                len(frame)) + frame
 
     orig_bytes = path.read_bytes()
-    assert orig_bytes.startswith(GT06_LOG_MAGIC_V2)
-    tmp = path.with_name(path.name + ".tmp-imeiid")
-    tmp.write_bytes(GT06_LOG_MAGIC_V2 + injected
-                    + orig_bytes[len(GT06_LOG_MAGIC_V2):])
+    if not orig_bytes.startswith(GT06_LOG_MAGIC_V2):
+        raise RewriteError("not a v2 log (magic missing)")
+    tmp = path.with_name(f"{path.name}.tmp-imeiid.{os.getpid()}")
+    try:
+        tmp.write_bytes(GT06_LOG_MAGIC_V2 + injected
+                        + orig_bytes[len(GT06_LOG_MAGIC_V2):])
 
-    # Validate the rewrite before replacing the archive: full re-parse, record
-    # count, and the injected markers decode to the expected identities.
-    with open(tmp, "rb") as f:
-        fmt = detect_format(f)
-        assert fmt == "v2", "temp file lost its magic"
-        recs = 0
-        for i, (ts, conn_id, outgoing, frame) in enumerate(read_packets(f, fmt=fmt)):
-            if i < len(needs):
-                result = validate_frame(frame)
-                assert result and result[0] == GT06_PROTO_LOG_IMEI, \
-                    f"record {i} is not a 0xFA marker"
-                exp_cid, exp_ts, exp_imei = needs[i]
-                assert conn_id == exp_cid and not outgoing
-                assert identity_from_frame(result[0], result[1], outgoing) == exp_imei
-            recs += 1
-        assert recs == n_orig + len(needs), \
-            f"record count mismatch: {recs} != {n_orig}+{len(needs)}"
+        # Validate the rewrite before replacing the archive: full re-parse,
+        # record count, and the injected markers decode (CRC-valid) to the
+        # expected identities. Explicit raises, not asserts (-O safe).
+        with open(tmp, "rb") as f:
+            if detect_format(f) != "v2":
+                raise RewriteError("temp file lost its magic")
+            recs = 0
+            for i, (ts, conn_id, outgoing, frame) in enumerate(
+                    read_packets(f, fmt="v2")):
+                if i < len(needs):
+                    result = validate_frame(frame)
+                    if not result or result[0] != GT06_PROTO_LOG_IMEI or not result[3]:
+                        raise RewriteError(f"record {i} is not a CRC-valid 0xFA marker")
+                    exp_cid, exp_imei = needs[i]
+                    if conn_id != exp_cid or outgoing or ts != marker_ts:
+                        raise RewriteError(f"record {i} header mismatch")
+                    if identity_from_frame(result[0], result[1], outgoing) != exp_imei:
+                        raise RewriteError(f"record {i} IMEI mismatch")
+                recs += 1
+            if recs != n_orig + len(needs):
+                raise RewriteError(
+                    f"record count mismatch: {recs} != {n_orig}+{len(needs)}")
 
-    st = path.stat()
-    os.replace(tmp, path)
-    os.utime(path, (st.st_atime, st.st_mtime))  # archive mtime = rotation date
+        st = path.stat()
+        os.replace(tmp, path)
+        os.utime(path, (st.st_atime, st.st_mtime))  # archive mtime = rotation date
+    finally:
+        tmp.unlink(missing_ok=True)  # no-op after a successful os.replace
 
 
 def main():
@@ -121,11 +141,17 @@ def main():
         if not path.exists():
             print(f"{path}: not found", file=sys.stderr)
             continue
+        if path.name == "gt06.log":
+            # A live log's writer holds the old inode across os.replace — frames
+            # appended during the rewrite would be lost. Archives only.
+            print(f"{path}: looks like the LIVE log — skipped (archives only)",
+                  file=sys.stderr)
+            continue
         res = scan(path)
         if res is None:
             print(f"{path.name}: v1 log (no conn ids) — skipped")
             continue
-        has_marker, needs, no_identity, n = res
+        has_marker, needs, no_identity, n, file_first_ts = res
         if has_marker:
             print(f"{path.name}: already has IMEI-ID markers — skipped")
             continue
@@ -135,12 +161,13 @@ def main():
             print(f"{path.name}: nothing to add ({n} records{extra})")
             continue
         if args.write:
-            rewrite(path, needs, n)
+            rewrite(path, needs, n, file_first_ts)
             print(f"{path.name}: injected {len(needs)} IMEI-ID marker(s){extra}")
         else:
-            print(f"{path.name}: would inject {len(needs)} marker(s){extra}:")
-            for cid, ts, imei in needs:
-                print(f"    conn {cid:<6d} {fmt_time(ts)}  IMEI={imei}")
+            print(f"{path.name}: would inject {len(needs)} marker(s) at "
+                  f"{fmt_time(file_first_ts)}{extra}:")
+            for cid, imei in needs:
+                print(f"    conn {cid:<6d} IMEI={imei}")
 
 
 if __name__ == "__main__":
