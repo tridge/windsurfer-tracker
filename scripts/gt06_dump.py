@@ -13,6 +13,7 @@ stream IDs to filter on).
 """
 
 import sys
+import re
 import struct
 import time
 import argparse
@@ -34,6 +35,7 @@ from protocol_GT06 import (
     gt06_crc_itu,
     GT06_LOG_MAGIC_V2,
     GT06_LOG_DIR_OUT,
+    GT06_PROTO_LOG_IMEI,
 )
 
 V1_HEADER_SIZE = 10  # 8 (float64) + 2 (uint16)
@@ -189,6 +191,12 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False, lag_filter=
         print(f"{ts_str}  LOGIN   IMEI={imei}{crc_tag}")
         if verbose:
             print(f"           serial={serial}  raw={data.hex()}")
+
+    elif protocol == GT06_PROTO_LOG_IMEI:
+        # Synthetic log-rotation identity marker (not a device frame, not a
+        # session boundary — just conn_id -> IMEI for the fresh file)
+        imei = gt06_parse_login(data)
+        print(f"{ts_str}  IMEIID  IMEI={imei}{crc_tag}")
 
     elif protocol in (0x12, 0x22):
         # Location
@@ -349,6 +357,48 @@ def dump_packet(ts, frame, verbose=False, conn_id=0, outgoing=False, lag_filter=
             print(f"           serial={serial}")
 
 
+# cxzt reply identity field, e.g. "...*ID:788276404187547*..."
+CXZT_ID_RE = re.compile(r"\*ID:(\d+)\*")
+
+
+class ConnIdentityTracker:
+    """conn_id -> IMEI map, most-recent-identity-wins (conn ids are reused
+    across server restarts, so a static map would mix devices).
+
+    Identity sources, so a rotated file self-identifies without the previous
+    file's LOGIN:
+      * incoming LOGIN (0x01)
+      * the synthetic IMEI-ID marker (0xFA) injected at log rotation
+      * incoming cxzt command responses (0x15 with an *ID:<digits>* field,
+        polled every ~15 min)
+    """
+
+    def __init__(self):
+        self.conn_cur = {}
+
+    def feed(self, conn_id, outgoing, result):
+        """result = validate_frame(frame). Returns the identity source name
+        ('login'/'marker'/'cxzt') when this frame carried identity, else None."""
+        if result is None or outgoing:
+            return None
+        protocol, data = result[0], result[1]
+        if protocol in (0x01, GT06_PROTO_LOG_IMEI):
+            imei = gt06_parse_login(data)
+            if imei:
+                self.conn_cur[conn_id] = imei
+                return "login" if protocol == 0x01 else "marker"
+        elif protocol == 0x15 and len(data) >= 5:
+            text = data[5:].decode("ascii", errors="replace")
+            m = CXZT_ID_RE.search(text)
+            if m:
+                self.conn_cur[conn_id] = m.group(1)
+                return "cxzt"
+        return None
+
+    def get(self, conn_id):
+        return self.conn_cur.get(conn_id)
+
+
 def _imei_matches(target, imei):
     """Match user-supplied IMEI string against a parsed IMEI.
 
@@ -402,18 +452,22 @@ def main():
                 sys.exit(2)
 
     if args.list_streams:
-        # Print EVERY login with its timestamp so conn_id reuse is visible. Conn
-        # ids reset to low numbers on each server restart, so one conn_id maps to
-        # different devices over time — dedup here would hide that.
+        # Print EVERY identity event with its timestamp so conn_id reuse is
+        # visible. Conn ids reset to low numbers on each server restart, so one
+        # conn_id maps to different devices over time — dedup here would hide
+        # that. Sources: login, the 0xFA rotation marker, and cxzt replies —
+        # only the first cxzt per conn is shown (they repeat every ~15 min).
+        tracker = ConnIdentityTracker()
         with open(logpath, "rb") as f:
             fmt = detect_format(f)
             for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
                 if outgoing or not conn_id:
                     continue
-                result = validate_frame(frame)
-                if result and result[0] == 0x01:
+                prev = tracker.get(conn_id)
+                source = tracker.feed(conn_id, outgoing, validate_frame(frame))
+                if source and (source != "cxzt" or tracker.get(conn_id) != prev):
                     print(f"{fmt_time(ts)}  conn_id={conn_id}  "
-                          f"IMEI={gt06_parse_login(result[1])}")
+                          f"IMEI={tracker.get(conn_id)}  [{source}]")
         return
 
     # Optional extraction: write matching raw records to a new v2 gt06.log.
@@ -422,46 +476,67 @@ def main():
         out_fd.write(GT06_LOG_MAGIC_V2)
     written = [0]
 
-    # Attribute each frame to whoever MOST-RECENTLY logged in on its conn_id
-    # (updated live as we stream), not first-login-wins. Conn ids are reused
-    # across server restarts, so a static conn->IMEI map mixes devices.
-    def _emit(f, fmt, conn_cur):
-        for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
-            result = validate_frame(frame)
-            if result and result[0] == 0x01 and not outgoing:
-                imei = gt06_parse_login(result[1])
-                if imei:
-                    conn_cur[conn_id] = imei
-            if args.imei is not None:
-                cur = conn_cur.get(conn_id)
-                if not cur or not _imei_matches(args.imei, cur):
-                    continue
-            # Time window filtered AFTER login tracking so conn_id→IMEI is correct.
-            if args.start is not None and ts < args.start:
-                continue
-            if args.end is not None and ts > args.end:
-                continue
-            # Extraction writes the faithful v2 record (re-OR the direction bit);
-            # independent of --lag/--verbose, which are display-only.
-            if out_fd is not None:
-                raw_conn = (conn_id | GT06_LOG_DIR_OUT) if outgoing else conn_id
-                out_fd.write(struct.pack("<dIH", ts, raw_conn & 0xFFFFFFFF, len(frame)))
-                out_fd.write(frame)
-                written[0] += 1
-            dump_packet(ts, frame, verbose=args.verbose,
-                        conn_id=conn_id, outgoing=outgoing, lag_filter=args.lag)
+    # Attribute each frame to whoever MOST-RECENTLY identified on its conn_id
+    # (login / rotation marker / cxzt reply, updated live as we stream), not
+    # first-wins: conn ids are reused across server restarts, so a static
+    # conn->IMEI map mixes devices.
+    PENDING_CAP = 100_000  # per-conn pre-identity buffer bound (frames)
 
-    conn_cur = {}
+    def _emit_one(ts, conn_id, outgoing, frame):
+        # Time window filtered AFTER identity tracking so conn_id→IMEI is correct.
+        if args.start is not None and ts < args.start:
+            return
+        if args.end is not None and ts > args.end:
+            return
+        # Extraction writes the faithful v2 record (re-OR the direction bit);
+        # independent of --lag/--verbose, which are display-only.
+        if out_fd is not None:
+            raw_conn = (conn_id | GT06_LOG_DIR_OUT) if outgoing else conn_id
+            out_fd.write(struct.pack("<dIH", ts, raw_conn & 0xFFFFFFFF, len(frame)))
+            out_fd.write(frame)
+            written[0] += 1
+        dump_packet(ts, frame, verbose=args.verbose,
+                    conn_id=conn_id, outgoing=outgoing, lag_filter=args.lag)
+
+    def _emit(f, fmt, tracker, pending):
+        for ts, conn_id, outgoing, frame in read_packets(f, fmt=fmt):
+            tracker.feed(conn_id, outgoing, validate_frame(frame))
+            if args.imei is not None:
+                cur = tracker.get(conn_id)
+                if cur is None:
+                    # Identity not known yet (login/cxzt still ahead) — buffer so
+                    # the whole stream is emitted once the conn identifies itself.
+                    buf = pending.setdefault(conn_id, [])
+                    if len(buf) < PENDING_CAP:
+                        buf.append((ts, conn_id, outgoing, frame))
+                    elif len(buf) == PENDING_CAP:
+                        print(f"warning: conn {conn_id} pre-identity buffer full, "
+                              f"dropping further frames", file=sys.stderr)
+                        buf.append(None)  # sentinel: cap message printed
+                    continue
+                buf = pending.pop(conn_id, None)
+                if buf:
+                    if _imei_matches(args.imei, cur):
+                        for item in buf:
+                            if item is not None:
+                                _emit_one(*item)
+                    # else: identified as another unit — discard its buffer
+                if not _imei_matches(args.imei, cur):
+                    continue
+            _emit_one(ts, conn_id, outgoing, frame)
+
+    tracker = ConnIdentityTracker()
+    pending = {}
     try:
         with open(logpath, "rb") as f:
             fmt = detect_format(f)
             if args.follow:
-                _emit(f, fmt, conn_cur)
+                _emit(f, fmt, tracker, pending)
                 while True:
-                    _emit(f, fmt, conn_cur)
+                    _emit(f, fmt, tracker, pending)
                     time.sleep(0.5)
             else:
-                _emit(f, fmt, conn_cur)
+                _emit(f, fmt, tracker, pending)
     except KeyboardInterrupt:
         pass
     finally:
