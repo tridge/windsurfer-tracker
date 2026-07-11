@@ -27,6 +27,7 @@ from collections import defaultdict
 DIR_OUT = 0x80000000
 _BT = re.compile(rb'\*BT:(\d+)')
 _BATT = re.compile(rb'Battery:(\d+\.\d+)V')
+_CXZT_ID = re.compile(rb'\*ID:(\d+)\*')
 
 
 def walk(path):
@@ -65,7 +66,7 @@ def main():
     for ts, cid, is_out, proto, data in walk(a.log):
         if is_out:
             continue
-        if proto == 0x01:
+        if proto in (0x01, 0xFA):   # login / rotation IMEI-ID marker (same payload)
             h = data.hex().lstrip('0')
             if len(h) == 16:
                 h = h[1:]
@@ -74,6 +75,9 @@ def main():
             continue
         if proto != 0x15:
             continue
+        m = _CXZT_ID.search(data)   # cxzt reply also identifies the conn
+        if m:
+            conn_sid[cid] = a.prefix + m.group(1).decode()[-6:]
         sid = conn_sid.get(cid)
         if not sid or ts < a.start or (a.end and ts > a.end):
             continue

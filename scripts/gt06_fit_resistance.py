@@ -28,6 +28,7 @@ from collections import defaultdict
 
 DIR_OUT = 0x80000000
 _BT = re.compile(rb'\*BT:(\d+)')
+_CXZT_ID = re.compile(rb'\*ID:(\d+)\*')
 THREE = {"G312243", "G312268", "G312292", "G312342", "G375349", "G375356",
          "G375372", "G375539", "G375562", "G378657", "G226122"}
 
@@ -61,7 +62,7 @@ def idle_voltage(path, start, end, prefix='G'):
     for ts, cid, out, proto, data in walk(path):
         if out:
             continue
-        if proto == 0x01:
+        if proto in (0x01, 0xFA):   # login / rotation IMEI-ID marker (same payload)
             h = data.hex().lstrip('0')
             if len(h) == 16:
                 h = h[1:]
@@ -70,6 +71,9 @@ def idle_voltage(path, start, end, prefix='G'):
             continue
         if proto != 0x15:
             continue
+        m = _CXZT_ID.search(data)   # cxzt reply also identifies the conn
+        if m:
+            conn_sid[cid] = prefix + m.group(1).decode()[-6:]
         sid = conn_sid.get(cid)
         if not sid or ts < start or (end and ts > end):
             continue

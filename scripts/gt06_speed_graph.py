@@ -40,7 +40,7 @@ import matplotlib  # backend selected in main() before pyplot import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gt06_dump import (  # noqa: E402
     detect_format, read_packets, validate_frame,
-    gt06_parse_login, gt06_parse_location, _imei_matches,
+    gt06_parse_location, _imei_matches, identity_from_frame,
 )
 
 # Per-device firmware (last-6 IMEI), from cxzt# strings on 2026-05-30.
@@ -110,13 +110,16 @@ def collect(logfile, ids):
             if not res:
                 continue
             protocol, data, serial, crc_ok = res
-            if protocol == 0x01:
-                imei = gt06_parse_login(data)
-                if imei:
-                    match = next((i for i in ids if _imei_matches(i, imei)), None)
-                    if match:
-                        conn_to_id[conn_id] = match
-            elif protocol in (0x12, 0x22):
+            imei = identity_from_frame(protocol, data, outgoing)
+            if imei:
+                # login / 0xFA rotation marker / cxzt *ID:* reply; clear on an
+                # identity change so conn-id reuse can't blend units
+                match = next((i for i in ids if _imei_matches(i, imei)), None)
+                if match:
+                    conn_to_id[conn_id] = match
+                else:
+                    conn_to_id.pop(conn_id, None)
+            if protocol in (0x12, 0x22):
                 tid = conn_to_id.get(conn_id)
                 if tid is None:
                     continue

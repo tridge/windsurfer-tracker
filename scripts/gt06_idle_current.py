@@ -23,6 +23,7 @@ from collections import defaultdict
 DIR_OUT = 0x80000000          # high bit of conn_id = server->device frame
 _BATT = re.compile(rb'Battery:(\d+\.\d+)V')
 _BT = re.compile(rb'\*BT:(\d+)')
+_CXZT_ID = re.compile(rb'\*ID:(\d+)\*')
 
 
 def imei_to_sailor(imei_bytes, prefix):
@@ -116,13 +117,16 @@ def main():
     for ts, cid, is_out, proto, data in walk(args.log):
         if is_out:
             continue
-        if proto == 0x01:                  # login: refresh conn_id -> sailor_id
+        if proto in (0x01, 0xFA):          # login / rotation IMEI-ID marker
             sid = imei_to_sailor(data, args.prefix)
             if sid:
                 conn_sid[cid] = sid
             continue
         if proto != 0x15:                  # voltages ride on 0x15 string replies
             continue
+        m = _CXZT_ID.search(data)          # cxzt reply also identifies the conn
+        if m:
+            conn_sid[cid] = args.prefix + m.group(1).decode()[-6:]
         sid = conn_sid.get(cid)
         if not sid or ts < wstart or (args.end and ts > args.end):
             continue
