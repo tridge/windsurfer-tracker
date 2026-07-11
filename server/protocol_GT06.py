@@ -32,6 +32,12 @@ _GT06_BATTERY_MAP = {0: 0, 1: 5, 2: 15, 3: 30, 4: 50, 5: 75, 6: 100}
 GT06_LOG_MAGIC_V2 = b"GT06LOG2"
 GT06_LOG_DIR_OUT = 0x80000000  # OR'd into conn_id for server→device packets
 
+# Synthetic log-only frame injected into a fresh gt06.log at rotation, one per
+# open connection, so each daily file is self-describing (conn_id → IMEI without
+# the previous file's LOGIN). Never sent to devices, never parsed inbound.
+# Payload is the same 8-byte BCD IMEI as a login (gt06_parse_login decodes it).
+GT06_PROTO_LOG_IMEI = 0xFA
+
 # Battery % is computed from the parametric OCV fit in gt06_calibration.json
 # (load-aware), see GT06Listener._battery_percent. The old single-cell (G226122)
 # _W07C_DISCHARGE table was retired 2026-06-25.
@@ -2964,6 +2970,30 @@ class GT06Listener:
         self._log_fd = fd
         self._log(f"[GT06] Packet logging to {path} (v2 format)")
 
+    def _log_imei_id_frames(self):
+        """Write a synthetic IMEI-ID (0xFA) record for every identified open
+        connection so the fresh log is self-describing. Caller must hold
+        self._log_lock (called from rotate_log_to after the fd swap)."""
+        if self._log_fd is None:
+            return
+        from gt06_frames import build_frame, build_login_data
+        ts = time.time()
+        for gt_conn in list(self.connections.values()):
+            if not gt_conn.imei:
+                continue
+            try:
+                frame = build_frame(GT06_PROTO_LOG_IMEI,
+                                    build_login_data(gt_conn.imei), 0)
+                header = struct.pack("<dIH", ts, gt_conn.conn_id & 0x7FFFFFFF,
+                                     len(frame))
+                self._log_fd.write(header + frame)
+            except Exception as e:
+                self._log(f"[GT06] IMEI-ID log write error: {e}")
+        try:
+            self._log_fd.flush()
+        except Exception:
+            pass
+
     def rotate_log_to(self, archive_path):
         """Move the current packet log to archive_path and open a fresh log.
 
@@ -2987,6 +3017,7 @@ class GT06Listener:
                 # old_fd still serves _log_packet (archived inode) until this swaps
                 # in the new fd. Do NOT clear _log_fd first — that window drops frames.
                 self._open_log_v2(path)
+                self._log_imei_id_frames()
             finally:
                 # Close the old fd only once the swap actually happened; if
                 # _open_log_v2 raised, _log_fd still points at old_fd (writes keep
