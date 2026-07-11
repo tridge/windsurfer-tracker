@@ -1,0 +1,4790 @@
+{
+ "generated_from": [
+  "old_logs/gt06.log.2026-07-05",
+  "old_logs/gt06.log.2026-07-06",
+  "old_logs/gt06.log.2026-07-07",
+  "old_logs/gt06.log.2026-07-08",
+  "old_logs/gt06.log.2026-07-09",
+  "old_logs/gt06.log.2026-07-10",
+  "old_logs/gt06.log.2026-07-11"
+ ],
+ "window": [
+  "2026-07-05 00:00:16.978",
+  "2026-07-12 00:00:09.657"
+ ],
+ "thresholds": {
+  "lag": 30.0,
+  "live": 5.0,
+  "restore": 8.0,
+  "replay_silence": 120.0,
+  "drained_hold": 60.0,
+  "gap": 300.0,
+  "active_secs": 30.0,
+  "active_run": 120.0,
+  "session_gap": 1800.0,
+  "restart_window": 60.0,
+  "restart_min": 4,
+  "idle_grace": 120.0,
+  "t2_min": 1500.0,
+  "idle_loc_min": 4,
+  "drain_window_sec": 7200.0,
+  "drain_min_sec": 1800.0,
+  "idle_drain_window_sec": 43200.0,
+  "idle_drain_min_sec": 14400.0,
+  "drain_factor": 1.5,
+  "drain_abs": 0.4,
+  "drop_mv": 60.0,
+  "drop_pair_sec": 900.0,
+  "plag_sec": 10.0,
+  "plag_min_minutes": 15
+ },
+ "fleet_events": [
+  {
+   "ts": "2026-07-05 12:07:53.484",
+   "end": "2026-07-05 12:08:23.654",
+   "kind": "server-restart",
+   "logins": 41,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-05 12:17:37.643",
+   "end": "2026-07-05 12:18:08.982",
+   "kind": "server-restart",
+   "logins": 41,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-05 20:08:34.948",
+   "end": "2026-07-05 20:08:57.491",
+   "kind": "server-restart",
+   "logins": 5,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-07 01:53:17.621",
+   "end": "2026-07-07 02:01:10.339",
+   "kind": "mass-device-reboot",
+   "logins": 17,
+   "reboots": 17
+  },
+  {
+   "ts": "2026-07-07 18:59:27.492",
+   "end": "2026-07-07 18:59:58.057",
+   "kind": "server-restart",
+   "logins": 19,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-08 05:41:18.786",
+   "end": "2026-07-08 05:43:08.288",
+   "kind": "server-restart",
+   "logins": 8,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-08 18:13:37.542",
+   "end": "2026-07-08 18:14:10.037",
+   "kind": "server-restart",
+   "logins": 32,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-09 04:09:48.418",
+   "end": "2026-07-09 04:10:16.228",
+   "kind": "server-restart",
+   "logins": 32,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-09 06:09:49.746",
+   "end": "2026-07-09 06:10:04.193",
+   "kind": "server-restart",
+   "logins": 39,
+   "reboots": 0
+  },
+  {
+   "ts": "2026-07-09 16:43:09.402",
+   "end": "2026-07-09 16:43:51.197",
+   "kind": "server-restart",
+   "logins": 4,
+   "reboots": 0
+  }
+ ],
+ "units": {
+  "G187547": {
+   "imei": "788276404187547",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6021,
+   "hours_conn": 36.01,
+   "hours_active": 0.7,
+   "hours_idle": 167.11,
+   "hours_overnight": 0.0,
+   "loc_total": 2618,
+   "loc_active": 2540,
+   "loc_idle": 78,
+   "idle_loc_normal": 66,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 1,
+   "lag_p95": 2,
+   "lag_max": 3,
+   "logins": 9,
+   "restart_logins": 2,
+   "solo_logins": 7,
+   "reboots": 1,
+   "dropouts": 3,
+   "drain_idle_med": -0.076,
+   "drain_track_med": 1.621,
+   "drain_idle_exp": 0.081,
+   "drain_track_exp": 1.91,
+   "v_first": 4.07,
+   "v_last": 4.12,
+   "soc_first": 83.2,
+   "soc_last": 86.9,
+   "anomaly_counts": {
+    "idle-loc": 1,
+    "reboot": 1,
+    "dropout": 3
+   }
+  },
+  "G226122": {
+   "imei": "350400880226122",
+   "name": "(Layline) GregJ",
+   "fw": "W07_MG133_10F8G_B53_V6.63",
+   "fw_class": "V6.63",
+   "cap_class": "3Ah",
+   "capacity_mah": 2685,
+   "hours_conn": 152.52,
+   "hours_active": 2.2,
+   "hours_idle": 165.61,
+   "hours_overnight": 0.0,
+   "loc_total": 8639,
+   "loc_active": 8329,
+   "loc_idle": 309,
+   "idle_loc_normal": 290,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 19,
+   "logins": 11,
+   "restart_logins": 7,
+   "solo_logins": 4,
+   "reboots": 1,
+   "dropouts": 2,
+   "drain_idle_med": 0.083,
+   "drain_track_med": 3.245,
+   "drain_idle_exp": 0.182,
+   "drain_track_exp": 4.283,
+   "v_first": 4.15,
+   "v_last": 3.52,
+   "soc_first": 91.4,
+   "soc_last": 14.7,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "reboot": 1,
+    "dropout": 2
+   }
+  },
+  "G304307": {
+   "imei": "671678980304307",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5182,
+   "hours_conn": 167.67,
+   "hours_active": 7.52,
+   "hours_idle": 160.29,
+   "hours_overnight": 0.0,
+   "loc_total": 30426,
+   "loc_active": 30086,
+   "loc_idle": 339,
+   "idle_loc_normal": 301,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 25,
+   "logins": 9,
+   "restart_logins": 6,
+   "solo_logins": 3,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.095,
+   "drain_track_med": 2.297,
+   "drain_idle_exp": 0.094,
+   "drain_track_exp": 2.219,
+   "v_first": 4.17,
+   "v_last": 3.76,
+   "soc_first": 91.9,
+   "soc_last": 50.0,
+   "anomaly_counts": {
+    "idle-loc": 3,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G306088": {
+   "imei": "835651698306088",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6244,
+   "hours_conn": 167.74,
+   "hours_active": 7.29,
+   "hours_idle": 160.52,
+   "hours_overnight": 0.0,
+   "loc_total": 29736,
+   "loc_active": 29397,
+   "loc_idle": 339,
+   "idle_loc_normal": 308,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 10,
+   "logins": 4,
+   "restart_logins": 4,
+   "solo_logins": 0,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.117,
+   "drain_track_med": 1.798,
+   "drain_idle_exp": 0.078,
+   "drain_track_exp": 1.842,
+   "v_first": 4.12,
+   "v_last": 3.65,
+   "soc_first": 88.6,
+   "soc_last": 30.6,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 3,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G306161": {
+   "imei": "455993517306161",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 7096,
+   "hours_conn": 167.69,
+   "hours_active": 2.1,
+   "hours_idle": 165.71,
+   "hours_overnight": 0.0,
+   "loc_total": 8462,
+   "loc_active": 8122,
+   "loc_idle": 339,
+   "idle_loc_normal": 320,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 4,
+   "lag_max": 22,
+   "logins": 7,
+   "restart_logins": 4,
+   "solo_logins": 3,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.162,
+   "drain_track_med": 3.579,
+   "drain_idle_exp": 0.069,
+   "drain_track_exp": 1.621,
+   "v_first": 4.11,
+   "v_last": 3.73,
+   "soc_first": 85.5,
+   "soc_last": 38.2,
+   "anomaly_counts": {
+    "excess-drain": 3,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G312243": {
+   "imei": "720270356312243",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3245,
+   "hours_conn": 152.93,
+   "hours_active": 2.14,
+   "hours_idle": 165.67,
+   "hours_overnight": 0.0,
+   "loc_total": 8089,
+   "loc_active": 7780,
+   "loc_idle": 308,
+   "idle_loc_normal": 291,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 4,
+   "lag_max": 5,
+   "logins": 13,
+   "restart_logins": 6,
+   "solo_logins": 7,
+   "reboots": 0,
+   "dropouts": 1,
+   "drain_idle_med": 0.073,
+   "drain_track_med": 4.535,
+   "drain_idle_exp": 0.151,
+   "drain_track_exp": 3.544,
+   "v_first": 4.19,
+   "v_last": 3.52,
+   "soc_first": 94.1,
+   "soc_last": 16.2,
+   "anomaly_counts": {
+    "dropout": 1
+   }
+  },
+  "G312268": {
+   "imei": "426954923312268",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3482,
+   "hours_conn": 167.67,
+   "hours_active": 2.2,
+   "hours_idle": 165.61,
+   "hours_overnight": 0.0,
+   "loc_total": 8965,
+   "loc_active": 8605,
+   "loc_idle": 360,
+   "idle_loc_normal": 317,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 6,
+   "logins": 7,
+   "restart_logins": 4,
+   "solo_logins": 3,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.07,
+   "drain_track_med": 4.873,
+   "drain_idle_exp": 0.14,
+   "drain_track_exp": 3.303,
+   "v_first": 4.05,
+   "v_last": 3.98,
+   "soc_first": 88.1,
+   "soc_last": 83.0,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "voltage-drop": 1,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G312292": {
+   "imei": "166486946312292",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3000,
+   "hours_conn": 151.29,
+   "hours_active": 2.14,
+   "hours_idle": 165.67,
+   "hours_overnight": 0.0,
+   "loc_total": 8606,
+   "loc_active": 8298,
+   "loc_idle": 307,
+   "idle_loc_normal": 289,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 6,
+   "lag_p95": 6,
+   "lag_max": 14,
+   "logins": 6,
+   "restart_logins": 4,
+   "solo_logins": 2,
+   "reboots": 0,
+   "dropouts": 1,
+   "drain_idle_med": 0.067,
+   "drain_track_med": 4.406,
+   "drain_idle_exp": 0.163,
+   "drain_track_exp": 3.833,
+   "v_first": 4.16,
+   "v_last": 3.46,
+   "soc_first": 93.8,
+   "soc_last": 12.2,
+   "anomaly_counts": {
+    "dropout": 1
+   }
+  },
+  "G312300": {
+   "imei": "422283244312300",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 5302,
+   "hours_conn": 167.99,
+   "hours_active": 2.2,
+   "hours_idle": 165.61,
+   "hours_overnight": 0.0,
+   "loc_total": 8429,
+   "loc_active": 8086,
+   "loc_idle": 342,
+   "idle_loc_normal": 323,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 5,
+   "lag_max": 7,
+   "logins": 7,
+   "restart_logins": 6,
+   "solo_logins": 1,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.089,
+   "drain_track_med": 3.033,
+   "drain_idle_exp": 0.092,
+   "drain_track_exp": 2.169,
+   "v_first": 4.1,
+   "v_last": 3.71,
+   "soc_first": 88.4,
+   "soc_last": 43.6,
+   "anomaly_counts": {
+    "excess-drain": 1
+   }
+  },
+  "G312326": {
+   "imei": "679757977312326",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 5762,
+   "hours_conn": 168.0,
+   "hours_active": 2.09,
+   "hours_idle": 165.71,
+   "hours_overnight": 0.0,
+   "loc_total": 8273,
+   "loc_active": 7930,
+   "loc_idle": 343,
+   "idle_loc_normal": 318,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 5,
+   "lag_max": 7,
+   "logins": 12,
+   "restart_logins": 6,
+   "solo_logins": 6,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.087,
+   "drain_track_med": 1.794,
+   "drain_idle_exp": 0.085,
+   "drain_track_exp": 1.996,
+   "v_first": 4.12,
+   "v_last": 4.12,
+   "soc_first": 88.1,
+   "soc_last": 88.1,
+   "anomaly_counts": {
+    "idle-loc": 1
+   }
+  },
+  "G312334": {
+   "imei": "355202641312334",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 5453,
+   "hours_conn": 167.69,
+   "hours_active": 2.11,
+   "hours_idle": 165.7,
+   "hours_overnight": 0.0,
+   "loc_total": 8270,
+   "loc_active": 7931,
+   "loc_idle": 339,
+   "idle_loc_normal": 321,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 5,
+   "logins": 11,
+   "restart_logins": 7,
+   "solo_logins": 4,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.096,
+   "drain_track_med": 2.492,
+   "drain_idle_exp": 0.09,
+   "drain_track_exp": 2.109,
+   "v_first": 4.06,
+   "v_last": 3.79,
+   "soc_first": 85.5,
+   "soc_last": 55.8,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G312342": {
+   "imei": "711649832312342",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 2807,
+   "hours_conn": 154.81,
+   "hours_active": 2.98,
+   "hours_idle": 164.83,
+   "hours_overnight": 0.0,
+   "loc_total": 11998,
+   "loc_active": 11686,
+   "loc_idle": 311,
+   "idle_loc_normal": 293,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 6,
+   "logins": 10,
+   "restart_logins": 6,
+   "solo_logins": 4,
+   "reboots": 1,
+   "dropouts": 2,
+   "drain_idle_med": 0.072,
+   "drain_track_med": 3.594,
+   "drain_idle_exp": 0.174,
+   "drain_track_exp": 4.097,
+   "v_first": 4.14,
+   "v_last": 3.5,
+   "soc_first": 92.1,
+   "soc_last": 15.0,
+   "anomaly_counts": {
+    "reboot": 1,
+    "dropout": 2
+   }
+  },
+  "G312359": {
+   "imei": "869977551312359",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 6244,
+   "hours_conn": 168.0,
+   "hours_active": 7.46,
+   "hours_idle": 160.34,
+   "hours_overnight": 0.0,
+   "loc_total": 29979,
+   "loc_active": 29649,
+   "loc_idle": 329,
+   "idle_loc_normal": 307,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 13,
+   "logins": 11,
+   "restart_logins": 6,
+   "solo_logins": 5,
+   "reboots": 1,
+   "dropouts": 0,
+   "drain_idle_med": 0.105,
+   "drain_track_med": 2.728,
+   "drain_idle_exp": 0.078,
+   "drain_track_exp": 1.842,
+   "v_first": 4.16,
+   "v_last": 3.72,
+   "soc_first": 89.5,
+   "soc_last": 38.1,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "reboot": 1
+   }
+  },
+  "G334023": {
+   "imei": "750154384334023",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6050,
+   "hours_conn": 167.69,
+   "hours_active": 8.47,
+   "hours_idle": 159.34,
+   "hours_overnight": 0.0,
+   "loc_total": 33783,
+   "loc_active": 33446,
+   "loc_idle": 336,
+   "idle_loc_normal": 297,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 5,
+   "logins": 16,
+   "restart_logins": 7,
+   "solo_logins": 9,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.147,
+   "drain_track_med": 2.083,
+   "drain_idle_exp": 0.081,
+   "drain_track_exp": 1.901,
+   "v_first": 4.12,
+   "v_last": 3.74,
+   "soc_first": 88.4,
+   "soc_last": 45.2,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 1,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G334189": {
+   "imei": "677282525334189",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5368,
+   "hours_conn": 167.55,
+   "hours_active": 2.15,
+   "hours_idle": 165.77,
+   "hours_overnight": 0.0,
+   "loc_total": 8642,
+   "loc_active": 8289,
+   "loc_idle": 353,
+   "idle_loc_normal": 316,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 6,
+   "logins": 10,
+   "restart_logins": 7,
+   "solo_logins": 3,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.097,
+   "drain_track_med": 1.827,
+   "drain_idle_exp": 0.091,
+   "drain_track_exp": 2.142,
+   "v_first": 4.08,
+   "v_last": 3.79,
+   "soc_first": 85.8,
+   "soc_last": 53.4,
+   "anomaly_counts": {
+    "idle-loc": 3,
+    "reboot": 1,
+    "dropout": 1,
+    "sos": 1
+   }
+  },
+  "G341846": {
+   "imei": "174243206341846",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5706,
+   "hours_conn": 168.0,
+   "hours_active": 3.1,
+   "hours_idle": 164.7,
+   "hours_overnight": 0.0,
+   "loc_total": 12030,
+   "loc_active": 11669,
+   "loc_idle": 360,
+   "idle_loc_normal": 309,
+   "loc_replay": 74,
+   "replay_eps": 1,
+   "replay_drained": 1,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 5,
+   "lag_max": 114,
+   "logins": 16,
+   "restart_logins": 6,
+   "solo_logins": 10,
+   "reboots": 1,
+   "dropouts": 0,
+   "drain_idle_med": 0.094,
+   "drain_track_med": 1.832,
+   "drain_idle_exp": 0.086,
+   "drain_track_exp": 2.015,
+   "v_first": 4.19,
+   "v_last": 3.79,
+   "soc_first": 90.9,
+   "soc_last": 48.6,
+   "anomaly_counts": {
+    "idle-loc": 2,
+    "replay": 1,
+    "reboot": 1
+   }
+  },
+  "G341887": {
+   "imei": "671871125341887",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6643,
+   "hours_conn": 167.77,
+   "hours_active": 15.22,
+   "hours_idle": 152.59,
+   "hours_overnight": 0.0,
+   "loc_total": 58964,
+   "loc_active": 58651,
+   "loc_idle": 313,
+   "idle_loc_normal": 293,
+   "loc_replay": 12,
+   "replay_eps": 1,
+   "replay_drained": 1,
+   "replay_unresolved": 0,
+   "lag_p50": 1,
+   "lag_p95": 2,
+   "lag_max": 44,
+   "logins": 14,
+   "restart_logins": 7,
+   "solo_logins": 7,
+   "reboots": 2,
+   "dropouts": 1,
+   "drain_idle_med": 0.173,
+   "drain_track_med": 1.769,
+   "drain_idle_exp": 0.074,
+   "drain_track_exp": 1.731,
+   "v_first": 4.1,
+   "v_last": 3.6,
+   "soc_first": 87.6,
+   "soc_last": 23.5,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "replay": 1,
+    "reboot": 2,
+    "dropout": 1
+   }
+  },
+  "G347082": {
+   "imei": "403203131347082",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6056,
+   "hours_conn": 136.71,
+   "hours_active": 2.83,
+   "hours_idle": 164.97,
+   "hours_overnight": 0.0,
+   "loc_total": 11334,
+   "loc_active": 11050,
+   "loc_idle": 284,
+   "idle_loc_normal": 246,
+   "loc_replay": 135,
+   "replay_eps": 1,
+   "replay_drained": 1,
+   "replay_unresolved": 0,
+   "lag_p50": 5,
+   "lag_p95": 6,
+   "lag_max": 136,
+   "logins": 12,
+   "restart_logins": 7,
+   "solo_logins": 5,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.076,
+   "drain_track_med": 2.076,
+   "drain_idle_exp": 0.081,
+   "drain_track_exp": 1.899,
+   "v_first": 4.05,
+   "v_last": 3.29,
+   "soc_first": 86.2,
+   "soc_last": 2.0,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "replay": 1,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G348635": {
+   "imei": "973316592348635",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 7904,
+   "hours_conn": 167.73,
+   "hours_active": 2.73,
+   "hours_idle": 165.07,
+   "hours_overnight": 0.0,
+   "loc_total": 10716,
+   "loc_active": 10368,
+   "loc_idle": 347,
+   "idle_loc_normal": 313,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 18,
+   "logins": 7,
+   "restart_logins": 6,
+   "solo_logins": 1,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.105,
+   "drain_track_med": 3.415,
+   "drain_idle_exp": 0.062,
+   "drain_track_exp": 1.455,
+   "v_first": 4.06,
+   "v_last": 3.67,
+   "soc_first": 84.7,
+   "soc_last": 34.7,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "idle-loc": 2,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G370498": {
+   "imei": "907963839370498",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5535,
+   "hours_conn": 167.73,
+   "hours_active": 7.34,
+   "hours_idle": 160.46,
+   "hours_overnight": 0.0,
+   "loc_total": 29172,
+   "loc_active": 28830,
+   "loc_idle": 342,
+   "idle_loc_normal": 302,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 7,
+   "logins": 9,
+   "restart_logins": 6,
+   "solo_logins": 3,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.082,
+   "drain_track_med": 2.522,
+   "drain_idle_exp": 0.088,
+   "drain_track_exp": 2.078,
+   "v_first": 4.07,
+   "v_last": 3.7,
+   "soc_first": 84.6,
+   "soc_last": 37.9,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 4,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G370589": {
+   "imei": "551756779370589",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6244,
+   "hours_conn": 167.73,
+   "hours_active": 2.11,
+   "hours_idle": 165.7,
+   "hours_overnight": 0.0,
+   "loc_total": 8623,
+   "loc_active": 8280,
+   "loc_idle": 342,
+   "idle_loc_normal": 320,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 10,
+   "logins": 5,
+   "restart_logins": 3,
+   "solo_logins": 2,
+   "reboots": 2,
+   "dropouts": 1,
+   "drain_idle_med": 0.108,
+   "drain_track_med": 3.499,
+   "drain_idle_exp": 0.078,
+   "drain_track_exp": 1.842,
+   "v_first": 4.16,
+   "v_last": 3.77,
+   "soc_first": 88.8,
+   "soc_last": 44.5,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "idle-loc": 1,
+    "reboot": 2,
+    "dropout": 1
+   }
+  },
+  "G370977": {
+   "imei": "316857066370977",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5775,
+   "hours_conn": 168.0,
+   "hours_active": 6.43,
+   "hours_idle": 161.38,
+   "hours_overnight": 0.0,
+   "loc_total": 24103,
+   "loc_active": 23757,
+   "loc_idle": 346,
+   "idle_loc_normal": 309,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 5,
+   "lag_p95": 6,
+   "lag_max": 12,
+   "logins": 9,
+   "restart_logins": 6,
+   "solo_logins": 3,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.075,
+   "drain_track_med": 1.918,
+   "drain_idle_exp": 0.085,
+   "drain_track_exp": 1.991,
+   "v_first": 4.15,
+   "v_last": 4.15,
+   "soc_first": 90.6,
+   "soc_last": 90.6,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 3
+   }
+  },
+  "G371074": {
+   "imei": "424981185371074",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5257,
+   "hours_conn": 167.69,
+   "hours_active": 2.1,
+   "hours_idle": 165.72,
+   "hours_overnight": 0.0,
+   "loc_total": 8361,
+   "loc_active": 8010,
+   "loc_idle": 350,
+   "idle_loc_normal": 315,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 7,
+   "logins": 6,
+   "restart_logins": 5,
+   "solo_logins": 1,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.098,
+   "drain_track_med": 2.467,
+   "drain_idle_exp": 0.093,
+   "drain_track_exp": 2.188,
+   "v_first": 4.08,
+   "v_last": 3.82,
+   "soc_first": 85.3,
+   "soc_last": 57.0,
+   "anomaly_counts": {
+    "idle-loc": 3,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G371116": {
+   "imei": "695072156371116",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5230,
+   "hours_conn": 167.51,
+   "hours_active": 7.35,
+   "hours_idle": 160.46,
+   "hours_overnight": 0.0,
+   "loc_total": 28740,
+   "loc_active": 28403,
+   "loc_idle": 336,
+   "idle_loc_normal": 305,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 6,
+   "logins": 10,
+   "restart_logins": 7,
+   "solo_logins": 3,
+   "reboots": 2,
+   "dropouts": 2,
+   "drain_idle_med": 0.153,
+   "drain_track_med": 2.509,
+   "drain_idle_exp": 0.094,
+   "drain_track_exp": 2.199,
+   "v_first": 4.15,
+   "v_last": 3.73,
+   "soc_first": 90.4,
+   "soc_last": 43.8,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "voltage-drop": 1,
+    "idle-loc": 1,
+    "reboot": 2,
+    "dropout": 2
+   }
+  },
+  "G375349": {
+   "imei": "827810284375349",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3443,
+   "hours_conn": 149.67,
+   "hours_active": 2.92,
+   "hours_idle": 165.0,
+   "hours_overnight": 0.0,
+   "loc_total": 11810,
+   "loc_active": 11507,
+   "loc_idle": 303,
+   "idle_loc_normal": 284,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 7,
+   "logins": 14,
+   "restart_logins": 6,
+   "solo_logins": 8,
+   "reboots": 1,
+   "dropouts": 2,
+   "drain_idle_med": 0.084,
+   "drain_track_med": 3.483,
+   "drain_idle_exp": 0.142,
+   "drain_track_exp": 3.34,
+   "v_first": 4.04,
+   "v_last": 3.48,
+   "soc_first": 87.8,
+   "soc_last": 16.0,
+   "anomaly_counts": {
+    "reboot": 1,
+    "dropout": 2
+   }
+  },
+  "G375356": {
+   "imei": "628821458375356",
+   "name": "",
+   "fw": "NT19D_MG133_WSTRK_B53_V665",
+   "fw_class": "V665",
+   "cap_class": "3Ah",
+   "capacity_mah": 2825,
+   "hours_conn": 92.18,
+   "hours_active": 0.0,
+   "hours_idle": 167.81,
+   "hours_overnight": 0.0,
+   "loc_total": 196,
+   "loc_active": 0,
+   "loc_idle": 196,
+   "idle_loc_normal": 164,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": null,
+   "lag_p95": null,
+   "lag_max": null,
+   "logins": 13,
+   "restart_logins": 3,
+   "solo_logins": 10,
+   "reboots": 9,
+   "dropouts": 5,
+   "drain_idle_med": 0.226,
+   "drain_track_med": null,
+   "drain_idle_exp": 0.173,
+   "drain_track_exp": 4.071,
+   "v_first": 3.81,
+   "v_last": 4.03,
+   "soc_first": 64.3,
+   "soc_last": 86.2,
+   "anomaly_counts": {
+    "reboot": 9,
+    "dropout": 5
+   }
+  },
+  "G375372": {
+   "imei": "456128692375372",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 2509,
+   "hours_conn": 150.53,
+   "hours_active": 3.05,
+   "hours_idle": 164.76,
+   "hours_overnight": 0.0,
+   "loc_total": 12191,
+   "loc_active": 11889,
+   "loc_idle": 301,
+   "idle_loc_normal": 284,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 6,
+   "logins": 9,
+   "restart_logins": 7,
+   "solo_logins": 2,
+   "reboots": 2,
+   "dropouts": 3,
+   "drain_idle_med": 0.072,
+   "drain_track_med": 3.748,
+   "drain_idle_exp": 0.195,
+   "drain_track_exp": 4.583,
+   "v_first": 4.2,
+   "v_last": 3.46,
+   "soc_first": 96.0,
+   "soc_last": 13.0,
+   "anomaly_counts": {
+    "reboot": 2,
+    "dropout": 3
+   }
+  },
+  "G375430": {
+   "imei": "400117432375430",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 7346,
+   "hours_conn": 138.33,
+   "hours_active": 2.64,
+   "hours_idle": 165.17,
+   "hours_overnight": 0.0,
+   "loc_total": 10793,
+   "loc_active": 10509,
+   "loc_idle": 283,
+   "idle_loc_normal": 254,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 7,
+   "lag_p95": 8,
+   "lag_max": 11,
+   "logins": 11,
+   "restart_logins": 7,
+   "solo_logins": 4,
+   "reboots": 3,
+   "dropouts": 3,
+   "drain_idle_med": 0.078,
+   "drain_track_med": 1.96,
+   "drain_idle_exp": 0.067,
+   "drain_track_exp": 1.565,
+   "v_first": 4.04,
+   "v_last": 3.29,
+   "soc_first": 83.2,
+   "soc_last": 1.5,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 1,
+    "reboot": 3,
+    "dropout": 3
+   }
+  },
+  "G375539": {
+   "imei": "926767662375539",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3001,
+   "hours_conn": 157.38,
+   "hours_active": 2.1,
+   "hours_idle": 165.71,
+   "hours_overnight": 0.0,
+   "loc_total": 8235,
+   "loc_active": 7916,
+   "loc_idle": 319,
+   "idle_loc_normal": 301,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 6,
+   "lag_p95": 7,
+   "lag_max": 9,
+   "logins": 8,
+   "restart_logins": 6,
+   "solo_logins": 2,
+   "reboots": 0,
+   "dropouts": 1,
+   "drain_idle_med": 0.07,
+   "drain_track_med": 5.075,
+   "drain_idle_exp": 0.163,
+   "drain_track_exp": 3.832,
+   "v_first": 4.15,
+   "v_last": 3.47,
+   "soc_first": 93.5,
+   "soc_last": 13.6,
+   "anomaly_counts": {
+    "dropout": 1
+   }
+  },
+  "G375547": {
+   "imei": "970053422375547",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 8109,
+   "hours_conn": 167.99,
+   "hours_active": 7.67,
+   "hours_idle": 160.14,
+   "hours_overnight": 0.0,
+   "loc_total": 30294,
+   "loc_active": 29967,
+   "loc_idle": 326,
+   "idle_loc_normal": 310,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 5,
+   "lag_p95": 5,
+   "lag_max": 9,
+   "logins": 9,
+   "restart_logins": 7,
+   "solo_logins": 2,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.115,
+   "drain_track_med": 1.898,
+   "drain_idle_exp": 0.06,
+   "drain_track_exp": 1.418,
+   "v_first": 4.09,
+   "v_last": 3.66,
+   "soc_first": 86.9,
+   "soc_last": 33.0,
+   "anomaly_counts": {
+    "excess-drain": 2
+   }
+  },
+  "G375562": {
+   "imei": "884500089375562",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3303,
+   "hours_conn": 145.84,
+   "hours_active": 2.47,
+   "hours_idle": 165.33,
+   "hours_overnight": 0.0,
+   "loc_total": 9766,
+   "loc_active": 9471,
+   "loc_idle": 295,
+   "idle_loc_normal": 275,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 23,
+   "logins": 11,
+   "restart_logins": 6,
+   "solo_logins": 5,
+   "reboots": 1,
+   "dropouts": 2,
+   "drain_idle_med": 0.074,
+   "drain_track_med": 5.112,
+   "drain_idle_exp": 0.148,
+   "drain_track_exp": 3.482,
+   "v_first": 4.07,
+   "v_last": 3.43,
+   "soc_first": 89.6,
+   "soc_last": 10.5,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "reboot": 1,
+    "dropout": 2
+   }
+  },
+  "G378517": {
+   "imei": "283403682378517",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 7177,
+   "hours_conn": 135.26,
+   "hours_active": 6.68,
+   "hours_idle": 161.13,
+   "hours_overnight": 0.0,
+   "loc_total": 25514,
+   "loc_active": 25231,
+   "loc_idle": 283,
+   "idle_loc_normal": 239,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 15,
+   "logins": 6,
+   "restart_logins": 6,
+   "solo_logins": 0,
+   "reboots": 0,
+   "dropouts": 1,
+   "drain_idle_med": 0.085,
+   "drain_track_med": 2.38,
+   "drain_idle_exp": 0.068,
+   "drain_track_exp": 1.602,
+   "v_first": 4.08,
+   "v_last": 3.71,
+   "soc_first": 86.2,
+   "soc_last": 41.4,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "idle-loc": 4,
+    "dropout": 1
+   }
+  },
+  "G378657": {
+   "imei": "265097052378657",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "3Ah",
+   "capacity_mah": 3758,
+   "hours_conn": 156.54,
+   "hours_active": 2.2,
+   "hours_idle": 165.61,
+   "hours_overnight": 0.0,
+   "loc_total": 8864,
+   "loc_active": 8544,
+   "loc_idle": 319,
+   "idle_loc_normal": 298,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 4,
+   "lag_max": 10,
+   "logins": 10,
+   "restart_logins": 6,
+   "solo_logins": 4,
+   "reboots": 2,
+   "dropouts": 2,
+   "drain_idle_med": 0.225,
+   "drain_track_med": 4.055,
+   "drain_idle_exp": 0.13,
+   "drain_track_exp": 3.06,
+   "v_first": 4.05,
+   "v_last": 3.53,
+   "soc_first": 87.7,
+   "soc_last": 21.0,
+   "anomaly_counts": {
+    "voltage-drop": 1,
+    "reboot": 2,
+    "dropout": 2
+   }
+  },
+  "G378723": {
+   "imei": "714386895378723",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 5548,
+   "hours_conn": 167.7,
+   "hours_active": 11.87,
+   "hours_idle": 155.93,
+   "hours_overnight": 0.0,
+   "loc_total": 47436,
+   "loc_active": 47110,
+   "loc_idle": 326,
+   "idle_loc_normal": 291,
+   "loc_replay": 1,
+   "replay_eps": 1,
+   "replay_drained": 1,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 7200,
+   "logins": 14,
+   "restart_logins": 7,
+   "solo_logins": 7,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.113,
+   "drain_track_med": 1.525,
+   "drain_idle_exp": 0.088,
+   "drain_track_exp": 2.073,
+   "v_first": 4.05,
+   "v_last": 3.66,
+   "soc_first": 84.2,
+   "soc_last": 33.5,
+   "anomaly_counts": {
+    "idle-loc": 1,
+    "replay": 1,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G378830": {
+   "imei": "429271654378830",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 7177,
+   "hours_conn": 168.0,
+   "hours_active": 3.07,
+   "hours_idle": 164.74,
+   "hours_overnight": 0.0,
+   "loc_total": 12674,
+   "loc_active": 12335,
+   "loc_idle": 339,
+   "idle_loc_normal": 321,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 5,
+   "lag_p95": 5,
+   "lag_max": 7,
+   "logins": 7,
+   "restart_logins": 6,
+   "solo_logins": 1,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.086,
+   "drain_track_med": 2.792,
+   "drain_idle_exp": 0.068,
+   "drain_track_exp": 1.602,
+   "v_first": 4.07,
+   "v_last": 3.73,
+   "soc_first": 85.5,
+   "soc_last": 44.7,
+   "anomaly_counts": {
+    "excess-drain": 2
+   }
+  },
+  "G378848": {
+   "imei": "762870168378848",
+   "name": "",
+   "fw": "W07_MG133_10F8G_B53_V6.68",
+   "fw_class": "V6.68",
+   "cap_class": "6Ah",
+   "capacity_mah": 6244,
+   "hours_conn": 167.99,
+   "hours_active": 7.47,
+   "hours_idle": 160.34,
+   "hours_overnight": 0.0,
+   "loc_total": 30397,
+   "loc_active": 30069,
+   "loc_idle": 327,
+   "idle_loc_normal": 310,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 4,
+   "lag_p95": 5,
+   "lag_max": 10,
+   "logins": 8,
+   "restart_logins": 6,
+   "solo_logins": 2,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.116,
+   "drain_track_med": 2.455,
+   "drain_idle_exp": 0.078,
+   "drain_track_exp": 1.842,
+   "v_first": 4.18,
+   "v_last": 3.71,
+   "soc_first": 92.3,
+   "soc_last": 41.4,
+   "anomaly_counts": {
+    "excess-drain": 1
+   }
+  },
+  "G380521": {
+   "imei": "304115095380521",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5611,
+   "hours_conn": 167.74,
+   "hours_active": 7.59,
+   "hours_idle": 160.22,
+   "hours_overnight": 0.0,
+   "loc_total": 30138,
+   "loc_active": 29795,
+   "loc_idle": 343,
+   "idle_loc_normal": 300,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 2,
+   "lag_max": 10,
+   "logins": 10,
+   "restart_logins": 3,
+   "solo_logins": 7,
+   "reboots": 3,
+   "dropouts": 1,
+   "drain_idle_med": 0.13,
+   "drain_track_med": 2.533,
+   "drain_idle_exp": 0.087,
+   "drain_track_exp": 2.05,
+   "v_first": 4.15,
+   "v_last": 3.75,
+   "soc_first": 90.2,
+   "soc_last": 46.8,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "voltage-drop": 2,
+    "idle-loc": 3,
+    "reboot": 3,
+    "dropout": 1
+   }
+  },
+  "G388862": {
+   "imei": "594613260388862",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 7177,
+   "hours_conn": 167.74,
+   "hours_active": 6.66,
+   "hours_idle": 161.15,
+   "hours_overnight": 0.0,
+   "loc_total": 24836,
+   "loc_active": 24494,
+   "loc_idle": 342,
+   "idle_loc_normal": 306,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 2,
+   "lag_p95": 3,
+   "lag_max": 5,
+   "logins": 12,
+   "restart_logins": 9,
+   "solo_logins": 3,
+   "reboots": 3,
+   "dropouts": 1,
+   "drain_idle_med": 0.13,
+   "drain_track_med": 2.249,
+   "drain_idle_exp": 0.068,
+   "drain_track_exp": 1.602,
+   "v_first": 4.14,
+   "v_last": 3.62,
+   "soc_first": 90.1,
+   "soc_last": 26.6,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "idle-loc": 3,
+    "reboot": 3,
+    "dropout": 1
+   }
+  },
+  "G388920": {
+   "imei": "683324182388920",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 6132,
+   "hours_conn": 167.56,
+   "hours_active": 5.58,
+   "hours_idle": 162.23,
+   "hours_overnight": 0.0,
+   "loc_total": 20929,
+   "loc_active": 20580,
+   "loc_idle": 349,
+   "idle_loc_normal": 306,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 4,
+   "lag_max": 8,
+   "logins": 13,
+   "restart_logins": 6,
+   "solo_logins": 7,
+   "reboots": 1,
+   "dropouts": 1,
+   "drain_idle_med": 0.114,
+   "drain_track_med": 2.767,
+   "drain_idle_exp": 0.08,
+   "drain_track_exp": 1.875,
+   "v_first": 4.07,
+   "v_last": 3.73,
+   "soc_first": 84.7,
+   "soc_last": 43.1,
+   "anomaly_counts": {
+    "excess-drain": 2,
+    "idle-loc": 4,
+    "reboot": 1,
+    "dropout": 1
+   }
+  },
+  "G594715": {
+   "imei": "152920495594715",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 7096,
+   "hours_conn": 167.99,
+   "hours_active": 6.65,
+   "hours_idle": 161.16,
+   "hours_overnight": 0.0,
+   "loc_total": 26059,
+   "loc_active": 25718,
+   "loc_idle": 341,
+   "idle_loc_normal": 306,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 7,
+   "lag_p95": 8,
+   "lag_max": 9,
+   "logins": 8,
+   "restart_logins": 6,
+   "solo_logins": 2,
+   "reboots": 0,
+   "dropouts": 0,
+   "drain_idle_med": 0.085,
+   "drain_track_med": 1.67,
+   "drain_idle_exp": 0.069,
+   "drain_track_exp": 1.621,
+   "v_first": 4.17,
+   "v_last": 3.77,
+   "soc_first": 91.8,
+   "soc_last": 51.2,
+   "anomaly_counts": {
+    "excess-drain": 1,
+    "idle-loc": 1
+   }
+  },
+  "G623050": {
+   "imei": "119048020623050",
+   "name": "",
+   "fw": "NT19D_MG133_10F8G_B53_V667",
+   "fw_class": "V667",
+   "cap_class": "6Ah",
+   "capacity_mah": 5750,
+   "hours_conn": 167.73,
+   "hours_active": 6.39,
+   "hours_idle": 161.42,
+   "hours_overnight": 0.0,
+   "loc_total": 24743,
+   "loc_active": 24389,
+   "loc_idle": 353,
+   "idle_loc_normal": 301,
+   "loc_replay": 0,
+   "replay_eps": 0,
+   "replay_drained": 0,
+   "replay_unresolved": 0,
+   "lag_p50": 3,
+   "lag_p95": 3,
+   "lag_max": 13,
+   "logins": 12,
+   "restart_logins": 6,
+   "solo_logins": 6,
+   "reboots": 2,
+   "dropouts": 1,
+   "drain_idle_med": 0.091,
+   "drain_track_med": 2.356,
+   "drain_idle_exp": 0.085,
+   "drain_track_exp": 2.0,
+   "v_first": 4.09,
+   "v_last": 3.78,
+   "soc_first": 86.2,
+   "soc_last": 51.3,
+   "anomaly_counts": {
+    "idle-loc": 4,
+    "reboot": 2,
+    "dropout": 1
+   }
+  }
+ },
+ "cross_tabs": {
+  "V667/6Ah": {
+   "units": 20,
+   "hours_active": 114.88999999999999,
+   "hours_idle": 3241.39,
+   "counts": {
+    "idle-loc": 46,
+    "reboot": 25,
+    "dropout": 20,
+    "excess-drain": 20,
+    "sos": 1,
+    "replay": 3,
+    "voltage-drop": 3
+   },
+   "gids": [
+    "G187547",
+    "G304307",
+    "G306088",
+    "G334023",
+    "G334189",
+    "G341846",
+    "G341887",
+    "G347082",
+    "G348635",
+    "G370498",
+    "G370589",
+    "G370977",
+    "G371074",
+    "G371116",
+    "G378517",
+    "G380521",
+    "G388862",
+    "G388920",
+    "G594715",
+    "G623050"
+   ],
+   "idle_drain_med": 0.098,
+   "track_drain_med": 2.273,
+   "lag_p95_med": 3.0,
+   "rates_per_10h": {
+    "idle-loc": 0.142,
+    "reboot": 0.074,
+    "dropout": 0.06,
+    "excess-drain": 0.06,
+    "sos": 0.003,
+    "replay": 0.261,
+    "voltage-drop": 0.009
+   }
+  },
+  "V6.63/3Ah": {
+   "units": 1,
+   "hours_active": 2.2,
+   "hours_idle": 165.61,
+   "counts": {
+    "excess-drain": 1,
+    "reboot": 1,
+    "dropout": 2
+   },
+   "gids": [
+    "G226122"
+   ],
+   "idle_drain_med": 0.083,
+   "track_drain_med": 3.245,
+   "lag_p95_med": 4,
+   "rates_per_10h": {
+    "excess-drain": 0.06,
+    "reboot": 0.06,
+    "dropout": 0.119
+   }
+  },
+  "V6.68/6Ah": {
+   "units": 10,
+   "hours_active": 48.68,
+   "hours_idle": 1629.39,
+   "counts": {
+    "excess-drain": 13,
+    "reboot": 7,
+    "dropout": 6,
+    "idle-loc": 3,
+    "replay": 1
+   },
+   "gids": [
+    "G306161",
+    "G312300",
+    "G312326",
+    "G312334",
+    "G312359",
+    "G375430",
+    "G375547",
+    "G378723",
+    "G378830",
+    "G378848"
+   ],
+   "idle_drain_med": 0.101,
+   "track_drain_med": 2.474,
+   "lag_p95_med": 5.0,
+   "rates_per_10h": {
+    "excess-drain": 0.077,
+    "reboot": 0.042,
+    "dropout": 0.036,
+    "idle-loc": 0.018,
+    "replay": 0.205
+   }
+  },
+  "V6.68/3Ah": {
+   "units": 9,
+   "hours_active": 22.2,
+   "hours_idle": 1488.19,
+   "counts": {
+    "dropout": 15,
+    "excess-drain": 3,
+    "voltage-drop": 2,
+    "reboot": 8
+   },
+   "gids": [
+    "G312243",
+    "G312268",
+    "G312292",
+    "G312342",
+    "G375349",
+    "G375372",
+    "G375539",
+    "G375562",
+    "G378657"
+   ],
+   "idle_drain_med": 0.072,
+   "track_drain_med": 4.406,
+   "lag_p95_med": 4,
+   "rates_per_10h": {
+    "dropout": 0.099,
+    "excess-drain": 0.02,
+    "voltage-drop": 0.013,
+    "reboot": 0.053
+   }
+  },
+  "V665/3Ah": {
+   "units": 1,
+   "hours_active": 0.0,
+   "hours_idle": 167.81,
+   "counts": {
+    "reboot": 9,
+    "dropout": 5
+   },
+   "gids": [
+    "G375356"
+   ],
+   "idle_drain_med": 0.226,
+   "track_drain_med": null,
+   "lag_p95_med": null,
+   "rates_per_10h": {
+    "reboot": 0.536,
+    "dropout": 0.298
+   }
+  }
+ },
+ "anomalies": [
+  {
+   "category": "reboot",
+   "t0": 1783181768.039172,
+   "t1": 1783181768.039172,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 39.0
+   },
+   "gid": "G341887"
+  },
+  {
+   "category": "voltage-drop",
+   "t0": 1783216570.1651218,
+   "t1": 1783216718.9575524,
+   "severity": 110.0,
+   "summary": "OCV drop -110mV in 2m28s (idle, near reboot)",
+   "details": {
+    "kind": "drop",
+    "dv_mv": -110.0,
+    "mode": "idle",
+    "near_reboot": true
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "voltage-drop",
+   "t0": 1783216604.760001,
+   "t1": 1783216656.8507154,
+   "severity": 110.0,
+   "summary": "OCV drop -110mV in 52s (idle, near reboot)",
+   "details": {
+    "kind": "drop",
+    "dv_mv": -110.0,
+    "mode": "idle",
+    "near_reboot": true
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783216655.455592,
+   "t1": 1783216655.455592,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 27.0
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783224246.3494508,
+   "t1": 1783225780.6668406,
+   "severity": 6,
+   "summary": "6 LOC in 25m34s while idle (0.2/min)",
+   "details": {
+    "n": 6,
+    "per_min": 0.23,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.8
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783224351.900734,
+   "t1": 1783225683.9643285,
+   "severity": 4,
+   "summary": "4 LOC in 22m12s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.18,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 6.5,
+    "max_lag_s": 3.0
+   },
+   "gid": "G304307"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783224432.277432,
+   "t1": 1783225696.7081866,
+   "severity": 5,
+   "summary": "5 LOC in 21m04s while idle (0.2/min)",
+   "details": {
+    "n": 5,
+    "per_min": 0.24,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.5
+   },
+   "gid": "G341846"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783224529.96717,
+   "t1": 1783225682.9506798,
+   "severity": 6,
+   "summary": "6 LOC in 19m12s while idle (0.3/min, STUCK)",
+   "details": {
+    "n": 6,
+    "per_min": 0.31,
+    "stuck": true,
+    "remediated": false,
+    "max_spd_kn": 6.5,
+    "max_lag_s": 3.5
+   },
+   "gid": "G371074"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783224907.533763,
+   "t1": 1783225683.5383978,
+   "severity": 4,
+   "summary": "4 LOC in 12m56s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.31,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 5.9,
+    "max_lag_s": 2.6
+   },
+   "gid": "G312326"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225139.6678622,
+   "t1": 1783225683.6818502,
+   "severity": 4,
+   "summary": "4 LOC in 9m04s while idle (0.4/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.44,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.9
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225352.3124127,
+   "t1": 1783225683.1954355,
+   "severity": 4,
+   "summary": "4 LOC in 5m30s while idle (0.7/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.73,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 2.2,
+    "max_lag_s": 4.4
+   },
+   "gid": "G370977"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225359.5283725,
+   "t1": 1783225683.2952023,
+   "severity": 4,
+   "summary": "4 LOC in 5m23s while idle (0.7/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.74,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.3
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225379.926114,
+   "t1": 1783225683.8270035,
+   "severity": 4,
+   "summary": "4 LOC in 5m03s while idle (0.8/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.79,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 4.9,
+    "max_lag_s": 2.4
+   },
+   "gid": "G378723"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225539.3242002,
+   "t1": 1783225828.327272,
+   "severity": 4,
+   "summary": "4 LOC in 4m49s while idle (0.8/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.83,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.8
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783225565.1602614,
+   "t1": 1783225685.3270693,
+   "severity": 4,
+   "summary": "4 LOC in 2m00s while idle (2.0/min)",
+   "details": {
+    "n": 4,
+    "per_min": 2.0,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.2
+   },
+   "gid": "G187547"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783249976.2829943,
+   "t1": 1783251404.963927,
+   "severity": 4,
+   "summary": "4 LOC in 23m48s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.17,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 5.9,
+    "max_lag_s": 4.2
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783281568.8481817,
+   "t1": 1783283125.8434947,
+   "severity": 4,
+   "summary": "4 LOC in 25m56s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.15,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.0
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783281628.6677911,
+   "t1": 1783283125.6634033,
+   "severity": 4,
+   "summary": "4 LOC in 24m56s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.16,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 3.8,
+    "max_lag_s": 2.8
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783302601.7078419,
+   "t1": 1783310019.6219208,
+   "severity": 123.6,
+   "summary": "active silence 2h03m -> reconnect",
+   "details": {
+    "start": 1783302601.7078419,
+    "end": 1783310019.6219208,
+    "dur": 7417.914078950882,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G187547"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783302865.7347174,
+   "t1": 1783303886.7682528,
+   "severity": 4,
+   "summary": "4 LOC in 17m01s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.24,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.4
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783302865.9517934,
+   "t1": 1783303886.9837904,
+   "severity": 4,
+   "summary": "4 LOC in 17m01s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.24,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 4.9,
+    "max_lag_s": 3.0
+   },
+   "gid": "G334023"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783302925.1179612,
+   "t1": 1783303886.127142,
+   "severity": 4,
+   "summary": "4 LOC in 16m01s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.25,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.2
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783302925.8041806,
+   "t1": 1783303886.8384917,
+   "severity": 4,
+   "summary": "4 LOC in 16m01s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.25,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.9
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783302926.4377937,
+   "t1": 1783303886.4388149,
+   "severity": 4,
+   "summary": "4 LOC in 16m00s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.25,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.5
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783303409.2164083,
+   "t1": 1783303886.0942795,
+   "severity": 4,
+   "summary": "4 LOC in 7m56s while idle (0.5/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.5,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 3.2,
+    "max_lag_s": 5.2
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783307426.481003,
+   "t1": 1783308853.3795621,
+   "severity": 4,
+   "summary": "4 LOC in 23m46s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.17,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.5
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783307486.845783,
+   "t1": 1783308853.84725,
+   "severity": 4,
+   "summary": "4 LOC in 22m47s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.18,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 2.2,
+    "max_lag_s": 3.2
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783310019.6219208,
+   "t1": 1783310019.6219208,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 7418.0
+   },
+   "gid": "G187547"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783310648.777524,
+   "t1": 1783311240.5396492,
+   "severity": 9.9,
+   "summary": "idle silence 9m51s -> reconnect",
+   "details": {
+    "start": 1783310648.777524,
+    "end": 1783311240.5396492,
+    "dur": 591.7621252536774,
+    "state": "idle",
+    "kind": "reconnect"
+   },
+   "gid": "G187547"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783311272.6525521,
+   "t1": 1783778409.6572735,
+   "severity": 7785.6,
+   "summary": "idle silence 129h45m -> no-return",
+   "details": {
+    "start": 1783311272.6525521,
+    "end": null,
+    "dur": 467137.0047214031,
+    "state": "idle",
+    "kind": "no-return"
+   },
+   "gid": "G187547"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325426.312591,
+   "t1": 1783326727.3328986,
+   "severity": 4,
+   "summary": "4 LOC in 21m41s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.18,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 3.2,
+    "max_lag_s": 2.7
+   },
+   "gid": "G334189"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325426.7346954,
+   "t1": 1783326768.94566,
+   "severity": 4,
+   "summary": "4 LOC in 22m22s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.18,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.6
+   },
+   "gid": "G371074"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325469.4228597,
+   "t1": 1783326728.439139,
+   "severity": 4,
+   "summary": "4 LOC in 20m59s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.19,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.7
+   },
+   "gid": "G304307"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325486.8619406,
+   "t1": 1783326727.7907093,
+   "severity": 4,
+   "summary": "4 LOC in 20m40s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.19,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.9
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325486.8704746,
+   "t1": 1783326728.5377305,
+   "severity": 4,
+   "summary": "4 LOC in 20m41s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.19,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.5
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325486.990569,
+   "t1": 1783326727.9254575,
+   "severity": 4,
+   "summary": "4 LOC in 20m40s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.19,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 3.2,
+    "max_lag_s": 6.1
+   },
+   "gid": "G594715"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325487.3291528,
+   "t1": 1783326728.341744,
+   "severity": 4,
+   "summary": "4 LOC in 20m41s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.19,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.7
+   },
+   "gid": "G370977"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783325529.3218508,
+   "t1": 1783326727.3358731,
+   "severity": 4,
+   "summary": "4 LOC in 19m58s while idle (0.2/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.2,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 4.2
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783332067.6034522,
+   "t1": 1783332351.103383,
+   "severity": 4,
+   "summary": "4 LOC in 4m43s while idle (0.8/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.85,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 9.7,
+    "max_lag_s": 5.1
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783347126.6574473,
+   "t1": 1783373466.3466616,
+   "severity": 0.65,
+   "summary": "idle drain 0.84%/h vs expected 0.18%/h (374 readings)",
+   "details": {
+    "mode": "idle",
+    "drain_pct_h": 0.837,
+    "expected_pct_h": 0.182,
+    "n": 374
+   },
+   "gid": "G226122"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783347144.9392292,
+   "t1": 1783373509.502883,
+   "severity": 0.45,
+   "summary": "idle drain 0.57%/h vs expected 0.12%/h (368 readings)",
+   "details": {
+    "mode": "idle",
+    "drain_pct_h": 0.566,
+    "expected_pct_h": 0.115,
+    "n": 368
+   },
+   "gid": "G306161"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783347848.7004027,
+   "t1": 1783347848.7004027,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 174.0
+   },
+   "gid": "G312359"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352056.0725167,
+   "t1": 1783353659.7809155,
+   "severity": 26.7,
+   "summary": "active silence 26m43s -> reconnect",
+   "details": {
+    "start": 1783352056.0725167,
+    "end": 1783353659.7809155,
+    "dur": 1603.7083988189697,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G334189"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352070.0184283,
+   "t1": 1783353670.3394606,
+   "severity": 26.7,
+   "summary": "active silence 26m40s -> reconnect",
+   "details": {
+    "start": 1783352070.0184283,
+    "end": 1783353670.3394606,
+    "dur": 1600.3210322856903,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375349"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352089.3671448,
+   "t1": 1783353248.6658304,
+   "severity": 19.3,
+   "summary": "active silence 19m19s -> reconnect",
+   "details": {
+    "start": 1783352089.3671448,
+    "end": 1783353248.6658304,
+    "dur": 1159.2986855506897,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G312268"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352103.0478997,
+   "t1": 1783353049.006411,
+   "severity": 15.8,
+   "summary": "active silence 15m45s -> reconnect",
+   "details": {
+    "start": 1783352103.0478997,
+    "end": 1783353049.006411,
+    "dur": 945.9585113525391,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352106.1369863,
+   "t1": 1783353082.2451825,
+   "severity": 16.3,
+   "summary": "active silence 16m16s -> reconnect",
+   "details": {
+    "start": 1783352106.1369863,
+    "end": 1783353082.2451825,
+    "dur": 976.1081962585449,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352108.701512,
+   "t1": 1783353210.6704426,
+   "severity": 18.4,
+   "summary": "active silence 18m21s -> reconnect",
+   "details": {
+    "start": 1783352108.701512,
+    "end": 1783353210.6704426,
+    "dur": 1101.9689304828644,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G306161"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352120.4317296,
+   "t1": 1783353197.621185,
+   "severity": 18.0,
+   "summary": "active silence 17m57s -> reconnect",
+   "details": {
+    "start": 1783352120.4317296,
+    "end": 1783353197.621185,
+    "dur": 1077.1894555091858,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G226122"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352120.7179322,
+   "t1": 1783353278.1122675,
+   "severity": 19.3,
+   "summary": "active silence 19m17s -> reconnect",
+   "details": {
+    "start": 1783352120.7179322,
+    "end": 1783353278.1122675,
+    "dur": 1157.394335269928,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G304307"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352121.2538269,
+   "t1": 1783353223.296779,
+   "severity": 18.4,
+   "summary": "active silence 18m22s -> reconnect",
+   "details": {
+    "start": 1783352121.2538269,
+    "end": 1783353223.296779,
+    "dur": 1102.0429520606995,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G334023"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352127.6869648,
+   "t1": 1783353683.868287,
+   "severity": 25.9,
+   "summary": "active silence 25m56s -> reconnect",
+   "details": {
+    "start": 1783352127.6869648,
+    "end": 1783353683.868287,
+    "dur": 1556.181322336197,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352128.6831038,
+   "t1": 1783353222.7383568,
+   "severity": 18.2,
+   "summary": "active silence 18m14s -> reconnect",
+   "details": {
+    "start": 1783352128.6831038,
+    "end": 1783353222.7383568,
+    "dur": 1094.0552530288696,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G312334"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352140.029331,
+   "t1": 1783353291.8883576,
+   "severity": 19.2,
+   "summary": "active silence 19m11s -> reconnect",
+   "details": {
+    "start": 1783352140.029331,
+    "end": 1783353291.8883576,
+    "dur": 1151.859026670456,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G312342"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352142.815479,
+   "t1": 1783353292.204877,
+   "severity": 19.2,
+   "summary": "active silence 19m09s -> reconnect",
+   "details": {
+    "start": 1783352142.815479,
+    "end": 1783353292.204877,
+    "dur": 1149.3893978595734,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352147.8370306,
+   "t1": 1783353211.284301,
+   "severity": 17.7,
+   "summary": "active silence 17m43s -> reconnect",
+   "details": {
+    "start": 1783352147.8370306,
+    "end": 1783353211.284301,
+    "dur": 1063.4472703933716,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G378723"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352153.0429528,
+   "t1": 1783353235.1315315,
+   "severity": 18.0,
+   "summary": "active silence 18m02s -> reconnect",
+   "details": {
+    "start": 1783352153.0429528,
+    "end": 1783353235.1315315,
+    "dur": 1082.0885787010193,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G371074"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352179.1465878,
+   "t1": 1783353078.3472722,
+   "severity": 15.0,
+   "summary": "active silence 14m59s -> reconnect",
+   "details": {
+    "start": 1783352179.1465878,
+    "end": 1783353078.3472722,
+    "dur": 899.2006843090057,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375562"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352181.138076,
+   "t1": 1783353306.0868545,
+   "severity": 18.7,
+   "summary": "active silence 18m44s -> reconnect",
+   "details": {
+    "start": 1783352181.138076,
+    "end": 1783353306.0868545,
+    "dur": 1124.9487783908844,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G378657"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352439.5231266,
+   "t1": 1783353361.5313265,
+   "severity": 15.4,
+   "summary": "active silence 15m22s -> reconnect",
+   "details": {
+    "start": 1783352439.5231266,
+    "end": 1783353361.5313265,
+    "dur": 922.008199930191,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352444.1859636,
+   "t1": 1783353358.146966,
+   "severity": 15.2,
+   "summary": "active silence 15m13s -> reconnect",
+   "details": {
+    "start": 1783352444.1859636,
+    "end": 1783353358.146966,
+    "dur": 913.9610023498535,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352453.912025,
+   "t1": 1783353391.056775,
+   "severity": 15.6,
+   "summary": "active silence 15m37s -> reconnect",
+   "details": {
+    "start": 1783352453.912025,
+    "end": 1783353391.056775,
+    "dur": 937.1447501182556,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352535.290274,
+   "t1": 1783353467.4010901,
+   "severity": 15.5,
+   "summary": "active silence 15m32s -> reconnect",
+   "details": {
+    "start": 1783352535.290274,
+    "end": 1783353467.4010901,
+    "dur": 932.1108162403107,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352556.1093383,
+   "t1": 1783353464.0814862,
+   "severity": 15.1,
+   "summary": "active silence 15m07s -> reconnect",
+   "details": {
+    "start": 1783352556.1093383,
+    "end": 1783353464.0814862,
+    "dur": 907.9721479415894,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352660.9793754,
+   "t1": 1783353612.0492435,
+   "severity": 15.9,
+   "summary": "active silence 15m51s -> reconnect",
+   "details": {
+    "start": 1783352660.9793754,
+    "end": 1783353612.0492435,
+    "dur": 951.0698680877686,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375372"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783352797.5829213,
+   "t1": 1783353613.305966,
+   "severity": 13.6,
+   "summary": "active silence 13m35s -> reconnect",
+   "details": {
+    "start": 1783352797.5829213,
+    "end": 1783353613.305966,
+    "dur": 815.7230446338654,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G341887"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353049.006411,
+   "t1": 1783353049.006411,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 946.0
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353078.3472722,
+   "t1": 1783353078.3472722,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 899.0
+   },
+   "gid": "G375562"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353082.2451825,
+   "t1": 1783353082.2451825,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 976.0
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353197.621185,
+   "t1": 1783353197.621185,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1077.0
+   },
+   "gid": "G226122"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353210.6704426,
+   "t1": 1783353210.6704426,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1102.0
+   },
+   "gid": "G306161"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353211.284301,
+   "t1": 1783353211.284301,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1063.0
+   },
+   "gid": "G378723"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353222.7383568,
+   "t1": 1783353222.7383568,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1094.0
+   },
+   "gid": "G312334"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353223.296779,
+   "t1": 1783353223.296779,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1102.0
+   },
+   "gid": "G334023"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353235.1315315,
+   "t1": 1783353235.1315315,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1082.0
+   },
+   "gid": "G371074"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353248.6658304,
+   "t1": 1783353248.6658304,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1159.0
+   },
+   "gid": "G312268"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353278.1122675,
+   "t1": 1783353278.1122675,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1157.0
+   },
+   "gid": "G304307"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353291.8883576,
+   "t1": 1783353291.8883576,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1152.0
+   },
+   "gid": "G312342"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353292.204877,
+   "t1": 1783353292.204877,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1149.0
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353306.0868545,
+   "t1": 1783353306.0868545,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1125.0
+   },
+   "gid": "G378657"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353358.146966,
+   "t1": 1783353358.146966,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 914.0
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353361.5313265,
+   "t1": 1783353361.5313265,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 922.0
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353391.056775,
+   "t1": 1783353391.056775,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 937.0
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353464.0814862,
+   "t1": 1783353464.0814862,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 908.0
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353467.4010901,
+   "t1": 1783353467.4010901,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 932.0
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353612.0492435,
+   "t1": 1783353612.0492435,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 951.0
+   },
+   "gid": "G375372"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353613.305966,
+   "t1": 1783353613.305966,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 816.0
+   },
+   "gid": "G341887"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353659.7809155,
+   "t1": 1783353659.7809155,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1604.0
+   },
+   "gid": "G334189"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353670.3394606,
+   "t1": 1783353670.3394606,
+   "severity": 1,
+   "summary": "device reboot (serial regression) in mass-device-reboot event",
+   "details": {
+    "server_reset": false,
+    "event": "mass-device-reboot",
+    "gap_s": 1600.0
+   },
+   "gid": "G375349"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783353683.868287,
+   "t1": 1783353683.868287,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 1556.0
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783372885.0269995,
+   "t1": 1783373636.3478272,
+   "severity": 4,
+   "summary": "4 LOC in 12m31s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.32,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.9
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783373081.373762,
+   "t1": 1783373636.6558037,
+   "severity": 4,
+   "summary": "4 LOC in 9m15s while idle (0.4/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.43,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.7
+   },
+   "gid": "G304307"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783373164.5099993,
+   "t1": 1783373636.8959615,
+   "severity": 4,
+   "summary": "4 LOC in 7m52s while idle (0.5/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.51,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.1
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783373266.8789535,
+   "t1": 1783373636.2919338,
+   "severity": 4,
+   "summary": "4 LOC in 6m09s while idle (0.6/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.65,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 2.2,
+    "max_lag_s": 2.2
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783373270.2559664,
+   "t1": 1783373636.6087623,
+   "severity": 6,
+   "summary": "6 LOC in 6m06s while idle (1.0/min, STUCK)",
+   "details": {
+    "n": 6,
+    "per_min": 0.98,
+    "stuck": true,
+    "remediated": false,
+    "max_spd_kn": 8.6,
+    "max_lag_s": 1.8
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783373462.6019773,
+   "t1": 1783373636.0180075,
+   "severity": 4,
+   "summary": "4 LOC in 2m53s while idle (1.4/min)",
+   "details": {
+    "n": 4,
+    "per_min": 1.38,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.1
+   },
+   "gid": "G334189"
+  },
+  {
+   "category": "replay",
+   "t0": 1783383794.7367706,
+   "t1": 1783383865.5168061,
+   "severity": 44.0,
+   "summary": "replay maxlag 44s -> drained-interleaved in 1m10s (12/84 lagged fixes, 0 drain cmds, intl 11, back 12, end lag 2s)",
+   "details": {
+    "t0": 1783383794.7,
+    "start_lag": 43.7,
+    "max_lag": 44.0,
+    "n": 84,
+    "n_lag": 12,
+    "v2l": 11,
+    "back": 12,
+    "drain_cmds": 0,
+    "last": 1783383865.5,
+    "last_lag": 1.5,
+    "last_high": 1783383805.5,
+    "t1": 1783383865.5,
+    "result": "drained-interleaved"
+   },
+   "gid": "G341887"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783396976.526736,
+   "t1": 1783397760.5345035,
+   "severity": 4,
+   "summary": "4 LOC in 13m04s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.31,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.8
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783396976.6200316,
+   "t1": 1783397761.2297306,
+   "severity": 4,
+   "summary": "4 LOC in 13m04s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.31,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.3
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397002.340093,
+   "t1": 1783397760.2578905,
+   "severity": 4,
+   "summary": "4 LOC in 12m37s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.32,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 2.2,
+    "max_lag_s": 1.8
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397036.4247751,
+   "t1": 1783397760.4264328,
+   "severity": 4,
+   "summary": "4 LOC in 12m04s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.33,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.7
+   },
+   "gid": "G341846"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397036.521735,
+   "t1": 1783397760.6238232,
+   "severity": 4,
+   "summary": "4 LOC in 12m04s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.33,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 2.7,
+    "max_lag_s": 2.8
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397037.0072825,
+   "t1": 1783397761.010789,
+   "severity": 4,
+   "summary": "4 LOC in 12m04s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.33,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.1
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397037.015089,
+   "t1": 1783397759.2500057,
+   "severity": 4,
+   "summary": "4 LOC in 12m02s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.33,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.8
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397037.4799702,
+   "t1": 1783397760.4810503,
+   "severity": 4,
+   "summary": "4 LOC in 12m03s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.33,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.5
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783397092.1927083,
+   "t1": 1783397760.0722754,
+   "severity": 4,
+   "summary": "4 LOC in 11m07s while idle (0.4/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.36,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 2.2
+   },
+   "gid": "G334189"
+  },
+  {
+   "category": "sos",
+   "t0": 1783400750.4699752,
+   "t1": 1783400750.4699752,
+   "severity": 0,
+   "summary": "alarm/SOS frame",
+   "details": {},
+   "gid": "G334189"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783401300.7811584,
+   "t1": 1783401421.7841682,
+   "severity": 4,
+   "summary": "4 LOC in 2m01s while idle (2.0/min)",
+   "details": {
+    "n": 4,
+    "per_min": 1.98,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 0.0,
+    "max_lag_s": 3.1
+   },
+   "gid": "G371074"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783403160.659726,
+   "t1": 1783404110.635752,
+   "severity": 4,
+   "summary": "4 LOC in 15m49s while idle (0.3/min)",
+   "details": {
+    "n": 4,
+    "per_min": 0.25,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 4.9,
+    "max_lag_s": 2.8
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783406554.2937758,
+   "t1": 1783406554.2937758,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 134.0
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783419456.5212297,
+   "t1": 1783545027.5354905,
+   "severity": 2092.9,
+   "summary": "active silence 34h52m -> reconnect",
+   "details": {
+    "start": 1783419456.5212297,
+    "end": 1783545027.5354905,
+    "dur": 125571.01426076889,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783425628.8916874,
+   "t1": 1783426307.2096856,
+   "severity": 11.3,
+   "summary": "active silence 11m18s -> reconnect",
+   "details": {
+    "start": 1783425628.8916874,
+    "end": 1783426307.2096856,
+    "dur": 678.3179981708527,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375372"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783426307.2096856,
+   "t1": 1783426307.2096856,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 678.0
+   },
+   "gid": "G375372"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783433561.4860873,
+   "t1": 1783476662.6020298,
+   "severity": 0.59,
+   "summary": "idle drain 0.69%/h vs expected 0.09%/h (619 readings)",
+   "details": {
+    "mode": "idle",
+    "drain_pct_h": 0.686,
+    "expected_pct_h": 0.094,
+    "n": 619
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "voltage-drop",
+   "t0": 1783455415.6845028,
+   "t1": 1783456152.4224255,
+   "severity": 70.0,
+   "summary": "OCV drop -70mV in 12m16s (idle, near reboot)",
+   "details": {
+    "kind": "drop",
+    "dv_mv": -70.0,
+    "mode": "idle",
+    "near_reboot": true
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783455483.0766046,
+   "t1": 1783456089.0172732,
+   "severity": 10.1,
+   "summary": "idle silence 10m05s -> reconnect",
+   "details": {
+    "start": 1783455483.0766046,
+    "end": 1783456089.0172732,
+    "dur": 605.9406685829163,
+    "state": "idle",
+    "kind": "reconnect"
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783456089.0172732,
+   "t1": 1783456089.0172732,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 606.0
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "replay",
+   "t0": 1783474788.6276567,
+   "t1": 1783474849.1117454,
+   "severity": 121612.0,
+   "summary": "replay maxlag 121612s -> drained-interleaved in 1m00s (1/63 lagged fixes, 0 drain cmds, intl 0, back 1, end lag 3s)",
+   "details": {
+    "t0": 1783474788.6,
+    "start_lag": 121611.6,
+    "max_lag": 121611.6,
+    "n": 63,
+    "n_lag": 1,
+    "v2l": 0,
+    "back": 1,
+    "drain_cmds": 0,
+    "last": 1783474849.1,
+    "last_lag": 3.1,
+    "last_high": 1783474788.6,
+    "t1": 1783474849.1,
+    "result": "drained-interleaved"
+   },
+   "gid": "G378723"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783545027.5354905,
+   "t1": 1783545027.5354905,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 125571.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783547618.5115054,
+   "t1": 1783547618.5115054,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 211.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783548655.606758,
+   "t1": 1783548995.9401636,
+   "severity": 5.7,
+   "summary": "active silence 5m40s -> reconnect",
+   "details": {
+    "start": 1783548655.606758,
+    "end": 1783548995.9401636,
+    "dur": 340.33340549468994,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783548995.9401636,
+   "t1": 1783548995.9401636,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 340.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783551353.9166691,
+   "t1": 1783551690.4136896,
+   "severity": 5.6,
+   "summary": "active silence 5m36s -> reconnect",
+   "details": {
+    "start": 1783551353.9166691,
+    "end": 1783551690.4136896,
+    "dur": 336.49702048301697,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783551690.4136896,
+   "t1": 1783551690.4136896,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 336.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783566505.0769439,
+   "t1": 1783573630.1464314,
+   "severity": 1.08,
+   "summary": "active drain 2.81%/h vs expected 1.73%/h (114 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.811,
+    "expected_pct_h": 1.731,
+    "n": 114
+   },
+   "gid": "G341887"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783572366.8433726,
+   "t1": 1783572366.8433726,
+   "severity": 1,
+   "summary": "device reboot (serial regression) after server RESET#",
+   "details": {
+    "server_reset": true,
+    "event": null,
+    "gap_s": 53.0
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783573216.1608856,
+   "t1": 1783573216.1608856,
+   "severity": 1,
+   "summary": "device reboot (serial regression) after server RESET#",
+   "details": {
+    "server_reset": true,
+    "event": null,
+    "gap_s": 65.0
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783586403.7919564,
+   "t1": 1783586735.452479,
+   "severity": 5.5,
+   "summary": "active silence 5m31s -> reconnect",
+   "details": {
+    "start": 1783586403.7919564,
+    "end": 1783586735.452479,
+    "dur": 331.6605224609375,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783586735.452479,
+   "t1": 1783586735.452479,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 332.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783591496.799761,
+   "t1": 1783591496.799761,
+   "severity": 1,
+   "summary": "device reboot (serial regression) after server RESET#",
+   "details": {
+    "server_reset": true,
+    "event": null,
+    "gap_s": 34.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783595074.8209143,
+   "t1": 1783595074.8209143,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 30.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783595322.2588058,
+   "t1": 1783595322.2588058,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 35.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783595593.3131552,
+   "t1": 1783595593.3131552,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 28.0
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783632033.9282162,
+   "t1": 1783778409.6572735,
+   "severity": 2439.6,
+   "summary": "active silence 40h39m -> no-return",
+   "details": {
+    "start": 1783632033.9282162,
+    "end": null,
+    "dur": 146375.729057312,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375356"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641340.1326964,
+   "t1": 1783645033.9025323,
+   "severity": 2.0,
+   "summary": "active drain 3.46%/h vs expected 1.45%/h (61 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.459,
+    "expected_pct_h": 1.455,
+    "n": 61
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641341.709972,
+   "t1": 1783644704.4658618,
+   "severity": 0.96,
+   "summary": "active drain 2.52%/h vs expected 1.57%/h (55 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.525,
+    "expected_pct_h": 1.565,
+    "n": 55
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641353.0944958,
+   "t1": 1783645034.1014206,
+   "severity": 1.99,
+   "summary": "active drain 3.84%/h vs expected 1.84%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.835,
+    "expected_pct_h": 1.842,
+    "n": 60
+   },
+   "gid": "G312359"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641354.8288214,
+   "t1": 1783645033.7170517,
+   "severity": 1.53,
+   "summary": "active drain 3.15%/h vs expected 1.62%/h (59 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.153,
+    "expected_pct_h": 1.621,
+    "n": 59
+   },
+   "gid": "G306161"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641363.109018,
+   "t1": 1783645034.0061035,
+   "severity": 1.29,
+   "summary": "active drain 3.19%/h vs expected 1.90%/h (58 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.192,
+    "expected_pct_h": 1.901,
+    "n": 58
+   },
+   "gid": "G334023"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641367.7304194,
+   "t1": 1783645033.465836,
+   "severity": 1.87,
+   "summary": "active drain 3.71%/h vs expected 1.84%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.713,
+    "expected_pct_h": 1.842,
+    "n": 60
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641369.6893673,
+   "t1": 1783645033.7067714,
+   "severity": 1.09,
+   "summary": "active drain 2.69%/h vs expected 1.60%/h (59 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.69,
+    "expected_pct_h": 1.602,
+    "n": 59
+   },
+   "gid": "G378830"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641369.8874044,
+   "t1": 1783645034.0124476,
+   "severity": 1.11,
+   "summary": "active drain 2.98%/h vs expected 1.88%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.984,
+    "expected_pct_h": 1.875,
+    "n": 60
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641370.104133,
+   "t1": 1783645043.4311354,
+   "severity": 1.18,
+   "summary": "active drain 3.34%/h vs expected 2.17%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.345,
+    "expected_pct_h": 2.169,
+    "n": 60
+   },
+   "gid": "G312300"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641370.3045795,
+   "t1": 1783645034.01868,
+   "severity": 3.06,
+   "summary": "active drain 4.90%/h vs expected 1.84%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 4.904,
+    "expected_pct_h": 1.842,
+    "n": 60
+   },
+   "gid": "G306088"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641370.4208217,
+   "t1": 1783645034.811518,
+   "severity": 1.58,
+   "summary": "active drain 3.78%/h vs expected 2.20%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.778,
+    "expected_pct_h": 2.199,
+    "n": 60
+   },
+   "gid": "G371116"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641372.5471976,
+   "t1": 1783645033.6164808,
+   "severity": 1.22,
+   "summary": "active drain 3.06%/h vs expected 1.84%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.06,
+    "expected_pct_h": 1.842,
+    "n": 60
+   },
+   "gid": "G378848"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641373.7992768,
+   "t1": 1783644688.9100807,
+   "severity": 2.17,
+   "summary": "active drain 4.07%/h vs expected 1.90%/h (54 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 4.073,
+    "expected_pct_h": 1.899,
+    "n": 54
+   },
+   "gid": "G347082"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641386.0640986,
+   "t1": 1783645034.0487432,
+   "severity": 2.02,
+   "summary": "active drain 3.44%/h vs expected 1.42%/h (59 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.436,
+    "expected_pct_h": 1.418,
+    "n": 59
+   },
+   "gid": "G375547"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641386.781018,
+   "t1": 1783645033.7432818,
+   "severity": 2.32,
+   "summary": "active drain 3.92%/h vs expected 1.60%/h (60 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.922,
+    "expected_pct_h": 1.602,
+    "n": 60
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783641390.6258075,
+   "t1": 1783645033.6268027,
+   "severity": 2.1,
+   "summary": "active drain 3.70%/h vs expected 1.60%/h (59 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.7,
+    "expected_pct_h": 1.602,
+    "n": 59
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651572.1731133,
+   "t1": 1783655528.8517554,
+   "severity": 1.71,
+   "summary": "active drain 3.59%/h vs expected 1.88%/h (64 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.586,
+    "expected_pct_h": 1.875,
+    "n": 64
+   },
+   "gid": "G388920"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651572.872463,
+   "t1": 1783655422.8439002,
+   "severity": 1.56,
+   "summary": "active drain 3.18%/h vs expected 1.62%/h (61 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.177,
+    "expected_pct_h": 1.621,
+    "n": 61
+   },
+   "gid": "G594715"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651573.4972804,
+   "t1": 1783655762.3233342,
+   "severity": 1.72,
+   "summary": "active drain 5.02%/h vs expected 3.30%/h (67 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 5.022,
+    "expected_pct_h": 3.303,
+    "n": 67
+   },
+   "gid": "G312268"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651575.7386885,
+   "t1": 1783655418.5764391,
+   "severity": 1.4,
+   "summary": "active drain 3.00%/h vs expected 1.60%/h (63 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.004,
+    "expected_pct_h": 1.602,
+    "n": 63
+   },
+   "gid": "G388862"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651583.9708083,
+   "t1": 1783655512.0171177,
+   "severity": 1.72,
+   "summary": "active drain 3.32%/h vs expected 1.60%/h (63 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.321,
+    "expected_pct_h": 1.602,
+    "n": 63
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651585.593031,
+   "t1": 1783657918.2053015,
+   "severity": 1.11,
+   "summary": "active drain 3.19%/h vs expected 2.08%/h (101 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.193,
+    "expected_pct_h": 2.078,
+    "n": 101
+   },
+   "gid": "G370498"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651588.2173612,
+   "t1": 1783658743.565777,
+   "severity": 1.44,
+   "summary": "active drain 2.85%/h vs expected 1.42%/h (114 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.854,
+    "expected_pct_h": 1.418,
+    "n": 114
+   },
+   "gid": "G375547"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651590.2747848,
+   "t1": 1783655393.0370338,
+   "severity": 1.35,
+   "summary": "active drain 3.34%/h vs expected 1.99%/h (62 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.338,
+    "expected_pct_h": 1.991,
+    "n": 62
+   },
+   "gid": "G370977"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651591.1814163,
+   "t1": 1783658352.3345869,
+   "severity": 1.24,
+   "summary": "active drain 3.08%/h vs expected 1.84%/h (107 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.079,
+    "expected_pct_h": 1.842,
+    "n": 107
+   },
+   "gid": "G312359"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651600.6163101,
+   "t1": 1783655457.6778178,
+   "severity": 1.44,
+   "summary": "active drain 3.29%/h vs expected 1.84%/h (63 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.286,
+    "expected_pct_h": 1.842,
+    "n": 63
+   },
+   "gid": "G370589"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651603.987668,
+   "t1": 1783658743.9768481,
+   "severity": 1.29,
+   "summary": "active drain 2.89%/h vs expected 1.60%/h (113 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 2.893,
+    "expected_pct_h": 1.602,
+    "n": 113
+   },
+   "gid": "G378830"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651614.5125008,
+   "t1": 1783654418.545182,
+   "severity": 1.39,
+   "summary": "active drain 3.44%/h vs expected 2.05%/h (47 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.435,
+    "expected_pct_h": 2.05,
+    "n": 47
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651617.729807,
+   "t1": 1783656752.8551793,
+   "severity": 2.28,
+   "summary": "active drain 5.76%/h vs expected 3.48%/h (82 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 5.758,
+    "expected_pct_h": 3.482,
+    "n": 82
+   },
+   "gid": "G375562"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651622.2009122,
+   "t1": 1783655447.286665,
+   "severity": 1.06,
+   "summary": "active drain 3.17%/h vs expected 2.11%/h (61 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.167,
+    "expected_pct_h": 2.109,
+    "n": 61
+   },
+   "gid": "G312334"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651629.9284415,
+   "t1": 1783655411.718105,
+   "severity": 2.38,
+   "summary": "active drain 4.00%/h vs expected 1.62%/h (62 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 4.005,
+    "expected_pct_h": 1.621,
+    "n": 62
+   },
+   "gid": "G306161"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783651644.1425755,
+   "t1": 1783657687.3249652,
+   "severity": 1.92,
+   "summary": "active drain 3.37%/h vs expected 1.45%/h (97 readings)",
+   "details": {
+    "mode": "active",
+    "drain_pct_h": 3.371,
+    "expected_pct_h": 1.455,
+    "n": 97
+   },
+   "gid": "G348635"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783651967.2407167,
+   "t1": 1783651967.2407167,
+   "severity": 1,
+   "summary": "device reboot (serial regression) after server RESET#",
+   "details": {
+    "server_reset": true,
+    "event": null,
+    "gap_s": 53.0
+   },
+   "gid": "G623050"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783651971.1591825,
+   "t1": 1783651971.1591825,
+   "severity": 1,
+   "summary": "device reboot (serial regression) after server RESET#",
+   "details": {
+    "server_reset": true,
+    "event": null,
+    "gap_s": 26.0
+   },
+   "gid": "G380521"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783653690.8254151,
+   "t1": 1783653690.8254151,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 129.0
+   },
+   "gid": "G347082"
+  },
+  {
+   "category": "replay",
+   "t0": 1783653694.10131,
+   "t1": 1783653888.423762,
+   "severity": 136.0,
+   "summary": "replay maxlag 136s -> drained-interleaved in 3m14s (135/348 lagged fixes, 0 drain cmds, intl 134, back 135, end lag 2s)",
+   "details": {
+    "t0": 1783653694.1,
+    "start_lag": 123.1,
+    "max_lag": 136.1,
+    "n": 348,
+    "n_lag": 135,
+    "v2l": 134,
+    "back": 135,
+    "drain_cmds": 0,
+    "last": 1783653888.4,
+    "last_lag": 2.4,
+    "last_high": 1783653827.8,
+    "t1": 1783653888.4,
+    "result": "drained-interleaved"
+   },
+   "gid": "G347082"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783655583.6315148,
+   "t1": 1783655583.6315148,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 123.0
+   },
+   "gid": "G341846"
+  },
+  {
+   "category": "replay",
+   "t0": 1783655587.1495798,
+   "t1": 1783655721.309555,
+   "severity": 114.0,
+   "summary": "replay maxlag 114s -> drained-interleaved in 2m14s (74/220 lagged fixes, 0 drain cmds, intl 73, back 74, end lag 2s)",
+   "details": {
+    "t0": 1783655587.1,
+    "start_lag": 114.1,
+    "max_lag": 114.1,
+    "n": 220,
+    "n_lag": 74,
+    "v2l": 73,
+    "back": 74,
+    "drain_cmds": 0,
+    "last": 1783655721.3,
+    "last_lag": 2.3,
+    "last_high": 1783655659.9,
+    "t1": 1783655721.3,
+    "result": "drained-interleaved"
+   },
+   "gid": "G341846"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783660537.2978814,
+   "t1": 1783778409.6572735,
+   "severity": 1964.5,
+   "summary": "active silence 32h44m -> no-return",
+   "details": {
+    "start": 1783660537.2978814,
+    "end": null,
+    "dur": 117872.35939216614,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G378517"
+  },
+  {
+   "category": "idle-loc",
+   "t0": 1783660671.6477923,
+   "t1": 1783660699.3137512,
+   "severity": 4,
+   "summary": "4 LOC in 27s while idle (8.7/min)",
+   "details": {
+    "n": 4,
+    "per_min": 8.67,
+    "stuck": false,
+    "remediated": false,
+    "max_spd_kn": 6.5,
+    "max_lag_s": 6.3
+   },
+   "gid": "G370977"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783665754.0168526,
+   "t1": 1783778409.6572735,
+   "severity": 1877.6,
+   "summary": "active silence 31h17m -> no-return",
+   "details": {
+    "start": 1783665754.0168526,
+    "end": null,
+    "dur": 112655.6404209137,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G347082"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783668476.3309393,
+   "t1": 1783731891.5607526,
+   "severity": 1056.9,
+   "summary": "active silence 17h36m -> reconnect",
+   "details": {
+    "start": 1783668476.3309393,
+    "end": 1783731891.5607526,
+    "dur": 63415.229813337326,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "excess-drain",
+   "t0": 1783699016.424536,
+   "t1": 1783742126.822308,
+   "severity": 0.84,
+   "summary": "idle drain 0.98%/h vs expected 0.14%/h (625 readings)",
+   "details": {
+    "mode": "idle",
+    "drain_pct_h": 0.981,
+    "expected_pct_h": 0.14,
+    "n": 625
+   },
+   "gid": "G312268"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783699540.804734,
+   "t1": 1783778409.6572735,
+   "severity": 1314.5,
+   "summary": "active silence 21h54m -> no-return",
+   "details": {
+    "start": 1783699540.804734,
+    "end": null,
+    "dur": 78868.85253953934,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375562"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783714038.6666548,
+   "t1": 1783778409.6572735,
+   "severity": 1072.8,
+   "summary": "active silence 17h52m -> no-return",
+   "details": {
+    "start": 1783714038.6666548,
+    "end": null,
+    "dur": 64370.99061870575,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375349"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783717148.4194982,
+   "t1": 1783778409.6572735,
+   "severity": 1021.0,
+   "summary": "active silence 17h01m -> no-return",
+   "details": {
+    "start": 1783717148.4194982,
+    "end": null,
+    "dur": 61261.237775325775,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375372"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783718239.5932958,
+   "t1": 1783778409.6572735,
+   "severity": 1002.8,
+   "summary": "active silence 16h42m -> no-return",
+   "details": {
+    "start": 1783718239.5932958,
+    "end": null,
+    "dur": 60170.06397771835,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G312292"
+  },
+  {
+   "category": "voltage-drop",
+   "t0": 1783723646.6674957,
+   "t1": 1783724051.668317,
+   "severity": 120.0,
+   "summary": "OCV drop -120mV in 6m45s (idle)",
+   "details": {
+    "kind": "drop",
+    "dv_mv": -120.0,
+    "mode": "idle",
+    "near_reboot": false
+   },
+   "gid": "G312268"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783723764.1613717,
+   "t1": 1783778409.6572735,
+   "severity": 910.8,
+   "summary": "active silence 15h10m -> no-return",
+   "details": {
+    "start": 1783723764.1613717,
+    "end": null,
+    "dur": 54645.495901823044,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G226122"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783724155.3120828,
+   "t1": 1783778409.6572735,
+   "severity": 904.2,
+   "summary": "active silence 15h04m -> no-return",
+   "details": {
+    "start": 1783724155.3120828,
+    "end": null,
+    "dur": 54254.34519076347,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G312243"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783731891.5607526,
+   "t1": 1783731891.5607526,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 63415.0
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783732077.8642223,
+   "t1": 1783778409.6572735,
+   "severity": 772.2,
+   "summary": "active silence 12h52m -> no-return",
+   "details": {
+    "start": 1783732077.8642223,
+    "end": null,
+    "dur": 46331.79305124283,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G312342"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783734154.787919,
+   "t1": 1783734154.787919,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 41.0
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783734396.8977456,
+   "t1": 1783738653.6854959,
+   "severity": 70.9,
+   "summary": "active silence 1h10m -> reconnect",
+   "details": {
+    "start": 1783734396.8977456,
+    "end": 1783738653.6854959,
+    "dur": 4256.787750244141,
+    "state": "active",
+    "kind": "reconnect"
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "voltage-drop",
+   "t0": 1783737446.3370621,
+   "t1": 1783738289.0080643,
+   "severity": 227.0,
+   "summary": "OCV drop -227mV in 14m02s (idle, near reboot)",
+   "details": {
+    "kind": "drop",
+    "dv_mv": -227.0,
+    "mode": "idle",
+    "near_reboot": true
+   },
+   "gid": "G378657"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783738287.7002094,
+   "t1": 1783738287.7002094,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 28.0
+   },
+   "gid": "G378657"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783738304.8710666,
+   "t1": 1783778409.6572735,
+   "severity": 668.4,
+   "summary": "active silence 11h08m -> no-return",
+   "details": {
+    "start": 1783738304.8710666,
+    "end": null,
+    "dur": 40104.78620696068,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G378657"
+  },
+  {
+   "category": "reboot",
+   "t0": 1783738653.6854959,
+   "t1": 1783738653.6854959,
+   "severity": 1,
+   "summary": "device reboot (serial regression) UNEXPECTED",
+   "details": {
+    "server_reset": false,
+    "event": null,
+    "gap_s": 4257.0
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783739270.7789445,
+   "t1": 1783778409.6572735,
+   "severity": 652.3,
+   "summary": "active silence 10h52m -> no-return",
+   "details": {
+    "start": 1783739270.7789445,
+    "end": null,
+    "dur": 39138.87832903862,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375430"
+  },
+  {
+   "category": "dropout",
+   "t0": 1783740176.6531975,
+   "t1": 1783778409.6572735,
+   "severity": 637.2,
+   "summary": "active silence 10h37m -> no-return",
+   "details": {
+    "start": 1783740176.6531975,
+    "end": null,
+    "dur": 38233.00407600403,
+    "state": "active",
+    "kind": "no-return"
+   },
+   "gid": "G375539"
+  }
+ ]
+}
