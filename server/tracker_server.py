@@ -862,6 +862,8 @@ def write_current_positions(positions: dict, positions_file: Path, user_override
                 display_pos.pop('hidden', None)
             if 'info' in merged:
                 display_pos['info'] = merged['info']
+            if merged.get('division'):
+                display_pos['division'] = merged['division']
         # Add position tail if available (last 20 seconds of positions)
         if position_tails and sailor_id in position_tails:
             display_pos['tail'] = position_tails[sailor_id]
@@ -3343,6 +3345,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     override['hidden'] = bool(data['hidden'])
                 if 'info' in data:
                     override['info'] = str(data['info'])
+                # empty string clears the division (key omitted from the stored entry)
+                if 'division' in data and str(data['division']).strip():
+                    override['division'] = str(data['division']).strip()
 
                 if override:
                     # Prefer did:XXX key if device has a did
@@ -3366,7 +3371,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     log(f"[EVENT {eid}] User override set for {user_id} (key={store_key}): {override}")
                     self._send_json({"success": True, "user_id": user_id, "override": override})
                 else:
-                    self._send_json({"error": "No valid fields (name, role, info)"}, 400)
+                    self._send_json({"error": "No valid fields (name, role, info, division)"}, 400)
 
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)

@@ -98,6 +98,25 @@ def test_per_event_override_wins_then_clear(udp_client, server):
     assert sid not in saved
 
 
+def test_division_only_override_keeps_default_name(udp_client, server):
+    """A per-event division-only override must not clobber the gt06 default name."""
+    sid = "G900004"
+    _send_pos(udp_client, sid)
+    assert _wait_for(lambda: _read_positions(server).get(sid)), "position not registered"
+
+    _mgr_post(server, "/api/manage/gt06/users", {"users": {sid: {"name": "DefName"}}})
+    assert _wait_for(lambda: _read_positions(server).get(sid, {}).get("name") == "DefName"), \
+        "default name not applied"
+
+    status, _ = _admin_post(server, f"/api/event/{EID}/admin/user/{sid}", {"division": "SH"})
+    assert status == 200
+
+    pos = _wait_for(lambda: (lambda p: p if p.get("division") == "SH" else None)(
+        _read_positions(server).get(sid, {})))
+    assert pos, "division did not propagate to current_positions.json"
+    assert pos.get("name") == "DefName", "gt06 default name lost by division-only override"
+
+
 def test_buoy_role_override_live_and_logged(udp_client, server):
     """The admin endpoint must accept role=buoy, apply it live, write it into the
     daily JSONL track log, and revert when the override is removed."""

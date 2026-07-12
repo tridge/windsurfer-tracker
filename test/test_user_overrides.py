@@ -303,3 +303,83 @@ def test_get_users_resolves_after_id_change(udp_client, http_client, server):
     assert body["users"]["RM02"]["name"] == "Remapped"
     # RM01 should not appear (no separate entry)
     assert "RM01" not in body["users"]
+
+
+# ── Division field tests ──────────────────────────────────────────────
+
+
+def test_set_division_override(http_client):
+    """Division should round-trip through POST and GET /users."""
+    eid = create_event(http_client, name="Division Set", admin_password="divset")
+    status, body = http_client.post(
+        f"/api/event/{eid}/admin/user/DIV01",
+        data={"name": "Div Sailor", "division": "HW"},
+        headers={"X-Admin-Password": "divset"},
+    )
+    assert status == 200
+    assert body["override"]["division"] == "HW"
+
+    status, body = http_client.get(
+        f"/api/event/{eid}/users",
+        headers={"X-Admin-Password": "divset"},
+    )
+    assert status == 200
+    assert body["users"]["DIV01"]["division"] == "HW"
+
+
+def test_division_applies_to_positions(udp_client, http_client, server):
+    """Division should appear in current_positions.json entries."""
+    eid = create_event(http_client, name="Division Display", admin_password="divdisp")
+
+    pkt = make_packet(eid=eid, id="DIV02")
+    udp_client.send_position(pkt)
+    time.sleep(0.3)
+
+    http_client.post(
+        f"/api/event/{eid}/admin/user/DIV02",
+        data={"division": "Womens"},
+        headers={"X-Admin-Password": "divdisp"},
+    )
+    time.sleep(0.3)
+
+    pos_file = server.data_dir / "html" / str(eid) / "current_positions.json"
+    data = json.loads(pos_file.read_text())
+    assert data["sailors"]["DIV02"]["division"] == "Womens"
+
+
+def test_empty_division_clears(udp_client, http_client, server):
+    """Posting an empty division should drop the field from store and positions."""
+    eid = create_event(http_client, name="Division Clear", admin_password="divclear")
+
+    pkt = make_packet(eid=eid, id="DIV03")
+    udp_client.send_position(pkt)
+    time.sleep(0.3)
+
+    http_client.post(
+        f"/api/event/{eid}/admin/user/DIV03",
+        data={"name": "Keep Name", "division": "LW"},
+        headers={"X-Admin-Password": "divclear"},
+    )
+    time.sleep(0.3)
+    pos_file = server.data_dir / "html" / str(eid) / "current_positions.json"
+    data = json.loads(pos_file.read_text())
+    assert data["sailors"]["DIV03"]["division"] == "LW"
+
+    # Re-post with empty division (full-field save, as the edit UIs do)
+    http_client.post(
+        f"/api/event/{eid}/admin/user/DIV03",
+        data={"name": "Keep Name", "division": ""},
+        headers={"X-Admin-Password": "divclear"},
+    )
+    time.sleep(0.3)
+
+    status, body = http_client.get(
+        f"/api/event/{eid}/users",
+        headers={"X-Admin-Password": "divclear"},
+    )
+    assert "division" not in body["users"]["DIV03"]
+    assert body["users"]["DIV03"]["name"] == "Keep Name"
+
+    data = json.loads(pos_file.read_text())
+    assert "division" not in data["sailors"]["DIV03"]
+    assert data["sailors"]["DIV03"]["name"] == "Keep Name"
