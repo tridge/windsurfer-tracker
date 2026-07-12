@@ -1254,6 +1254,7 @@
         // the list and the map. Stored as the excluded set so new divisions
         // default to visible; '' represents "No division".
         let divisionByTracker = {};
+        let divisionByDid = {};
         let availableDivisions = new Set();
         let divisionExcluded = new Set(
             JSON.parse(localStorage.getItem(`divisionFilter_${EVENT_ID}`) || '[]'));
@@ -1265,10 +1266,15 @@
                 const users = (await resp.json()).users || {};
                 for (const [key, u] of Object.entries(users)) {
                     if (!u.division) continue;
-                    // did:XXX keys carry the tracker id in _last_id
-                    const id = key.startsWith('did:') ? u._last_id : key;
-                    if (!id) continue;
-                    divisionByTracker[id] = u.division;
+                    if (key.startsWith('did:')) {
+                        // did:XXX keys carry the tracker id in _last_id;
+                        // also index by device id since _last_id can go
+                        // stale if the device later changes sailor id
+                        divisionByDid[key.slice(4)] = u.division;
+                        if (u._last_id) divisionByTracker[u._last_id] = u.division;
+                    } else {
+                        divisionByTracker[key] = u.division;
+                    }
                     availableDivisions.add(u.division);
                 }
             } catch (e) {
@@ -1282,7 +1288,15 @@
         }
 
         function getUserDivision(userId) {
-            return divisionByTracker[getOriginalTrackerId(userId)] || null;
+            const division = divisionByTracker[getOriginalTrackerId(userId)];
+            if (division) return division;
+            // Fall back to the device id baked into log entries (survives
+            // sailor-id changes that leave the override's _last_id stale)
+            if (userData[userId] && userData[userId].length > 0) {
+                const did = userData[userId][0].did;
+                if (did && divisionByDid[did]) return divisionByDid[did];
+            }
+            return null;
         }
 
         function userPassesDivision(userId) {

@@ -320,8 +320,14 @@
                         if (pos.division) userRows[id].division = pos.division;
                         if (pos.hidden) userRows[id].hidden = true;
                         if (pos.info) userRows[id].info = pos.info;
-                    } else if (!userRows[id].did && pos.did) {
-                        userRows[id].did = pos.did;
+                    } else {
+                        // Backfill effective values for override rows so a
+                        // division-only override still shows its merged
+                        // name/role (and name-based CSV matching works)
+                        const row = userRows[id];
+                        if (!row.did && pos.did) row.did = pos.did;
+                        if (!row.effName && pos.name) row.effName = pos.name;
+                        if (!row.effRole && pos.role) row.effRole = pos.role;
                     }
                 }
             }
