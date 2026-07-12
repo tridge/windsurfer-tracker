@@ -269,13 +269,17 @@ rather than backlog. Flagged for a bench discharge test before the next event.</
   (shaded) on 07-10.</figcaption>
 </figure>
 <p><strong>Re-test after a full recharge (07-12).</strong> Two days after the
-regatta the unit was recharged and taken on a ~1¾-hour tracking run at real
-sailing speeds (up to 20 kn, solid 1 Hz, 6,193 fixes). From a fresh charge the
-collapse <strong>did not reproduce</strong>: 4.07 V resting at the start,
-4.02 V under load at the end — no measurable state-of-charge loss at the 10 mV
-resolution, with a single −70 mV transient sag (10:29) that recovered within
-minutes. Its GPS staleness was also normal on this run (fix lag p50/p95 = 2 s,
-against ~7 s throughout the regatta).</p>
+regatta the unit was recharged and left running in tracking mode for ~1¾ hours —
+sitting on a windowsill with a poor sky view for most of it, carried at walking
+pace for some (the scattered high "speeds" in the raw fixes are artifacts of the
+weak GPS lock, not motion). The part that matters is the electrical load, which
+is the same as racing: GPS receiver on and 1 Hz reporting throughout (6,193
+fixes). From a fresh charge the collapse <strong>did not reproduce</strong>:
+4.07 V resting at the start, 4.02 V under load at the end — no measurable
+state-of-charge loss at the 10 mV resolution, with a single −70 mV transient sag
+(10:29) that recovered within minutes. Its fix staleness was also normal on this
+run (lag p50/p95 = 2 s even with the poor sky view, against ~7 s throughout the
+regatta).</p>
 <p>That narrows the diagnosis: the cell still performs on the upper part of its
 charge, and the regatta failure mode was <strong>state-of-charge dependent</strong> —
 after three idle days had eaten into a partial charge, the remaining real
@@ -287,8 +291,8 @@ true capacity is the follow-up.</p>
   <div class="legend" id="lgG"></div>
   <div class="chartwrap" id="cG"></div>
   <figcaption>The 07-12 re-test (5-min medians): recharged to 4.07 V resting,
-  then a 1¾-hour tracking session (shaded) at up to 20 kn — voltage holds
-  around 4.02–4.05 V under load with no collapse.</figcaption>
+  then a 1¾-hour stationary/walking tracking session (shaded) — voltage holds
+  around 4.02–4.05 V under GPS + 1 Hz reporting load with no collapse.</figcaption>
 </figure>
 </div>
 
