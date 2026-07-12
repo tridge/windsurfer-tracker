@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <title>Users - Windsurfer Tracker</title>
+    <title>Edit Users - Windsurfer Tracker</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -53,11 +53,50 @@
             color: #666;
             white-space: nowrap;
         }
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            white-space: nowrap;
+        }
+        .toolbar button {
+            padding: 7px 14px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .toolbar button:hover { background: #f0f0f0; }
+        .toolbar button.primary {
+            background: #0066cc;
+            border-color: #0066cc;
+            color: #fff;
+        }
+        .toolbar button.primary:hover { background: #0055aa; }
+        .toolbar button:disabled { opacity: 0.5; cursor: default; }
+        .toolbar input[type="password"] {
+            padding: 7px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 13px;
+            width: 140px;
+        }
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 16px;
         }
+        .status-msg {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+            white-space: pre-wrap;
+        }
+        .status-msg.ok { display: block; background: #e8f5e9; color: #2e7d32; }
+        .status-msg.err { display: block; background: #fee; color: #c00; }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -89,6 +128,17 @@
         tr:last-child td { border-bottom: none; }
         tr:hover td { background: #fafafa; }
         tr.hidden-user td { opacity: 0.5; }
+        td input[type="text"], td select {
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            background: #fff;
+        }
+        td input.changed, td select.changed, td input[type="checkbox"].changed { outline: 2px solid #f0ad4e; }
+        .col-name { min-width: 130px; }
+        .col-division { min-width: 90px; }
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -99,7 +149,9 @@
         .badge-sailor { background: #e0f0ff; color: #0066cc; }
         .badge-support { background: #fff3e0; color: #e65100; }
         .badge-spectator { background: #e8f5e9; color: #2e7d32; }
+        .badge-buoy { background: #f3e5f5; color: #7b1fa2; }
         .badge-hidden { background: #fee; color: #c00; }
+        .badge-division { background: #ede7f6; color: #4527a0; }
         .mono { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
         .did {
             font-family: 'SF Mono', Monaco, Consolas, monospace;
@@ -125,19 +177,31 @@
 
 <div class="header">
     <a class="back-link" id="backLink" href="event.html">← Live</a>
-    <h1>Users</h1>
+    <h1>Edit Users</h1>
     <div class="search-bar">
-        <input type="text" id="searchInput" placeholder="Search by ID, name, DID, or info..." oninput="renderUsers()">
+        <input type="text" id="searchInput" placeholder="Search by ID, name, DID, division, or info..." oninput="renderUsers()">
     </div>
     <span class="user-count" id="userCount"></span>
+    <div class="toolbar" id="adminLogin" style="display:none;">
+        <input type="password" id="adminPasswordInput" placeholder="Admin password"
+               onkeydown="if(event.key==='Enter')adminLogin()">
+        <button onclick="adminLogin()">Admin</button>
+    </div>
+    <div class="toolbar" id="adminTools" style="display:none;">
+        <button onclick="document.getElementById('csvFileInput').click()">Load Divisions</button>
+        <button class="primary" id="saveBtn" onclick="saveAll()">Save</button>
+    </div>
+    <input type="file" id="csvFileInput" accept=".csv,text/csv" style="display:none" onchange="loadDivisionsCSV(this.files[0])">
 </div>
 <div class="container">
+    <div class="status-msg" id="statusMsg"></div>
     <table id="usersTable">
         <thead>
             <tr>
                 <th onclick="sortBy('id')">ID <span class="sort-arrow" id="sort-id"></span></th>
                 <th onclick="sortBy('name')">Display Name <span class="sort-arrow" id="sort-name"></span></th>
                 <th onclick="sortBy('role')">Role <span class="sort-arrow" id="sort-role"></span></th>
+                <th onclick="sortBy('division')">Division <span class="sort-arrow" id="sort-division"></span></th>
                 <th onclick="sortBy('hidden')">Hidden <span class="sort-arrow" id="sort-hidden"></span></th>
                 <th class="col-info" onclick="sortBy('info')">Info <span class="sort-arrow" id="sort-info"></span></th>
             </tr>
@@ -145,34 +209,131 @@
         <tbody id="usersBody"></tbody>
     </table>
     <div class="empty-state" id="emptyState" style="display:none;">No users found</div>
+    <datalist id="divisionList"></datalist>
 </div>
 
 <script>
     const urlParams = new URLSearchParams(window.location.search);
     const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
+    const EVENT_API = `/api/event/${EVENT_ID}`;
 
-    let usersData = {};
+    let isAdmin = false;
+    let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+    // userRows: id -> {id, did, name, role, hidden, info, division, hasOverride, effName, effRole}
+    let userRows = {};
     let sortCol = 'id';
     let sortAsc = true;
 
     document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
-    loadUsers();
+    init();
+
+    async function init() {
+        if (adminPassword) {
+            try {
+                const resp = await fetch(`${EVENT_API}/auth/check`,
+                    { headers: { 'X-Admin-Password': adminPassword } });
+                isAdmin = resp.ok;
+            } catch (e) { isAdmin = false; }
+        }
+        document.getElementById('adminLogin').style.display = isAdmin ? 'none' : '';
+        document.getElementById('adminTools').style.display = isAdmin ? '' : 'none';
+        await loadUsers();
+    }
+
+    async function adminLogin() {
+        const pw = document.getElementById('adminPasswordInput').value;
+        if (!pw) return;
+        try {
+            const resp = await fetch(`${EVENT_API}/auth/check`,
+                { headers: { 'X-Admin-Password': pw } });
+            if (!resp.ok) { showStatus('Wrong admin password', true); return; }
+        } catch (e) { showStatus('Auth check failed: ' + e, true); return; }
+        adminPassword = pw;
+        localStorage.setItem(`adminPassword_${EVENT_ID}`, pw);
+        isAdmin = true;
+        document.getElementById('adminLogin').style.display = 'none';
+        document.getElementById('adminTools').style.display = '';
+        showStatus('Admin mode enabled');
+        await loadUsers();
+    }
+
+    function showStatus(msg, isError) {
+        const el = document.getElementById('statusMsg');
+        el.textContent = msg;
+        el.className = 'status-msg ' + (isError ? 'err' : 'ok');
+        if (!isError) setTimeout(() => { if (el.textContent === msg) el.className = 'status-msg'; }, 6000);
+    }
 
     async function loadUsers() {
-        try {
-            const resp = await fetch(`${EVENT_ID}/users.json`);
-            if (!resp.ok) {
-                document.getElementById('emptyState').style.display = '';
-                document.getElementById('emptyState').textContent = 'No users file found';
-                document.getElementById('usersTable').style.display = 'none';
-                return;
-            }
-            const data = await resp.json();
-            usersData = data.users || {};
-            renderUsers();
-        } catch (e) {
-            console.error('Failed to load users:', e);
+        userRows = {};
+        // Fresh load: drop any stale editable rows so renderUsers() doesn't
+        // sync old input values into the reloaded data
+        document.getElementById('usersBody').innerHTML = '';
+        let overrides = {};
+        if (isAdmin) {
+            // Resolved overrides (did: keys translated back to sailor ids)
+            try {
+                const resp = await fetch(`${EVENT_API}/users`,
+                    { headers: { 'X-Admin-Password': adminPassword } });
+                if (resp.ok) overrides = (await resp.json()).users || {};
+            } catch (e) { console.error('Failed to load overrides:', e); }
+        } else {
+            // Public fallback: raw per-event users.json (resolve did: keys ourselves)
+            try {
+                const resp = await fetch(`${EVENT_ID}/users.json`);
+                if (resp.ok) {
+                    const raw = (await resp.json()).users || {};
+                    for (const [key, u] of Object.entries(raw)) {
+                        const id = key.startsWith('did:') ? (u._last_id || '') : key;
+                        if (!id) continue;
+                        overrides[id] = u;
+                        if (key.startsWith('did:')) overrides[id] = { ...u, _did: key.slice(4) };
+                    }
+                }
+            } catch (e) { console.error('Failed to load users.json:', e); }
         }
+
+        for (const [id, u] of Object.entries(overrides)) {
+            userRows[id] = {
+                id, did: u._did || '',
+                name: u.name || '', role: u.role || '', hidden: !!u.hidden,
+                info: u.info || '', division: u.division || '',
+                hasOverride: true, effName: u.name || '', effRole: u.role || ''
+            };
+        }
+
+        // Merge in every tracker known to current_positions.json so units without an
+        // override get a row too (merged name/role shown as effective placeholders).
+        try {
+            const resp = await fetch(`${EVENT_ID}/current_positions.json`);
+            if (resp.ok) {
+                const sailors = (await resp.json()).sailors || {};
+                for (const [id, pos] of Object.entries(sailors)) {
+                    if (!userRows[id]) {
+                        userRows[id] = {
+                            id, did: pos.did || '',
+                            name: '', role: '', hidden: false, info: '', division: '',
+                            hasOverride: false, effName: pos.name || '', effRole: pos.role || ''
+                        };
+                        // Not an override, but show current merged values where the
+                        // override would otherwise apply (gt06 defaults etc.)
+                        if (pos.division) userRows[id].division = pos.division;
+                        if (pos.hidden) userRows[id].hidden = true;
+                        if (pos.info) userRows[id].info = pos.info;
+                    } else if (!userRows[id].did && pos.did) {
+                        userRows[id].did = pos.did;
+                    }
+                }
+            }
+        } catch (e) { console.error('Failed to load positions:', e); }
+
+        for (const row of Object.values(userRows)) row.orig = origKey(row);
+        renderUsers();
+        updateDivisionDatalist();
+    }
+
+    function origKey(row) {
+        return JSON.stringify([row.name, row.role, row.hidden, row.info, row.division]);
     }
 
     function sortBy(col) {
@@ -190,52 +351,66 @@
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    function updateDivisionDatalist() {
+        const divisions = new Set();
+        for (const row of Object.values(userRows)) {
+            if (row.division) divisions.add(row.division);
+        }
+        document.getElementById('divisionList').innerHTML =
+            [...divisions].sort().map(d => `<option value="${escapeHtml(d)}">`).join('');
+    }
+
+    // Pull current input values back into userRows before re-rendering
+    function syncFromInputs() {
+        document.querySelectorAll('#usersBody tr[data-id]').forEach(tr => {
+            const row = userRows[tr.dataset.id];
+            if (!row) return;
+            row.name = tr.querySelector('.f-name').value.trim();
+            row.role = tr.querySelector('.f-role').value;
+            row.division = tr.querySelector('.f-division').value.trim();
+            row.hidden = tr.querySelector('.f-hidden').checked;
+            row.info = tr.querySelector('.f-info').value.trim();
+        });
+    }
+
     function renderUsers() {
+        if (isAdmin) syncFromInputs();
         const query = (document.getElementById('searchInput').value || '').toLowerCase();
         const tbody = document.getElementById('usersBody');
         const emptyState = document.getElementById('emptyState');
 
-        // Build array from raw users.json data
-        // Keys can be "did:XXXX" or plain IDs like "S01"
-        let rows = Object.entries(usersData).map(([key, u]) => {
-            const isDid = key.startsWith('did:');
-            return {
-                key,
-                did: isDid ? key.slice(4) : '',
-                id: isDid ? (u._last_id || '') : key,
-                name: u.name || '',
-                role: u.role || '',
-                hidden: u.hidden ? 'yes' : '',
-                info: u.info || ''
-            };
-        });
+        let rows = Object.values(userRows).map(r => ({
+            ...r,
+            dispName: r.name || r.effName,
+            dispRole: r.role || r.effRole,
+        }));
 
-        // Filter on DID, ID, Display Name, Info
         if (query) {
             rows = rows.filter(r =>
                 r.id.toLowerCase().includes(query) ||
                 r.did.toLowerCase().includes(query) ||
-                r.name.toLowerCase().includes(query) ||
+                r.dispName.toLowerCase().includes(query) ||
+                r.division.toLowerCase().includes(query) ||
                 r.info.toLowerCase().includes(query)
             );
         }
 
-        // Sort
+        const sortVal = r => sortCol === 'name' ? r.dispName :
+                             sortCol === 'role' ? r.dispRole :
+                             sortCol === 'hidden' ? (r.hidden ? 'yes' : '') :
+                             (r[sortCol] || '');
         rows.sort((a, b) => {
-            let va = (a[sortCol] || '').toLowerCase();
-            let vb = (b[sortCol] || '').toLowerCase();
+            const va = String(sortVal(a)).toLowerCase();
+            const vb = String(sortVal(b)).toLowerCase();
             if (va < vb) return sortAsc ? -1 : 1;
             if (va > vb) return sortAsc ? 1 : -1;
-            // stable tiebreak by unique key so tied rows keep a fixed order
-            return String(a.key).localeCompare(String(b.key));
+            return String(a.id).localeCompare(String(b.id));
         });
 
-        // Update sort arrows
         document.querySelectorAll('.sort-arrow').forEach(el => el.textContent = '');
         const arrow = document.getElementById(`sort-${sortCol}`);
         if (arrow) arrow.textContent = sortAsc ? '▲' : '▼';
 
-        // Render
         if (rows.length === 0) {
             tbody.innerHTML = '';
             emptyState.style.display = '';
@@ -244,33 +419,225 @@
         } else {
             emptyState.style.display = 'none';
             document.getElementById('usersTable').style.display = '';
-            tbody.innerHTML = rows.map(r => {
-                const roleBadge = r.role
-                    ? `<span class="badge badge-${escapeHtml(r.role)}">${escapeHtml(r.role)}</span>`
-                    : '<span style="color:#999">—</span>';
-                const hiddenBadge = r.hidden === 'yes'
-                    ? '<span class="badge badge-hidden">hidden</span>'
-                    : '';
-                const trClass = r.hidden === 'yes' ? ' class="hidden-user"' : '';
-                const idCell = r.did
-                    ? `<span class="mono">${escapeHtml(r.id) || '<span style="color:#999">—</span>'}</span><br><span class="did">${escapeHtml(r.did)}</span>`
-                    : `<span class="mono">${escapeHtml(r.id)}</span>`;
-                return `<tr${trClass}>
-                    <td>${idCell}</td>
-                    <td>${escapeHtml(r.name) || '<span style="color:#999">—</span>'}</td>
-                    <td>${roleBadge}</td>
-                    <td>${hiddenBadge}</td>
-                    <td class="col-info">${escapeHtml(r.info) || ''}</td>
-                </tr>`;
-            }).join('');
+            tbody.innerHTML = rows.map(r => isAdmin ? renderEditRow(r) : renderViewRow(r)).join('');
+            if (isAdmin) {
+                tbody.querySelectorAll('input, select').forEach(el =>
+                    el.addEventListener('change', () => markChanged(el)));
+                tbody.querySelectorAll('input[type="text"]').forEach(el =>
+                    el.addEventListener('input', () => markChanged(el)));
+            }
         }
 
-        // Count
-        const total = Object.keys(usersData).length;
-        const shown = rows.length;
+        const total = Object.keys(userRows).length;
         document.getElementById('userCount').textContent = query
-            ? `${shown} / ${total}`
+            ? `${rows.length} / ${total}`
             : `${total} users`;
+    }
+
+    function idCellHtml(r) {
+        return r.did
+            ? `<span class="mono">${escapeHtml(r.id) || '<span style="color:#999">—</span>'}</span><br><span class="did">${escapeHtml(r.did)}</span>`
+            : `<span class="mono">${escapeHtml(r.id)}</span>`;
+    }
+
+    function renderViewRow(r) {
+        const roleBadge = r.dispRole
+            ? `<span class="badge badge-${escapeHtml(r.dispRole)}">${escapeHtml(r.dispRole)}</span>`
+            : '<span style="color:#999">—</span>';
+        const hiddenBadge = r.hidden ? '<span class="badge badge-hidden">hidden</span>' : '';
+        const divBadge = r.division
+            ? `<span class="badge badge-division">${escapeHtml(r.division)}</span>`
+            : '';
+        const trClass = r.hidden ? ' class="hidden-user"' : '';
+        return `<tr${trClass}>
+            <td>${idCellHtml(r)}</td>
+            <td>${escapeHtml(r.dispName) || '<span style="color:#999">—</span>'}</td>
+            <td>${roleBadge}</td>
+            <td>${divBadge}</td>
+            <td>${hiddenBadge}</td>
+            <td class="col-info">${escapeHtml(r.info) || ''}</td>
+        </tr>`;
+    }
+
+    function renderEditRow(r) {
+        const roleOpts = ['', 'sailor', 'support', 'spectator', 'buoy'].map(role =>
+            `<option value="${role}"${r.role === role ? ' selected' : ''}>${role || '(default)'}</option>`
+        ).join('');
+        const trClass = r.hidden ? ' class="hidden-user"' : '';
+        return `<tr${trClass} data-id="${escapeHtml(r.id)}">
+            <td>${idCellHtml(r)}</td>
+            <td class="col-name"><input type="text" class="f-name" value="${escapeHtml(r.name)}"
+                placeholder="${escapeHtml(r.effName)}"></td>
+            <td><select class="f-role">${roleOpts}</select></td>
+            <td class="col-division"><input type="text" class="f-division" list="divisionList"
+                value="${escapeHtml(r.division)}"></td>
+            <td><input type="checkbox" class="f-hidden"${r.hidden ? ' checked' : ''}></td>
+            <td class="col-info"><input type="text" class="f-info" value="${escapeHtml(r.info)}"></td>
+        </tr>`;
+    }
+
+    function markChanged(el) {
+        const tr = el.closest('tr');
+        const row = userRows[tr.dataset.id];
+        if (!row) return;
+        const cur = JSON.stringify([
+            tr.querySelector('.f-name').value.trim(),
+            tr.querySelector('.f-role').value,
+            tr.querySelector('.f-hidden').checked,
+            tr.querySelector('.f-info').value.trim(),
+            tr.querySelector('.f-division').value.trim(),
+        ]);
+        const changed = cur !== row.orig;
+        tr.querySelectorAll('input, select').forEach(e =>
+            e.classList.toggle('changed', changed));
+    }
+
+    // Build the POST payload for a row; the server replaces the whole override
+    // entry, so omitted fields are cleared.
+    function rowPayload(row) {
+        const payload = {};
+        if (row.name) payload.name = row.name;
+        if (row.role) payload.role = row.role;
+        if (row.hidden) payload.hidden = true;
+        if (row.info) payload.info = row.info;
+        if (row.division) payload.division = row.division;
+        return payload;
+    }
+
+    async function saveAll() {
+        if (!isAdmin) return;
+        syncFromInputs();
+        const saveBtn = document.getElementById('saveBtn');
+        saveBtn.disabled = true;
+        let saved = 0, failed = [];
+        try {
+            for (const row of Object.values(userRows)) {
+                if (origKey(row) === row.orig) continue;
+                const payload = rowPayload(row);
+                let ok = false;
+                try {
+                    let resp;
+                    if (Object.keys(payload).length === 0) {
+                        // Everything cleared: remove the override entirely
+                        resp = await fetch(`${EVENT_API}/admin/user/${encodeURIComponent(row.id)}`,
+                            { method: 'DELETE', headers: { 'X-Admin-Password': adminPassword } });
+                    } else {
+                        resp = await fetch(`${EVENT_API}/admin/user/${encodeURIComponent(row.id)}`,
+                            { method: 'POST',
+                              headers: { 'X-Admin-Password': adminPassword,
+                                         'Content-Type': 'application/json' },
+                              body: JSON.stringify(payload) });
+                    }
+                    ok = resp.ok;
+                } catch (e) { ok = false; }
+                if (ok) { saved++; row.orig = origKey(row); row.hasOverride = true; }
+                else failed.push(row.id);
+            }
+        } finally {
+            saveBtn.disabled = false;
+        }
+        if (failed.length) {
+            showStatus(`Saved ${saved}, FAILED: ${failed.join(', ')}`, true);
+        } else {
+            showStatus(saved ? `Saved ${saved} user${saved === 1 ? '' : 's'}` : 'No changes to save');
+        }
+        renderUsers();
+        updateDivisionDatalist();
+    }
+
+    // ── Load Divisions CSV import ─────────────────────────────────────
+    // Expected: header row with a "division" column plus "id" and/or "name";
+    // extra columns ignored. Rows match a user by exact id, else by display
+    // name (ignoring a leading RET/VAN marker on the user's current name).
+
+    function parseCSV(text) {
+        const rows = [];
+        let row = [], field = '', inQuotes = false;
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            if (inQuotes) {
+                if (c === '"') {
+                    if (text[i + 1] === '"') { field += '"'; i++; }
+                    else inQuotes = false;
+                } else field += c;
+            } else if (c === '"') {
+                inQuotes = true;
+            } else if (c === ',') {
+                row.push(field); field = '';
+            } else if (c === '\n' || c === '\r') {
+                if (c === '\r' && text[i + 1] === '\n') i++;
+                row.push(field); field = '';
+                if (row.length > 1 || row[0] !== '') rows.push(row);
+                row = [];
+            } else field += c;
+        }
+        row.push(field);
+        if (row.length > 1 || row[0] !== '') rows.push(row);
+        return rows;
+    }
+
+    function normalizeName(name) {
+        // Strip leading RET/VAN markers ("RET VAN SusieH 1393" -> "susieh 1393")
+        return String(name).replace(/^(\s*(RET|VAN)\s+)+/i, '')
+            .trim().replace(/\s+/g, ' ').toLowerCase();
+    }
+
+    async function loadDivisionsCSV(file) {
+        document.getElementById('csvFileInput').value = '';
+        if (!file || !isAdmin) return;
+        const text = await file.text();
+        const rows = parseCSV(text);
+        if (rows.length < 2) { showStatus('CSV has no data rows', true); return; }
+
+        const header = rows[0].map(h => h.trim().toLowerCase());
+        const idCol = header.indexOf('id');
+        const nameCol = header.indexOf('name');
+        const divCol = header.indexOf('division');
+        if (divCol < 0 || (idCol < 0 && nameCol < 0)) {
+            showStatus('CSV needs a "division" column plus "id" and/or "name"', true);
+            return;
+        }
+
+        syncFromInputs();
+        const byName = {};
+        for (const row of Object.values(userRows)) {
+            const n = normalizeName(row.name || row.effName);
+            if (n) byName[n] = row;
+        }
+
+        let matched = 0, created = 0;
+        const unmatched = [];
+        for (const csvRow of rows.slice(1)) {
+            const division = (csvRow[divCol] || '').trim();
+            const id = idCol >= 0 ? (csvRow[idCol] || '').trim() : '';
+            const name = nameCol >= 0 ? (csvRow[nameCol] || '').trim() : '';
+            if (!division && !id && !name) continue;
+
+            let row = id ? userRows[id] : null;
+            if (!row && name) row = byName[normalizeName(name)];
+            if (row) {
+                row.division = division;
+                matched++;
+            } else if (id) {
+                // Unknown to this event yet: create a division-only row for it
+                userRows[id] = {
+                    id, did: '', name: '', role: '', hidden: false, info: '',
+                    division, hasOverride: false, effName: name, effRole: '',
+                    orig: JSON.stringify(['', '', false, '', ''])
+                };
+                created++;
+            } else {
+                unmatched.push(name || '(blank)');
+            }
+        }
+
+        renderUsers();
+        updateDivisionDatalist();
+        await saveAll();
+        let msg = `Divisions loaded: ${matched} matched` +
+            (created ? `, ${created} new` : '');
+        if (unmatched.length) msg += `\nUnmatched: ${unmatched.join(', ')}`;
+        showStatus(msg, unmatched.length > 0);
     }
 </script>
 </body>
