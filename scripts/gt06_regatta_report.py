@@ -72,6 +72,22 @@ def _dur(sec):
     return f"{h}h{m:02d}m" if h else (f"{m}m{s:02d}s" if m else f"{s}s")
 
 
+def parse_when(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    import time as _t
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return _t.mktime(_t.strptime(v, fmt))
+        except ValueError:
+            continue
+    raise SystemExit(f"can't parse time {v!r} (epoch or 'YYYY-MM-DD HH:MM')")
+
+
 def first_ts(path):
     with open(path, "rb") as f:
         fmt = detect_format(f)
@@ -395,6 +411,9 @@ class FleetScan:
     def feed(self, ts, conn_id, outgoing, res):
         proto, data = res[0], res[1]
         self.ident.feed(conn_id, outgoing, res)
+        if (self.cfg.win0 is not None and ts < self.cfg.win0) or \
+                (self.cfg.win1 is not None and ts > self.cfg.win1):
+            return
         imei = self.ident.get(conn_id)
         if imei is None:
             buf = self.pending.setdefault(conn_id, [])
@@ -942,6 +961,10 @@ def main():
     ap.add_argument("--baseline-out", default=None,
                     help="write per-unit baseline JSON and exit (no report)")
     ap.add_argument("--plots", action="store_true")
+    ap.add_argument("--start", default=None,
+                    help="analysis window start (epoch or 'YYYY-MM-DD HH:MM'); "
+                         "identity is tracked outside the window, events are not")
+    ap.add_argument("--end", default=None, help="analysis window end")
     ap.add_argument("--lag", dest="lag", type=float, default=30.0)
     ap.add_argument("--live", type=float, default=5.0)
     ap.add_argument("--restore", type=float, default=8.0)
@@ -984,7 +1007,8 @@ def main():
         idle_drain_min_sec=args.idle_drain_min_sec,
         drain_factor=args.drain_factor, drain_abs=args.drain_abs,
         drop_mv=args.drop_mv, drop_pair_sec=args.drop_pair_sec,
-        plag_sec=args.plag_sec, plag_min_minutes=args.plag_min_minutes)
+        plag_sec=args.plag_sec, plag_min_minutes=args.plag_min_minutes,
+        win0=parse_when(args.start), win1=parse_when(args.end))
 
     soc = SocModel()
     ok, _errs = soc.self_test()
