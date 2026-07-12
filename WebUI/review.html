@@ -305,7 +305,13 @@
                 <p style="color:#666">Select a date to see logs</p>
             </div>
         </div>
-        <h3>Users</h3>
+        <h3 style="display:flex;align-items:center;gap:8px;">Users
+            <button id="division-filter-btn" title="Filter by division"
+                    style="display:none;padding:2px 7px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;line-height:1;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;"><path d="M3 4h18l-7 9v5.5l-4 2V13L3 4z"/></svg>
+            </button>
+        </h3>
+        <div id="division-filter-panel" style="display:none;margin-bottom:10px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;background:#fafafa;"></div>
         <div style="margin-bottom:10px;">
             <button id="show-all-btn" style="padding:5px 10px;margin-right:5px;">Show All</button>
             <button id="hide-all-btn" style="padding:5px 10px;">Hide All</button>
@@ -1241,6 +1247,110 @@
             return 'sailor';
         }
 
+        // ── Division filter ─────────────────────────────────────────────
+        // Divisions come from the per-event users.json overrides (current
+        // state, applied to historical tracks by original tracker id). The
+        // filter narrows the Users list: unchecked divisions disappear from
+        // the list and the map. Stored as the excluded set so new divisions
+        // default to visible; '' represents "No division".
+        let divisionByTracker = {};
+        let availableDivisions = new Set();
+        let divisionExcluded = new Set(
+            JSON.parse(localStorage.getItem(`divisionFilter_${EVENT_ID}`) || '[]'));
+
+        async function loadDivisions() {
+            try {
+                const resp = await fetch(`${DATA_BASE}users.json`);
+                if (!resp.ok) return;
+                const users = (await resp.json()).users || {};
+                for (const [key, u] of Object.entries(users)) {
+                    if (!u.division) continue;
+                    // did:XXX keys carry the tracker id in _last_id
+                    const id = key.startsWith('did:') ? u._last_id : key;
+                    if (!id) continue;
+                    divisionByTracker[id] = u.division;
+                    availableDivisions.add(u.division);
+                }
+            } catch (e) {
+                console.error('Failed to load divisions:', e);
+            }
+            if (availableDivisions.size > 0) {
+                document.getElementById('division-filter-btn').style.display = '';
+                updateDivisionFilterBtn();
+                if (Object.keys(userData).length > 0) applyDivisionFilter();
+            }
+        }
+
+        function getUserDivision(userId) {
+            return divisionByTracker[getOriginalTrackerId(userId)] || null;
+        }
+
+        function userPassesDivision(userId) {
+            if (availableDivisions.size === 0) return true;
+            return !divisionExcluded.has(getUserDivision(userId) || '');
+        }
+
+        function renderDivisionFilterPanel() {
+            const panel = document.getElementById('division-filter-panel');
+            const row = (value, label) => `
+                <label style="display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer;">
+                    <input type="checkbox" ${divisionExcluded.has(value) ? '' : 'checked'}
+                        data-division="${escapeHtml(value)}"
+                        onchange="toggleDivision(this.dataset.division, this.checked)">
+                    <span>${escapeHtml(label)}</span>
+                </label>`;
+            panel.innerHTML = [...availableDivisions].sort().map(d => row(d, d)).join('')
+                + row('', 'No division');
+        }
+
+        function toggleDivision(division, checked) {
+            if (checked) divisionExcluded.delete(division);
+            else divisionExcluded.add(division);
+            localStorage.setItem(`divisionFilter_${EVENT_ID}`,
+                JSON.stringify([...divisionExcluded]));
+            updateDivisionFilterBtn();
+            applyDivisionFilter();
+        }
+
+        function updateDivisionFilterBtn() {
+            const btn = document.getElementById('division-filter-btn');
+            const active = divisionExcluded.size > 0;
+            btn.style.background = active ? '#f0ad4e' : '#fff';
+            btn.style.color = active ? '#fff' : '';
+            btn.style.borderColor = active ? '#f0ad4e' : '#ccc';
+        }
+
+        // Deselect filtered-out users and redraw list, map and graphs
+        function applyDivisionFilter() {
+            if (Object.keys(userData).length === 0) return;  // no log loaded yet
+            let changed = false;
+            for (const userId of [...selectedUsers]) {
+                if (userPassesDivision(userId)) continue;
+                selectedUsers.delete(userId);
+                changed = true;
+                if (followedUsers.has(userId)) {
+                    followedUsers.delete(userId);
+                    if (followedPopups[userId]) {
+                        map.removeLayer(followedPopups[userId]);
+                        delete followedPopups[userId];
+                    }
+                }
+            }
+            updateUserList();
+            if (changed) {
+                updateSliderEndpoints();
+                resetPlaybackToSelection();
+            }
+        }
+
+        document.getElementById('division-filter-btn').addEventListener('click', () => {
+            const panel = document.getElementById('division-filter-panel');
+            const show = panel.style.display === 'none';
+            if (show) renderDivisionFilterPanel();
+            panel.style.display = show ? '' : 'none';
+        });
+        loadDivisions();
+
         // Create a map marker based on role
         // Returns a Leaflet layer with fixed pixel size (doesn't scale with zoom)
         // options.interactive: if false, clicks pass through to map (for playback)
@@ -1820,11 +1930,22 @@
         }
 
         function updateUserList() {
+            // Keep selection consistent with the division filter no matter how
+            // users got selected (restore, select-all fallback, URL deep link)
+            for (const userId of [...selectedUsers]) {
+                if (!userPassesDivision(userId)) selectedUsers.delete(userId);
+            }
             const container = document.getElementById('user-list');
             container.innerHTML = '';
 
             let colorIdx = 0;
             for (const [userId, entries] of sortedUserData()) {
+                // Division-filtered users are skipped but keep their color slot
+                // so colors stay stable across filter changes
+                if (!userPassesDivision(userId)) {
+                    colorIdx++;
+                    continue;
+                }
                 const speeds = entries.map(e => e.spd || 0);
                 // Use reduce instead of spread to avoid stack overflow with large arrays
                 const maxSpeed = speeds.reduce((max, s) => s > max ? s : max, 0);
@@ -5638,7 +5759,8 @@
         });
 
         document.getElementById('show-all-btn').addEventListener('click', () => {
-            selectedUsers = new Set(Object.keys(userData));
+            // Only select users passing the division filter
+            selectedUsers = new Set(Object.keys(userData).filter(userPassesDivision));
             document.querySelectorAll('.user-item').forEach(el => el.classList.add('selected'));
             resetPlaybackToSelection();
             fitMapToData();
