@@ -55,7 +55,9 @@ _F_RE = re.compile(rb"\*F:(\d+)\|(\d+)")
 _H_RE = re.compile(rb"\*H:(\d+)")
 _STAT_V = re.compile(rb"Battery:(\d+\.\d+)V")
 _ACC = re.compile(rb"ACC:(ON|OFF)")
-_GPS = re.compile(rb"GPS:(ON|OFF)")
+# tracking-mode STATUS says "GPS:Successful positioning" / "GPS:Fail..." rather
+# than ON/OFF - treat anything other than OFF as GPS active
+_GPS = re.compile(rb"GPS:(ON|OFF|Successful|Fail)")
 _TIMER_RE = re.compile(r"TIMER,(\d+),(\d+)")
 
 MODE_IDLE, MODE_ACTIVE, MODE_OVERNIGHT = "idle", "active", "overnight"
@@ -470,7 +472,7 @@ class FleetScan:
             acc = ma.group(1) == b"ON"
         mg = _GPS.search(data)
         if mg:
-            gps = mg.group(1) == b"ON"
+            gps = mg.group(1) != b"OFF"
         mv = _BT.search(data)
         if mv:
             u.readings.append((ts, int(mv.group(1)) / 1000.0, "bt", gps, acc))
