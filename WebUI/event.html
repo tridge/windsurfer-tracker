@@ -1122,6 +1122,11 @@
     <div class="info-panel">
         <div class="panel-header" onclick="togglePanel()">
             <h3 id="panelTitle">Tracking (0)</h3>
+            <button class="tracking-controls-btn" id="divisionFilterBtn"
+                    onclick="event.stopPropagation(); showTrackingControls()"
+                    title="Division filter" style="display:none;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;"><path d="M3 4h18l-7 9v5.5l-4 2V13L3 4z"/></svg>
+            </button>
             <button class="tracking-controls-btn" id="trackingControlsBtn"
                     onclick="event.stopPropagation(); showTrackingControls()"
                     title="Sort / filter">⚙</button>
@@ -1224,7 +1229,10 @@
             <div class="event-modal-body" style="padding:16px 20px;">
                 <div style="margin-bottom:10px;font-weight:600;color:#333;">Sort by</div>
                 <div id="trackingSortRows"></div>
-                <p style="font-size:12px;color:#888;margin-top:12px;">More filtering options coming later.</p>
+                <div id="trackingDivisionSection" style="display:none;margin-top:16px;">
+                    <div style="margin-bottom:10px;font-weight:600;color:#333;">Divisions</div>
+                    <div id="trackingDivisionRows"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -1410,7 +1418,7 @@
             <h4>Users</h4>
             <div class="admin-btn-group">
                 <a class="admin-action-btn primary" id="viewUsersLink" href="users.html" target="_blank" style="text-decoration:none;display:block;">
-                    👥 View Users
+                    👥 Edit Users
                 </a>
             </div>
         </div>
@@ -1451,6 +1459,9 @@
                 <option value="spectator">Spectator</option>
                 <option value="buoy">Buoy</option>
             </select>
+            <label for="editUserDivision">Division</label>
+            <input type="text" id="editUserDivision" list="editUserDivisionList" placeholder="e.g. LW, MW, HW">
+            <datalist id="editUserDivisionList"></datalist>
             <div style="margin: 12px 0;">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                     <input type="checkbox" id="editUserHidden" style="width:18px;height:18px;">
@@ -3096,6 +3107,9 @@
             document.getElementById('editUserRole').value = override.role || '';
             document.getElementById('editUserHidden').checked = override.hidden || false;
             document.getElementById('editUserInfo').value = override.info || '';
+            document.getElementById('editUserDivision').value = override.division || '';
+            document.getElementById('editUserDivisionList').innerHTML =
+                [...knownDivisions()].sort().map(d => `<option value="${escapeHtml(d)}">`).join('');
 
             // Show remove button if override exists
             document.getElementById('btnRemoveOverride').style.display =
@@ -3291,12 +3305,14 @@
             const role = document.getElementById('editUserRole').value;
             const hidden = document.getElementById('editUserHidden').checked;
             const info = document.getElementById('editUserInfo').value.replace(/^\s+/, '').replace(/\s+$/, '');
+            const division = document.getElementById('editUserDivision').value.trim();
 
             const data = {};
             if (name) data.name = name;
             if (role) data.role = role;
             data.hidden = hidden;  // Always include hidden state
             if (info) data.info = info;
+            if (division) data.division = division;
 
             if (Object.keys(data).length === 1 && !data.hidden) {
                 // Only hidden=false with no other data - treat as remove
@@ -3830,8 +3846,67 @@
                 </div>`).join('');
         }
 
+        // Division filter — unchecked divisions are excluded from list + map.
+        // Stored as the excluded set so new divisions default to visible.
+        // '' represents "No division".
+        let divisionExcluded = new Set(
+            JSON.parse(localStorage.getItem('divisionFilter_' + EVENT_ID) || '[]'));
+
+        function knownDivisions() {
+            const divisions = new Set();
+            if (currentPositions && currentPositions.sailors) {
+                for (const s of Object.values(currentPositions.sailors)) {
+                    if (s.division) divisions.add(s.division);
+                }
+            }
+            return divisions;
+        }
+
+        function divisionPasses(s) {
+            return !divisionExcluded.has(s.division || '');
+        }
+
+        function renderTrackingDivisionRows() {
+            const divisions = [...knownDivisions()].sort();
+            const section = document.getElementById('trackingDivisionSection');
+            section.style.display = divisions.length ? 'block' : 'none';
+            if (!divisions.length) return;
+            const row = (value, label) => `
+                <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;">
+                    <input type="checkbox" ${divisionExcluded.has(value) ? '' : 'checked'}
+                        data-division="${escapeHtml(value)}"
+                        onchange="toggleDivision(this.dataset.division, this.checked)">
+                    <span style="color:#333;">${escapeHtml(label)}</span>
+                </label>`;
+            document.getElementById('trackingDivisionRows').innerHTML =
+                divisions.map(d => row(d, d)).join('') + row('', 'No division');
+        }
+
+        function toggleDivision(division, checked) {
+            if (checked) divisionExcluded.delete(division);
+            else divisionExcluded.add(division);
+            localStorage.setItem('divisionFilter_' + EVENT_ID,
+                JSON.stringify([...divisionExcluded]));
+            updateDivisionFilterBtn();
+            if (currentPositions && currentPositions.sailors) {
+                updateMarkers(currentPositions.sailors);
+                updateSailorList(currentPositions.sailors);
+            }
+        }
+
+        // Funnel next to the Tracking heading: visible when any tracker has a
+        // division, highlighted while a filter is active
+        function updateDivisionFilterBtn() {
+            const btn = document.getElementById('divisionFilterBtn');
+            btn.style.display = knownDivisions().size ? '' : 'none';
+            const active = divisionExcluded.size > 0;
+            btn.style.color = active ? '#fff' : '';
+            btn.style.background = active ? '#f0ad4e' : '';
+        }
+
         function showTrackingControls() {
             renderTrackingSortRows();
+            renderTrackingDivisionRows();
             document.getElementById('trackingControlsOverlay').classList.add('visible');
         }
         function hideTrackingControls(ev) {
@@ -4339,16 +4414,22 @@
             document.getElementById('hiddenCount').textContent = hiddenUsers.length;
 
             // Filter out hidden users unless admin toggle is on
-            const all = showHiddenTrackers ? allRaw : allRaw.filter(s => !s.hidden);
+            const unfiltered = showHiddenTrackers ? allRaw : allRaw.filter(s => !s.hidden);
+
+            // Find assist requests before division filtering — an assistance
+            // request must never be filtered out of the alerts (buoys can't
+            // request assistance)
+            const assistList = unfiltered.filter(s => s.ast && s.role !== 'buoy');
+
+            // Apply the division filter (assist requesters always shown)
+            const all = unfiltered.filter(s => s.ast || divisionPasses(s));
+            updateDivisionFilterBtn();
 
             // Separate by role
             const sailorList = all.filter(s => (s.role || 'sailor') === 'sailor');
             const supportList = all.filter(s => s.role === 'support');
             const spectatorList = all.filter(s => s.role === 'spectator');
             const buoyList = all.filter(s => s.role === 'buoy');
-
-            // Find assist requests (buoys can't request assistance)
-            const assistList = all.filter(s => s.ast && s.role !== 'buoy');
             const hadAssist = hasActiveAssist;
             hasActiveAssist = assistList.length > 0;
             
@@ -4545,10 +4626,12 @@
 
             const now = Date.now() / 1000;
 
-            // Filter out hidden users unless admin toggle is on
+            // Filter out hidden users unless admin toggle is on, and apply the
+            // division filter (assist requesters always shown)
             const visibleSailors = {};
             for (const [id, sailor] of Object.entries(sailors)) {
-                if (!sailor.hidden || showHiddenTrackers) {
+                if (!(sailor.hidden && !showHiddenTrackers) &&
+                    (sailor.ast || divisionPasses(sailor))) {
                     visibleSailors[id] = sailor;
                 }
             }
