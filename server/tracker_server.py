@@ -3359,6 +3359,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                         # Remove old sailor_id entry if migrating to did key
                         if user_id in tracker.user_overrides and store_key != user_id:
                             del tracker.user_overrides[user_id]
+                    else:
+                        # Device not in live positions (e.g. tracks cleared):
+                        # reuse an existing did: entry that last belonged to
+                        # this id, else a plain-id save would leave a stale
+                        # did: duplicate that wins when the device returns
+                        for key, ov in tracker.user_overrides.items():
+                            if key.startswith("did:") and ov.get("_last_id") == user_id:
+                                store_key = key
+                                override["_last_id"] = user_id
+                                break
                     tracker.user_overrides[store_key] = override
                     save_user_overrides(tracker.users_file, tracker.user_overrides)
                     # Refresh positions file
@@ -4328,6 +4338,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     if did_key in tracker.user_overrides:
                         del tracker.user_overrides[did_key]
                         removed = True
+                # Also remove did: entries that last belonged to this id, so
+                # deleting an offline device doesn't leave a stale override
+                for key in [k for k, ov in tracker.user_overrides.items()
+                            if k.startswith("did:") and ov.get("_last_id") == user_id]:
+                    del tracker.user_overrides[key]
+                    removed = True
                 if removed:
                     save_user_overrides(tracker.users_file, tracker.user_overrides)
                     write_current_positions(

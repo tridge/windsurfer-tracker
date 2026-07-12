@@ -271,6 +271,54 @@ def test_fallback_to_sailor_id_when_no_did(udp_client, http_client, server):
     assert data["sailors"]["FB01"]["displayid"] == "Fallback"
 
 
+def test_offline_device_save_reuses_did_key(udp_client, http_client, server):
+    """POST for a device no longer in current_positions must update its
+    existing did: entry instead of creating a stale plain-id duplicate."""
+    eid = create_event(http_client, name="DID Offline", admin_password="didoffline")
+    did = "dev_offline_001"
+
+    pkt = make_packet(eid=eid, id="OFF01", did=did)
+    udp_client.send_position(pkt)
+    time.sleep(0.3)
+
+    # Set override while live (stored under did:XXX)
+    http_client.post(
+        f"/api/event/{eid}/admin/user/OFF01",
+        data={"name": "Offline Name"},
+        headers={"X-Admin-Password": "didoffline"},
+    )
+
+    # Clear tracks: device drops out of current_positions
+    status, _ = http_client.post(
+        f"/api/event/{eid}/admin/clear-tracks",
+        headers={"X-Admin-Password": "didoffline"},
+    )
+    assert status == 200
+
+    # Save again (e.g. from the Edit Users page) while device is offline
+    status, _ = http_client.post(
+        f"/api/event/{eid}/admin/user/OFF01",
+        data={"name": "Offline Name", "division": "HW"},
+        headers={"X-Admin-Password": "didoffline"},
+    )
+    assert status == 200
+
+    users_file = server.data_dir / "html" / str(eid) / "users.json"
+    users_data = json.loads(users_file.read_text())
+    assert "OFF01" not in users_data["users"], "stale plain-id duplicate created"
+    assert users_data["users"][f"did:{did}"]["division"] == "HW"
+    assert users_data["users"][f"did:{did}"]["_last_id"] == "OFF01"
+
+    # DELETE while offline must remove the did: entry too
+    status, _ = http_client.delete(
+        f"/api/event/{eid}/admin/user/OFF01",
+        headers={"X-Admin-Password": "didoffline"},
+    )
+    assert status == 200
+    users_data = json.loads(users_file.read_text())
+    assert f"did:{did}" not in users_data["users"]
+
+
 def test_get_users_resolves_after_id_change(udp_client, http_client, server):
     """GET /api/users resolves did:XXX to new sailor_id after device changes id."""
     eid = create_event(http_client, name="DID Remap", admin_password="didremap")
