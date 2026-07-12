@@ -172,7 +172,7 @@ summary.json, per-unit plots).</p>
 <h3 id="f2">2 · Idle GPS-restart flurries are an NT19D-V667 signature</h3>
 <ul>
 <li>11 idle-LOC burst episodes during the regatta — <strong>every one on a V667 unit</strong> (0.08/10 idle-h); zero on W07 V6.6x under identical idle config.</li>
-<li>Pattern: off-schedule no-fix LOC → server re-asserts GPS-off → GPS resets, briefly acquires (sats 10–13), uploads 4–6 fixes, settles. Self-limiting; none needed a MODE1 bounce.</li>
+<li>Pattern: off-schedule no-fix LOC → server re-asserts GPS-off → GPS resets, briefly acquires, uploads a few fixes, settles. Self-limiting; none needed a MODE1 bounce. A frame-by-frame worked example is in the <a href="#cs-341846">G341846 case study</a>.</li>
 </ul>
 <h3 id="f3">3 · Blind buffer worked exactly as designed</h3>
 <ul>
@@ -199,6 +199,9 @@ dropouts, all on a single charge: 4.07 V at the start of racing down to 3.64 V
 (≈25 %) at the finish. Its heaviest race (07-09 afternoon) burned 2.8 %/h
 ≈ 170 mA — the per-unit shape of the fleet-wide finding that real racing draws
 well above the 115 mA bench figure.</p>
+<p>It is also the clean control for finding 2: not a single idle GPS-restart
+flurry all regatta — 130 idle uploads, every one on the 30-minute cadence, and
+GPS reported OFF in every idle STATUS poll.</p>
 <p>Ten minutes into its first race (07-07 10:23) it lost the network for 44 s,
 re-logged-in, and replayed 12 buffered fixes — fully live again in 71 s, in the
 V667 interleaved drain style. The sailor's track has no gap: the blind-buffer
@@ -313,6 +316,24 @@ minutes before and after (no sag whatsoever). This is the one
 regatta, and the concrete case for the vendor list. The cost to the sailor:
 nothing — the blind buffer replayed 74 fixes (max 114 s stale) on reconnect and
 was fully live in 2m14s, so the track is continuous through the reboot.</p>
+<p>It also supplies the cleanest frame-by-frame example of a V667 idle
+GPS-restart flurry (finding 2), on the afternoon of day 1 — and it wasn't alone:
+G370498 and G334189, which had entered idle at the same moment after the morning
+session and so share the same 30-minute wake phase, ran the identical sequence in
+the same twelve minutes. The wake → no-fix → reset → instant 9-satellite lock
+pattern shows the GPS receiver was wedged while the sky view was fine — exactly
+the condition the idle <span class="mono">GPS_RST_TIME=60</span> setting exists
+to recover:</p>
+<div class="tablewrap"><table>
+<tr><th>time (07-07)</th><th>direction</th><th>frame</th><th>reading</th></tr>
+<tr><td>13:33:56</td><td>device →</td><td>LOC</td><td>sats 2, no fix — scheduled 30-min wake, can't lock</td></tr>
+<tr><td>14:03:56</td><td>device →</td><td>LOC</td><td>sats 2, no fix — next wake, still wedged</td></tr>
+<tr><td>14:15:00</td><td>device →</td><td>LOC</td><td>sats 0, no fix — off-schedule upload</td></tr>
+<tr><td>14:15:19</td><td>→ server</td><td>CMD</td><td>GPS_RST_TIME=60 re-asserted (idle GPS-off remediation)</td></tr>
+<tr><td>14:15:32</td><td>device →</td><td>LOC</td><td><strong>sats 9, valid fix — 13 s after the reset</strong></td></tr>
+<tr><td>14:16:00</td><td>device →</td><td>LOC</td><td>sats 9, valid fix — flurry ends</td></tr>
+<tr><td>14:46:00</td><td>device →</td><td>LOC</td><td>sats 9 — back on the normal 30-min cadence</td></tr>
+</table></div>
 <figure>
   <div class="legend" id="lgE"></div>
   <div class="chartwrap" id="cE"></div>
