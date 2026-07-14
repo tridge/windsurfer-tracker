@@ -6,6 +6,10 @@ After=network.target
 Type=simple
 User=tracker
 WorkingDirectory=/home/tracker/tracker.beta
+# systemd creates the append: target as root before dropping to User=tracker;
+# make sure the server can truncate it for the nightly rotation
+ExecStartPre=+/usr/bin/touch /home/tracker/tracker.beta/tracker.log
+ExecStartPre=+/usr/bin/chown tracker:tracker /home/tracker/tracker.beta/tracker.log
 ExecStart=/usr/bin/python3 /home/tracker/tracker.beta/tracker_server.py
 StandardOutput=append:/home/tracker/tracker.beta/tracker.log
 StandardError=append:/home/tracker/tracker.beta/tracker.log
