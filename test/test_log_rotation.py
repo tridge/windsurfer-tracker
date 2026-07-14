@@ -36,6 +36,22 @@ def test_rotate_missing_source(tmp_path):
     assert not archive.exists()
 
 
+def test_rotate_copy_failure_removes_partial_archive(tmp_path, monkeypatch):
+    import shutil
+    src = tmp_path / "tracker.log"
+    src.write_text("day one contents\n")
+    archive = tmp_path / "tracker.log.2026-07-14"
+
+    def fail_copy(s, d, **kwargs):
+        Path(d).write_text("partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    assert rotate_copytruncate(src, archive) is False
+    assert not archive.exists()
+    assert src.read_text() == "day one contents\n"
+
+
 def test_rotate_unwritable_source_leaves_no_archive(tmp_path):
     if os.geteuid() == 0:
         pytest.skip("root ignores file permissions")

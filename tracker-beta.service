@@ -7,9 +7,9 @@ Type=simple
 User=tracker
 WorkingDirectory=/home/tracker/tracker.beta
 # systemd creates the append: target as root before dropping to User=tracker;
-# make sure the server can truncate it for the nightly rotation
-ExecStartPre=+/usr/bin/touch /home/tracker/tracker.beta/tracker.log
-ExecStartPre=+/usr/bin/chown tracker:tracker /home/tracker/tracker.beta/tracker.log
+# make sure the server can truncate it for the nightly rotation. Refuse
+# symlinks/non-regular files so the root chown can't be redirected.
+ExecStartPre=+/bin/sh -ec 'f=/home/tracker/tracker.beta/tracker.log; if [ -e "$f" ] && { [ -L "$f" ] || [ ! -f "$f" ]; }; then echo "$f is not a regular file" >&2; exit 1; fi; touch "$f"; chown tracker:tracker "$f"; chmod u+rw "$f"'
 ExecStart=/usr/bin/python3 /home/tracker/tracker.beta/tracker_server.py
 StandardOutput=append:/home/tracker/tracker.beta/tracker.log
 StandardError=append:/home/tracker/tracker.beta/tracker.log
