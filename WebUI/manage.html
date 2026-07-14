@@ -317,6 +317,12 @@
             padding: 40px;
             color: #666;
         }
+
+        .bat-table th, .bat-table td {
+            padding: 4px 18px 4px 0;
+            white-space: nowrap;
+        }
+        .bat-table th:last-child, .bat-table td:last-child { padding-right: 0; }
     </style>
 </head>
 <body>
@@ -1143,7 +1149,7 @@
             const cols = [['id','ID / IMEI'],['fw','Firmware'],['cls','Cap'],['on','St'],['off','Offset (mV)'],
                 ['rawv','Raw V'],['corrv','Corr V'],['r','R (Ω)'],['cap','Capacity (mAh)'],['wh','Wh'],
                 ['trk','Max track (h)'],['idle','Max idle (h)']];
-            let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+            let html = '<table class="bat-table" style="width:100%;border-collapse:collapse;font-size:13px">';
             html += '<tr style="text-align:left;border-bottom:2px solid #ddd">'
                 + cols.map(([k, l]) => {
                     const arrow = batSort.key === k ? (batSort.dir > 0 ? ' ▲' : ' ▼') : '';
