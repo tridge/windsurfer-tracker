@@ -115,12 +115,19 @@ def rotate_copytruncate(path: Path, archive_path: Path) -> bool:
     if not path.exists():
         return False
     try:
-        shutil.copy2(path, archive_path)
+        # open for write first: if we can't truncate, fail before copying
         with open(path, "r+b") as f:
+            shutil.copy2(path, archive_path)
             f.truncate(0)
         return True
     except Exception as e:
         log(f"[ROTATE] copytruncate failed for {path}: {e}")
+        # don't leave a partial/cumulative archive behind (archive_path is
+        # always a fresh name from _unique_archive_path)
+        try:
+            archive_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False
 
 
