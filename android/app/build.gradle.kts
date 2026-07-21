@@ -33,7 +33,7 @@ android {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 148
+        versionCode = 149  // must be unique across phone+wear (wear is 148)
         versionName = "1.11.0"
 
         // Add version info as build config fields
