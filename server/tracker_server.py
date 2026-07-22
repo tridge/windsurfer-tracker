@@ -1182,7 +1182,7 @@ class PositionTracker:
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
             if battery_voltage is not None:
-                bat_str += f"/{battery_voltage}V"
+                bat_str += f"/{battery_voltage:.3f}V"
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
@@ -1262,7 +1262,7 @@ class PositionTracker:
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
             if battery_voltage is not None:
-                bat_str += f"/{battery_voltage}V"
+                bat_str += f"/{battery_voltage:.3f}V"
             if charging:
                 bat_str += "+"
             sig_str = f"{signal}/4" if signal >= 0 else "?"
@@ -1355,7 +1355,7 @@ class PositionTracker:
         stopped_marker = " [STOPPED]" if stopped else ""
         bat_str = f"{battery}%" if battery >= 0 else "?"
         if battery_voltage is not None:
-            bat_str += f"/{battery_voltage}V"
+            bat_str += f"/{battery_voltage:.3f}V"
         if charging:
             bat_str += "+"
         sig_str = f"{signal}/4" if signal >= 0 else "?"

@@ -1897,7 +1897,7 @@ class GT06Listener:
 
             bat_str = f"{gt_conn.battery}%" if gt_conn.battery >= 0 else "?"
             if gt_conn.battery_voltage is not None:
-                bat_str += f"/{gt_conn.battery_voltage}V"
+                bat_str += f"/{gt_conn.battery_voltage:.3f}V"
             if gt_conn.charging:
                 bat_str += "+"
             sig_str = f"{gt_conn.signal}/4" if gt_conn.signal >= 0 else "?"
@@ -2265,7 +2265,7 @@ class GT06Listener:
                     st['battery'] = gt_conn.battery
                     st['last_seen'] = now_w
                     st['last_seen_iso'] = datetime.fromtimestamp(now_w).isoformat()
-                self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage}V ({gt_conn.battery}%)")
+                self._log(f"[GT06] {label} battery voltage: {gt_conn.battery_voltage:.3f}V ({gt_conn.battery}%)")
             # Detect GPS still active during idle — re-assert the GPS-off setting,
             # but rate-limited: firing on every STATUS# (~60s) was a second churn
             # source, and on a unit that can't lock it re-sends every poll forever.
