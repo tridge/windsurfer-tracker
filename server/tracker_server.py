@@ -5681,7 +5681,7 @@ def run_midnight_clearer(event_manager: EventManager, check_interval: int = 60):
 def run_server(port: int, http_port: int | None = None,
                static_dir: Path | None = None,
                manager_password: str | None = None, events_file: Path | None = None,
-               gt06_port: int | None = None, gt06_interval: int = 10, gt06_id_prefix: str = "G",
+               gt06_port: int | None = None, gt06_interval: int = 1, gt06_id_prefix: str = "G",
                gt06_config_path: Path | None = None, gt06_log_path: Path | None = None,
                jt808_port: int | None = None, jt808_interval: int = 10, jt808_id_prefix: str = "J",
                jt808_config_path: Path | None = None, jt808_log_path: Path | None = None,
@@ -6046,7 +6046,7 @@ def load_settings(settings_file: Path = Path("settings.json")) -> dict:
         "no_http": False,
         "no_track_logs": False,
         "gt06_port": None,
-        "gt06_interval": 10,
+        "gt06_interval": 1,
         "gt06_id_prefix": "G",
         "gt06_config": "gt06.json",
         "gt06_log": "gt06.log",
@@ -6120,7 +6120,7 @@ def main():
         "--gt06-interval",
         type=int,
         default=None,
-        help="GT06 location reporting interval in seconds (default: 10)"
+        help="GT06 location reporting interval in seconds (default: 1)"
     )
     parser.add_argument(
         "--gt06-id-prefix",
@@ -6198,7 +6198,7 @@ def main():
 
     # GT06 settings
     gt06_port = args.gt06_port if args.gt06_port is not None else settings.get('gt06_port')
-    gt06_interval = args.gt06_interval if args.gt06_interval is not None else settings.get('gt06_interval', 10)
+    gt06_interval = args.gt06_interval if args.gt06_interval is not None else settings.get('gt06_interval', 1)
     gt06_id_prefix = args.gt06_id_prefix if args.gt06_id_prefix is not None else settings.get('gt06_id_prefix', 'G')
     gt06_config_path = args.gt06_config if args.gt06_config is not None else Path(settings.get('gt06_config', 'gt06.json'))
     gt06_log_path = args.gt06_log if args.gt06_log is not None else Path(settings.get('gt06_log', 'gt06.log'))
