@@ -48,6 +48,13 @@ def log(msg: str) -> None:
     print(f"{ts} {msg}")
 
 
+# Routine per-request [HTTP] and per-cycle [COMPRESS] status lines are high-volume and
+# drown out the useful log; silenced by default. Enable with --log-http / --log-compress.
+# (Auth-failure [HTTP] and [COMPRESS] error messages are always logged, regardless.)
+LOG_HTTP = False
+LOG_COMPRESS = False
+
+
 def _schedule_server_restart(delay: float = 0.7) -> None:
     """Re-exec this process after a short delay (so the HTTP restart response flushes
     to the client first). os.execv keeps the same PID — clean under systemd — and
@@ -2474,8 +2481,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     """HTTP handler for admin API endpoints and optional static file serving."""
     
     def log_message(self, format, *args):
-        """Override to prefix with [HTTP]"""
-        log(f"[HTTP] {args[0]}")
+        """Override to prefix with [HTTP] (routine request logging; off by default)."""
+        if LOG_HTTP:
+            log(f"[HTTP] {args[0]}")
     
     def _send_json(self, data: dict | list, status: int = 200):
         """Send JSON response."""
@@ -5296,7 +5304,8 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
     """
     import gzip
 
-    log(f"[COMPRESS] Background compressor started (interval: {interval}s, live window: {live_window_minutes}min)")
+    if LOG_COMPRESS:
+        log(f"[COMPRESS] Background compressor started (interval: {interval}s, live window: {live_window_minutes}min)")
     last_mtime: dict[str, float] = {}
 
     while True:
@@ -5345,8 +5354,9 @@ def run_log_compressor(log_dir: Path, interval: int = 10, live_window_minutes: i
                     orig_size = log_file.stat().st_size
                     live_size = live_gz_file.stat().st_size
                     full_size = full_gz_file.stat().st_size
-                    log(f"[COMPRESS] Updated: live={live_size:,}B ({live_lines}/{total_lines} entries), "
-                          f"full={full_size:,}B (from {orig_size:,}B)")
+                    if LOG_COMPRESS:
+                        log(f"[COMPRESS] Updated: live={live_size:,}B ({live_lines}/{total_lines} entries), "
+                              f"full={full_size:,}B (from {orig_size:,}B)")
 
         except Exception as e:
             tb_lines = traceback.format_exc().strip().split('\n')[-3:]
@@ -6177,8 +6187,25 @@ def main():
         help="Path to tracker.log (systemd stdout redirect target). If set, "
              "it is rotated daily via copytruncate alongside the protocol logs."
     )
+    parser.add_argument(
+        "--log-http",
+        action="store_true",
+        default=None,
+        help="Log every HTTP request (off by default; the routine [HTTP] lines are high-volume)."
+    )
+    parser.add_argument(
+        "--log-compress",
+        action="store_true",
+        default=None,
+        help="Log routine [COMPRESS] status each cycle (off by default; errors are always logged)."
+    )
 
     args = parser.parse_args()
+
+    # Routine [HTTP]/[COMPRESS] chatter is off unless explicitly enabled (CLI or settings.json).
+    global LOG_HTTP, LOG_COMPRESS
+    LOG_HTTP = args.log_http if args.log_http is not None else settings.get('log_http', False)
+    LOG_COMPRESS = args.log_compress if args.log_compress is not None else settings.get('log_compress', False)
 
     # Merge: command line args override settings.json, which overrides built-in defaults
     port = args.port if args.port is not None else settings['port']
