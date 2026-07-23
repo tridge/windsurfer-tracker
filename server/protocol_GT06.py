@@ -2710,7 +2710,11 @@ class GT06Listener:
             if (gt_conn.eid == eid and gt_conn.sailor_id == sailor_id
                     and gt_conn.assist_active):
                 gt_conn.assist_active = False
-                self._queue_commands(gt_conn, ["SENALM,OFF#"])
+                # SENALM,OFF# silences the vendor firmware's alarm; CANCELSOS# clears our
+                # standalone firmware's latched SOS (item 17 — it latches through release/
+                # reconnect and is ONLY cleared by CANCELSOS#, never by the routine SENALM,OFF#
+                # sent on every reconcile). Send both so the cancel works on either firmware.
+                self._queue_commands(gt_conn, ["SENALM,OFF#", "CANCELSOS#"])
                 if gt_conn.imei:
                     self._sticky_assist.discard(gt_conn.imei)
                 self._log(f"[GT06] Cancelled assist for {sailor_id} (sticky cleared)")
