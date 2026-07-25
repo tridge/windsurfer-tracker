@@ -1,0 +1,17 @@
+image size            : 204560 (0x31F10) bytes
+load base (verified)  : 0x7E1B0000
+
+32-byte header (OpenSDK application descriptor):
+  +0x00 reserved     0x00000000  
+  +0x04 reserved     0x00000000  
+  +0x08 size/flags   0x00002800  = 10240
+  +0x0C ver/type     0x0000001E  = 30
+  +0x10 name ptr     0x7E1DD244  -> 'userSpaceMain'
+  +0x14 entry        0x7E1B3DD1  -> file 0x3DD0 (Thumb)
+  +0x18 tag ptr      0x7E1DD252  -> 'J16_10F8G'
+  +0x1C reserved     0x00000000  
+
+sections:
+  header      0x000000 .. 0x000020
+  code+data   0x000020 .. 0x02D240  (~180 KB)
+  rodata/str  0x02D240 .. 0x031F10  (~19 KB)
