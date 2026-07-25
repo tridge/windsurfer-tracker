@@ -208,6 +208,149 @@ _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
                 "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE", "BLIND_EN", "HBT"]
 
 
+# ---- Operator-visible device parameters (manage.html Params tab) ----
+#
+# Deliberately EXCLUDES:
+#   * everything in _SETTINGS above — the reconciler re-applies those on every login
+#     and state change, so an operator edit would be silently reverted minutes later
+#   * MODE — storm-guarded elsewhere, and MODE4 hard-bricks W07/V6.6x firmware
+#   * TERIID — a server-derived auth credential owned by onboarding; editing it can
+#     orphan or impersonate a unit
+#
+# Replies are SELF-IDENTIFYING, so we never try to correlate a reply with the command
+# that produced it. That correlation is not safe here: _send_next_cmd() sends before
+# assigning cmd_pending, HTTP handlers run concurrently with the listener thread, and
+# the delivery timeout advances the queue — so a late reply would be attributed to the
+# following command. Instead every parser below is run against every reply text and
+# picks out only what it recognises.
+#
+# `read`   command to issue to fetch it (None = comes from the cxzt# snapshot)
+# `parse`  reply-text -> {key: value} for anything recognised (must be side-effect free)
+# `write`  value -> command string, or None for read-only
+# `fw`     'any' | 'standalone'
+# `danger` requires operator confirmation (can take the tracker off the air)
+# `volatile` RAM-only on the device: reset on reboot (UI must say so)
+
+def _p_servip(text):
+    m = re.search(r'SERVIP\s*=\s*([0-9.]+)\s*#\s*SERVPORT\s*=\s*(\d+)', text)
+    return {'SERVIP': m.group(1), 'SERVPORT': m.group(2)} if m else {}
+
+
+def _p_apn(text):
+    # PWPPP is deliberately NOT captured — it is a plaintext credential and must
+    # never reach the API or the browser.
+    m = re.search(r'APN\s*=\s*([^#\s\x00-\x1f]*)', text)
+    if not m or 'MCU:' in text:          # avoid matching the cxzt# blob
+        return {}
+    out = {'APN': m.group(1)}
+    mu = re.search(r'USERPPP\s*=\s*([^#\s\x00-\x1f]*)', text)
+    if mu:
+        out['USERPPP'] = mu.group(1)
+    return out
+
+
+def _p_fwdserver(text):
+    m = re.search(r'READOK:FWDSERVER=([0-9.]+)#FWDPORT=(\d+)', text)
+    return {'FWDSERVER': m.group(1), 'FWDPORT': m.group(2)} if m else {}
+
+
+def _p_fwdstat(text):
+    """FWDSTAT carries the forwarding toggles; they have no CXCS# of their own."""
+    if 'READOK:FWDSTAT' not in text:
+        return {}
+    out = {}
+    for key, tag in (('FWDTX', 'w'), ('FWDNB', 'nb'), ('FWDUDP', 'u')):
+        m = re.search(r'\s' + tag + r'([01])(?:\s|$)', text)
+        if m:
+            out[key] = m.group(1)
+    return out
+
+
+def _p_cellstat(text):
+    m = re.search(r'READOK:CELLSTAT.*?\sok([^\s\x00-\x1f]*)', text)
+    return {'PLMNOK': m.group(1)} if m else {}
+
+
+def _v_ip(v):
+    if not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', v or ''):
+        return "must be a dotted IPv4 address"
+    if any(int(o) > 255 for o in v.split('.')):
+        return "IPv4 octets must be 0-255"
+    return None
+
+
+def _v_port(v):
+    if not (v or '').isdigit() or not (1 <= int(v) <= 65535):
+        return "must be a port 1-65535"
+    return None
+
+
+def _v_fwdport(v):
+    """FWDPORT accepts 0 — that is how forwarding is disabled on our firmware
+    (and it clears FWDSERVER with it, which is why the pair is confirmed)."""
+    if not (v or '').isdigit() or not (0 <= int(v) <= 65535):
+        return "must be a port 0-65535 (0 disables forwarding)"
+    return None
+
+
+def _v_apn(v):
+    if not v or len(v) > 29 or re.search(r'[#\s\x00-\x1f]', v):
+        return "1-29 chars, no '#' or whitespace"
+    return None
+
+
+_PARAMS = {
+    "SERVIP":    {"read": "CXCS#SERVIP", "parse": _p_servip, "group": "Server",
+                  "write": None, "fw": "any", "danger": True,
+                  "help": "GT06 server address. Wrong value takes the tracker off the air."},
+    "SERVPORT":  {"read": None, "parse": None, "group": "Server",
+                  "write": None, "fw": "any", "danger": True},
+    "APN":       {"read": "CXCS#APN", "parse": _p_apn, "group": "Network",
+                  "write": lambda v: f"SZCS#APN={v}", "validate": _v_apn,
+                  "fw": "any", "danger": True,
+                  "help": "Cellular APN. Wrong value takes the tracker off the air."},
+    "USERPPP":   {"read": None, "parse": None, "group": "Network",
+                  "write": None, "fw": "any"},
+    "FWDSERVER": {"read": "CXCS#FWDSERVER", "parse": _p_fwdserver, "group": "UAV link",
+                  "write": None, "fw": "standalone", "danger": True,
+                  "help": "USB<->UDP forwarding target. Set together with FWDPORT."},
+    "FWDPORT":   {"read": None, "parse": None, "group": "UAV link",
+                  "write": None, "fw": "standalone", "danger": True},
+    "FWDUDP":    {"read": "CXCS#FWDSTAT", "parse": _p_fwdstat, "group": "UAV link",
+                  "write": None, "fw": "standalone",
+                  "help": "1 = connected UDP uplink (persisted)."},
+    "FWDTX":     {"read": None, "parse": None, "group": "UAV link", "write": None,
+                  "fw": "standalone", "volatile": True,
+                  "help": "Down direction (socket->if04) enable. Diagnostic only."},
+    "FWDNB":     {"read": None, "parse": None, "group": "UAV link", "write": None,
+                  "fw": "standalone", "volatile": True,
+                  "help": "Non-blocking FWD socket. Diagnostic only."},
+    "PLMNOK":    {"read": "CXCS#CELLSTAT", "parse": _p_cellstat, "group": "Cell",
+                  "write": None, "fw": "standalone", "volatile": True,
+                  "help": "PLMN whitelist for the recovery ladder."},
+}
+
+# A queued command is abandoned after ~40s (30s TCP delivery + 10s app-ACK), so a
+# fetch of several reads can legitimately take a while before we call it timed out.
+_PARAM_OP_TIMEOUT = 90
+
+
+def _strip_ctrl(v):
+    """Devices terminate replies with a \x00\x01 trailer — never show it."""
+    return re.sub(r'[\x00-\x1f]', '', v) if isinstance(v, str) else v
+
+
+# Parsers run against every reply; list them once so the caller doesn't re-walk _PARAMS.
+_PARAM_PARSERS = [_p_servip, _p_apn, _p_fwdserver, _p_fwdstat, _p_cellstat]
+
+# Paired writes: these must be set together or the device clears the other half.
+# SZCS#FWDPORT=0 zeroes FWDSERVER too (observed on hardware 2026-07-25).
+_PARAM_PAIRS = {
+    ("SERVIP", "SERVPORT"): lambda ip, port: f"SZCS#SERVIP={ip}#SERVPORT={port}",
+    ("FWDSERVER", "FWDPORT"): lambda ip, port: f"SZCS#FWDSERVER={ip}#FWDPORT={port}",
+}
+
+
 def _norm(v):
     """Normalise a setting value for comparison. Strips surrounding whitespace
     AND control chars — real devices terminate command replies with a \\x00\\x01
@@ -722,6 +865,14 @@ class GT06Listener:
         # last-seen) so the management page shows offline devices too. Sidecar
         # gt06_state.json next to the config; survives restart.
         self.device_state = self._load_device_state()
+        # Operator parameter cache for the Params tab: imei -> {key: (value, ts)}.
+        # In-memory only — values are always re-fetchable from the device, and a
+        # stale value surviving a restart is worse than an empty tab. Guarded by
+        # _params_lock because HTTP handler threads read it while the listener
+        # thread writes it (ThreadingHTTPServer).
+        self.device_params = {}
+        self.param_ops = {}          # imei -> in-flight fetch operation
+        self._params_lock = threading.Lock()
         # Battery calibration (parametric OCV fit) for voltage -> % conversion.
         self.battery_cal_path = Path(battery_cal_path) if battery_cal_path else None
         self.battery_cal = self._load_battery_cal()
@@ -2024,6 +2175,9 @@ class GT06Listener:
             self._log(f"[GT06] Command ACK from {label}:{text}")
             # Feed any query/ack response into the reconciler's observed-state.
             self._reconcile_parse(gt_conn, text)
+            # Feed it to the operator-visible parameter cache (Params tab). Parsed by
+            # CONTENT, never by which command we think is outstanding — see _PARAMS.
+            self._params_parse(gt_conn, text)
             # Capture firmware version from VERSION# response, e.g.
             #   "NT19D_MG133_10F8G_B53_V667 2026-04-13"
             fwmatch = re.search(r'([A-Z0-9]+(?:_[A-Z0-9]+)*_V\d+)\s+(\d{4}-\d{2}-\d{2})', text)
@@ -2394,6 +2548,7 @@ class GT06Listener:
                 if isinstance(settings.get('ID'), str) and len(settings['ID']) == 15 and settings['ID'].isdigit():
                     settings['ID'] = '***' + settings['ID'][-6:]
                 st['settings'] = settings
+                st['settings_fetched_at'] = now
                 st['raw_cxzt'] = _redact_teriid(cxzt_text.strip())
                 if 'M' in settings:
                     st['mode'] = settings['M'].split('|')[0]
@@ -2587,6 +2742,213 @@ class GT06Listener:
         """Queue a cxzt# probe so the device re-reports its full settings."""
         return self.queue_command_any(imei, "cxzt#")
 
+    # ---- Operator parameter get/set (manage.html Params tab) ----
+
+    def _params_forget(self, imei):
+        """Drop a device's parameter cache (called from forget_device)."""
+        with self._params_lock:
+            self.device_params.pop(imei, None)
+            self.param_ops.pop(imei, None)
+
+    def _params_parse(self, gt_conn, text):
+        """Extract any recognised parameter values from a device reply.
+
+        Runs every parser against every reply and keeps what matches. Deliberately
+        content-based: correlating a reply with the command we believe is pending is
+        NOT safe here (see the note on _PARAMS), and a mis-attributed value is worse
+        than a missing one.
+        """
+        if not gt_conn or not gt_conn.imei or not text:
+            return
+        found = {}
+        for parser in _PARAM_PARSERS:
+            try:
+                found.update(parser(text))
+            except Exception:
+                continue                     # a bad reply must never break the listener
+        if not found:
+            return
+        now = time.time()
+        with self._params_lock:
+            cache = self.device_params.setdefault(gt_conn.imei, {})
+            for k, v in found.items():
+                cache[k] = (v, now)
+            op = self.param_ops.get(gt_conn.imei)
+            if op and now >= op["started"]:
+                # Only replies arriving after the fetch began may satisfy it. A stale
+                # reply or a SET confirmation would otherwise report a new fetch
+                # complete without its values having been refreshed.
+                op["outstanding"] -= {k for k in found if cache[k][1] >= op["started"]}
+
+    def _params_fw_kind(self, imei):
+        """'standalone' if this unit runs our firmware, else 'vendor'."""
+        st = self.device_state.get(imei, {})
+        conn = self._conn_for_imei(imei)
+        fw = (conn.firmware if conn and conn.firmware else st.get("firmware")) or ""
+        return "standalone" if fw.startswith("WSTR-STD1") else "vendor"
+
+    def params_fetch(self, imei):
+        """Queue the reads that populate the Params tab.
+
+        Returns (ok, payload). One fetch per device at a time: a second concurrent
+        fetch would have its replies consumed by the first operator's poll.
+        """
+        conn = self._conn_for_imei(imei)
+        if conn is None:
+            return False, {"error": "device not connected"}
+        now = time.time()
+        standalone = self._params_fw_kind(imei) == "standalone"
+        reads, keys = ["cxzt#"], set()
+        for key, spec in _PARAMS.items():
+            if not spec.get("read"):
+                continue
+            if spec.get("fw") == "standalone" and not standalone:
+                continue
+            if spec["read"] not in reads:
+                reads.append(spec["read"])
+            keys.add(key)
+        op_id = f"{int(now * 1000):x}"
+        # Check-and-claim under ONE lock hold: two HTTP threads racing here would
+        # otherwise both pass the check and clobber each other's operation.
+        with self._params_lock:
+            op = self.param_ops.get(imei)
+            if op and now - op["started"] < _PARAM_OP_TIMEOUT and op["outstanding"]:
+                return False, {"error": "a parameter fetch is already running for this device",
+                               "op_id": op["op_id"]}
+            self.param_ops[imei] = {"op_id": op_id, "started": now,
+                                    "outstanding": set(keys), "expected": sorted(keys)}
+        self._queue_commands(conn, reads)
+        self._log(f"[GT06] Params fetch for {conn.sailor_id or imei}: {len(reads)} reads (op {op_id})")
+        return True, {"op_id": op_id, "expected": sorted(keys)}
+
+    def params_get(self, imei):
+        """Typed, allowlisted parameter view for the UI.
+
+        Only values the registry knows are returned — never raw reply text, which can
+        carry credentials (PWPPP in the APN reply, TERIID in its set/read ack).
+        """
+        conn = self._conn_for_imei(imei)
+        st = self.device_state.get(imei, {})
+        settings = st.get("settings") or {}
+        standalone = self._params_fw_kind(imei) == "standalone"
+        with self._params_lock:
+            cache = dict(self.device_params.get(imei, {}))
+            op = dict(self.param_ops.get(imei) or {})
+            # deep-copy the mutable set: the listener thread subtracts from it
+            if op:
+                op["outstanding"] = set(op.get("outstanding", ()))
+        # cxzt# gives APN and the server address without a targeted read.
+        cxzt_ts = st.get("settings_fetched_at")
+        seeded = {}
+        if settings.get("A"):
+            seeded["APN"] = (settings["A"], cxzt_ts)
+        if settings.get("server") and ":" in str(settings["server"]):
+            host, _, port = str(settings["server"]).rpartition(":")
+            seeded["SERVIP"], seeded["SERVPORT"] = (host, cxzt_ts), (port, cxzt_ts)
+        out = []
+        for key, spec in _PARAMS.items():
+            if spec.get("fw") == "standalone" and not standalone:
+                continue
+            val, ts = cache.get(key, (None, None))
+            sval, sts = seeded.get(key, (None, None))
+            # a fresher cxzt snapshot must win over a stale targeted read
+            if sval is not None and (ts is None or (sts or 0) > ts):
+                val, ts = sval, sts
+            out.append({
+                "key": key, "group": spec.get("group", "Other"),
+                "value": _strip_ctrl(val) if isinstance(val, str) else val,
+                "fetched_at": ts,
+                # only the PRIMARY of a pair offers Edit — it writes both halves
+                "writable": bool(spec.get("write")) or any(
+                    key == pair[0] for pair in _PARAM_PAIRS),
+                "danger": bool(spec.get("danger")),
+                "volatile": bool(spec.get("volatile")),
+                "help": spec.get("help"),
+            })
+        status = "idle"
+        if op:
+            if not op.get("outstanding"):
+                status = "complete"
+            elif time.time() - op["started"] > _PARAM_OP_TIMEOUT:
+                status = "timed-out"
+            else:
+                status = "pending"
+        return {
+            "imei": imei, "online": conn is not None,
+            "firmware_kind": "standalone" if standalone else "vendor",
+            "params": out,
+            "op": ({"op_id": op.get("op_id"), "status": status,
+                    "expected": op.get("expected", []),
+                    "outstanding": sorted(op.get("outstanding", []))} if op else None),
+        }
+
+    def params_set(self, imei, key, value, value2=None):
+        """Validate and apply one parameter (or one paired pair), then re-read it.
+
+        The command string is built HERE from the registry — the UI never composes a
+        SZCS# string, so it cannot be talked into sending an arbitrary command through
+        this path.
+        """
+        conn = self._conn_for_imei(imei)
+        if conn is None:
+            return False, "device not connected"
+        # Every value that reaches a command string must be a plain ASCII string:
+        # gt06_make_command() encodes ascii, so a non-str or non-ASCII value would
+        # raise inside the listener rather than returning a clean error here.
+        for v in (value, value2):
+            if v is None:
+                continue
+            if not isinstance(v, str):
+                return False, "values must be strings"
+            try:
+                v.encode("ascii")
+            except UnicodeEncodeError:
+                return False, "values must be ASCII"
+        if not isinstance(key, str):
+            return False, "key must be a string"
+        # A secondary key (SERVPORT/FWDPORT) normalises to its primary so the pair is
+        # always written together — setting one alone clears the other on the device.
+        for a, b in _PARAM_PAIRS:
+            if key == b:
+                return False, f"set {a} instead — {a} and {b} are written together"
+        pair = next((p for p in _PARAM_PAIRS if p[0] == key), None)
+        if pair:
+            second = pair[1]
+            if _PARAMS.get(key, {}).get("fw") == "standalone" and \
+                    self._params_fw_kind(imei) != "standalone":
+                return False, f"{key} is not supported on this firmware"
+            for k, v in ((key, value), (second, value2)):
+                if k in ("SERVIP", "FWDSERVER"):
+                    check = _v_ip
+                elif k == "FWDPORT":
+                    check = _v_fwdport
+                elif k == "SERVPORT":
+                    check = _v_port
+                else:
+                    check = _PARAMS.get(k, {}).get("validate")
+                err = check(v) if check else None
+                if err:
+                    return False, f"{k}: {err}"
+            cmd = _PARAM_PAIRS[pair](value, value2)
+        else:
+            spec = _PARAMS.get(key)
+            if not spec or not spec.get("write"):
+                return False, f"{key} is not settable"
+            if spec.get("fw") == "standalone" and self._params_fw_kind(imei) != "standalone":
+                return False, f"{key} is not supported on this firmware"
+            err = spec["validate"](value) if spec.get("validate") else None
+            if err:
+                return False, f"{key}: {err}"
+            cmd = spec["write"](value)
+        cmds = [cmd]
+        read = _PARAMS.get(key, {}).get("read")
+        if read:
+            cmds.append(read)                # confirm from the device, don't assume
+        self._queue_commands(conn, cmds)
+        self._log(f"[GT06] Params set for {conn.sailor_id or imei}: "
+                  f"{_redact_teriid(cmd)}")
+        return True, None
+
     def reboot_device(self, imei):
         """Ask a device to reboot (GT06 RESET#)."""
         return self.queue_command_any(imei, "RESET#")
@@ -2685,6 +3047,7 @@ class GT06Listener:
             del self.device_state[target]
             self._save_device_state()
             removed = True
+        self._params_forget(target)
         if target in self.pending_devices:
             del self.pending_devices[target]
             removed = True

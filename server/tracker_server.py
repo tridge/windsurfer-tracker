@@ -2485,13 +2485,17 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         if LOG_HTTP:
             log(f"[HTTP] {args[0]}")
     
-    def _send_json(self, data: dict | list, status: int = 200):
-        """Send JSON response."""
+    def _send_json(self, data: dict | list, status: int = 200,
+                   extra_headers: dict | None = None):
+        """Send JSON response. extra_headers is for per-endpoint additions such as
+        Cache-Control: no-store on responses that carry device configuration."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Headers', 'X-Admin-Password, X-Manager-Password, Content-Type')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
@@ -2607,6 +2611,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "gt06_running": True,
                 "events": _event_manager.get_all_events() if _event_manager else [],
             })
+
+        elif re.match(r'^/api/manage/gt06/tracker/[^/]+/params$', path):
+            # Typed parameter view for the Params tab. Allowlisted fields only —
+            # never raw device replies, which can carry credentials (PWPPP in the
+            # APN reply, TERIID in its ack).
+            if not self._check_manager_auth():
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            if _gt06_listener is None:
+                self._send_json({"error": "GT06 listener not running"}, 503)
+                return
+            from urllib.parse import unquote as _unq
+            imei = _unq(path.split('/')[-2])
+            self._send_json(_gt06_listener.params_get(imei),
+                            extra_headers={'Cache-Control': 'no-store'})
 
         elif path == '/api/manage/gt06/config':
             # Editable GT06 config (overnight mode/interval + global sleep
@@ -5006,12 +5025,48 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
 
         from urllib.parse import unquote
-        m = re.match(r'^/api/manage/gt06/tracker/([^/]+)(/[a-z-]+)?$', path)
+        # Two path segments so /params/fetch and /params/set route (the params GET
+        # lives on the GET side).
+        m = re.match(r'^/api/manage/gt06/tracker/([^/]+)((?:/[a-z-]+){0,2})?$', path)
         if not m:
             self._send_json({"error": "Not found"}, 404)
             return
         imei = unquote(m.group(1))
         action = (m.group(2) or '').lstrip('/')
+
+        if action == 'params/fetch':
+            ok, payload = _gt06_listener.params_fetch(imei)
+            payload = dict(payload or {})
+            payload["success"] = ok
+            payload["imei"] = imei
+            # 409: another operator's fetch is in flight; its replies would be
+            # consumed by whoever polls first.
+            code = 200 if ok else (409 if 'already running' in str(payload.get('error')) else 404)
+            self._send_json(payload, code)
+            return
+        if action == 'params/set':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+                req = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
+            # A JSON list or a non-string key would raise inside the handler and
+            # abort the request instead of returning a clean 400.
+            if not isinstance(req, dict):
+                self._send_json({"error": "body must be a JSON object"}, 400)
+                return
+            key = req.get('key')
+            if not isinstance(key, str) or not key.strip():
+                self._send_json({"error": "key required"}, 400)
+                return
+            key = key.strip()
+            ok, err = _gt06_listener.params_set(imei, key, req.get('value'),
+                                                req.get('value2'))
+            self._send_json({"success": ok, "imei": imei, "key": key, "error": err},
+                            200 if ok else (404 if err == 'device not connected' else 400))
+            return
 
         if action == 'refresh':
             ok = _gt06_listener.refresh_device(imei)

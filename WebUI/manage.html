@@ -347,6 +347,7 @@
             <button class="btn" id="tabBtnGt06Settings" onclick="showTab('gt06settings')">GT06 Settings</button>
             <button class="btn" id="tabBtnGt06Battery" onclick="showTab('gt06battery')">GT06 Battery</button>
             <button class="btn" id="tabBtnSimbase" onclick="showTab('simbase')">SIMbase</button>
+            <button class="btn" id="tabBtnParams" onclick="showTab('params')">Params</button>
         </div>
 
         <!-- Events Section (hidden until logged in) -->
@@ -446,6 +447,20 @@
             <div id="simList" class="event-list">
                 <div class="loading">Loading SIMs&hellip;</div>
             </div>
+        </div>
+
+        <!-- Params Section (hidden until the Params tab is selected). Populated only
+             when a tracker is chosen from the GT06 Trackers tab — never auto-fetched. -->
+        <div class="events-section" id="paramsSection">
+            <div class="section-header">
+                <h2>Params <span id="paramSubject" style="font-size:14px;font-weight:normal;color:#888"></span></h2>
+                <div>
+                    <button class="btn" id="paramFetchBtn" onclick="fetchParams()">Fetch from device</button>
+                </div>
+            </div>
+            <div id="paramError" class="error-message" style="display:none"></div>
+            <span id="paramMsg" style="font-size:13px"></span>
+            <div id="paramList" class="event-list"></div>
         </div>
     </div>
 
@@ -789,6 +804,7 @@
             gt06settings: { section: 'gt06settingsSection', button: 'tabBtnGt06Settings', load: () => loadGt06Settings() },
             gt06battery:  { section: 'gt06batterySection',  button: 'tabBtnGt06Battery',  load: () => loadGt06Battery() },
             simbase:      { section: 'simbaseSection',      button: 'tabBtnSimbase',      load: () => loadSims() },
+            params:       { section: 'paramsSection',       button: 'tabBtnParams',       load: () => loadParams() },
         };
 
         function showTab(name) {
@@ -1566,6 +1582,7 @@
                     + `<td style="white-space:nowrap">`
                     + `<button class="btn" style="padding:2px 7px" title="Refresh (cxzt#)" onclick="refreshTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>↻</button> `
                     + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Settings" onclick="showTrackerSettings('${esc(t.imei)}')">⚙</button> `)
+                    + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Parameters (get/set)" onclick="openParams('${esc(t.imei)}')">≡</button> `)
                     + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⏻</button> `
                     + `<button class="btn" style="padding:2px 7px" title="Disconnect (close socket)" onclick="disconnectTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⊘</button>`
                     + `</td></tr>`;
@@ -1777,6 +1794,177 @@
 
         function closeSettings() {
             document.getElementById('settingsModal').classList.remove('visible');
+        }
+
+        // ---- GT06 Params tab ----
+        // Device-owned parameters only. The 11 reconciled settings (TIMER, HBT,
+        // BLIND_EN, ...) are deliberately absent: the server re-applies those on every
+        // login and state change, so an edit here would be silently reverted. MODE and
+        // TERIID are absent too — MODE4 bricks some firmware, and TERIID is the auth
+        // credential owned by onboarding.
+        let paramImei = null;
+        let paramData = null;
+        let paramPoll = null;
+
+        function openParams(imei) {
+            paramImei = imei;
+            paramData = null;
+            showTab('params');
+        }
+
+        // Renders from the server's cache only — never triggers a device fetch, because
+        // showTab() calls this on every click of the tab.
+        async function loadParams() {
+            const list = document.getElementById('paramList');
+            const err = document.getElementById('paramError');
+            err.style.display = 'none';
+            document.getElementById('paramFetchBtn').disabled = !paramImei;
+            if (!paramImei) {
+                document.getElementById('paramSubject').textContent = '';
+                list.innerHTML = '<p style="color:#888">Choose a tracker with the ≡ button on the '
+                    + 'GT06 Trackers tab.</p>';
+                return;
+            }
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(paramImei)}/params`,
+                    { headers: { 'X-Manager-Password': managerPassword } });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+                paramData = d;
+                renderParams();
+            } catch (e) {
+                list.innerHTML = '';
+                err.textContent = 'Could not load parameters: ' + e.message;
+                err.style.display = 'block';
+            }
+        }
+
+        function paramAge(ts) {
+            if (!ts) return '<span style="color:#999">never fetched</span>';
+            const mins = Math.floor((Date.now() / 1000 - ts) / 60);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + ' min ago';
+            return Math.floor(mins / 60) + ' h ago';
+        }
+
+        function renderParams() {
+            const d = paramData;
+            if (!d) return;
+            const t = (window._trackers || []).find(x => x.imei === paramImei);
+            document.getElementById('paramSubject').textContent =
+                (t && t.sailor_id ? t.sailor_id + ' — ' : '') + paramImei
+                + ' (' + d.firmware_kind + ', ' + (d.online ? 'online' : 'OFFLINE') + ')';
+            document.getElementById('paramFetchBtn').disabled = !d.online;
+
+            let html = '';
+            if (!d.online) {
+                html += '<p style="color:#c60">Tracker is offline — values below are the last '
+                     + 'known ones. Commands cannot be queued for an offline device.</p>';
+            }
+            let group = null;
+            html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+            for (const p of d.params) {
+                if (p.group !== group) {
+                    group = p.group;
+                    html += `<tr><th colspan="4" style="text-align:left;padding-top:10px;border-bottom:2px solid #ddd">${esc(group)}</th></tr>`;
+                }
+                const val = (p.value === null || p.value === undefined || p.value === '')
+                    ? '<span style="color:#999">—</span>' : esc(String(p.value));
+                let note = '';
+                if (p.volatile) note += ' <span style="color:#d97706" title="RAM-only on the device: resets on reboot">RAM-only</span>';
+                if (p.danger) note += ' <span style="color:#c00" title="Changing this can take the tracker off the air">⚠</span>';
+                html += '<tr style="border-bottom:1px solid #eee">'
+                    + `<td style="padding:4px 6px"><b>${esc(p.key)}</b>${note}</td>`
+                    + `<td style="padding:4px 6px">${val}</td>`
+                    + `<td style="padding:4px 6px;color:#888">${paramAge(p.fetched_at)}</td>`
+                    + '<td style="padding:4px 6px">'
+                    + (p.writable && d.online
+                        ? `<button class="btn" style="padding:2px 7px" onclick="editParam('${esc(p.key)}')">Edit</button>`
+                        : '')
+                    + '</td></tr>';
+            }
+            html += '</table>';
+            if (d.op && d.op.status === 'pending') {
+                html += `<p style="color:#888">Fetch in progress — waiting for ${d.op.outstanding.map(esc).join(', ')}&hellip;</p>`;
+            } else if (d.op && d.op.status === 'timed-out') {
+                html += `<p style="color:#c60">Last fetch timed out waiting for ${d.op.outstanding.map(esc).join(', ')}. `
+                     + 'Values above keep their original timestamps.</p>';
+            }
+            document.getElementById('paramList').innerHTML = html;
+        }
+
+        async function fetchParams() {
+            if (!paramImei) return;
+            gt06Msg('paramMsg', 'Fetching…', true);
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(paramImei)}/params/fetch`,
+                    { method: 'POST', headers: { 'X-Manager-Password': managerPassword } });
+                const d = await r.json();
+                if (!d.success) {
+                    gt06Msg('paramMsg', 'Fetch failed: ' + (d.error || r.status), false);
+                    return;
+                }
+                gt06Msg('paramMsg', 'Fetch queued (' + d.expected.length + ' values)…', true);
+                // Poll until the server reports the operation done or timed out. Each
+                // queued command can take up to ~40s on a slow link.
+                if (paramPoll) clearInterval(paramPoll);
+                paramPoll = setInterval(async () => {
+                    await loadParams();
+                    const st = paramData && paramData.op && paramData.op.status;
+                    if (st !== 'pending') {
+                        clearInterval(paramPoll); paramPoll = null;
+                        gt06Msg('paramMsg', st === 'complete' ? 'Fetch complete.' : 'Fetch timed out.',
+                                st === 'complete');
+                    }
+                }, 3000);
+            } catch (e) {
+                gt06Msg('paramMsg', 'Fetch failed: ' + e.message, false);
+            }
+        }
+
+        async function editParam(key) {
+            const d = paramData;
+            const p = d.params.find(x => x.key === key);
+            // Paired writes: the device clears the other half if set alone.
+            const pairs = { SERVIP: 'SERVPORT', FWDSERVER: 'FWDPORT' };
+            const second = pairs[key];
+            const cur = p.value == null ? '' : String(p.value);
+            const v1 = prompt(key + (p.help ? '\n' + p.help : ''), cur);
+            if (v1 === null) return;
+            let v2 = null;
+            if (second) {
+                const sp = d.params.find(x => x.key === second);
+                v2 = prompt(second, sp && sp.value != null ? String(sp.value) : '');
+                if (v2 === null) return;
+            }
+            if (p.danger) {
+                const t = (window._trackers || []).find(x => x.imei === paramImei);
+                const who = (t && t.sailor_id) ? t.sailor_id + ' (' + paramImei + ')' : paramImei;
+                const what = key + ' = ' + v1 + (second ? ', ' + second + ' = ' + v2 : '');
+                if (!confirm('Set ' + what + '\non ' + who + '?\n\n'
+                    + 'This can take the tracker off the air until it is physically recovered.')) return;
+            }
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(paramImei)}/params/set`,
+                    { method: 'POST',
+                      headers: { 'X-Manager-Password': managerPassword, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ key: key, value: v1, value2: v2 }) });
+                const dd = await r.json();
+                if (!dd.success) { gt06Msg('paramMsg', 'Set failed: ' + (dd.error || r.status), false); return; }
+                gt06Msg('paramMsg', 'Set queued — re-reading to confirm…', true);
+                setTimeout(loadParams, 4000);
+            } catch (e) {
+                gt06Msg('paramMsg', 'Set failed: ' + e.message, false);
+            }
+        }
+
+        // Small status-line helper (mirrors gt06CfgMsg, which is bound to its own element).
+        function gt06Msg(elId, text, ok) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.textContent = text;
+            el.style.color = ok ? '#16a34a' : '#c00';
+            if (ok && /complete|Set queued/.test(text)) setTimeout(() => { el.textContent = ''; }, 4000);
         }
 
         // ---- SimBase SIM management ----
