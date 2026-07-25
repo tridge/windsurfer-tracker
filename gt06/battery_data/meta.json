@@ -35,6 +35,18 @@
    "wake_end_epoch": 1782079200,
    "window_local": "2026-06-22 ~01:45 -> ~08:35 (sleep 02:00->08:00 between the two idle endpoints)",
    "note": "The sleep-power estimate uses the two low-noise idle endpoints (last pre_idle, first settled post_idle); the sleep_wake reads are noisy (load transient at each wake) and kept only as evidence/validation."
+  },
+  "full_charge": {
+   "file": "full_voltages.csv",
+   "mode": "fully charged, settled resting (whole fleet charged overnight, charging stopped, then idle)",
+   "source": "tracker.log cxzt# Command ACK *BT field (1 mV); 06:49:21 fleet poll, re-confirmed at the 07:04:21 poll (identical to the mV for all 41). Cross-checked vs public current_positions bat_v (0 mismatches >1 mV).",
+   "columns": "id,cap_ah,v_full,bat_pct,reached_full",
+   "snapshot_epoch": 1782506961,
+   "snapshot_local": "2026-06-27 06:49:21",
+   "full_threshold_v": 4.10,
+   "n_reached_full": 39,
+   "not_full": ["G375430", "G623050"],
+   "note": "v_full = cxzt *BT in volts (1 mV). Settled resting voltage: charging was stopped a few minutes before the first sample, so the cells had already relaxed off the charge CV plateau, and idle self-discharge is only ~1 mV/h (see the idle dataset) so they barely move afterwards -- the 07:04 re-poll (15 min later) read the SAME mV for all 41, confirming a stable resting value rather than a still-relaxing one. (The large overnight *BT swings in the raw log are the charger's top-off cycling, which stops at unplug -- not the gauge freezing.) reached_full=0 marks units that did not actually charge (G375430 4.052 V, G623050 4.076 V -- both sat flat at ~4.05 V the WHOLE night in tracker.log, i.e. a dead charge connection, not a late-stage fault); exclude them from any full-charge reference."
   }
  }
 }

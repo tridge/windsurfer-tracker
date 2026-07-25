@@ -25,6 +25,15 @@ overnight sleep run); keep them here for re-analysis.
 - `meta.json` — dataset manifest (windows, provenance) + the keys the fit scripts read.
 - `idle_voltages.csv` — per-unit median idle voltage, **derived from `idle.csv.gz`**; the
   low-load anchor for the two-load resistance estimate.
+- `full_voltages.csv` — per-unit **settled resting** full-charge voltage (`id,cap_ah,v_full,
+  bat_pct,reached_full`), fleet cxzt poll **2026-06-27 06:49** after the overnight charge.
+  `v_full` is the cxzt `*BT` value (**1 mV**, from `tracker.log`; cross-checked against the
+  public feed, 0 mismatches). Charging was stopped a few minutes before sampling, so the cells
+  had already relaxed off the charge plateau; idle drift is only ~1 mV/h (see the idle dataset),
+  so the 07:04 re-poll 15 min later read the **same mV for all 41** — these are stable resting
+  values, not still-relaxing. `reached_full=0` flags units that never charged (G375430 4.052 V,
+  G623050 4.076 V — both flat at ~4.05 V the *whole* night = dead charge connection); exclude
+  them. Fleet full-set median 4.173 V (3 Ah 4.185, 6 Ah 4.168).
 - `soc_fit.json` — fitted resting-V→SoC curve coefficients (+ class R, per-unit offsets).
 - `resistance.json` — per-unit R attempt + the finding it's not identifiable cross-run
   (only class-median is meaningful). See `METHOD.md` §6.
