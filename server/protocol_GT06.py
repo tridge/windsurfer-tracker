@@ -2744,6 +2744,17 @@ class GT06Listener:
 
     # ---- Operator parameter get/set (manage.html Params tab) ----
 
+    def _params_op_busy(self, imei):
+        """True if a management operation is outstanding for this device.
+
+        Caller must hold _params_lock. Fetch and set are serialised against each other
+        so that any recognised reply can be attributed to the fetch in flight.
+        """
+        op = self.param_ops.get(imei)
+        if not op or op.get("closed") or not op.get("outstanding"):
+            return False
+        return time.monotonic() - op["started"] < _PARAM_OP_TIMEOUT
+
     def _params_forget(self, imei):
         """Drop a device's parameter cache (called from forget_device)."""
         with self._params_lock:
@@ -2774,11 +2785,14 @@ class GT06Listener:
             for k, v in found.items():
                 cache[k] = (v, now)
             op = self.param_ops.get(gt_conn.imei)
-            if op and now >= op["started"]:
-                # Only replies arriving after the fetch began may satisfy it. A stale
-                # reply or a SET confirmation would otherwise report a new fetch
-                # complete without its values having been refreshed.
-                op["outstanding"] -= {k for k in found if cache[k][1] >= op["started"]}
+            if op and not op.get("closed"):
+                # Safe because management operations are serialised per device (see
+                # _params_op_busy): while a fetch is outstanding no SET — and so no
+                # confirming read — can be queued for this device, so any recognised
+                # reply belongs to this fetch. Deciding ownership after the fact is
+                # not possible: a fetch read and a SET confirmation produce
+                # byte-identical replies.
+                op["outstanding"] -= set(found)
 
     def _params_fw_kind(self, imei):
         """'standalone' if this unit runs our firmware, else 'vendor'."""
@@ -2796,7 +2810,7 @@ class GT06Listener:
         conn = self._conn_for_imei(imei)
         if conn is None:
             return False, {"error": "device not connected"}
-        now = time.time()
+        now = time.monotonic()          # ordering/timeouts: immune to wall-clock steps
         standalone = self._params_fw_kind(imei) == "standalone"
         reads, keys = ["cxzt#"], set()
         for key, spec in _PARAMS.items():
@@ -2807,14 +2821,13 @@ class GT06Listener:
             if spec["read"] not in reads:
                 reads.append(spec["read"])
             keys.add(key)
-        op_id = f"{int(now * 1000):x}"
+        op_id = f"{int(time.time() * 1000):x}"
         # Check-and-claim under ONE lock hold: two HTTP threads racing here would
         # otherwise both pass the check and clobber each other's operation.
         with self._params_lock:
-            op = self.param_ops.get(imei)
-            if op and now - op["started"] < _PARAM_OP_TIMEOUT and op["outstanding"]:
-                return False, {"error": "a parameter fetch is already running for this device",
-                               "op_id": op["op_id"]}
+            if self._params_op_busy(imei):
+                return False, {"error": "a parameter operation is already running for this device",
+                               "op_id": self.param_ops[imei]["op_id"]}
             self.param_ops[imei] = {"op_id": op_id, "started": now,
                                     "outstanding": set(keys), "expected": sorted(keys)}
         self._queue_commands(conn, reads)
@@ -2834,9 +2847,11 @@ class GT06Listener:
         with self._params_lock:
             cache = dict(self.device_params.get(imei, {}))
             op = dict(self.param_ops.get(imei) or {})
-            # deep-copy the mutable set: the listener thread subtracts from it
+            # copy BOTH mutable members out of the lock — a shallow dict() leaves
+            # them aliased to the live operation the listener thread is updating
             if op:
                 op["outstanding"] = set(op.get("outstanding", ()))
+                op["expected"] = list(op.get("expected", ()))
         # cxzt# gives APN and the server address without a targeted read.
         cxzt_ts = st.get("settings_fetched_at")
         seeded = {}
@@ -2869,7 +2884,7 @@ class GT06Listener:
         if op:
             if not op.get("outstanding"):
                 status = "complete"
-            elif time.time() - op["started"] > _PARAM_OP_TIMEOUT:
+            elif time.monotonic() - op["started"] > _PARAM_OP_TIMEOUT:
                 status = "timed-out"
             else:
                 status = "pending"
@@ -2892,6 +2907,10 @@ class GT06Listener:
         conn = self._conn_for_imei(imei)
         if conn is None:
             return False, "device not connected"
+        with self._params_lock:
+            if self._params_op_busy(imei):
+                return False, ("a parameter fetch is running for this device — "
+                               "wait for it to finish")
         # Every value that reaches a command string must be a plain ASCII string:
         # gt06_make_command() encodes ascii, so a non-str or non-ASCII value would
         # raise inside the listener rather than returning a clean error here.
@@ -2906,8 +2925,10 @@ class GT06Listener:
                 return False, "values must be ASCII"
         if not isinstance(key, str):
             return False, "key must be a string"
-        # A secondary key (SERVPORT/FWDPORT) normalises to its primary so the pair is
-        # always written together — setting one alone clears the other on the device.
+        # A secondary key (SERVPORT/FWDPORT) is REJECTED rather than silently promoted
+        # to its primary: promoting it would have to take the primary's value from
+        # cache, which may be stale, and writing a stale server address is exactly the
+        # failure this pairing exists to prevent.
         for a, b in _PARAM_PAIRS:
             if key == b:
                 return False, f"set {a} instead — {a} and {b} are written together"
@@ -2944,6 +2965,12 @@ class GT06Listener:
         read = _PARAMS.get(key, {}).get("read")
         if read:
             cmds.append(read)                # confirm from the device, don't assume
+        with self._params_lock:
+            # retire any finished fetch so this set's confirming read can never be
+            # counted against it (_params_op_busy already blocks an active one)
+            op = self.param_ops.get(imei)
+            if op:
+                op["closed"] = True
         self._queue_commands(conn, cmds)
         self._log(f"[GT06] Params set for {conn.sailor_id or imei}: "
                   f"{_redact_teriid(cmd)}")

@@ -1,7 +1,8 @@
 # standalone — from-scratch `customer_app` (our C only, no vendor app)
 
 A full-image firmware that replaces the vendor application, over the resident RTOS + modem + GNSS +
-loader HAL. Distinct from `../fw-src/` (which injects our C into the vendor image's zero-holes). Feasibility
+loader HAL. Distinct from the earlier `fw-src` approach (injecting our C into the vendor image's
+zero-holes), which is on the fwdev branch. Feasibility
 and the boot ABI are established in `../standalone_sapi_test.md` (RESULT 4/5/6): the loader jumps to
 descriptor `+0x14` with `r0` = a resident symbol-resolver, the sAPI dispatch table is app-filled BSS at
 `0x7E1E2000`, and the kernel/byte-pool are already resident.
@@ -12,7 +13,8 @@ descriptor `+0x14` with `r0` = a resident symbol-resolver, the sAPI dispatch tab
 - `start.S` — the decoded 32-byte descriptor + `_start`: stash `r0`→`0x7E1E2444`, zero bss, call
   `standalone_main(resolver)`.
 - `sapi.h` / `sapi_table.c` — fill the dispatch table by baking the captured constant pointers
-  (`gen_table.py` → `sapi_table_baked.h` from `../fromsrc/sapi_table_boot1.bin`).
+  (`gen_table.py` → `sapi_table_baked.h`; its vendor input lives on the fwdev branch —
+  the generated header is committed here so this tree builds standalone).
 - `main.c` — `standalone_main`: STAGE 0 fills the table and parks.
 
 ## Build

@@ -31,10 +31,7 @@ observable string patch to prove the load path end to end.
 | File | What it is |
 |---|---|
 | `fwtool.py` | The tool: `info` / `unpack` / `pack` / `patch` / `verify`. **Repacks device-loadable OTA images.** |
-| `extract.py` | Reproducible extractor — regenerates the `.txt` data files below from the vendor `.bin`. |
-| `container_format.md` | The `.bin` wrapper + LZMA container spec (byte layout, CRC, how to repack). |
-| `image_layout.md` | Decompressed image: descriptor header, load base, sections, entry routine, disassembly. |
-| `customer_app_ota_mapping.md` | Where the OTA image lands in flash: the `customer_app` partition holds `[wrapper][LZMA payload]` verbatim (minus the XOR pad); app decompresses to RAM `0x7E1B0000` at boot. Bridges the OTA format to the `simcom_da/` golden dump. |
+| `customer_app_ota_mapping.md` | Where the OTA image lands in flash: the `customer_app` partition holds `[wrapper][LZMA payload]` verbatim (minus the XOR pad); app decompresses to RAM `0x7E1B0000` at boot. Bridges the OTA format to the golden dump (on the fwdev branch). |
 | `ota_and_patch_test.md` | The `YCSJ` FOTA mechanism, the no-signature finding, and the **step-by-step patch-load test plan**. |
 | `memory_map.txt` | Generated: header fields + section boundaries. |
 | `strings_full.txt` | Generated: every string ≥4 chars with file offset + virtual address. |
@@ -43,7 +40,12 @@ observable string patch to prove the load path end to end.
 | `firmware_patched_demo.bin` | Demonstration: the vendor image with `10F8G`→`WSTRK` (visible in `cxzt`/`VERSION#`). |
 
 Source image: `../../devices/W07C/W07_NT19D_MG133_B53_V665.bin` (and the pre-decompressed
-`../../devices/W07C/unpacked/…​.raw`). Regenerate everything with `python3 extract.py`.
+`../../devices/W07C/unpacked/…​.raw`).
+
+⚠ The vendor reverse-engineering material — `extract.py`, `container_format.md`,
+`image_layout.md`, `simcom_da/`, `m0_dump/`, `fromsrc/`, `fw-src/` and the `re_*.md`
+analysis notes — is NOT on this branch. It lives on the **fwdev** branch; check that
+out if you need to regenerate any of it.
 
 ## What this does NOT cover
 
