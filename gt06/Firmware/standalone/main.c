@@ -527,24 +527,52 @@ static void parse_gga(const char *p)
 #define CONN_RETRY_SEC   5     /* wait between connect attempts */
 #define CONN_TIMEOUT_SEC 30    /* abandon a pending connect (covers lwIP SYN retransmits) */
 
-/* GPS power/rate follows the state (caller applies only on a change). Tracking brings GNSS up with 1 Hz
- * URC — the LOC send is gated to T1 s in the loop; idle forces GNSS power OFF. Per-T1 GPS output-rate
- * config (for T1>1) needs the GNSS_FREQ arg semantics RE'd — for now GPS runs 1 Hz and LOC is downsampled. */
-static void apply_gps(int track)
+/* GPS power follows the state. Tracking brings GNSS up with its default 1 Hz NMEA URC — the LOC send is
+ * gated to T1 s in the loop; idle forces GNSS power OFF. The resident power API is a setter, not a getter,
+ * so g_gps_power_state records only states confirmed by a successful API return. A failed setter leaves the
+ * previous confirmed state intact (or UNKNOWN at boot), rather than claiming the requested state happened.
+ *
+ * GNSS_FREQ is intentionally not called: live probing proved gnss_set_freq(1) returns -1 on this resident,
+ * while the receiver already defaults to the required 1 Hz. */
+#define GPS_RETRY_SEC 10
+#define GPS_POWER_UNKNOWN 0
+#define GPS_POWER_OFF     1
+#define GPS_POWER_ON      2
+static volatile unsigned char g_gps_power_state = GPS_POWER_UNKNOWN;
+
+static int apply_gps(int track)
 {
     gnss1_fn pw = *(gnss1_fn *)SLOT_GNSS_POWER;
+    if (!pw) {
+        vputs("ST: GPS power API missing\r\n");
+        return 0;
+    }
+
     g_wd_phase = 'G';
+    int pwr_ret = pw(track ? 1 : 0);
+    g_wd_phase = 0;
+    if (pwr_ret != 0) {
+        vhex(track ? "ST:gps_on_err" : "ST:gps_off_err", (unsigned)pwr_ret);
+        vputs(track ? "ST: GPS power on FAILED\r\n" : "ST: GPS power off FAILED\r\n");
+        return 0;
+    }
+    g_gps_power_state = track ? GPS_POWER_ON : GPS_POWER_OFF;
+
     if (track) {
-        pw(1);
-        (*(gnss2_fn *)SLOT_GNSS_CFG)(1, 1);
-        (*(gnss1_fn *)SLOT_GNSS_FREQ)(1);
+        gnss2_fn cfg = *(gnss2_fn *)SLOT_GNSS_CFG;
+        g_wd_phase = 'G';
+        int cfg_ret = cfg ? cfg(1, 1) : -1;
         g_wd_phase = 0;
+        if (cfg_ret != 0) {
+            vhex("ST:gps_cfg_err", (unsigned)cfg_ret);
+            vputs("ST: GPS NMEA config FAILED\r\n");
+            return 0;
+        }
         vputs("ST: GPS on (tracking)\r\n");
     } else {
-        pw(0);
-        g_wd_phase = 0;
         vputs("ST: GPS off (idle)\r\n");
     }
+    return 1;
 }
 
 /* Signal (item 3): the vendor app never sends AT — it reads rssi via the resident getter (SLOT_GET_CSQ,
@@ -1006,7 +1034,8 @@ static int build_text_resp(const char *ascii, int alen, unsigned short serial, u
     data[0] = (unsigned char)(4 + alen);
     return gt06_frame(0x15, data, 5 + alen, serial, out);
 }
-/* STATUS# reply: battery at mV resolution (Battery:X.XXXV) + GPRS/signal for vendor-format parity. */
+/* STATUS# reply: battery at mV resolution (Battery:X.XXXV) + GPRS/signal for vendor-format parity.
+ * GPS is the last power state confirmed by a successful resident GNSS API return, not a lock indicator. */
 static int status_str(char *b)
 {
     unsigned mv = g_batt_mv, f = mv % 1000;
@@ -1015,7 +1044,11 @@ static int status_str(char *b)
     b[n++] = (char)('0' + f / 100); b[n++] = (char)('0' + (f / 10) % 10); b[n++] = (char)('0' + f % 10);
     n += put_str(b + n, "V;GPRS:Online;GSM Signal Level:");
     n += put_uint(b + n, g_csq <= 31 ? g_csq : 0);
-    n += put_str(b + n, ";ACC:ON;GPS:OFF;Defense:OFF;");
+    n += put_str(b + n, ";ACC:ON;GPS:");
+    if (g_gps_power_state == GPS_POWER_ON) n += put_str(b + n, "ON");
+    else if (g_gps_power_state == GPS_POWER_OFF) n += put_str(b + n, "OFF");
+    else n += put_str(b + n, "UNKNOWN");
+    n += put_str(b + n, ";Defense:OFF;");
     return n;
 }
 /* cxzt# reply: the device-info line the server parses — *ID, server, *A(pn), *F(TIMER), *H(bt), *BT(mV). */
@@ -2392,6 +2425,7 @@ void standalone_main(u32 loader_resolver)
     static char g_line[256]; static int g_llen;    /* NMEA line reassembly across URC chunks */
     static unsigned char acc[768]; static int acclen; /* server->device RX accumulator (>= max frame + one recv) */
     unsigned last_hbt = 0, last_loc = 0, last_csq = 0, last_batt = 0, last_blind = 0, last_sos = 0;
+    unsigned last_gps_power = 0;
     unsigned conn_start = 0, last_conn = 0u - (unsigned)CONN_RETRY_SEC;  /* first attempt immediately */
 
     for (;;) {
@@ -2525,9 +2559,23 @@ void standalone_main(u32 loader_resolver)
                 else if (n > 0) {
                     int changed = 0;
                     handle_rx(fd, se, acc, &acclen, (int)sizeof acc, rx, n, &track, &t1, &t2, &serial, &changed);
-                    if (changed) { apply_gps(track); g_llen = 0; last_loc = now; }
+                    if (changed) {
+                        apply_gps(track);
+                        last_gps_power = now;
+                        g_llen = 0;
+                        last_loc = now;
+                    }
                 }
             }
+        }
+
+        /* A successful call is not enough evidence that the resident GNSS service stayed healthy (G388920
+         * stopped producing NMEA until a full reset). Reassert power + NMEA delivery every 10 s for the
+         * entire tracking period, and check every return. This also recovers automatically from a transient
+         * power-on/config failure without requiring another TIMER state transition. */
+        if (track && (now - last_gps_power) >= GPS_RETRY_SEC) {
+            apply_gps(1);
+            last_gps_power = now;
         }
 
         /* USB<->TCP forwarding bridge: keep the FWD socket up + pump both directions (independent of GT06).

@@ -74,8 +74,12 @@ sitl-ubsan: $(SITLSRC) sapi.h        ## SITL under UndefinedBehaviorSanitizer
 
 sitl-all: sitl sitl-asan sitl-ubsan  ## build all SITL variants
 
+SITL_TEST_BIN ?= ./sitl
+test-gps-retry: sitl                 ## exercise truthful GPS STATUS + 10-second power-on retry
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_retry.py
+
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan
 
-.PHONY: all flashimg fotaimg sitl-all clean
+.PHONY: all flashimg fotaimg sitl-all test-gps-retry clean
