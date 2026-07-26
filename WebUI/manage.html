@@ -1885,9 +1885,11 @@
             }
             html += '</table>';
             if (d.op && d.op.status === 'pending') {
-                html += `<p style="color:#888">Fetch in progress — waiting for ${d.op.outstanding.map(esc).join(', ')}&hellip;</p>`;
+                const action = d.op.kind === 'set' ? 'Set confirmation' : 'Fetch';
+                html += `<p style="color:#888">${action} in progress — waiting for ${d.op.outstanding.map(esc).join(', ')}&hellip;</p>`;
             } else if (d.op && d.op.status === 'timed-out') {
-                html += `<p style="color:#c60">Last fetch timed out waiting for ${d.op.outstanding.map(esc).join(', ')}. `
+                const action = d.op.kind === 'set' ? 'set confirmation' : 'fetch';
+                html += `<p style="color:#c60">Last ${action} timed out waiting for ${d.op.outstanding.map(esc).join(', ')}. `
                      + 'Values above keep their original timestamps.</p>';
             }
             document.getElementById('paramList').innerHTML = html;

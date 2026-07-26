@@ -217,12 +217,12 @@ _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
 #   * TERIID — a server-derived auth credential owned by onboarding; editing it can
 #     orphan or impersonate a unit
 #
-# Replies are SELF-IDENTIFYING, so we never try to correlate a reply with the command
-# that produced it. That correlation is not safe here: _send_next_cmd() sends before
-# assigning cmd_pending, HTTP handlers run concurrently with the listener thread, and
-# the delivery timeout advances the queue — so a late reply would be attributed to the
-# following command. Instead every parser below is run against every reply text and
-# picks out only what it recognises.
+# Replies are SELF-IDENTIFYING, so every parser below is run against every reply text
+# and picks out only what it recognises. Operation completion is stricter: parameter
+# commands carry a non-zero GT06 server flag which the device echoes in its response.
+# That flag is the operation token, so a late response from a timed-out fetch (or an
+# untagged CXCS# command from the arbitrary-command endpoint) can refresh the cache but
+# cannot complete a newer operation.
 #
 # `read`   command to issue to fetch it (None = comes from the cxzt# snapshot)
 # `parse`  reply-text -> {key: value} for anything recognised (must be side-effect free)
@@ -419,7 +419,7 @@ def gt06_make_response(protocol, serial):
     return b"\x78\x78" + payload + struct.pack(">H", crc) + b"\x0d\x0a"
 
 
-def gt06_make_command(cmd_str, cmd_serial):
+def gt06_make_command(cmd_str, cmd_serial, server_flag=0):
     """Build a GT06 server command frame (protocol 0x80).
 
     Format: 78 78 [len] 80 [content_len] [server_flag 4B] [cmd ASCII] [serial] [crc] 0d 0a
@@ -430,7 +430,7 @@ def gt06_make_command(cmd_str, cmd_serial):
     length = 1 + 1 + content_len + 2 + 2
     payload = struct.pack(">BB", length, 0x80)
     payload += struct.pack(">B", content_len)
-    payload += b"\x00\x00\x00\x00"  # server flag
+    payload += struct.pack(">I", server_flag)
     payload += cmd_bytes
     payload += struct.pack(">H", cmd_serial)
     crc = gt06_crc_itu(payload)
@@ -693,8 +693,9 @@ class GT06Connection:
         self.pos_history = []  # last 3 (lat, lon, ts) for speed smoothing
 
         # Command queue — sequential delivery with SIOCOUTQ verification
-        self.cmd_queue = []           # list of command strings waiting to send
+        self.cmd_queue = []           # list of (command string, server flag) waiting to send
         self.cmd_pending = None       # command string currently awaiting TCP ACK
+        self.cmd_pending_flag = 0     # server flag expected in that command's app ACK
         self.cmd_pending_frame = None # raw frame bytes (for retry)
         self.cmd_sent_time = 0        # time.monotonic() when cmd was sent
         self.cmd_tcp_acked = False    # True once SIOCOUTQ shows 0
@@ -871,8 +872,9 @@ class GT06Listener:
         # _params_lock because HTTP handler threads read it while the listener
         # thread writes it (ThreadingHTTPServer).
         self.device_params = {}
-        self.param_ops = {}          # imei -> in-flight fetch operation
+        self.param_ops = {}          # imei -> in-flight fetch/set operation
         self._params_lock = threading.Lock()
+        self._params_token = 0       # non-zero uint32 GT06 server-flag allocator
         # Battery calibration (parametric OCV fit) for voltage -> % conversion.
         self.battery_cal_path = Path(battery_cal_path) if battery_cal_path else None
         self.battery_cal = self._load_battery_cal()
@@ -1243,21 +1245,29 @@ class GT06Listener:
 
     # -- Command queue: sequential delivery with SIOCOUTQ verification --
 
-    def _queue_commands(self, gt_conn, cmds):
-        """Queue command strings for sequential delivery to a GT06 device."""
+    def _queue_commands(self, gt_conn, cmds, server_flag=0):
+        """Queue commands for sequential delivery to a GT06 device.
+
+        ``cmds`` normally contains strings, all tagged with ``server_flag``.
+        A caller that needs per-command flags may supply ``(string, flag)`` pairs.
+        """
         # Hard safety net: MODE4 hard-bricks W07/V6.6x firmware (modem goes
         # dark, physical power-cycle to recover). Drop any MODE4 to such a
         # device whatever the source — schedule, reconcile, or a raw operator
         # command. The cxzt# overnight branch already substitutes a safe mode;
         # this catches every other path (incl. unknown firmware). V667 only.
         safe = []
-        for c in cmds:
+        for item in cmds:
+            if isinstance(item, tuple):
+                c, flag = item
+            else:
+                c, flag = item, server_flag
             if c.startswith("MODE4") and not _firmware_allows_mode4(gt_conn.firmware):
                 self._log(f"[GT06] {gt_conn.sailor_id or gt_conn.imei}: refusing "
                           f"{c} — MODE4 unsafe on "
                           f"{gt_conn.firmware or 'unknown fw'}")
                 continue
-            safe.append(c)
+            safe.append((c, flag))
         gt_conn.cmd_queue.extend(safe)
         self._send_next_cmd(gt_conn)
 
@@ -1275,10 +1285,15 @@ class GT06Listener:
             self._reconcile_advance(gt_conn)
             if gt_conn.cmd_pending is not None or not gt_conn.cmd_queue:
                 return
-        cmd_str = gt_conn.cmd_queue.pop(0)
-        frame = gt06_make_command(cmd_str, gt_conn.next_cmd_serial())
+        queued = gt_conn.cmd_queue.pop(0)
+        if isinstance(queued, tuple):
+            cmd_str, server_flag = queued
+        else:  # tolerate queues populated by older tests/callers
+            cmd_str, server_flag = queued, 0
+        frame = gt06_make_command(cmd_str, gt_conn.next_cmd_serial(), server_flag)
         self._send(gt_conn, frame)
         gt_conn.cmd_pending = cmd_str
+        gt_conn.cmd_pending_flag = server_flag
         gt_conn.cmd_pending_frame = frame
         gt_conn.cmd_sent_time = time.monotonic()
         gt_conn.cmd_tcp_acked = False
@@ -1412,6 +1427,7 @@ class GT06Listener:
                 label = gt_conn.sailor_id or gt_conn.imei or "unknown"
                 self._log(f"[GT06] No app ACK for {label}: {gt_conn.cmd_pending} — advancing queue")
                 gt_conn.cmd_pending = None
+                gt_conn.cmd_pending_flag = 0
                 gt_conn.cmd_pending_frame = None
                 self._send_next_cmd(gt_conn)
 
@@ -1596,6 +1612,8 @@ class GT06Listener:
                     f"retry {gt_conn.rate_retry_count}/2")
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
+                gt_conn.cmd_pending_flag = 0
+                gt_conn.cmd_pending_frame = None
                 self._queue_commands(gt_conn, cmds)
                 gt_conn.rate_check_time = now
                 gt_conn.loc_count = 0
@@ -2170,14 +2188,16 @@ class GT06Listener:
             # Server command response — clear pending, advance queue
             label = gt_conn.sailor_id or gt_conn.imei or "unknown"
             text = ""
+            response_server_flag = 0
             if len(data) >= 5:
+                response_server_flag = struct.unpack(">I", data[1:5])[0]
                 text = " " + data[5:].decode("ascii", errors="replace")
             self._log(f"[GT06] Command ACK from {label}:{text}")
             # Feed any query/ack response into the reconciler's observed-state.
             self._reconcile_parse(gt_conn, text)
             # Feed it to the operator-visible parameter cache (Params tab). Parsed by
             # CONTENT, never by which command we think is outstanding — see _PARAMS.
-            self._params_parse(gt_conn, text)
+            self._params_parse(gt_conn, text, response_server_flag)
             # Capture firmware version from VERSION# response, e.g.
             #   "NT19D_MG133_10F8G_B53_V667 2026-04-13"
             fwmatch = re.search(r'([A-Z0-9]+(?:_[A-Z0-9]+)*_V\d+)\s+(\d{4}-\d{2}-\d{2})', text)
@@ -2436,9 +2456,15 @@ class GT06Listener:
                     self._queue_commands(gt_conn, [
                         f"SZCS#GPS_RST_TIME={gps_rst}",
                         "SZCS#VIBCHK=0:16"])
-            gt_conn.cmd_pending = None
-            gt_conn.cmd_pending_frame = None
-            self._send_next_cmd(gt_conn)
+            # A delayed response may arrive after the command queue has advanced.
+            # Only the echoed server flag proves that this response belongs to the
+            # command currently pending; otherwise leave the current command alone.
+            if (gt_conn.cmd_pending is not None
+                    and response_server_flag == gt_conn.cmd_pending_flag):
+                gt_conn.cmd_pending = None
+                gt_conn.cmd_pending_flag = 0
+                gt_conn.cmd_pending_frame = None
+                self._send_next_cmd(gt_conn)
 
     def send_command_to(self, eid, sailor_id, cmd_str):
         """Send a command to a connected GT06 device matching (eid, sailor_id)."""
@@ -2747,11 +2773,11 @@ class GT06Listener:
     def _params_op_busy(self, imei):
         """True if a management operation is outstanding for this device.
 
-        Caller must hold _params_lock. Fetch and set are serialised against each other
-        so that any recognised reply can be attributed to the fetch in flight.
+        Caller must hold _params_lock. Fetch and set are serialised so a write cannot
+        change device state while a fetch is collecting its tagged replies.
         """
         op = self.param_ops.get(imei)
-        if not op or op.get("closed") or not op.get("outstanding"):
+        if not op or not op.get("outstanding"):
             return False
         return time.monotonic() - op["started"] < _PARAM_OP_TIMEOUT
 
@@ -2761,13 +2787,12 @@ class GT06Listener:
             self.device_params.pop(imei, None)
             self.param_ops.pop(imei, None)
 
-    def _params_parse(self, gt_conn, text):
+    def _params_parse(self, gt_conn, text, server_flag=0):
         """Extract any recognised parameter values from a device reply.
 
         Runs every parser against every reply and keeps what matches. Deliberately
-        content-based: correlating a reply with the command we believe is pending is
-        NOT safe here (see the note on _PARAMS), and a mis-attributed value is worse
-        than a missing one.
+        content-based for caching. An operation is completed only by a reply carrying
+        its token in the GT06 server-flag field; see the note on _PARAMS.
         """
         if not gt_conn or not gt_conn.imei or not text:
             return
@@ -2785,14 +2810,16 @@ class GT06Listener:
             for k, v in found.items():
                 cache[k] = (v, now)
             op = self.param_ops.get(gt_conn.imei)
-            if op and not op.get("closed"):
-                # Safe because management operations are serialised per device (see
-                # _params_op_busy): while a fetch is outstanding no SET — and so no
-                # confirming read — can be queued for this device, so any recognised
-                # reply belongs to this fetch. Deciding ownership after the fact is
-                # not possible: a fetch read and a SET confirmation produce
-                # byte-identical replies.
+            if (op and server_flag != 0
+                    and server_flag == op.get("token")):
                 op["outstanding"] -= set(found)
+
+    def _params_next_token_locked(self):
+        """Allocate a non-zero GT06 server flag. Caller holds _params_lock."""
+        self._params_token = (self._params_token + 1) & 0xffffffff
+        if self._params_token == 0:
+            self._params_token = 1
+        return self._params_token
 
     def _params_fw_kind(self, imei):
         """'standalone' if this unit runs our firmware, else 'vendor'."""
@@ -2804,8 +2831,8 @@ class GT06Listener:
     def params_fetch(self, imei):
         """Queue the reads that populate the Params tab.
 
-        Returns (ok, payload). One fetch per device at a time: a second concurrent
-        fetch would have its replies consumed by the first operator's poll.
+        Returns (ok, payload). Only one parameter operation per device is allowed at
+        a time, keeping SETs out of a fetch's read window.
         """
         conn = self._conn_for_imei(imei)
         if conn is None:
@@ -2821,16 +2848,18 @@ class GT06Listener:
             if spec["read"] not in reads:
                 reads.append(spec["read"])
             keys.add(key)
-        op_id = f"{int(time.time() * 1000):x}"
         # Check-and-claim under ONE lock hold: two HTTP threads racing here would
         # otherwise both pass the check and clobber each other's operation.
         with self._params_lock:
             if self._params_op_busy(imei):
                 return False, {"error": "a parameter operation is already running for this device",
                                "op_id": self.param_ops[imei]["op_id"]}
+            token = self._params_next_token_locked()
+            op_id = f"{int(time.time() * 1000):x}-{token:08x}"
             self.param_ops[imei] = {"op_id": op_id, "started": now,
+                                    "kind": "fetch", "token": token,
                                     "outstanding": set(keys), "expected": sorted(keys)}
-        self._queue_commands(conn, reads)
+        self._queue_commands(conn, reads, server_flag=token)
         self._log(f"[GT06] Params fetch for {conn.sailor_id or imei}: {len(reads)} reads (op {op_id})")
         return True, {"op_id": op_id, "expected": sorted(keys)}
 
@@ -2847,8 +2876,8 @@ class GT06Listener:
         with self._params_lock:
             cache = dict(self.device_params.get(imei, {}))
             op = dict(self.param_ops.get(imei) or {})
-            # copy BOTH mutable members out of the lock — a shallow dict() leaves
-            # them aliased to the live operation the listener thread is updating
+            # copy BOTH mutable members out of the lock — a shallow dict() leaves them
+            # aliased to the live operation the listener thread is updating
             if op:
                 op["outstanding"] = set(op.get("outstanding", ()))
                 op["expected"] = list(op.get("expected", ()))
@@ -2892,7 +2921,8 @@ class GT06Listener:
             "imei": imei, "online": conn is not None,
             "firmware_kind": "standalone" if standalone else "vendor",
             "params": out,
-            "op": ({"op_id": op.get("op_id"), "status": status,
+            "op": ({"op_id": op.get("op_id"), "kind": op.get("kind", "fetch"),
+                    "status": status,
                     "expected": op.get("expected", []),
                     "outstanding": sorted(op.get("outstanding", []))} if op else None),
         }
@@ -2907,10 +2937,6 @@ class GT06Listener:
         conn = self._conn_for_imei(imei)
         if conn is None:
             return False, "device not connected"
-        with self._params_lock:
-            if self._params_op_busy(imei):
-                return False, ("a parameter fetch is running for this device — "
-                               "wait for it to finish")
         # Every value that reaches a command string must be a plain ASCII string:
         # gt06_make_command() encodes ascii, so a non-str or non-ASCII value would
         # raise inside the listener rather than returning a clean error here.
@@ -2961,19 +2987,31 @@ class GT06Listener:
             if err:
                 return False, f"{key}: {err}"
             cmd = spec["write"](value)
-        cmds = [cmd]
         read = _PARAMS.get(key, {}).get("read")
-        if read:
-            cmds.append(read)                # confirm from the device, don't assume
+        expected = set(pair or (key,)) if read else set()
+        now = time.monotonic()
+        # Validation above may be relatively expensive and never needs ownership.
+        # The busy check and SET claim, however, must be one lock hold: a Fetch
+        # cannot slip between them, nor can two validated SETs claim together.
         with self._params_lock:
-            # retire any finished fetch so this set's confirming read can never be
-            # counted against it (_params_op_busy already blocks an active one)
-            op = self.param_ops.get(imei)
-            if op:
-                op["closed"] = True
+            if self._params_op_busy(imei):
+                return False, ("a parameter operation is running for this device — "
+                               "wait for it to finish")
+            token = self._params_next_token_locked()
+            op_id = f"{int(time.time() * 1000):x}-{token:08x}"
+            self.param_ops[imei] = {
+                "op_id": op_id, "kind": "set", "token": token, "started": now,
+                "outstanding": expected, "expected": sorted(expected),
+            }
+        # The SET acknowledgement is deliberately untagged: only the tagged read
+        # after it may confirm the operation. Queue both at once so no other command
+        # can be inserted between the write and its confirming read.
+        cmds = [(cmd, 0)]
+        if read:
+            cmds.append((read, token))
         self._queue_commands(conn, cmds)
         self._log(f"[GT06] Params set for {conn.sailor_id or imei}: "
-                  f"{_redact_teriid(cmd)}")
+                  f"{_redact_teriid(cmd)} (op {op_id})")
         return True, None
 
     def reboot_device(self, imei):
@@ -3191,6 +3229,8 @@ class GT06Listener:
                 # overnight branch deliberately leaves it off.
                 gt_conn.cmd_queue.clear()
                 gt_conn.cmd_pending = None
+                gt_conn.cmd_pending_flag = 0
+                gt_conn.cmd_pending_frame = None
                 gt_conn.reconcile_phase = None
                 if idle:
                     # Within ~5 min of the morning wake a manual sleep isn't
