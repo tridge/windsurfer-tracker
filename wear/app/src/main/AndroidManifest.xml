@@ -29,8 +29,11 @@
     <!-- Vibration for feedback -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Heart rate sensor (optional) -->
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <!-- Heart rate sensor (optional). Android 16 replaced BODY_SENSORS with the
+         granular health permission; keep both so pre-16 watches still work. -->
+    <uses-permission android:name="android.permission.BODY_SENSORS"
+        android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-feature android:name="android.hardware.sensor.heartrate" android:required="false" />
 
     <application

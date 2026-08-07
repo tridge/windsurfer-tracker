@@ -461,10 +461,15 @@ class MainActivity : ComponentActivity() {
         )
         // Only request heart rate permission if enabled in settings
         if (settings.value.heartRateEnabled) {
-            permissions.add(Manifest.permission.BODY_SENSORS)
+            permissions.add(heartRatePermission())
         }
         locationPermissionRequest.launch(permissions.toTypedArray())
     }
+
+    // Android 16 (API 36) retired BODY_SENSORS in favour of the granular health permission
+    private fun heartRatePermission(): String =
+        if (Build.VERSION.SDK_INT >= 36) "android.permission.health.READ_HEART_RATE"
+        else Manifest.permission.BODY_SENSORS
 
     private fun requestBackgroundLocation() {
         backgroundLocationRequest.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)

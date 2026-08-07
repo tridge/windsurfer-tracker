@@ -29,13 +29,13 @@ fun getGitHash(): String {
 
 android {
     namespace = "nz.co.tracker.windsurfer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "nz.co.tracker.windsurfer"
         minSdk = 30  // Wear OS 3.0 minimum
-        targetSdk = 35
-        versionCode = 148
+        targetSdk = 36
+        versionCode = 151
         versionName = "1.11.0"
 
         // Add version info as build config fields
@@ -90,6 +90,13 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // pin a real JDK 17 toolchain (host default JDK may be too new for Gradle/AGP)
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(17))
+        }
     }
 
     buildFeatures {
