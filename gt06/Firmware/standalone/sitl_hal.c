@@ -334,11 +334,17 @@ static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ms)
 /* ================= GNSS: power flag + NMEA injector thread ================= */
 static volatile int g_gps_on;
 static int g_gps_power_failures;                  /* SITL_GNSS_POWER_FAILS: fail the first N power-on calls */
+static int g_gps_poweroff_failures;               /* SITL_GNSS_POWEROFF_FAILS: fail the first N power-off calls */
 static int sitl_gnss_power(int on)
 {
     if (on && g_gps_power_failures > 0) {
         g_gps_power_failures--;
         fprintf(stderr, "[SITL] GNSS power-on failure injected (%d remaining)\n", g_gps_power_failures);
+        return -1;
+    }
+    if (!on && g_gps_poweroff_failures > 0) {
+        g_gps_poweroff_failures--;
+        fprintf(stderr, "[SITL] GNSS power-off failure injected (%d remaining)\n", g_gps_poweroff_failures);
         return -1;
     }
     g_gps_on = on ? 1 : 0;
@@ -828,7 +834,8 @@ static void usage(const char *prog)
         "  -f, --fwd IP:PORT          preset FWDSERVER/FWDPORT (the UAV forward server) without a command\n"
         "  -h, --help                 this help\n"
         "Env fallbacks (overridden by flags): SITL_SERVER, SITL_TERIID, SITL_NO_REEXEC, SITL_USB_LISTEN, SITL_FWD.\n"
-        "Test injection: SITL_GNSS_POWER_FAILS=N fails the first N GNSS power-on calls.\n"
+        "Test injection: SITL_GNSS_POWER_FAILS=N fails the first N GNSS power-on calls,\n"
+        "                SITL_GNSS_POWEROFF_FAILS=N the first N power-off calls.\n"
         "Signals: SIGUSR1 toggles coverage loss (connect/send fail fast);\n"
         "         SIGUSR2 toggles radio-off (sends fail, connects hang pending — blackhole);\n"
         "         SIGHUP  toggles carrier denial (camped PLMN rejects the SIM; item-16 ladder);\n"
@@ -851,6 +858,7 @@ int main(int argc, char **argv)
     if (getenv("SITL_CHARGING")) g_charging_sim = 1;   /* start with the M0 charge-active flag set */
     if (getenv("SITL_SOS")) g_sos_sim = 1;             /* start with the SOS button down (edge fires) */
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
+    if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_USB_LISTEN"))) g_usb_listen_port = atoi(e);
     const char *fwd_arg = getenv("SITL_FWD");           /* preset FWDSERVER/FWDPORT (seeded after cwprm) */
 

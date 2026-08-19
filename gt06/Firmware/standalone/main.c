@@ -2572,9 +2572,18 @@ void standalone_main(u32 loader_resolver)
         /* A successful call is not enough evidence that the resident GNSS service stayed healthy (G388920
          * stopped producing NMEA until a full reset). Reassert power + NMEA delivery every 10 s for the
          * entire tracking period, and check every return. This also recovers automatically from a transient
-         * power-on/config failure without requiring another TIMER state transition. */
+         * power-on/config failure without requiring another TIMER state transition.
+         *
+         * Idle is retried too, but only until the OFF is confirmed: a failed power-off (including the one
+         * at boot) would otherwise leave GNSS drawing current for the whole idle period, since nothing
+         * re-runs apply_gps until the next state change. Unlike the tracking case there is no reason to
+         * keep reasserting once the resident has acknowledged OFF. */
         if (track && (now - last_gps_power) >= GPS_RETRY_SEC) {
             apply_gps(1);
+            last_gps_power = now;
+        } else if (!track && g_gps_power_state != GPS_POWER_OFF &&
+                   (now - last_gps_power) >= GPS_RETRY_SEC) {
+            apply_gps(0);
             last_gps_power = now;
         }
 
