@@ -20,7 +20,10 @@ observable string patch to prove the load path end to end.
   reports `NT19D_MG133_WSTRK_B53_V665`. No USB, no SDK, no signing key.
 - There is **no cryptographic signature.** The FOTA integrity check is an **8-bit XOR over
   the whole `.bin`**, compared against the hex value in the `YCSJ` command's trailing field
-  (`,80#` = port 80 **and** expected XOR `0x80`); the vendor pads every image to XOR `0x80`.
+  (`,80#` = expected XOR `0x80`); the vendor pads every image to XOR `0x80`. That field is
+  **not** a port — the download port is hardcoded to 80 in the handler (disassembly,
+  2026-08-20; see `OTA_notes.md`), so a FOTA host must serve on port 80. The downloader also
+  fetches via **HTTP Range** and requires a `Content-Range` header in every reply.
   `fwtool.py pack` reproduces this by appending one pad byte. The filename must contain `B53`
   or the device rejects it before downloading. Details in `ota_and_patch_test.md`.
 - `fwtool.py` unpacks, repacks (identical LZMA header + correct XOR pad), and same-length
