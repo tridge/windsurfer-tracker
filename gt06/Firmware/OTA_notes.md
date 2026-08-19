@@ -367,7 +367,53 @@ remembering, because that failure looks nothing like a size problem from the out
    good target). Do NOT repack the raw — pad after the container.
 2. Confirm the whole file XORs to the value you will put in the command (`0x80` for our
    builds, since the pack step already adds a pad byte for that).
-3. Name it with **`B53`** somewhere in the filename.
+3. Name it `W07_MG133_WSTR_B53_<git tag>.bin` — our convention, and the `B53` rule
+   is satisfied by it. (Do not bother mimicking a vendor version string; test 6 confirms
+   the name only has to contain `B53`.)
 4. Put it where it is served on **port 80** with **Range support** (`206` + `Content-Range`).
 5. `YCSJ,http://<host>/<path>/<name>.bin,80#` — remember the `80` is the XOR, not the port.
 6. Verify with `cxzt#`. Nothing else reports success or failure.
+
+---
+
+## Test 6 — 2026-08-20, G407273, standalone firmware onto a W07 unit via the repaired `/W07_FW/` — WORKED
+
+Three things at once: the **W07** hardware variant, the **repaired `/W07_FW/` path** (first OTA
+through it since the Range fix), and a **sensible filename** instead of the fake vendor version
+used in test 5.
+
+| | |
+|---|---|
+| Unit | G407273 — IMEI 866557081333462, login id `000004072407273`, eid 8, provisioned |
+| Firmware before | `W07_MG133_10F8G_B53_V6.68-GT06` (vendor, **W07** variant — test 5 was NT19D) |
+| Served as | `W07_MG133_WSTR_B53_890ac16.bin` — our own `W07_MG133_WSTR_B53_<git tag>` convention |
+| From | `http://103.230.158.49/W07_FW/...` (the path fixed earlier today) |
+| Trigger | `YCSJ,http://103.230.158.49/W07_FW/W07_MG133_WSTR_B53_890ac16.bin,80#` |
+| Result | **`WSTR-STD1_890ac16-GT06 MCU:R5` — applied** |
+
+Identical artefact to test 5 (65536 B, XOR `0x80`, payload untouched), renamed. The `V669` name
+used in test 5 was only ever to mimic the vendor form — **use the `WSTR` + git-tag convention**,
+it still satisfies the `B53` rule and says what the build actually is.
+
+```
+09:17:51  YCSJ sent (manage API)
+09:18:55  server: Disconnected (downloading)
+09:19:01  apache: first 206
+09:20:03  apache: last 206  — 66 ranged requests, same as test 5
+09:21:15  Login: id ***407273 -> G407273 (eid=8, auth)      <-- IDENTITY + TERIID INTACT
+09:21:16  cxzt# -> WSTR-STD1_890ac16-GT06 MCU:R5*ID:***407273
+          *103.230.158.49:7711 *A:simbase *BT:4128 *CHG:1
+```
+
+### What test 6 additionally establishes
+
+- **The same image runs on both hardware variants** — NT19D (test 5) and W07 (here) — despite
+  the vendor shipping separate `NT19D_...` and `W07_...` builds.
+- **`/W07_FW/` is confirmed working** after removing the Range-stripping directives. Both our
+  paths are now proven by a real OTA.
+- **Identity survives vendor -> standalone even when the login id is NOT the IMEI.** This unit's
+  id `000004072407273` was manufactured by the *vendor* firmware from its H02 id (see
+  `SZCS#PTL_SEL`), and everything keys off it: `gt06.json`, its TERIID, the `G407273` label,
+  eid 8. Our firmware came back on the same id and re-authenticated (`auth`, not `legacy_raw`,
+  not a new unregistered device). Test 5 could not show this — that unit's id already matched
+  its IMEI.
