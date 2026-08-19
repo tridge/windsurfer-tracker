@@ -102,3 +102,12 @@ def test_dump_imei_filter_uses_marker(tmp_path):
     assert sum("CMDRESP" in ln for ln in lines) == 1
     # the other unit's stream is excluded
     assert not any("c8" in ln.split()[2] for ln in lines if len(ln.split()) > 2)
+
+
+def test_login_id_keeps_leading_zeros():
+    """H02->GT06 conversion (SZCS#PTL_SEL=2) prepends "00000" to the 10-digit
+    H02 id. Those zeros are part of the 15-digit id, not BCD padding."""
+    # 8 BCD bytes = one pad nibble + the 15-digit id
+    assert gt06_parse_login(bytes.fromhex("0000004072407273")) == "000004072407273"
+    # a normal 15-digit IMEI is unchanged
+    assert gt06_parse_login(bytes.fromhex("0866557081333462")) == "866557081333462"

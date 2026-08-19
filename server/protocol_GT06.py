@@ -438,12 +438,17 @@ def gt06_make_command(cmd_str, cmd_serial, server_flag=0):
 
 
 def gt06_parse_login(data):
-    """Parse login packet (protocol 0x01). Data is IMEI in BCD encoding."""
+    """Parse login packet (protocol 0x01). Data is the terminal id in BCD.
+
+    8 BCD bytes = 16 nibbles = one pad nibble + a 15-digit id, so drop only
+    that pad. Ids may legitimately start with '0': the vendor's H02->GT06
+    conversion (SZCS#PTL_SEL=2) prepends "00000" to the 10-digit H02 id, and
+    stripping all leading zeros left a short id that could not route.
+    """
     imei = data.hex()
-    imei = imei.lstrip("0")
     if len(imei) == 16:
-        imei = imei[1:]  # Remove leading nibble padding for 15-digit IMEI
-    return imei
+        return imei[1:]
+    return imei.lstrip("0")
 
 
 def gt06_parse_location(data):
