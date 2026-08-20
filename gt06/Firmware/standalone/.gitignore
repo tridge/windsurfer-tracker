@@ -5,3 +5,7 @@ customer_app_standalone.bin
 sitl
 sitl-asan
 sitl-ubsan
+standalone_fw_cpad.bin
+standalone_fw_fill.bin
+standalone_fw_padded.bin
+standalone_fota.bin
