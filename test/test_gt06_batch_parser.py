@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 from protocol_GT06 import (  # noqa: E402
     gt06_parse_batch, GT06_HDOP_TO_METRES, GT06_HACC_SATURATED_M,
-    GT06_BATCH_MAX_SPAN_S,
+    GT06_BATCH_MAX_SPAN_S, GT06_BATCH_MAX_FUTURE_S,
 )
 
 
@@ -125,3 +125,39 @@ def test_out_of_order_elements_are_sorted():
     assert b is not None
     tss = [f["ts"] for f in b["fixes"]]
     assert tss == sorted(tss), f"parser left the batch out of order: {tss}"
+
+
+def _sod_now_dt():
+    """A header datetime for 'now', so span tests are not fighting the receipt-time anchor."""
+    t = time.gmtime()
+    return (t.tm_year - 2000, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+
+
+@pytest.mark.parametrize("dt_ds,keep", [
+    (0, True),
+    (1200, True),       # exactly the firmware's 120 s cap
+    (1201, False),      # one decisecond past it
+    (3000, False),      # the old 300 s slack: five minutes of frozen track
+])
+def test_span_bound_matches_the_firmware_invariant(dt_ds, keep):
+    """The server must enforce the producer's 120 s cap, not a looser one — a future timestamp
+    advances the duplicate high-water mark and suppresses real updates until wall time catches up."""
+    b = gt06_parse_batch(_hdr(count=2, dt=_sod_now_dt()) + _elem(0) + _elem(dt_ds))
+    assert b is not None
+    assert len(b["fixes"]) == (2 if keep else 1), \
+        f"dt_ds={dt_ds} should {'be kept' if keep else 'be dropped'}"
+
+
+def test_far_future_base_is_anchored_to_receipt_time():
+    """A syntactically valid but absurd date passes every field check; unanchored it would freeze the
+    live track for as long as it claims (a 2099 base = decades)."""
+    b = gt06_parse_batch(_hdr(count=1, dt=(99, 6, 1, 12, 0, 0)) + _elem(0))
+    assert b is not None
+    assert b["fixes"][0]["ts"] <= time.time() + GT06_BATCH_MAX_FUTURE_S + 5, \
+        "a year-2099 base was trusted"
+
+
+def test_ancient_base_is_anchored_to_receipt_time():
+    b = gt06_parse_batch(_hdr(count=1, dt=(1, 1, 1, 0, 0, 0)) + _elem(0))
+    assert b is not None
+    assert b["fixes"][0]["ts"] > time.time() - 3600, "a year-2001 base was trusted"

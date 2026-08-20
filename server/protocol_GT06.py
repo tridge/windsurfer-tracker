@@ -471,11 +471,15 @@ GT06_BATCH_PROTO = 0xF1
 GT06_BATCH_HDR = 12
 GT06_BATCH_ELEM = 14
 GT06_BATCH_MAX_FIXES = 64          # sanity bound; the firmware caps itself far lower
-# The firmware caps a batch's span at 120 s, but the wire field is 16 bits, so an invalid or hostile
-# frame could claim +6553.5 s. Enforce the protocol invariant here rather than trusting the peer: a
-# timestamp in the future poisons the tracker's newest-first bookkeeping and suppresses real updates
-# until wall time catches up. Generous enough to absorb any legitimate batch.
-GT06_BATCH_MAX_SPAN_S = 300.0
+# The firmware caps a batch's span at 120 s (BATCH_MAX_SPAN_DS), and the wire field is 16 bits, so an
+# invalid or hostile frame could claim +6553.5 s. Enforce the PRODUCER'S invariant, not a looser one:
+# a future timestamp poisons the tracker's newest-first bookkeeping and suppresses real updates until
+# wall time catches up, so even the 300 s of slack this once allowed was five minutes of frozen track.
+GT06_BATCH_MAX_SPAN_S = 120.0
+# A syntactically valid but absurd base date (say 2099) does the same damage for far longer, and the
+# delta bound cannot catch it. Anchor the batch to receipt time when the claimed base is not plausible.
+GT06_BATCH_MAX_FUTURE_S = 120.0        # a fix may not claim to be from the future by more than this
+GT06_BATCH_MAX_AGE_S = 7 * 24 * 3600   # nor be older than the blind buffer could possibly hold
 
 
 def gt06_parse_batch(data):
@@ -509,6 +513,11 @@ def gt06_parse_batch(data):
             base_ts = timegm((2000 + yy, mo, dd, hh, mi, ss)) + base_ds / 10.0
         except Exception:
             base_ts = time.time()
+    # Sanity-anchor against receipt time: a well-formed but absurd date (2099, or a year in the past)
+    # passes every field check yet would freeze the live track for as long as it claims.
+    now = time.time()
+    if base_ts > now + GT06_BATCH_MAX_FUTURE_S or base_ts < now - GT06_BATCH_MAX_AGE_S:
+        base_ts = now
 
     fixes = []
     for i in range(count):

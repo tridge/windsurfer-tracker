@@ -112,7 +112,10 @@ typedef struct {
     unsigned char dt[6];        /* yy mo dd hh mi ss (from the fix's own RMC) */
     unsigned char sats;         /* 0..15 */
     unsigned char flags;        /* bit0=south bit1=west bit2=valid */
-} blindfix_t;                   /* 16 bytes */
+    unsigned char ds;           /* deciseconds 0..9 — needed for a lossless 0xF1 replay */
+    unsigned short spd_dkn;     /* 0.1 knots  \ carried so a batched replay is not poorer */
+    unsigned short hdg_deg;     /* degrees    / than the live batch it replaces */
+} blindfix_t;                   /* 22 bytes */
 static blindfix_t g_blind[BLIND_CAP];
 static int g_blind_head;         /* next write slot */
 static int g_blind_count;        /* buffered fixes (<= BLIND_CAP; oldest dropped when full) */
@@ -120,16 +123,26 @@ static int g_blind_count;        /* buffered fixes (<= BLIND_CAP; oldest dropped
  * coverage hole), 0 in every non-tracking state. Default on — the server reconciles it at login. */
 static volatile unsigned char g_blind_en = 1;
 
-static void blind_push(u32 lat, u32 lon, const unsigned char *dt,
-                       int south, int west, int valid, int sats)
+static void blind_push_full(u32 lat, u32 lon, const unsigned char *dt,
+                            int south, int west, int valid, int sats,
+                            unsigned ds, unsigned spd_dkn, unsigned hdg_deg)
 {
     blindfix_t *f = &g_blind[g_blind_head];
     f->lat = lat; f->lon = lon;
     for (int i = 0; i < 6; i++) f->dt[i] = dt[i];
     f->sats  = (unsigned char)(sats & 0x0F);
     f->flags = (unsigned char)((south ? 1 : 0) | (west ? 2 : 0) | (valid ? 4 : 0));
+    f->ds = (unsigned char)(ds <= 9 ? ds : 0);
+    f->spd_dkn = (unsigned short)(spd_dkn > 65535u ? 65535u : spd_dkn);
+    f->hdg_deg = (unsigned short)(hdg_deg > 359u ? 0u : hdg_deg);
     g_blind_head = (g_blind_head + 1) % BLIND_CAP;
     if (g_blind_count < BLIND_CAP) g_blind_count++;   /* full => the just-overwritten slot was the oldest */
+}
+/* Legacy call shape (no speed/heading/sub-second available at the call site). */
+static void blind_push(u32 lat, u32 lon, const unsigned char *dt,
+                       int south, int west, int valid, int sats)
+{
+    blind_push_full(lat, lon, dt, south, west, valid, sats, 0, 0, 0);
 }
 static int blind_peek(blindfix_t *out)                /* copy oldest (FIFO) without removing; 0 if empty */
 {
@@ -138,7 +151,15 @@ static int blind_peek(blindfix_t *out)                /* copy oldest (FIFO) with
     *out = g_blind[tail];
     return 1;
 }
+static int blind_peek_at(int i, blindfix_t *out)       /* i-th oldest (0 = oldest); 0 if out of range */
+{
+    if (i < 0 || i >= g_blind_count) return 0;
+    int tail = (g_blind_head - g_blind_count + BLIND_CAP) % BLIND_CAP;
+    *out = g_blind[(tail + i) % BLIND_CAP];
+    return 1;
+}
 static void blind_drop(void) { if (g_blind_count > 0) g_blind_count--; }  /* remove oldest after a good send */
+static void blind_drop_n(int n) { while (n-- > 0) blind_drop(); }
 
 static int gt06_frame(unsigned char proto, const unsigned char *data, int dlen,
                       unsigned short serial, unsigned char *out)
@@ -338,6 +359,13 @@ static void vhexbuf(const char *label, const unsigned char *p, int n)
     b[i++] = '\r'; b[i++] = '\n';
     vcom_raw(b, i);
 }
+
+/* Replay the backlog as BATCHED frames when batching is on. This is the whole point of the message for
+ * catch-up: the legacy path sends one 0x12 per fix, BLIND_REPLAY_HZ per RMC (5 fixes/s), so a full
+ * 300-fix buffer takes a minute to drain. Packing LOC_BATCH_MAX fixes per 0xF1 frame moves the same
+ * backlog in BLIND_REPLAY_HZ * LOC_BATCH_MAX fixes per second — a full buffer drains in ~6 s.
+ * Declared here; defined after the batch serialiser it depends on. */
+static int blind_replay_batched(int fd, send_fn se, unsigned short *serial);
 
 /* Replay up to BLIND_REPLAY_HZ buffered fixes (each LOC carries its ORIGINAL datetime so the track
  * back-fills to real time). Called once per ~1 s tick — N sends per tick == N Hz to the server.
@@ -625,6 +653,10 @@ static int g_batch_n;
 /* Flush pacing lives at file scope so SZCS#LOCBATCH can re-phase the window; as a loop local it could
  * only be reset on a tracking change, so the first window after a rate change inherited the old phase. */
 static unsigned g_last_batch;
+/* Set by SZCS#LOCBATCH; the loop applies it with its OWN `now`. Reading the clock in the command
+ * handler could land one tick ahead of the loop's snapshot, making the unsigned `now - g_last_batch`
+ * wrap and fire the gate immediately. */
+static volatile unsigned char g_batch_rephase;
 static unsigned char g_batch_pay[12 + 14 * LOC_BATCH_MAX];
 static unsigned char g_batch_frame[10 + 12 + 14 * LOC_BATCH_MAX];
 
@@ -675,10 +707,15 @@ static void batch_push(const rmc_t *rc)
     batchfix_t nb;
     batch_fill(&nb, rc);
 
-    if (g_batch_n >= LOC_BATCH_MAX) {                  /* full before the flush ran (bunched NMEA):
-                                                        * buffer the fix rather than dropping it */
-        if (g_blind_en)
-            blind_push(nb.lat_raw, nb.lon_raw, nb.dt, nb.south, nb.west, 1, g_numsats);
+    if (g_batch_n >= LOC_BATCH_MAX) {
+        /* Full before the flush ran (bunched NMEA). Push the OLDER batch out to the blind buffer and
+         * keep the new fix as the start of the next one. Buffering the new fix instead would invert
+         * the order — blind replay runs in this same pass and would transmit the newest fix ahead of
+         * the ten older ones still sitting in the batch — and it would drop the fix outright when the
+         * blind buffer is disabled. */
+        batch_spill_to_blind();
+        g_batch[0] = nb;
+        g_batch_n = 1;
         return;
     }
     if (g_batch_n > 0) {
@@ -692,8 +729,13 @@ static void batch_push(const rmc_t *rc)
             return;
         }
         /* Keep the batch monotonic: the server publishes the LAST element, so an out-of-order line
-         * would rewind the live position. Comparing only against the base cannot catch this. */
-        if (batch_ds_of(&nb) < batch_ds_of(&g_batch[g_batch_n - 1]))
+         * would rewind the live position. Comparing only against the base cannot catch this.
+         * The comparison must go through batch_delta_ds, NOT a raw seconds-of-day `<`: at midnight
+         * 00:00:00 is numerically less than 23:59:59, so a raw compare rejected every post-midnight
+         * fix until the batch flushed. A clamped (zero) delta for a fix that is not simply the same
+         * instant is the real "went backwards" signal. */
+        unsigned prev = batch_ds_of(&g_batch[g_batch_n - 1]), tnew = batch_ds_of(&nb);
+        if (tnew != prev && batch_delta_ds(prev, tnew) == 0)
             return;
     }
     g_batch[g_batch_n++] = nb;
@@ -707,8 +749,9 @@ static void batch_spill_to_blind(void)
 {
     if (g_blind_en)
         for (int i = 0; i < g_batch_n; i++)
-            blind_push(g_batch[i].lat_raw, g_batch[i].lon_raw, g_batch[i].dt,
-                       g_batch[i].south, g_batch[i].west, 1, g_numsats);
+            blind_push_full(g_batch[i].lat_raw, g_batch[i].lon_raw, g_batch[i].dt,
+                            g_batch[i].south, g_batch[i].west, 1, g_numsats,
+                            g_batch[i].ds, g_batch[i].spd_dkn, g_batch[i].hdg_deg);
     g_batch_n = 0;
 }
 
@@ -747,6 +790,60 @@ static int build_batch_data(unsigned char *d)
         d[o++] = (unsigned char)(b->hdg_deg >> 8); d[o++] = (unsigned char)b->hdg_deg;
     }
     return o;
+}
+
+/* Serialise `n` blind-buffer entries starting at the oldest into a 0xF1 payload. Mirrors
+ * build_batch_data(), but reads the blind ring instead of the live batch. Returns the payload length,
+ * or 0 if nothing could be packed. */
+static int build_batch_from_blind(unsigned char *d, int n)
+{
+    blindfix_t f0;
+    if (n <= 0 || !blind_peek_at(0, &f0)) return 0;
+    if (n > LOC_BATCH_MAX) n = LOC_BATCH_MAX;
+    d[0] = 1;
+    d[1] = (unsigned char)n;
+    d[2] = g_numsats8;
+    d[3] = g_fixtype;
+    d[4] = g_hdop_x10;
+    for (int i = 0; i < 6; i++) d[5 + i] = f0.dt[i];
+    d[11] = f0.ds;
+    unsigned base = ((unsigned)f0.dt[3] * 3600u + (unsigned)f0.dt[4] * 60u + (unsigned)f0.dt[5]) * 10u + f0.ds;
+    int o = 12;
+    for (int i = 0; i < n; i++) {
+        blindfix_t f;
+        if (!blind_peek_at(i, &f)) { d[1] = (unsigned char)i; break; }
+        unsigned t = ((unsigned)f.dt[3] * 3600u + (unsigned)f.dt[4] * 60u + (unsigned)f.dt[5]) * 10u + f.ds;
+        unsigned dt_ds = batch_delta_ds(base, t);
+        if (dt_ds > BATCH_MAX_SPAN_DS) { d[1] = (unsigned char)i; break; }   /* older span than one frame
+                                                                             * can express: stop short */
+        d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
+        u32 la = (u32)raw_to_e7(f.lat, f.flags & 1), lo = (u32)raw_to_e7(f.lon, f.flags & 2);
+        d[o++] = (unsigned char)(la >> 24); d[o++] = (unsigned char)(la >> 16);
+        d[o++] = (unsigned char)(la >> 8);  d[o++] = (unsigned char)la;
+        d[o++] = (unsigned char)(lo >> 24); d[o++] = (unsigned char)(lo >> 16);
+        d[o++] = (unsigned char)(lo >> 8);  d[o++] = (unsigned char)lo;
+        d[o++] = (unsigned char)(f.spd_dkn >> 8); d[o++] = (unsigned char)f.spd_dkn;
+        d[o++] = (unsigned char)(f.hdg_deg >> 8); d[o++] = (unsigned char)f.hdg_deg;
+    }
+    return d[1] ? o : 0;
+}
+
+/* Note: replay frames carry up to LOC_BATCH_MAX fixes regardless of the configured LOCBATCH. LOCBATCH
+ * sets the LIVE window (how long the device waits before shipping), which has no bearing on how densely
+ * an already-recorded backlog should be packed — packing it full is exactly what makes catch-up fast. */
+static int blind_replay_batched(int fd, send_fn se, unsigned short *serial)
+{
+    for (int rep = 0; rep < BLIND_REPLAY_HZ && g_blind_count > 0; rep++) {
+        int want = g_blind_count < LOC_BATCH_MAX ? g_blind_count : LOC_BATCH_MAX;
+        int blen = build_batch_from_blind(g_batch_pay, want);
+        if (blen <= 0) break;
+        int sent_n = g_batch_pay[1];
+        int flen = gt06_frame(0xF1, g_batch_pay, blen, (*serial)++, g_batch_frame);
+        if (se(fd, g_batch_frame, flen, 0) != flen) return 0;   /* fixes stay buffered */
+        blind_drop_n(sent_n);
+    }
+    vhex("BLIND:remaining", (unsigned)g_blind_count);
+    return 1;
 }
 
 /* ---- item 1: idle/tracking state, driven by the server TIMER command ----
@@ -1601,7 +1698,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         if (v > LOC_BATCH_MAX) return put_str(out, "SET ERROR: LOCBATCH");
         g_loc_batch = (unsigned char)v;
         if (g_batch_n > 0) batch_spill_to_blind();   /* a rate change must not silently drop fixes */
-        g_last_batch = wd_uptime();                  /* re-phase: don't inherit the old window */
+        g_batch_rephase = 1;                         /* re-phase: don't inherit the old window */
         int n = put_str(out, "SETOK:LOCBATCH=");
         n += put_uint(out + n, g_loc_batch);
         return n;
@@ -2858,6 +2955,7 @@ void standalone_main(u32 loader_resolver)
          * Fewer than a full batch is fine (send what we have); ZERO fixes sends nothing at all, which is
          * exactly the existing no-fix behaviour. Cleared unconditionally so a stale partial batch can
          * never be emitted with the wrong base time after an outage. */
+        if (g_batch_rephase) { g_last_batch = now; g_batch_rephase = 0; }
         if (g_loc_batch && track && (now - g_last_batch) >= (unsigned)g_loc_batch) {
             g_last_batch = now;
             if (g_batch_n > 0) {
@@ -2999,7 +3097,8 @@ void standalone_main(u32 loader_resolver)
                                  * order. */
                                 if (g_batch_n > 0) batch_spill_to_blind();
                                 if (g_blind_en)
-                                    blind_push(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1, g_numsats);
+                                    blind_push_full(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1,
+                                                    g_numsats, rc.ds, rc.spd_dkn, rc.hdg_deg);
                             }
                         }
                         /* one fix per T1-second period (GPS runs 1 Hz; T1>1 downsamples) */
@@ -3022,7 +3121,9 @@ void standalone_main(u32 loader_resolver)
                         /* Catch-up: once (re)connected, replay buffered fixes at BLIND_REPLAY_HZ. This runs
                          * once per ~1 Hz RMC, so N sends per RMC == N Hz. Each replayed LOC carries its OWN
                          * datetime (back-fills to real time, no bunching at reconnect). */
-                        if (connected && g_blind_count > 0 && !blind_replay(fd, se, &serial))
+                        if (connected && g_blind_count > 0
+                            && !(g_loc_batch ? blind_replay_batched(fd, se, &serial)
+                                             : blind_replay(fd, se, &serial)))
                             connected = 0;                  /* send failed -> fixes stay buffered */
                     }
                 }

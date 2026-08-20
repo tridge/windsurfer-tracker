@@ -340,6 +340,10 @@ static int g_gps_poweroff_skip;                   /* SITL_GNSS_POWEROFF_SKIP: le
  * way to exercise the largest frame (and the batch-full path) — at 1 Hz phase alignment leaves it one
  * short. Real hardware is 1 Hz; this exists for tests. */
 static unsigned g_nmea_period_us = 1000 * 1000;
+/* SITL_NMEA_TIME_OFFSET_S: shift the UTC stamp the injector puts in GGA/RMC. Lets a test place the fix
+ * stream just before midnight so a batch straddles 23:59:59 -> 00:00:00, which is otherwise only
+ * reachable once a day. */
+static long g_nmea_time_offset_s;
 static int sitl_gnss_power(int on)
 {
     if (on && g_gps_power_failures > 0) {
@@ -383,7 +387,8 @@ static void *nmea_thread(void *arg)
         /* real UTC time/date so the LOC datetime (used for blind-buffer replay) is genuine wall-clock —
          * a backfilled fix then lands at its true past time, not the reconnect instant. */
         struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
-        struct tm tmv; gmtime_r(&ts.tv_sec, &tmv);
+        time_t stamp = ts.tv_sec + g_nmea_time_offset_s;
+        struct tm tmv; gmtime_r(&stamp, &tmv);
         int hh = tmv.tm_hour, mm = tmv.tm_min, ss = tmv.tm_sec;
         int dd = tmv.tm_mday, mo = tmv.tm_mon + 1, yy = (tmv.tm_year + 1900) % 100;
         /* Deciseconds: real receivers stamp a sub-second fraction. Rotate it deterministically rather
@@ -855,7 +860,8 @@ static void usage(const char *prog)
         "Test injection: SITL_GNSS_POWER_FAILS=N fails the first N GNSS power-on calls,\n"
         "                SITL_GNSS_POWEROFF_FAILS=N power-off calls, after\n"
         "                SITL_GNSS_POWEROFF_SKIP=N of them have been allowed to succeed.\n"
-        "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1).\n"
+        "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1),\n"
+        "                SITL_NMEA_TIME_OFFSET_S=N shifts the stamped UTC (midnight tests).\n"
         "Signals: SIGUSR1 toggles coverage loss (connect/send fail fast);\n"
         "         SIGUSR2 toggles radio-off (sends fail, connects hang pending — blackhole);\n"
         "         SIGHUP  toggles carrier denial (camped PLMN rejects the SIM; item-16 ladder);\n"
@@ -880,6 +886,7 @@ int main(int argc, char **argv)
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_SKIP"))) g_gps_poweroff_skip = atoi(e);
+    if ((e = getenv("SITL_NMEA_TIME_OFFSET_S"))) g_nmea_time_offset_s = atol(e);
     if ((e = getenv("SITL_NMEA_HZ"))) {
         int hz = atoi(e);
         if (hz > 0 && hz <= 20) g_nmea_period_us = (unsigned)(1000000 / hz);
