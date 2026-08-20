@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 from protocol_GT06 import (  # noqa: E402
     gt06_parse_batch, GT06_HDOP_TO_METRES, GT06_HACC_SATURATED_M,
+    GT06_BATCH_MAX_SPAN_S,
 )
 
 
@@ -98,3 +99,29 @@ def test_saturated_hdop_maps_to_an_unambiguously_bad_accuracy():
 def test_unknown_hdop_reports_no_accuracy():
     b = gt06_parse_batch(_hdr(count=1, hdop_x10=0) + _elem())
     assert b["hdop"] is None and b["horizontal_accuracy"] is None
+
+
+def test_absurd_delta_is_rejected_not_trusted():
+    """dt_ds is 16 bits, so a bad frame can claim +6553.5s. The firmware caps a batch at 120s; the
+    parser must enforce that invariant rather than publishing a timestamp in the future, which would
+    suppress genuine updates until wall time caught up."""
+    good = _elem(0)
+    absurd = _elem(65535)
+    b = gt06_parse_batch(_hdr(count=2) + good + absurd)
+    assert b is not None and len(b["fixes"]) == 1, "absurd delta was accepted"
+    assert b["fixes"][0]["ts"] < time.time() + GT06_BATCH_MAX_SPAN_S + 5
+
+
+def test_future_timestamp_cannot_be_synthesised_from_a_bogus_base():
+    """Invalid base falls back to receipt time; an unchecked delta on top of that still produced a
+    future timestamp before the span bound was added."""
+    b = gt06_parse_batch(_hdr(count=1, dt=(26, 99, 20, 1, 2, 3)) + _elem(65535))
+    assert b is None or b["fixes"][0]["ts"] <= time.time() + GT06_BATCH_MAX_SPAN_S + 5
+
+
+def test_out_of_order_elements_are_sorted():
+    """The dispatch publishes fixes[-1]; an out-of-order batch must not rewind the live position."""
+    b = gt06_parse_batch(_hdr(count=3) + _elem(0) + _elem(50) + _elem(40))
+    assert b is not None
+    tss = [f["ts"] for f in b["fixes"]]
+    assert tss == sorted(tss), f"parser left the batch out of order: {tss}"

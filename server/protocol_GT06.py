@@ -471,6 +471,11 @@ GT06_BATCH_PROTO = 0xF1
 GT06_BATCH_HDR = 12
 GT06_BATCH_ELEM = 14
 GT06_BATCH_MAX_FIXES = 64          # sanity bound; the firmware caps itself far lower
+# The firmware caps a batch's span at 120 s, but the wire field is 16 bits, so an invalid or hostile
+# frame could claim +6553.5 s. Enforce the protocol invariant here rather than trusting the peer: a
+# timestamp in the future poisons the tracker's newest-first bookkeeping and suppresses real updates
+# until wall time catches up. Generous enough to absorb any legitimate batch.
+GT06_BATCH_MAX_SPAN_S = 300.0
 
 
 def gt06_parse_batch(data):
@@ -513,6 +518,8 @@ def gt06_parse_batch(data):
         lon = lon_e7 / 1e7
         if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
             continue                      # drop a corrupt element rather than the whole batch
+        if dt_ds / 10.0 > GT06_BATCH_MAX_SPAN_S:
+            continue                      # element claims to be far past the batch it arrived in
         fixes.append({
             "ts": base_ts + dt_ds / 10.0,
             "lat": lat,
@@ -522,6 +529,9 @@ def gt06_parse_batch(data):
         })
     if not fixes:
         return None
+    # The caller publishes the LAST fix, so order matters and the peer's order is not to be trusted:
+    # an out-of-order element would rewind the live position.
+    fixes.sort(key=lambda f: f["ts"])
 
     if not hdop_x10:
         hdop = None

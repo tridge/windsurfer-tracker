@@ -14,6 +14,7 @@ Checks the wire contract the server depends on:
 import os
 import socket
 import struct
+import signal
 import subprocess
 import time
 
@@ -50,6 +51,16 @@ def frames(buf):
         i = end
 
 
+def loc_sod(payload):
+    """Seconds-of-day from a legacy 0x12 LOC payload (yy mo dd hh mi ss ...)."""
+    if len(payload) < 6:
+        return None
+    _, _, _, hh, mi, ss = payload[0:6]
+    if hh > 23 or mi > 59 or ss > 60:
+        return None
+    return hh * 3600 + mi * 60 + ss
+
+
 def parse_batch(payload):
     """Decode a 0xF1 payload into (header dict, [element dicts])."""
     assert len(payload) >= 12, f"batch payload too short: {len(payload)}"
@@ -68,8 +79,12 @@ def parse_batch(payload):
              "base_dt": base_dt, "base_ds": base_ds}, elems)
 
 
-def drain(conn, seconds):
-    """Collect everything the device sends for a fixed period."""
+def drain(conn, seconds, allow_close=False):
+    """Collect everything the device sends for a fixed period.
+
+    allow_close: the device is expected to hang up (e.g. simulated coverage loss), so a closed
+    connection ends the collection instead of failing the test.
+    """
     buf = bytearray()
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -78,7 +93,13 @@ def drain(conn, seconds):
             chunk = conn.recv(4096)
         except socket.timeout:
             continue
+        except OSError:
+            if allow_close:
+                break
+            raise
         if not chunk:
+            if allow_close:
+                break
             raise AssertionError("SITL closed its GT06 connection")
         buf += chunk
     return buf
@@ -205,6 +226,103 @@ def main():
     print("batched LOC (0xF1) PASS")
 
 
+def test_full_batch_serialises_the_maximum_frame():
+    """Actually build a 10-element frame — the largest payload the format allows (152 B).
+
+    At 1 Hz phase alignment leaves a 10 s window one fix short, so the maximum element is never
+    serialised and a sanitizer cannot see an overrun confined to it. Run GNSS faster so the window
+    genuinely fills, which also exercises the batch-full path.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    env = dict(os.environ)
+    env["SITL_NMEA_HZ"] = "5"                    # 5 fixes/s: a 5 s window overfills a 10-fix batch
+    proc = subprocess.Popen(
+        [SITL, "--server", f"127.0.0.1:{port}", "--teriid", "888800000000128", "--no-reexec"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+    conn = None
+    try:
+        listener.settimeout(8)
+        conn, _ = listener.accept()
+        drain(conn, 2)
+        conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        drain(conn, 2)
+        conn.sendall(gt06_cmd("SZCS#LOCBATCH=10", 2))
+        got = drain(conn, 26)
+        assert b"SETOK:LOCBATCH=10" in got, got[-200:]
+        batches = [parse_batch(pl) for p, pl in frames(got) if p == BATCH_PROTO]
+        counts = [h["count"] for h, _ in batches]
+        assert 10 in counts, f"never serialised a full 10-element frame: {counts}"
+        assert max(counts) <= 10, f"batch exceeded the maximum: {counts}"
+        # every element of the largest frame must still decode sanely
+        full = [(h, e) for h, e in batches if h["count"] == 10][0]
+        assert [x["dt_ds"] for x in full[1]] == sorted(x["dt_ds"] for x in full[1])
+    finally:
+        if conn is not None:
+            conn.close()
+        listener.close()
+        finish_sitl(proc)
+
+    print("maximum 10-element frame PASS")
+
+
+def test_batch_survives_a_link_drop():
+    """A pending batch must not be lost when the link goes down.
+
+    SIGUSR1 makes the simulated modem lose coverage; fixes captured before that are still in the
+    in-memory batch and would be discarded without the blind-buffer spill. After coverage returns the
+    device reconnects and replays them as legacy 0x12 frames.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    proc = subprocess.Popen(
+        [SITL, "--server", f"127.0.0.1:{port}", "--teriid", "888800000000129", "--no-reexec"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ))
+
+    conn = None
+    try:
+        listener.settimeout(8)
+        conn, _ = listener.accept()
+        drain(conn, 2)
+        conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        drain(conn, 3)                            # accumulate a partial batch
+
+        drop_sod = time.gmtime().tm_hour * 3600 + time.gmtime().tm_min * 60 + time.gmtime().tm_sec
+        proc.send_signal(signal.SIGUSR1)          # coverage DOWN mid-window
+        drain(conn, 3, allow_close=True)          # the device hangs up when coverage goes
+        conn.close()
+        conn = None
+
+        proc.send_signal(signal.SIGUSR1)          # coverage back UP
+        listener.settimeout(30)
+        conn, _ = listener.accept()               # device reconnects
+        got = drain(conn, 20)
+        replays = [loc_sod(pl) for p, pl in frames(got) if p == LOC_PROTO]
+        replays = [r for r in replays if r is not None]
+        assert replays, "nothing replayed after reconnect"
+        # Fixes captured AFTER the drop reach the blind buffer on their own, so their presence proves
+        # nothing. The batch spill is what preserves fixes stamped BEFORE coverage went away.
+        assert min(replays) < drop_sod, (
+            f"no pre-drop fix replayed (earliest {min(replays)} vs drop {drop_sod}) — "
+            "the in-memory batch was discarded rather than spilled")
+    finally:
+        if conn is not None:
+            conn.close()
+        listener.close()
+        finish_sitl(proc)
+
+    print("batch survives a link drop PASS")
+
+
 def test_tracking_without_fixes_sends_nothing():
     """A tracking window that produced NO fixes must send no batch frame at all.
 
@@ -247,3 +365,5 @@ def test_tracking_without_fixes_sends_nothing():
 if __name__ == "__main__":
     main()
     test_tracking_without_fixes_sends_nothing()
+    test_full_batch_serialises_the_maximum_frame()
+    test_batch_survives_a_link_drop()

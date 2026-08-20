@@ -336,6 +336,10 @@ static volatile int g_gps_on;
 static int g_gps_power_failures;                  /* SITL_GNSS_POWER_FAILS: fail the first N power-on calls */
 static int g_gps_poweroff_failures;               /* SITL_GNSS_POWEROFF_FAILS: fail N power-off calls */
 static int g_gps_poweroff_skip;                   /* SITL_GNSS_POWEROFF_SKIP: let the first N succeed first */
+/* SITL_NMEA_HZ: fix rate. Above 1 Hz a batch window fills to its configured maximum, which is the only
+ * way to exercise the largest frame (and the batch-full path) — at 1 Hz phase alignment leaves it one
+ * short. Real hardware is 1 Hz; this exists for tests. */
+static unsigned g_nmea_period_us = 1000 * 1000;
 static int sitl_gnss_power(int on)
 {
     if (on && g_gps_power_failures > 0) {
@@ -368,7 +372,7 @@ static void *nmea_thread(void *arg)
     /* a slowly-moving track near Canberra so tracking produces changing LOCs */
     double lat = -35.33145, lon = 149.13182;
     for (;;) {
-        usleep(1000 * 1000);                     /* 1 Hz, like the real GNSS */
+        usleep(g_nmea_period_us);                /* 1 Hz by default, like the real GNSS */
         if (!g_gps_on) continue;
         lat += 0.00002; lon += 0.00003;
         int lad = (int)(-lat);                   /* south -> magnitude */
@@ -851,6 +855,7 @@ static void usage(const char *prog)
         "Test injection: SITL_GNSS_POWER_FAILS=N fails the first N GNSS power-on calls,\n"
         "                SITL_GNSS_POWEROFF_FAILS=N power-off calls, after\n"
         "                SITL_GNSS_POWEROFF_SKIP=N of them have been allowed to succeed.\n"
+        "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1).\n"
         "Signals: SIGUSR1 toggles coverage loss (connect/send fail fast);\n"
         "         SIGUSR2 toggles radio-off (sends fail, connects hang pending — blackhole);\n"
         "         SIGHUP  toggles carrier denial (camped PLMN rejects the SIM; item-16 ladder);\n"
@@ -875,6 +880,10 @@ int main(int argc, char **argv)
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_SKIP"))) g_gps_poweroff_skip = atoi(e);
+    if ((e = getenv("SITL_NMEA_HZ"))) {
+        int hz = atoi(e);
+        if (hz > 0 && hz <= 20) g_nmea_period_us = (unsigned)(1000000 / hz);
+    }
     if ((e = getenv("SITL_USB_LISTEN"))) g_usb_listen_port = atoi(e);
     const char *fwd_arg = getenv("SITL_FWD");           /* preset FWDSERVER/FWDPORT (seeded after cwprm) */
 

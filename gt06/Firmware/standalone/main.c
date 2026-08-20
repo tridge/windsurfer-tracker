@@ -622,6 +622,9 @@ static batchfix_t g_batch[LOC_BATCH_MAX];
 static int g_batch_n;
 /* Frame scratch. Static, not on the stack: the main loop's own frame buffer is sized for the 18-byte
  * 0x12 LOC, and a batch frame is up to 162 bytes — writing one into that buffer smashed the stack. */
+/* Flush pacing lives at file scope so SZCS#LOCBATCH can re-phase the window; as a loop local it could
+ * only be reset on a tracking change, so the first window after a rate change inherited the old phase. */
+static unsigned g_last_batch;
 static unsigned char g_batch_pay[12 + 14 * LOC_BATCH_MAX];
 static unsigned char g_batch_frame[10 + 12 + 14 * LOC_BATCH_MAX];
 
@@ -640,6 +643,20 @@ static int raw_to_e7(u32 raw, int neg)
 
 static unsigned batch_ds_of(const batchfix_t *b);
 
+/* Forward delta from `base` to `t` in deciseconds, both seconds-of-day*10.
+ *
+ * ONE rule, shared by the span check and the serialiser — they previously disagreed: batch_push
+ * treated every backward step as a midnight wrap (so a 0.1 s regression looked like +24 h and blew the
+ * batch away), while the serialiser clamped small regressions. Only a jump of more than 12 h backwards
+ * is a real midnight crossing; anything smaller is jitter or an out-of-order line and clamps to 0. */
+#define BATCH_WRAP_DS 432000u                   /* 12 h */
+static unsigned batch_delta_ds(unsigned base, unsigned t)
+{
+    if (t >= base) return t - base;
+    if ((base - t) > BATCH_WRAP_DS) return t + 864000u - base;
+    return 0;
+}
+
 static void batch_fill(batchfix_t *b, const rmc_t *rc)
 {
     for (int i = 0; i < 6; i++) b->dt[i] = rc->dt[i];
@@ -651,19 +668,33 @@ static void batch_fill(batchfix_t *b, const rmc_t *rc)
     b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
 }
 
+static void batch_spill_to_blind(void);
+
 static void batch_push(const rmc_t *rc)
 {
-    if (g_batch_n >= LOC_BATCH_MAX) return;            /* full: drop (flush is due within the second) */
     batchfix_t nb;
     batch_fill(&nb, rc);
+
+    if (g_batch_n >= LOC_BATCH_MAX) {                  /* full before the flush ran (bunched NMEA):
+                                                        * buffer the fix rather than dropping it */
+        if (g_blind_en)
+            blind_push(nb.lat_raw, nb.lon_raw, nb.dt, nb.south, nb.west, 1, g_numsats);
+        return;
+    }
     if (g_batch_n > 0) {
         unsigned base = batch_ds_of(&g_batch[0]), t = batch_ds_of(&nb);
-        unsigned fwd = (t >= base) ? (t - base) : (t + 864000u - base);
-        if (fwd > BATCH_MAX_SPAN_DS) {                 /* clock step / stale base -> start a new batch */
+        if (batch_delta_ds(base, t) > BATCH_MAX_SPAN_DS) {
+            /* clock step or a stale base: the accumulated fixes can't share this base, so keep them
+             * (blind buffer) rather than discarding, and restart the batch on the new fix. */
+            batch_spill_to_blind();
             g_batch[0] = nb;
             g_batch_n = 1;
             return;
         }
+        /* Keep the batch monotonic: the server publishes the LAST element, so an out-of-order line
+         * would rewind the live position. Comparing only against the base cannot catch this. */
+        if (batch_ds_of(&nb) < batch_ds_of(&g_batch[g_batch_n - 1]))
+            return;
     }
     g_batch[g_batch_n++] = nb;
 }
@@ -704,17 +735,7 @@ static int build_batch_data(unsigned char *d)
     int o = 12;
     for (int i = 0; i < n; i++) {
         const batchfix_t *b = &g_batch[i];
-        unsigned t = batch_ds_of(b);
-        unsigned dt_ds;
-        if (t >= base) {
-            dt_ds = t - base;
-        } else if ((base - t) > 432000u) {              /* > 12 h backwards = a real midnight wrap */
-            dt_ds = t + 864000u - base;
-        } else {
-            dt_ds = 0;                                  /* small backwards step (jitter / out of order):
-                                                         * clamp. Treating it as a wrap would saturate to
-                                                         * 65535 ds and post a fix ~109 min ahead. */
-        }
+        unsigned dt_ds = batch_delta_ds(base, batch_ds_of(b));
         if (dt_ds > BATCH_MAX_SPAN_DS) dt_ds = BATCH_MAX_SPAN_DS;
         d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
         u32 la = (u32)raw_to_e7(b->lat_raw, b->south), lo = (u32)raw_to_e7(b->lon_raw, b->west);
@@ -1580,6 +1601,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         if (v > LOC_BATCH_MAX) return put_str(out, "SET ERROR: LOCBATCH");
         g_loc_batch = (unsigned char)v;
         if (g_batch_n > 0) batch_spill_to_blind();   /* a rate change must not silently drop fixes */
+        g_last_batch = wd_uptime();                  /* re-phase: don't inherit the old window */
         int n = put_str(out, "SETOK:LOCBATCH=");
         n += put_uint(out + n, g_loc_batch);
         return n;
@@ -2663,7 +2685,6 @@ void standalone_main(u32 loader_resolver)
     static char g_line[256]; static int g_llen;    /* NMEA line reassembly across URC chunks */
     static unsigned char acc[768]; static int acclen; /* server->device RX accumulator (>= max frame + one recv) */
     unsigned last_hbt = 0, last_loc = 0, last_csq = 0, last_batt = 0, last_blind = 0, last_sos = 0;
-    unsigned last_batch = 0;                       /* 0xF1 batch flush pacing */
     unsigned last_gps_power = 0;
     unsigned conn_start = 0, last_conn = 0u - (unsigned)CONN_RETRY_SEC;  /* first attempt immediately */
 
@@ -2804,7 +2825,7 @@ void standalone_main(u32 loader_resolver)
                          * session it would be flushed with a stale base time, dropping old fixes into
                          * the new session's log and briefly showing an old position. */
                         if (g_batch_n > 0) batch_spill_to_blind();
-                        last_batch = now;
+                        g_last_batch = now;
                         last_gps_power = now;
                         g_llen = 0;
                         last_loc = now;
@@ -2837,8 +2858,8 @@ void standalone_main(u32 loader_resolver)
          * Fewer than a full batch is fine (send what we have); ZERO fixes sends nothing at all, which is
          * exactly the existing no-fix behaviour. Cleared unconditionally so a stale partial batch can
          * never be emitted with the wrong base time after an outage. */
-        if (g_loc_batch && track && (now - last_batch) >= (unsigned)g_loc_batch) {
-            last_batch = now;
+        if (g_loc_batch && track && (now - g_last_batch) >= (unsigned)g_loc_batch) {
+            g_last_batch = now;
             if (g_batch_n > 0) {
                 if (connected) {
                     int blen = build_batch_data(g_batch_pay);
@@ -2968,9 +2989,18 @@ void standalone_main(u32 loader_resolver)
                         /* Batched path (0xF1): collect every valid fix; the flush below ships them as one
                          * frame every g_loc_batch seconds. Out of coverage we still use the blind buffer. */
                         if (g_loc_batch && rc.valid) {
-                            if (connected) batch_push(&rc);
-                            else if (g_blind_en)
-                                blind_push(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1, g_numsats);
+                            if (connected) {
+                                batch_push(&rc);
+                            } else {
+                                /* Link already down. Spill FIRST: several paths (peer close, heartbeat
+                                 * or replay failure) clear `connected` without touching the batch, and
+                                 * the periodic flush may be seconds away. Appending this newer fix to
+                                 * the blind buffer ahead of the older batch would replay them out of
+                                 * order. */
+                                if (g_batch_n > 0) batch_spill_to_blind();
+                                if (g_blind_en)
+                                    blind_push(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1, g_numsats);
+                            }
                         }
                         /* one fix per T1-second period (GPS runs 1 Hz; T1>1 downsamples) */
                         if (!g_loc_batch && rc.valid && (now - last_loc) >= (unsigned)t1) {
