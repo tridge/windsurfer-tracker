@@ -1112,6 +1112,11 @@ static int read_signal(void)     { return sig_map(g_csq); }
 static volatile unsigned char g_urx[128];      /* supervisor RX bytes, filled async by uart_rx_cb */
 static volatile int g_urxlen;
 static volatile unsigned short g_batt_mv;       /* last good supervisor mV (0 = none yet) */
+static volatile unsigned g_batt_mv_rejects;     /* samples outside the plausibility window (diagnostic) */
+/* Upper plausibility bound for the supervisor mV. Charging pushes the measured rail past a resting
+ * cell's 4.2 V, so this has to be generous; 5.5 V still rejects framing garbage (a bad 16-bit read is
+ * almost always far outside 2.6..5.5 V) while accepting any real charge voltage. */
+#define BATT_MV_MAX 5500
 /* SOS button (item 17, SAFETY): 0x82 payload byte 1. g_sos_active latches on press; the main loop sends
  * a burst of 0x16 SOS alarms (survives packet loss + a reconnect) and re-arms on each reconnect. */
 static volatile unsigned char g_sos_active, g_sos_sends, g_sos_prev;
@@ -1175,7 +1180,15 @@ static void batt_mcu_parse(void)
         if (cmd == 0x82 && plen >= 22) {
             const volatile unsigned char *pay = &g_urx[i + 4];
             unsigned mv = (pay[19] << 8) | pay[20];
-            if (mv >= 2600 && mv <= 4500) g_batt_mv = (unsigned short)mv;
+            /* Plausibility window, to reject a mis-framed reply rather than publish garbage. The upper
+             * bound must clear a CHARGING unit: the M0 measures the charge rail, not a resting cell, so
+             * it sits well above 4.2 V on charge. A 4500 ceiling silently rejected EVERY sample on a
+             * unit left charging overnight (G378517, 2026-08-21) — it reported BT:4486 on vendor
+             * firmware and BT:0 on ours the moment it was updated, because the true value had climbed
+             * past the limit. Rejecting a real reading is worse than passing a slightly odd one: the
+             * device then looks flat rather than full. */
+            if (mv >= 2600 && mv <= BATT_MV_MAX) g_batt_mv = (unsigned short)mv;
+            else g_batt_mv_rejects++;
             /* (pay[11..14] is a BE u32 uptime-minutes counter — the earlier "byte 13 = charge flag"
              * read was uptime bits coinciding with a bench power-cycle. Charging now comes from the
              * resident charger_state() sAPI instead; the M0 has no charger/VBUS state at all.) */

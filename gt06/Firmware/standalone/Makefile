@@ -96,10 +96,13 @@ test-loc-batch: sitl-asan            ## exercise the batched LOC message (protoc
 test-fota-image: sitl-asan standalone_fw.bin  ## one image must satisfy vendor AND our own FOTA
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_image.py
 
-test: test-gps-retry test-loc-batch test-fota-image  ## all SITL regression tests
+test-battery-mv: sitl-asan           ## supervisor battery mV, including a unit on charge
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_battery_mv.py
+
+test: test-gps-retry test-loc-batch test-fota-image test-battery-mv  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan
 
-.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test clean
+.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test-battery-mv test clean

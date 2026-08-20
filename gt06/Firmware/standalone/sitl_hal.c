@@ -493,6 +493,10 @@ static int sitl_at_send(const char *cmd, int len)
 }
 
 /* ================= M0 supervisor battery over UART (55 AA / 0x82) ================= */
+/* SITL_BATT_MV: what the M0 mock reports. A unit ON CHARGE reads well above a resting cell — the real
+ * G378517 sat at 4486 mV overnight and its true value climbed past the firmware's old 4500 ceiling,
+ * which rejected every sample and made a full battery report as 0. */
+static unsigned g_batt_mv_sim = 4100;
 static void (*g_uart_cb)(u32, u32, u32);
 static unsigned char g_uart_rx[64];
 static int g_uart_rxlen, g_uart_rxpos;
@@ -515,7 +519,7 @@ static int sitl_uart_write(int port, const void *buf, int len)
     const unsigned char *b = buf;
     /* battery query 55 AA 02 00 02 0D 0A -> reply 55 AA 82 <plen=22> <payload> <sum> 0D 0A, mV @payload[19,20] */
     if (len >= 5 && b[0] == 0x55 && b[1] == 0xAA && b[2] == 0x02) {
-        unsigned mv = 4100;                      /* realistic resting mV */
+        unsigned mv = g_batt_mv_sim;             /* realistic resting mV; SITL_BATT_MV overrides */
         unsigned char r[29];
         memset(r, 0, sizeof r);
         r[0] = 0x55; r[1] = 0xAA; r[2] = 0x82; r[3] = 22;
@@ -861,7 +865,8 @@ static void usage(const char *prog)
         "                SITL_GNSS_POWEROFF_FAILS=N power-off calls, after\n"
         "                SITL_GNSS_POWEROFF_SKIP=N of them have been allowed to succeed.\n"
         "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1),\n"
-        "                SITL_NMEA_TIME_OFFSET_S=N shifts the stamped UTC (midnight tests).\n"
+        "                SITL_NMEA_TIME_OFFSET_S=N shifts the stamped UTC (midnight tests),\n"
+        "                SITL_BATT_MV=N sets the supervisor battery reading.\n"
         "Signals: SIGUSR1 toggles coverage loss (connect/send fail fast);\n"
         "         SIGUSR2 toggles radio-off (sends fail, connects hang pending — blackhole);\n"
         "         SIGHUP  toggles carrier denial (camped PLMN rejects the SIM; item-16 ladder);\n"
@@ -886,6 +891,7 @@ int main(int argc, char **argv)
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_SKIP"))) g_gps_poweroff_skip = atoi(e);
+    if ((e = getenv("SITL_BATT_MV"))) { int v = atoi(e); if (v > 0) g_batt_mv_sim = (unsigned)v; }
     if ((e = getenv("SITL_NMEA_TIME_OFFSET_S"))) g_nmea_time_offset_s = atol(e);
     if ((e = getenv("SITL_NMEA_HZ"))) {
         int hz = atoi(e);
