@@ -397,7 +397,12 @@ static unsigned parse_dec1(const char *s)
     while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s - '0'); s++; seen++; if (v > 100000u) return 0; }
     if (!seen) return 0;
     v *= 10;
-    if (*s == '.' && s[1] >= '0' && s[1] <= '9') v += (unsigned)(s[1] - '0');
+    if (*s == '.') {
+        s++;
+        if (*s >= '0' && *s <= '9') { v += (unsigned)(*s - '0'); s++; }
+        while (*s >= '0' && *s <= '9') s++;          /* remaining decimals are simply truncated */
+    }
+    if (*s) return 0;                                /* trailing garbage => the field is mangled */
     return v;
 }
 
@@ -495,6 +500,17 @@ static int parse_rmc(const char *p, rmc_t *o)
         int tok = 1, dok = 1;
         for (int i = 0; i < 6; i++) { if (tm[i] < '0' || tm[i] > '9') tok = 0; if (dm[i] < '0' || dm[i] > '9') dok = 0; }
         if (tok && dok) {
+            unsigned hh = (unsigned)((tm[0]-'0')*10 + (tm[1]-'0'));
+            unsigned mi = (unsigned)((tm[2]-'0')*10 + (tm[3]-'0'));
+            unsigned sc = (unsigned)((tm[4]-'0')*10 + (tm[5]-'0'));
+            unsigned dd = (unsigned)((dm[0]-'0')*10 + (dm[1]-'0'));
+            unsigned mo = (unsigned)((dm[2]-'0')*10 + (dm[3]-'0'));
+            /* digits alone are not enough: a spliced line can read as hour 99 / month 99, which the
+             * server's timegm() silently normalises into a wildly wrong timestamp. */
+            if (hh > 23 || mi > 59 || sc > 60 || dd < 1 || dd > 31 || mo < 1 || mo > 12)
+                tok = dok = 0;
+        }
+        if (tok && dok) {
             o->dt[3] = (unsigned char)((tm[0]-'0')*10 + (tm[1]-'0'));   /* hh */
             o->dt[4] = (unsigned char)((tm[2]-'0')*10 + (tm[3]-'0'));   /* mi */
             o->dt[5] = (unsigned char)((tm[4]-'0')*10 + (tm[5]-'0'));   /* ss */
@@ -534,15 +550,18 @@ static void parse_gga(const char *p)
         if (*c == ',') c++; else break;
     }
     const char *q = f[6];
-    int v = 0, any = 0;
-    while (*q >= '0' && *q <= '9') { v = v * 10 + (*q - '0'); q++; any = 1; }
+    int v = 0, any = 0, nd = 0;
+    while (*q >= '0' && *q <= '9' && nd < 3) { v = v * 10 + (*q - '0'); q++; any = 1; nd++; }
+    if (*q) any = 0;                                   /* trailing junk => not a satellite count */
     if (any && v > 0) {
         g_numsats = (unsigned char)(v > 15 ? 15 : v);      /* legacy 0x12 low nibble caps at 15 */
         g_numsats8 = (unsigned char)(v > 255 ? 255 : v);   /* 0xF1 carries the real count in 8 bits */
     }
-    {   /* HDOP (field 7) * 10, saturating — the only horizontal-accuracy figure the NMEA stream gives us */
+    {   /* HDOP (field 7) * 10 — the only horizontal-accuracy figure the NMEA stream gives us.
+         * 0 = unknown, 1..254 = HDOP 0.1..25.4, 255 = "worse than 25.4" so the server can map it to a
+         * clearly-bad accuracy instead of a plausible-looking 63 m. */
         unsigned h = parse_dec1(f[7]);
-        g_hdop_x10 = (unsigned char)(h > 255 ? 255 : h);
+        g_hdop_x10 = (unsigned char)(h > 254 ? 255 : h);
     }
 }
 
@@ -561,7 +580,8 @@ static void parse_gsa(const char *p)
     while (*c && *c != ',') c++;                /* -> comma before field 1 */
     if (*c != ',') return;
     c++;
-    if (*c >= '1' && *c <= '3') g_fixtype = (unsigned char)(*c - '0');
+    if (*c >= '1' && *c <= '3' && (c[1] == ',' || c[1] == '*' || c[1] == 0))
+        g_fixtype = (unsigned char)(*c - '0');         /* exactly one digit, else the field is mangled */
 }
 
 /* ---- item: batched LOC (protocol 0xF1) ----------------------------------------------------------
@@ -592,12 +612,24 @@ static unsigned char g_loc_batch = LOC_BATCH_DEFAULT;   /* 0 = off (legacy 0x12)
 typedef struct {
     unsigned char dt[6];        /* datetime of this fix */
     unsigned char ds;           /* deciseconds 0..9 */
-    int lat_e7, lon_e7;         /* signed degrees * 1e7 */
+    u32 lat_raw, lon_raw;       /* rmc-native magnitude (deg*1800000) — kept so an undelivered batch can
+                                 * be handed to the blind buffer, which speaks that format */
+    unsigned char south, west;
     unsigned short spd_dkn;     /* 0.1 knots */
     unsigned short hdg_deg;     /* degrees */
 } batchfix_t;
 static batchfix_t g_batch[LOC_BATCH_MAX];
 static int g_batch_n;
+/* Frame scratch. Static, not on the stack: the main loop's own frame buffer is sized for the 18-byte
+ * 0x12 LOC, and a batch frame is up to 162 bytes — writing one into that buffer smashed the stack. */
+static unsigned char g_batch_pay[12 + 14 * LOC_BATCH_MAX];
+static unsigned char g_batch_frame[10 + 12 + 14 * LOC_BATCH_MAX];
+
+/* A batch spans one flush window (seconds). Anything further from the base than this means the fix
+ * stream jumped (clock step, stale partial batch), so the batch is re-based rather than encoding a
+ * nonsense delta — a saturated delta would place the point ~109 minutes in the future and stall the
+ * server's duplicate suppression until real time caught up. */
+#define BATCH_MAX_SPAN_DS 1200          /* 120 s */
 
 /* deg*1800000 magnitude + hemisphere -> signed deg*1e7. 1800000 raw = 1 deg, so e7 = raw * 100 / 18. */
 static int raw_to_e7(u32 raw, int neg)
@@ -606,16 +638,47 @@ static int raw_to_e7(u32 raw, int neg)
     return neg ? -(int)e7 : (int)e7;
 }
 
+static unsigned batch_ds_of(const batchfix_t *b);
+
+static void batch_fill(batchfix_t *b, const rmc_t *rc)
+{
+    for (int i = 0; i < 6; i++) b->dt[i] = rc->dt[i];
+    b->ds = rc->ds <= 9 ? rc->ds : 0;
+    b->lat_raw = rc->lat_raw; b->lon_raw = rc->lon_raw;
+    b->south = (unsigned char)(rc->south ? 1 : 0);
+    b->west  = (unsigned char)(rc->west ? 1 : 0);
+    b->spd_dkn = (unsigned short)(rc->spd_dkn > 65535u ? 65535u : rc->spd_dkn);
+    b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
+}
+
 static void batch_push(const rmc_t *rc)
 {
     if (g_batch_n >= LOC_BATCH_MAX) return;            /* full: drop (flush is due within the second) */
-    batchfix_t *b = &g_batch[g_batch_n++];
-    for (int i = 0; i < 6; i++) b->dt[i] = rc->dt[i];
-    b->ds = rc->ds <= 9 ? rc->ds : 0;
-    b->lat_e7 = raw_to_e7(rc->lat_raw, rc->south);
-    b->lon_e7 = raw_to_e7(rc->lon_raw, rc->west);
-    b->spd_dkn = (unsigned short)(rc->spd_dkn > 65535u ? 65535u : rc->spd_dkn);
-    b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
+    batchfix_t nb;
+    batch_fill(&nb, rc);
+    if (g_batch_n > 0) {
+        unsigned base = batch_ds_of(&g_batch[0]), t = batch_ds_of(&nb);
+        unsigned fwd = (t >= base) ? (t - base) : (t + 864000u - base);
+        if (fwd > BATCH_MAX_SPAN_DS) {                 /* clock step / stale base -> start a new batch */
+            g_batch[0] = nb;
+            g_batch_n = 1;
+            return;
+        }
+    }
+    g_batch[g_batch_n++] = nb;
+}
+
+/* Hand every pending fix to the blind buffer and clear. Used whenever a batch cannot be delivered
+ * (link down, short send, rate change): the legacy per-fix path buffers a failed fix, so batching must
+ * not be the reason a racer's track gets a hole. Speed/heading are not carried by the blind-buffer
+ * record — a replayed fix goes out as a plain 0x12, exactly as before. */
+static void batch_spill_to_blind(void)
+{
+    if (g_blind_en)
+        for (int i = 0; i < g_batch_n; i++)
+            blind_push(g_batch[i].lat_raw, g_batch[i].lon_raw, g_batch[i].dt,
+                       g_batch[i].south, g_batch[i].west, 1, g_numsats);
+    g_batch_n = 0;
 }
 
 /* seconds-of-day of a batch entry, for the delta against the base entry (the batch spans a few seconds,
@@ -642,10 +705,19 @@ static int build_batch_data(unsigned char *d)
     for (int i = 0; i < n; i++) {
         const batchfix_t *b = &g_batch[i];
         unsigned t = batch_ds_of(b);
-        unsigned dt_ds = (t >= base) ? (t - base) : (t + 864000u - base);   /* midnight wrap */
-        if (dt_ds > 65535u) dt_ds = 65535u;
+        unsigned dt_ds;
+        if (t >= base) {
+            dt_ds = t - base;
+        } else if ((base - t) > 432000u) {              /* > 12 h backwards = a real midnight wrap */
+            dt_ds = t + 864000u - base;
+        } else {
+            dt_ds = 0;                                  /* small backwards step (jitter / out of order):
+                                                         * clamp. Treating it as a wrap would saturate to
+                                                         * 65535 ds and post a fix ~109 min ahead. */
+        }
+        if (dt_ds > BATCH_MAX_SPAN_DS) dt_ds = BATCH_MAX_SPAN_DS;
         d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
-        u32 la = (u32)b->lat_e7, lo = (u32)b->lon_e7;
+        u32 la = (u32)raw_to_e7(b->lat_raw, b->south), lo = (u32)raw_to_e7(b->lon_raw, b->west);
         d[o++] = (unsigned char)(la >> 24); d[o++] = (unsigned char)(la >> 16);
         d[o++] = (unsigned char)(la >> 8);  d[o++] = (unsigned char)la;
         d[o++] = (unsigned char)(lo >> 24); d[o++] = (unsigned char)(lo >> 16);
@@ -1507,7 +1579,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         while (*q >= '0' && *q <= '9' && v <= 999) { v = v * 10 + (unsigned)(*q - '0'); q++; }
         if (v > LOC_BATCH_MAX) return put_str(out, "SET ERROR: LOCBATCH");
         g_loc_batch = (unsigned char)v;
-        g_batch_n = 0;                               /* a rate change invalidates the partial batch */
+        if (g_batch_n > 0) batch_spill_to_blind();   /* a rate change must not silently drop fixes */
         int n = put_str(out, "SETOK:LOCBATCH=");
         n += put_uint(out + n, g_loc_batch);
         return n;
@@ -2728,6 +2800,11 @@ void standalone_main(u32 loader_resolver)
                     handle_rx(fd, se, acc, &acclen, (int)sizeof acc, rx, n, &track, &t1, &t2, &serial, &changed);
                     if (changed) {
                         apply_gps(track);
+                        /* Don't let a partial batch straddle the transition: on the next tracking
+                         * session it would be flushed with a stale base time, dropping old fixes into
+                         * the new session's log and briefly showing an old position. */
+                        if (g_batch_n > 0) batch_spill_to_blind();
+                        last_batch = now;
                         last_gps_power = now;
                         g_llen = 0;
                         last_loc = now;
@@ -2764,14 +2841,19 @@ void standalone_main(u32 loader_resolver)
             last_batch = now;
             if (g_batch_n > 0) {
                 if (connected) {
-                    unsigned char bd[12 + 14 * LOC_BATCH_MAX];
-                    int blen = build_batch_data(bd);
-                    int flen = gt06_frame(0xF1, bd, blen, serial++, loc);
-                    int sret = se(fd, loc, flen, 0);
+                    int blen = build_batch_data(g_batch_pay);
+                    int flen = gt06_frame(0xF1, g_batch_pay, blen, serial++, g_batch_frame);
+                    int sret = se(fd, g_batch_frame, flen, 0);
                     vhex("S3c:batch_send", (unsigned)g_batch_n);
-                    if (sret != flen) connected = 0;   /* partial send corrupts the frame */
+                    if (sret != flen) {                /* partial send corrupts the frame */
+                        connected = 0;
+                        batch_spill_to_blind();        /* keep the fixes for replay */
+                    } else {
+                        g_batch_n = 0;
+                    }
+                } else {
+                    batch_spill_to_blind();            /* link went down before the flush */
                 }
-                g_batch_n = 0;
             }
         }
 

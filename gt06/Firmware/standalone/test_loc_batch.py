@@ -84,6 +84,29 @@ def drain(conn, seconds):
     return buf
 
 
+def finish_sitl(proc):
+    """Stop the SITL process and FAIL if it crashed or a sanitizer complained.
+
+    Without this a firmware crash goes unnoticed: the assertions above run against frames that
+    already arrived, and the process is killed in `finally` regardless. That is exactly how a stack
+    buffer overflow in the batch path passed a green test run.
+    """
+    crashed_early = proc.poll() is not None
+    rc = proc.returncode
+    proc.terminate()
+    try:
+        stdout, stderr = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate(timeout=5)
+    tail = stderr.decode(errors="replace")
+    if b"AddressSanitizer" in stderr or b"runtime error" in stderr:
+        raise AssertionError("sanitizer reported a fault:\n" + tail[-3000:])
+    if crashed_early:
+        raise AssertionError(f"SITL exited early (rc={rc}):\n{tail[-3000:]}")
+    return stdout, stderr
+
+
 def main():
     if not os.path.exists(SITL):
         raise SystemExit("build first: make sitl")
@@ -153,6 +176,19 @@ def main():
         assert all(h["count"] <= 3 for h, _ in batches), \
             f"counts {[h['count'] for h, _ in batches]} exceed the configured 3"
 
+        # ---- the maximum batch: biggest frame we can emit, 12 + 14*10 = 152 B payload ----
+        conn.sendall(gt06_cmd("SZCS#LOCBATCH=10", 4))
+        got = drain(conn, 24)
+        assert b"SETOK:LOCBATCH=10" in got, got[-200:]
+        batches = [parse_batch(pl) for p, pl in frames(got) if p == BATCH_PROTO]
+        assert batches, "no batches at LOCBATCH=10"
+        counts = [h["count"] for h, _ in batches]
+        # A 10 s window at 1 Hz yields 9 or 10 depending on where the first fix falls relative to the
+        # flush, so accept either — what matters is that a near-maximum frame is built and framed
+        # correctly (parse_batch above checks payload == 12 + 14*count) and that the cap holds.
+        assert max(counts) >= 9, f"never reached a near-full batch: {counts}"
+        assert max(counts) <= 10, f"batch exceeded the configured maximum: {counts}"
+
         # ---- 0 disables batching and restores the legacy per-fix 0x12 ----
         conn.sendall(gt06_cmd("SZCS#LOCBATCH=0", 3))
         got = drain(conn, 8)
@@ -164,15 +200,50 @@ def main():
         if conn is not None:
             conn.close()
         listener.close()
-        proc.terminate()
-        try:
-            proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate(timeout=3)
+        finish_sitl(proc)
 
     print("batched LOC (0xF1) PASS")
 
 
+def test_tracking_without_fixes_sends_nothing():
+    """A tracking window that produced NO fixes must send no batch frame at all.
+
+    The main test can only check this while idle, where the flush is disabled outright; here GNSS
+    power-on is failed forever, so the device is genuinely tracking and simply has nothing to report.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    env = dict(os.environ)
+    env["SITL_GNSS_POWER_FAILS"] = "9999"        # GNSS never comes up -> no NMEA -> no fixes
+    proc = subprocess.Popen(
+        [SITL, "--server", f"127.0.0.1:{port}", "--teriid", "888800000000127", "--no-reexec"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+    conn = None
+    try:
+        listener.settimeout(8)
+        conn, _ = listener.accept()
+        drain(conn, 2)
+        conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        got = drain(conn, 14)                     # several 5 s windows
+        assert b"TIMER,1,1# OK" in got, "device did not enter tracking"
+        assert not [p for p, _ in frames(got) if p == BATCH_PROTO], \
+            "batch frame sent for a window with no fixes"
+        assert not [p for p, _ in frames(got) if p == LOC_PROTO], \
+            "legacy LOC sent for a window with no fixes"
+    finally:
+        if conn is not None:
+            conn.close()
+        listener.close()
+        finish_sitl(proc)
+
+    print("tracking with no fixes sends nothing PASS")
+
+
 if __name__ == "__main__":
     main()
+    test_tracking_without_fixes_sends_nothing()

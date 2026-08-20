@@ -362,6 +362,30 @@ class GT06DeviceSim:
         except Exception as e:
             log.error("%s send_loc failed: %s (entity=%r)", self.sailor_id, e, self.entity)
 
+    def _apply_locbatch(self, cmd):
+        """Handle SZCS#LOCBATCH=<n> / CXCS#LOCBATCH the way the firmware does.
+
+        Returns a reply string, or None if this is not a LOCBATCH command.
+        """
+        up = cmd.upper()
+        if up.startswith("CXCS#LOCBATCH"):
+            return f"READOK:LOCBATCH={self.loc_batch}"
+        if not up.startswith("SZCS#LOCBATCH"):
+            return None
+        _, _, val = cmd.partition("=")
+        try:
+            n = int(val.strip().rstrip("#"))
+        except ValueError:
+            return "SET ERROR: LOCBATCH"
+        if n < 0 or n > 10:
+            return "SET ERROR: LOCBATCH"
+        self.loc_batch = n
+        self._batch_fixes = []          # firmware spills these to the blind buffer; the sim just drops
+        now = self.clock.now()
+        self._next_capture_at = now
+        self._next_batch_at = now + n if n else 0.0
+        return f"SETOK:LOCBATCH={n}"
+
     def send_loc_batch(self):
         """Build and send a batched LOC frame (protocol 0xF1).
 
@@ -490,6 +514,11 @@ class GT06DeviceSim:
         Real W07C devices have idiosyncratic response strings; we mirror the
         ones our parser looks for (see protocol_GT06.py:1083-1140).
         """
+        lb = self._apply_locbatch(cmd)
+        if lb is not None:
+            self._reply(lb, server_flag)
+            return
+
         # cxzt# — return the rich device-info line our cxzt# handler parses.
         if cmd == "cxzt#":
             self.cxzt_count += 1
@@ -688,8 +717,12 @@ class GT06DeviceSim:
                 self.capture_fix()
                 self._next_capture_at = now + 1.0
             if self._next_batch_at <= now:
-                self.send_loc_batch()
-                self._next_batch_at = now + self.loc_batch
+                if self._next_batch_at == 0.0:
+                    # first window after connect: arm it rather than flushing a singleton straight away
+                    self._next_batch_at = now + self.loc_batch
+                else:
+                    self.send_loc_batch()
+                    self._next_batch_at = now + self.loc_batch
             return
         if self._next_loc_at <= now:
             self.send_loc()

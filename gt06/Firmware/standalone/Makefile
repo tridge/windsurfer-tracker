@@ -74,11 +74,13 @@ sitl-ubsan: $(SITLSRC) sapi.h        ## SITL under UndefinedBehaviorSanitizer
 
 sitl-all: sitl sitl-asan sitl-ubsan  ## build all SITL variants
 
-SITL_TEST_BIN ?= ./sitl
-test-gps-retry: sitl                 ## exercise truthful GPS STATUS + 10-second power-on retry
+# Tests run against the AddressSanitizer build by default: the batched-LOC work shipped a stack
+# buffer overflow that the plain build ran straight through, and only ASan caught it.
+SITL_TEST_BIN ?= ./sitl-asan
+test-gps-retry: sitl-asan            ## exercise truthful GPS STATUS + 10-second power-on retry
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_retry.py
 
-test-loc-batch: sitl                 ## exercise the batched LOC message (protocol 0xF1)
+test-loc-batch: sitl-asan            ## exercise the batched LOC message (protocol 0xF1)
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_loc_batch.py
 
 test: test-gps-retry test-loc-batch  ## all SITL regression tests

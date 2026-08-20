@@ -453,9 +453,15 @@ def gt06_parse_login(data):
 
 # Horizontal accuracy is not reported by the NMEA stream the tracker parses; the only figure available
 # is HDOP. Convert with a nominal UERE so the value lands in the same `horizontal_accuracy` field the
-# phone apps fill (metres). This is an ESTIMATE, not a receiver-reported accuracy — the raw HDOP is kept
-# alongside it so nothing downstream has to trust the constant.
+# phone apps fill (metres). This is an ESTIMATE, not a receiver-reported accuracy, and 2.5 m/HDOP is
+# receiver- and environment-specific — the raw HDOP is therefore also passed through in the record's
+# flags so a consumer can recompute rather than trust this constant.
 GT06_HDOP_TO_METRES = 2.5
+# The wire byte is HDOP*10, so 255 means "worse than 25.4" rather than exactly 25.5. Map it to a value
+# that is unambiguously bad; otherwise the estimate saturates at ~64 m and can never cross the UI's
+# 100 m BADGPS threshold, which would make a hopeless fix look merely mediocre.
+GT06_HDOP_SATURATED = 255
+GT06_HACC_SATURATED_M = 150.0
 
 # Batched location (protocol 0xF1) — a WSTR firmware extension, not vendor GT06. One frame carries up to
 # LOCBATCH fixes so a 1 Hz track costs one frame (and one jsonl record) every LOCBATCH seconds.
@@ -488,10 +494,16 @@ def gt06_parse_batch(data):
     base_ds = data[11]
     if base_ds > 9:
         base_ds = 0
-    try:
-        base_ts = timegm((2000 + yy, mo, dd, hh, mi, ss)) + base_ds / 10.0
-    except Exception:
+    # timegm() happily normalises hour 99 / month 99 into a wildly wrong date instead of raising, so the
+    # fields have to be range-checked here; a mangled datetime otherwise becomes a plausible timestamp
+    # far from now, which would poison the tracker's newest-timestamp bookkeeping.
+    if not (1 <= mo <= 12 and 1 <= dd <= 31 and hh <= 23 and mi <= 59 and ss <= 60):
         base_ts = time.time()
+    else:
+        try:
+            base_ts = timegm((2000 + yy, mo, dd, hh, mi, ss)) + base_ds / 10.0
+        except Exception:
+            base_ts = time.time()
 
     fixes = []
     for i in range(count):
@@ -511,12 +523,21 @@ def gt06_parse_batch(data):
     if not fixes:
         return None
 
-    hdop = hdop_x10 / 10.0 if hdop_x10 else None
+    if not hdop_x10:
+        hdop = None
+        hacc = None
+    elif hdop_x10 >= GT06_HDOP_SATURATED:
+        hdop = GT06_HDOP_SATURATED / 10.0       # ">= 25.5"; the true value is unknown and worse
+        hacc = GT06_HACC_SATURATED_M
+    else:
+        hdop = hdop_x10 / 10.0
+        hacc = round(hdop * GT06_HDOP_TO_METRES, 1)
     return {
         "satellites": sats,                     # 8 bits here, vs the 4-bit nibble in 0x12
         "fix_type": fix_type,                   # 0 unknown, 1 no fix, 2 = 2D, 3 = 3D
         "hdop": hdop,
-        "horizontal_accuracy": round(hdop * GT06_HDOP_TO_METRES, 1) if hdop else None,
+        "hdop_saturated": hdop_x10 >= GT06_HDOP_SATURATED,
+        "horizontal_accuracy": hacc,
         "fixes": fixes,
     }
 
@@ -2135,6 +2156,9 @@ class GT06Listener:
             # Batched location (WSTR firmware extension). One frame = up to LOCBATCH fixes, logged as a
             # SINGLE jsonl record carrying a `pos` array — the same compaction the phone apps get at 1 Hz,
             # which is what makes the web UI's incremental track load fast.
+            # A frame carrying only ONE fix is logged as an ordinary lat/lon record instead (EventTracker
+            # treats a 1-element array as non-batch). That is deliberate: a plain record is smaller than a
+            # single-element `pos` array, and every reader already handles both shapes.
             batch = gt06_parse_batch(data)
             if not batch:
                 self._log(f"[GT06] Bad batch packet from {gt_conn.sailor_id or gt_conn.addr}")
@@ -2172,6 +2196,14 @@ class GT06Listener:
             if tracker is None or not self._publishes(gt_conn):
                 return
 
+            # Keep the GNSS provenance in the record: `hac` alone is indistinguishable from a
+            # phone-reported accuracy, so the raw HDOP and the fix type ride along in flags.
+            gps_flags = {"fix": batch["fix_type"]}
+            if batch["hdop"] is not None:
+                gps_flags["hdop"] = batch["hdop"]
+                if batch["hdop_saturated"]:
+                    gps_flags["hdop_sat"] = True
+
             # [ts, lat, lon, speed_kn, heading] per fix — readers older than the heading element simply
             # stop at index 3, so this stays backward compatible.
             pos_array = [[round(f["ts"], 1), round(f["lat"], 7), round(f["lon"], 7),
@@ -2189,7 +2221,7 @@ class GT06Listener:
                 signal=gt_conn.signal,
                 role="sailor",
                 version="gt06",
-                flags={},
+                flags=gps_flags,
                 src_ip=gt_conn.addr[0],
                 source="GT06",
                 nsats=batch["satellites"],

@@ -11,6 +11,8 @@ import socket
 import subprocess
 import time
 
+from test_loc_batch import finish_sitl
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITL = os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl")
@@ -89,12 +91,7 @@ def test_power_on_retry():
         if conn is not None:
             conn.close()
         listener.close()
-        proc.terminate()
-        try:
-            stdout, stderr = proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate(timeout=3)
+        stdout, stderr = finish_sitl(proc)
 
     if stdout.count(b"ST: GPS power on FAILED") != 2:
         raise AssertionError(stdout.decode(errors="replace"))
@@ -141,12 +138,7 @@ def test_power_off_retry():
         if conn is not None:
             conn.close()
         listener.close()
-        proc.terminate()
-        try:
-            stdout, stderr = proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate(timeout=3)
+        stdout, stderr = finish_sitl(proc)
 
     if stdout.count(b"ST: GPS power off FAILED") != 2:
         raise AssertionError(stdout.decode(errors="replace"))
@@ -208,12 +200,7 @@ def test_power_off_retry_after_failed_power_on():
         if conn is not None:
             conn.close()
         listener.close()
-        proc.terminate()
-        try:
-            stdout, stderr = proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate(timeout=3)
+        stdout, stderr = finish_sitl(proc)
 
     if stdout.count(b"ST: GPS power off FAILED") != 2:
         raise AssertionError("expected 2 failed power-offs\n" + stdout.decode(errors="replace"))
