@@ -369,10 +369,34 @@ remembering, because that failure looks nothing like a size problem from the out
   Until one has, do not treat it as a guaranteed way back for an inaccessible unit.
 - Our firmware's banner uses a different shape: `MCU:R5` and an extra `CHG:` field.
 
+## ONE image for both consumers (corrected 2026-08-20)
+
+**There is no need for two build forms, and shipping two is how the wrong one gets flashed.**
+
+An earlier note here claimed our own `fota_run` rejects the vendor-padded image because it requires
+`total == clen + 8`. That was WRONG. `fota_run` caps its write/CRC at the wrapper's `clen+8` and
+discards the pad tail — the behaviour has been in the code since the first standalone commit. Proved
+end to end by `test_fota_image.py`, which feeds a real padded image to SITL over HTTP and checks the
+COMMITTED partition:
+
+```
+vendor-form (padded 65536 B) accepted, staged 19476 B PASS
+pad-free (19476 B) accepted, staged 19476 B PASS
+```
+
+So `make fotaimg` now produces exactly one artefact: **padded to 65536 with whole-file XOR `0x80`**,
+which satisfies the vendor's 40960..245760 window and its XOR check, and which our own firmware
+accepts and de-pads. The recipe below applies to both.
+
+⚠ **The YCSJ trailing field means different things to the two firmwares.** The vendor reads it as the
+expected 8-bit XOR and hardcodes port 80; ours reads it as the PORT and lets it override the URL's.
+With `,80#` and a host on port 80 both agree, which is why one command works for both — but a FOTA
+host on any other port can only ever be reached by our own firmware.
+
 ## Recipe — pushing a custom build over YCSJ
 
-1. Build; check the `.bin` size. If **< 40960**, append zero bytes until it is (65536 is a
-   good target). Do NOT repack the raw — pad after the container.
+1. `make fotaimg` — one image, padded to 65536, XOR `0x80`, good for the vendor FOTA and for our
+   own firmware alike. (Manually: append zeros after the container; never repack the raw.)
 2. Confirm the whole file XORs to the value you will put in the command (`0x80` for our
    builds, since the pack step already adds a pad byte for that).
 3. Name it `W07_MG133_WSTR_B53_<git tag>.bin` — our convention, and the `B53` rule

@@ -47,13 +47,23 @@ flashimg: customer_app_standalone.bin   ## build the USB-flashable partition ima
 # Host standalone_fw.bin for either firmware. This pad-free variant is kept for reference/older paths;
 # it also works with fota_run. (0x30000 zero-fill still breaks it — never host customer_app_standalone.bin.
 # Filename must contain "B53" for the vendor FOTA verifier.)
+# ONE image for both consumers. The VENDOR downloader requires 40960..245760 bytes and a whole-file
+# 8-bit XOR matching the YCSJ trailing field (0x80); OUR fota_run caps its write/CRC at the wrapper's
+# clen+8 and discards the pad, so the same padded file satisfies both (proved by test_fota_image.py).
+# Zero padding leaves the XOR untouched, so the pack step's existing pad byte still lands it on 0x80.
+# Do NOT ship a pad-free variant as well: two forms is how the wrong one gets flashed.
 standalone_fota.bin: standalone_fw.bin
-	python3 -c "import struct; \
-d=open('standalone_fw.bin','rb').read(); clen=struct.unpack('<I',d[:4])[0]; body=d[:8+clen]; \
-open('$@','wb').write(body); \
-print('standalone_fota.bin', len(body),'bytes (clen+8, pad-free)')"
+	python3 -c "import functools,operator; \
+d=bytearray(open('standalone_fw.bin','rb').read()); \
+assert len(d) < 65536, 'image already exceeds the pad target'; \
+d += b'\0' * (65536 - len(d)); \
+x=functools.reduce(operator.xor, d, 0); \
+assert x == 0x80, 'padded image XOR is 0x%02X, not 0x80' % x; \
+assert 40960 <= len(d) <= 245760, 'outside the vendor size window'; \
+open('$@','wb').write(bytes(d)); \
+print('standalone_fota.bin', len(d), 'bytes (padded, XOR 0x80 — vendor AND our own fota_run)')"
 
-fotaimg: standalone_fota.bin   ## build the pad-free image to host for YCSJ FOTA
+fotaimg: standalone_fota.bin   ## build the ONE OTA image (vendor + our firmware both accept it)
 
 # ---- SITL: host build of the SAME main.c against sitl_hal.c mocks (talks to a real server) ----
 # Built 64-bit; the one 32-bit-pointer dependency (the URC message word the fw casts to a pointer) is met by
@@ -83,10 +93,13 @@ test-gps-retry: sitl-asan            ## exercise truthful GPS STATUS + 10-second
 test-loc-batch: sitl-asan            ## exercise the batched LOC message (protocol 0xF1)
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_loc_batch.py
 
-test: test-gps-retry test-loc-batch  ## all SITL regression tests
+test-fota-image: sitl-asan standalone_fw.bin  ## one image must satisfy vendor AND our own FOTA
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_image.py
+
+test: test-gps-retry test-loc-batch test-fota-image  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan
 
-.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test clean
+.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test clean
