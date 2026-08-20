@@ -162,9 +162,74 @@ def test_power_off_retry():
     print("GPS power-OFF retry-until-confirmed PASS")
 
 
+def test_power_off_retry_after_failed_power_on():
+    """Regression for the stale-state hole (found in review).
+
+    A failed power-ON leaves the last CONFIRMED state at OFF, so gating the idle retry on
+    g_gps_power_state would see "already off" and never retry a later power-off that really
+    failed. Sequence: boot OFF succeeds -> tracking ON fails -> back to idle -> OFF fails.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    proc = start_sitl(port, {
+        "SITL_GNSS_POWEROFF_SKIP": "1",    # boot power-off succeeds -> confirmed state OFF
+        "SITL_GNSS_POWER_FAILS": "99",     # every power-on fails, so the state stays OFF
+        "SITL_GNSS_POWEROFF_FAILS": "2",   # then the idle power-off fails twice
+    })
+
+    conn = None
+    try:
+        listener.settimeout(8)
+        conn, _ = listener.accept()
+        received = bytearray()
+        receive_until(conn, received, b"\x78\x78", 5)
+
+        # boot power-off succeeded
+        conn.sendall(gt06_cmd("STATUS#", 1))
+        receive_until(conn, received, b"GPS:OFF", 5)
+
+        # track: every power-on fails, so the confirmed state remains OFF
+        conn.sendall(gt06_cmd("TIMER,1,1#", 2))
+        receive_until(conn, received, b"TIMER,1,1# OK", 5)
+        time.sleep(3)
+
+        # back to idle: this power-off fails, and the stale OFF must NOT suppress the retry
+        conn.sendall(gt06_cmd("TIMER,600,1800#", 3))
+        receive_until(conn, received, b"TIMER,600,1800# OK", 5)
+
+        time.sleep(24)
+        conn.sendall(gt06_cmd("STATUS#", 4))
+        receive_until(conn, received, b"GPS:OFF", 5)
+    finally:
+        if conn is not None:
+            conn.close()
+        listener.close()
+        proc.terminate()
+        try:
+            stdout, stderr = proc.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate(timeout=3)
+
+    if stdout.count(b"ST: GPS power off FAILED") != 2:
+        raise AssertionError("expected 2 failed power-offs\n" + stdout.decode(errors="replace"))
+    # boot success + the retried success after the failures
+    if stdout.count(b"ST: GPS off (idle)") != 2:
+        raise AssertionError(
+            "idle retry did not recover the power-off (stale-state hole)\n"
+            + stdout.decode(errors="replace"))
+
+    print("GPS power-OFF retry after a failed power-ON PASS")
+
+
 def main():
     test_power_on_retry()
     test_power_off_retry()
+    test_power_off_retry_after_failed_power_on()
 
 
 if __name__ == "__main__":

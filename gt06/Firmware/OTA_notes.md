@@ -31,8 +31,13 @@ Two traps when judging a run:
 
 ## Constraints
 
-- Vendor app allows **3 FOTA sessions/day**, GMT reset. (No such limit on our standalone
-  firmware — `fota_run` has no counter there.)
+- Vendor app allows **3 FOTA sessions/day**. (No such limit on our standalone firmware —
+  `fota_run` has no counter there.)
+  ⚠ **When the counter resets is CONTESTED and unverified.** `README.md` has long said "GMT
+  reset"; a 2026-08-20 review disassembling V665 reports the counter compares month/day off an
+  **RTC at UTC+8**, so it would roll at **16:00 UTC**, and that it increments when a YCSJ session
+  *starts* rather than when one succeeds. Neither has been confirmed against hardware. Ration
+  attempts on the pessimistic reading until someone checks.
 - The filename must contain `B53` or the device rejects it before downloading.
 - ⚠ The trailing field of `YCSJ,<url>,<n>#` is **NOT a port** — it is only the expected
   8-bit XOR of the whole `.bin`, parsed as **hex** into param `0x14A` (`SetVerify`). The
@@ -282,8 +287,9 @@ The fix, proven end to end from our own infrastructure.
 ```
 
 ~108 ranged requests of ~1 KB. Note this succeeded on a **3.31 V / 2%** cell (it read 3.374 V
-afterwards), so the flash is not especially power-hungry — though that was luck, not a
-recommendation.
+afterwards). That is a single data point that this attempt completed — it does NOT measure OTA
+current or energy (the post-reboot rebound cannot), so do not read it as "flashing is cheap".
+Treat a nearly-empty cell as a real risk; this one was luck.
 
 ### Answering "is the vendor host special?" — NO
 
@@ -356,9 +362,11 @@ remembering, because that failure looks nothing like a size problem from the out
   it must not break the XOR (zeros are the safe choice).
 - **Vendor app -> our standalone firmware over OTA works**, and **settings survive the
   transition**: TERIID (`ID:***380521`), `SERVIP:PORT` and APN all carried across, so the
-  unit came back authenticated without intervention. This is the recovery-relevant fact for
-  units with no USB access: our firmware also implements `YCSJ`, so it can be OTA'd back to
-  the vendor image.
+  unit came back authenticated without intervention.
+- ⚠ **The reverse direction (standalone -> vendor) is NOT proven on hardware.** Our firmware
+  implements `YCSJ` and it has been exercised in SITL, so rollback is plausible and is the
+  intended recovery path for units with no USB access — but no live reverse OTA has been done.
+  Until one has, do not treat it as a guaranteed way back for an inaccessible unit.
 - Our firmware's banner uses a different shape: `MCU:R5` and an extra `CHG:` field.
 
 ## Recipe — pushing a custom build over YCSJ
@@ -411,9 +419,14 @@ it still satisfies the `B53` rule and says what the build actually is.
   the vendor shipping separate `NT19D_...` and `W07_...` builds.
 - **`/W07_FW/` is confirmed working** after removing the Range-stripping directives. Both our
   paths are now proven by a real OTA.
-- **Identity survives vendor -> standalone even when the login id is NOT the IMEI.** This unit's
-  id `000004072407273` was manufactured by the *vendor* firmware from its H02 id (see
-  `SZCS#PTL_SEL`), and everything keys off it: `gt06.json`, its TERIID, the `G407273` label,
-  eid 8. Our firmware came back on the same id and re-authenticated (`auth`, not `legacy_raw`,
-  not a new unregistered device). Test 5 could not show this — that unit's id already matched
-  its IMEI.
+- **Credentials and config survive vendor -> standalone.** The unit came back `auth` (not
+  `legacy_raw`, not a new unregistered device) on eid 8, with `SERVIP:PORT` and APN intact, so
+  the flash does not disturb provisioning.
+  ⚠ **Precisely what survived is the TERIID, not necessarily the raw id.** The server had
+  pushed `SETOK: TERIID=***407273` at 09:14:26, so from then on the device logs in with that
+  **TERIID** — whose HMAC prefix means it CANNOT be `000004072407273`. The logs redact all but
+  the last 6, so they show a valid TERIID ending `407273` surviving and authenticating; they do
+  NOT show the post-provisioning login id still being the raw zero-prefixed id. (Correction
+  from review — the first write-up of this test conflated the two.) The raw converted id still
+  matters for *initial* onboarding, which is what the `gt06_parse_login` leading-zero fix
+  addresses.

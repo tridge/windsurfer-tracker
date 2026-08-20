@@ -539,6 +539,11 @@ static void parse_gga(const char *p)
 #define GPS_POWER_OFF     1
 #define GPS_POWER_ON      2
 static volatile unsigned char g_gps_power_state = GPS_POWER_UNKNOWN;
+/* Whether the MOST RECENT power-off request was acknowledged. g_gps_power_state is not enough to drive the
+ * idle retry: a failed power-ON leaves the last confirmed state at OFF, so (boot OFF ok -> ON fails -> back
+ * to idle -> OFF fails) would look "already off" and never retry, which is the case this flag exists for.
+ * Any power-on request invalidates it, so the retry runs until the resident acknowledges THIS off. */
+static volatile unsigned char g_gps_off_confirmed;
 
 static int apply_gps(int track)
 {
@@ -548,6 +553,7 @@ static int apply_gps(int track)
         return 0;
     }
 
+    g_gps_off_confirmed = 0;                       /* unconfirmed until THIS call returns 0 for an off */
     g_wd_phase = 'G';
     int pwr_ret = pw(track ? 1 : 0);
     g_wd_phase = 0;
@@ -557,6 +563,7 @@ static int apply_gps(int track)
         return 0;
     }
     g_gps_power_state = track ? GPS_POWER_ON : GPS_POWER_OFF;
+    if (!track) g_gps_off_confirmed = 1;
 
     if (track) {
         gnss2_fn cfg = *(gnss2_fn *)SLOT_GNSS_CFG;
@@ -2577,11 +2584,13 @@ void standalone_main(u32 loader_resolver)
          * Idle is retried too, but only until the OFF is confirmed: a failed power-off (including the one
          * at boot) would otherwise leave GNSS drawing current for the whole idle period, since nothing
          * re-runs apply_gps until the next state change. Unlike the tracking case there is no reason to
-         * keep reasserting once the resident has acknowledged OFF. */
+         * keep reasserting once the resident has acknowledged OFF. The gate is g_gps_off_confirmed, NOT
+         * g_gps_power_state: a failed power-on leaves the confirmed state at OFF, which would otherwise
+         * suppress the retry for a later off that genuinely failed. */
         if (track && (now - last_gps_power) >= GPS_RETRY_SEC) {
             apply_gps(1);
             last_gps_power = now;
-        } else if (!track && g_gps_power_state != GPS_POWER_OFF &&
+        } else if (!track && !g_gps_off_confirmed &&
                    (now - last_gps_power) >= GPS_RETRY_SEC) {
             apply_gps(0);
             last_gps_power = now;

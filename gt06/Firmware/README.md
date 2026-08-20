@@ -27,7 +27,7 @@ observable string patch to prove the load path end to end.
   `fwtool.py pack` reproduces this by appending one pad byte. The filename must contain `B53`
   or the device rejects it before downloading. Details in `ota_and_patch_test.md`.
 - `fwtool.py` unpacks, repacks (identical LZMA header + correct XOR pad), and same-length
-  string-patches these images. Daily limit: 3 FOTA sessions/day (GMT reset).
+  string-patches these images. Daily limit: 3 FOTA sessions/day (reset time contested — see OTA_notes.md).
 
 ## Files in this folder
 
