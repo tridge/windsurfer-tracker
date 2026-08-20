@@ -78,8 +78,13 @@ SITL_TEST_BIN ?= ./sitl
 test-gps-retry: sitl                 ## exercise truthful GPS STATUS + 10-second power-on retry
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_retry.py
 
+test-loc-batch: sitl                 ## exercise the batched LOC message (protocol 0xF1)
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_loc_batch.py
+
+test: test-gps-retry test-loc-batch  ## all SITL regression tests
+
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan
 
-.PHONY: all flashimg fotaimg sitl-all test-gps-retry clean
+.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test clean

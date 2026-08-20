@@ -19,6 +19,7 @@ import heapq
 import logging
 import random
 import socket
+import struct
 import threading
 import time
 from datetime import datetime, timezone
@@ -162,7 +163,8 @@ class GT06DeviceSim:
                  loc_interval_override=None, loc_ts_step=None,
                  loc_ts_start_offset=0.0,
                  replay_lag_s=None, replay_drain_freq=None,
-                 replay_drain_step=0.0):
+                 replay_drain_step=0.0,
+                 loc_batch=0, batch_sats=17, batch_fix_type=3, batch_hdop=1.2):
         self.imei = imei
         self.host = host
         self.port = port
@@ -178,6 +180,15 @@ class GT06DeviceSim:
 
         # Device-side state — mirrors what real W07C exposes via cxzt#.
         self.mode = mode
+        # Batched LOC (protocol 0xF1): 0 = legacy per-fix 0x12, else fixes per frame (and the flush
+        # period in seconds, matching the firmware where LOCBATCH is both count and cadence).
+        self.loc_batch = int(loc_batch)
+        self.batch_sats = int(batch_sats)          # >15 on purpose: 0xF1 carries 8 bits
+        self.batch_fix_type = int(batch_fix_type)  # 3 = 3D
+        self.batch_hdop = float(batch_hdop)
+        self._batch_fixes = []
+        self._next_capture_at = 0.0
+        self._next_batch_at = 0.0
         self.freq = freq            # TIMER T1 (ACC-ON upload interval)
         self.freq_off = freq        # TIMER T2 (ACC-OFF / parked upload interval)
         self.hbt_interval = hbt_interval
@@ -350,6 +361,49 @@ class GT06DeviceSim:
             self._send_frame(0x12, data)
         except Exception as e:
             log.error("%s send_loc failed: %s (entity=%r)", self.sailor_id, e, self.entity)
+
+    def send_loc_batch(self):
+        """Build and send a batched LOC frame (protocol 0xF1).
+
+        Mirrors the WSTR firmware: accumulate up to `loc_batch` fixes and ship them as one frame.
+        A window that produced no fixes sends nothing at all (the no-GPS case).
+        """
+        try:
+            fixes = self._batch_fixes
+            self._batch_fixes = []
+            if not fixes:
+                return                      # no fixes this window -> send nothing, as the firmware does
+            base = fixes[0]["ts"]
+            base_dt = datetime.fromtimestamp(base, tz=timezone.utc)
+            base_ds = int(round((base - int(base)) * 10)) % 10
+            data = bytearray()
+            data.append(1)                                  # fmt
+            data.append(len(fixes))
+            data.append(min(255, self.batch_sats))
+            data.append(self.batch_fix_type)
+            data.append(min(255, int(round(self.batch_hdop * 10))))
+            data += bytes([base_dt.year - 2000, base_dt.month, base_dt.day,
+                           base_dt.hour, base_dt.minute, base_dt.second, base_ds])
+            for f in fixes:
+                dt_ds = max(0, min(65535, int(round((f["ts"] - base) * 10))))
+                data += struct.pack(">HiiHH", dt_ds,
+                                    int(round(f["lat"] * 1e7)), int(round(f["lon"] * 1e7)),
+                                    max(0, min(65535, int(round(f["spd"] * 10)))),
+                                    int(f["hdg"]) % 360)
+            self._send_frame(0xF1, bytes(data))
+        except Exception as e:
+            log.error("%s send_loc_batch failed: %s", self.sailor_id, e)
+
+    def capture_fix(self):
+        """Record one GPS fix into the pending batch (called at the 1 Hz capture rate)."""
+        if self.entity is None:
+            lat, lon, spd, hdg = -41.2865, 174.7762, 0.0, 180.0
+        else:
+            lat, lon = float(self.entity.lat), float(self.entity.lon)
+            spd, hdg = float(self.entity.spd), float(self.entity.hdg) % 360
+        if len(self._batch_fixes) < self.loc_batch:
+            self._batch_fixes.append({"ts": self.clock.now(), "lat": lat, "lon": lon,
+                                      "spd": spd, "hdg": hdg})
 
     def send_hbt(self):
         """Build and send a 0x13 heartbeat frame.
@@ -628,6 +682,15 @@ class GT06DeviceSim:
         if self._next_hbt_at <= now:
             self.send_hbt()
             self._next_hbt_at = now + self.hbt_interval
+        if self.loc_batch:
+            # Batched mode replaces the per-fix 0x12 entirely: capture at 1 Hz, flush on the period.
+            if self._next_capture_at <= now:
+                self.capture_fix()
+                self._next_capture_at = now + 1.0
+            if self._next_batch_at <= now:
+                self.send_loc_batch()
+                self._next_batch_at = now + self.loc_batch
+            return
         if self._next_loc_at <= now:
             self.send_loc()
             interval = (self.loc_interval_override
@@ -850,6 +913,15 @@ def _main():
     p.add_argument("--hbt", type=int, default=300, help="heartbeat interval (s)")
     p.add_argument("--duration", type=int, default=120, help="stop after N seconds")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--loc-batch", type=int, default=0, metavar="N",
+                   help="send batched LOC (protocol 0xF1): N fixes per frame, one frame every N s "
+                        "(0 = legacy per-fix 0x12)")
+    p.add_argument("--batch-sats", type=int, default=17,
+                   help="satellite count reported in the batch header (8-bit, so >15 is allowed)")
+    p.add_argument("--batch-fix-type", type=int, default=3, choices=[0, 1, 2, 3],
+                   help="GNSS fix type in the batch header: 0 unknown, 1 none, 2 = 2D, 3 = 3D")
+    p.add_argument("--batch-hdop", type=float, default=1.2,
+                   help="HDOP reported in the batch header (0 = unknown)")
     args = p.parse_args()
 
     logging.basicConfig(
@@ -869,6 +941,8 @@ def _main():
         imei=args.imei, host=args.host, port=args.port,
         firmware=args.firmware, quirks=quirks,
         freq=args.freq, hbt_interval=args.hbt,
+        loc_batch=args.loc_batch, batch_sats=args.batch_sats,
+        batch_fix_type=args.batch_fix_type, batch_hdop=args.batch_hdop,
     )
     sim.start()
     try:

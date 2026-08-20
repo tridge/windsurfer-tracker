@@ -935,7 +935,8 @@
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
         function expandEntry(entry) {
             if (entry.pos && Array.isArray(entry.pos)) {
-                // Compact format: pos array [[ts, lat, lon], ...] or [[ts, lat, lon, spd], ...]
+                // Compact format: pos array [[ts, lat, lon], ...], [[ts, lat, lon, spd], ...] or
+                // [[ts, lat, lon, spd, hdg], ...] (GT06 batched LOC carries per-point heading)
                 // Expand into individual entries, each inheriting all metadata
                 return entry.pos.map(p => BatteryCal.correct({
                     id: entry.id,
@@ -944,7 +945,7 @@
                     lat: p[1],
                     lon: p[2],
                     spd: p.length >= 4 ? p[3] : entry.spd,  // Use per-point speed if available
-                    hdg: entry.hdg,
+                    hdg: p.length >= 5 ? p[4] : entry.hdg,  // per-point heading when the source sends it
                     bat: entry.bat,
                     bat_v: entry.bat_v,
                     sig: entry.sig,

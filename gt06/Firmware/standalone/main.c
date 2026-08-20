@@ -390,8 +390,23 @@ static u32 parse_coord(const char *s)
     return raw;
 }
 
+/* "12.34" -> 123 (i.e. value * 10, one decimal kept). Empty/garbage -> 0. Integer only, no libc float. */
+static unsigned parse_dec1(const char *s)
+{
+    unsigned v = 0; int seen = 0;
+    while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s - '0'); s++; seen++; if (v > 100000u) return 0; }
+    if (!seen) return 0;
+    v *= 10;
+    if (*s == '.' && s[1] >= '0' && s[1] <= '9') v += (unsigned)(s[1] - '0');
+    return v;
+}
+
 typedef struct { int found, valid, south, west; u32 lat_raw, lon_raw;
-                 unsigned char dt[6]; } rmc_t;   /* dt = {yy,mo,dd,hh,mi,ss} for blind-buffer replay (0=none) */
+                 unsigned char dt[6];            /* {yy,mo,dd,hh,mi,ss} for blind-buffer replay (0=none) */
+                 unsigned spd_dkn;               /* speed, 0.1 knots (RMC field 6) */
+                 unsigned hdg_deg;               /* course over ground, whole degrees (RMC field 7) */
+                 unsigned char ds;               /* deciseconds from the RMC time fraction (0..9) */
+               } rmc_t;
 
 /* NMEA "*hh" checksum: XOR of the chars between '$' and '*'. The modem interleaves AT replies (CSQ
  * poll, every ~20 s) INTO the NMEA stream mid-sentence and the swallowed bytes are unrecoverable, so
@@ -464,6 +479,9 @@ static int parse_rmc(const char *p, rmc_t *o)
     }
     o->found = 1;
     o->valid = (f[1][0] == 'A');
+    o->spd_dkn = parse_dec1(f[6]);       /* knots -> 0.1 kn */
+    o->hdg_deg = parse_dec1(f[7]) / 10;  /* degrees (drop the tenth) */
+    o->ds = 0;
     o->lat_raw = parse_coord(f[2]); o->south = (f[3][0] == 'S');
     o->lon_raw = parse_coord(f[4]); o->west  = (f[5][0] == 'W');
     /* belt (splice defense): NMEA coord fields are fixed-format ddmm.mmmm / dddmm.mmmm — a dot
@@ -484,13 +502,19 @@ static int parse_rmc(const char *p, rmc_t *o)
             o->dt[1] = (unsigned char)((dm[2]-'0')*10 + (dm[3]-'0'));   /* mo */
             o->dt[0] = (unsigned char)((dm[4]-'0')*10 + (dm[5]-'0'));   /* yy (2000+) */
         }
+        /* sub-second: "hhmmss.sss" -> first fraction digit = deciseconds (item: 0.1 s batch resolution) */
+        if (tok && tm[6] == '.' && tm[7] >= '0' && tm[7] <= '9')
+            o->ds = (unsigned char)(tm[7] - '0');
     }
     return 1;
 }
 
 /* NMEA GGA sats-in-use: RMC carries no satellite count, so read GGA field 6 (0-based, after "GGA,") and
  * cache the last good value for the LOC frame. GGA and RMC arrive as independent reassembled lines. */
-static unsigned char g_numsats = 8;             /* last good GGA sats-in-use (8 = pre-lock default) */
+static unsigned char g_numsats = 8;             /* last good GGA sats-in-use, capped 15 for the 0x12 nibble */
+static unsigned char g_numsats8 = 8;            /* same value uncapped (0..255) for the 0xF1 batch header */
+static unsigned char g_hdop_x10;                /* GGA HDOP * 10, 0 = unknown */
+static unsigned char g_fixtype;                 /* GSA fix type: 0=unknown 1=no fix 2=2D 3=3D */
 static void parse_gga(const char *p)
 {
     const char *g = 0;
@@ -501,9 +525,9 @@ static void parse_gga(const char *p)
     while (*c && *c != ',') c++;
     if (*c != ',') return;
     c++;                                        /* -> field 0 (time) */
-    char f[7][16] = {{0}};                      /* time,lat,ns,lon,ew,fixqual,numsat (zero-init: short
-                                                 * sentence leaves late fields empty, not stack garbage) */
-    for (int fi = 0; fi < 7; fi++) {
+    char f[8][16] = {{0}};                      /* time,lat,ns,lon,ew,fixqual,numsat,hdop (zero-init: a
+                                                 * short sentence leaves late fields empty, not garbage) */
+    for (int fi = 0; fi < 8; fi++) {
         int k = 0;
         while (*c && *c != ',' && *c != '*' && *c != '\r' && *c != '\n' && k < 15) f[fi][k++] = *c++;
         f[fi][k] = 0;
@@ -512,7 +536,124 @@ static void parse_gga(const char *p)
     const char *q = f[6];
     int v = 0, any = 0;
     while (*q >= '0' && *q <= '9') { v = v * 10 + (*q - '0'); q++; any = 1; }
-    if (any && v > 0) g_numsats = (unsigned char)(v > 15 ? 15 : v);   /* GT06 low nibble caps at 15 */
+    if (any && v > 0) {
+        g_numsats = (unsigned char)(v > 15 ? 15 : v);      /* legacy 0x12 low nibble caps at 15 */
+        g_numsats8 = (unsigned char)(v > 255 ? 255 : v);   /* 0xF1 carries the real count in 8 bits */
+    }
+    {   /* HDOP (field 7) * 10, saturating — the only horizontal-accuracy figure the NMEA stream gives us */
+        unsigned h = parse_dec1(f[7]);
+        g_hdop_x10 = (unsigned char)(h > 255 ? 255 : h);
+    }
+}
+
+/* GSA field 1 is the fix type (1 = no fix, 2 = 2D, 3 = 3D) — RMC's A/V flag cannot distinguish 2D from 3D.
+ * Cached like the GGA fields: GSA arrives as its own line, independent of RMC. */
+static void parse_gsa(const char *p)
+{
+    const char *g = 0;
+    for (int i = 0; i < 180 && p[i]; i++)
+        if (p[i] == 'G' && p[i+1] == 'S' && p[i+2] == 'A') { g = p + i; break; }
+    if (!g) return;
+    const char *c = g;
+    while (*c && *c != ',') c++;
+    if (*c != ',') return;
+    c++;                                        /* -> field 0 (mode1 A/M) */
+    while (*c && *c != ',') c++;                /* -> comma before field 1 */
+    if (*c != ',') return;
+    c++;
+    if (*c >= '1' && *c <= '3') g_fixtype = (unsigned char)(*c - '0');
+}
+
+/* ---- item: batched LOC (protocol 0xF1) ----------------------------------------------------------
+ * While tracking, GNSS gives a fix per second but one GT06 0x12 frame per fix is mostly overhead, and
+ * the server writes one jsonl record per frame. Accumulate up to LOCBATCH fixes and ship them as ONE
+ * 0xF1 frame every LOCBATCH seconds; the server logs a single record with a `pos` array, exactly as the
+ * phone apps already do at 1 Hz.
+ *
+ * Rules (from the spec):
+ *   - flush every LOCBATCH seconds even if fewer than LOCBATCH fixes arrived (send what we have);
+ *   - zero fixes in the window => send NOTHING and behave as today's no-fix case;
+ *   - LOCBATCH = 0 disables batching entirely and restores the legacy per-fix 0x12 path.
+ *
+ * Wire format (big-endian), 12-byte header + 14 bytes per element:
+ *   0  u8  fmt = 1            5  u8[6] base datetime {yy,mo,dd,hh,mi,ss} (UTC, as 0x12)
+ *   1  u8  count N            11 u8  base deciseconds (0..9)
+ *   2  u8  satellites 0..255  -- 8 bits, unlike the 4-bit nibble in 0x12
+ *   3  u8  fix type           -- 0 unknown, 1 no fix, 2 = 2D, 3 = 3D (from GSA)
+ *   4  u8  HDOP * 10          -- 0 = unknown (NMEA gives no metres figure; the server converts)
+ *   element: u16 dt_ds (deciseconds after base) | i32 lat 1e-7 deg | i32 lon 1e-7 deg
+ *            | u16 speed 0.1 kn | u16 heading deg
+ * Signed 1e-7 degrees replaces the 0x12 magnitude+hemisphere-bit encoding: it is finer than the
+ * 1/1800000 deg wire unit and removes the hemisphere bits entirely. */
+#define LOC_BATCH_MAX     10            /* 12 + 14*10 = 152 B payload — inside the 1-byte 0x78 length */
+#define LOC_BATCH_DEFAULT 5
+static unsigned char g_loc_batch = LOC_BATCH_DEFAULT;   /* 0 = off (legacy 0x12), else fixes per frame */
+
+typedef struct {
+    unsigned char dt[6];        /* datetime of this fix */
+    unsigned char ds;           /* deciseconds 0..9 */
+    int lat_e7, lon_e7;         /* signed degrees * 1e7 */
+    unsigned short spd_dkn;     /* 0.1 knots */
+    unsigned short hdg_deg;     /* degrees */
+} batchfix_t;
+static batchfix_t g_batch[LOC_BATCH_MAX];
+static int g_batch_n;
+
+/* deg*1800000 magnitude + hemisphere -> signed deg*1e7. 1800000 raw = 1 deg, so e7 = raw * 100 / 18. */
+static int raw_to_e7(u32 raw, int neg)
+{
+    u32 e7 = (raw / 18u) * 100u + ((raw % 18u) * 100u) / 18u;
+    return neg ? -(int)e7 : (int)e7;
+}
+
+static void batch_push(const rmc_t *rc)
+{
+    if (g_batch_n >= LOC_BATCH_MAX) return;            /* full: drop (flush is due within the second) */
+    batchfix_t *b = &g_batch[g_batch_n++];
+    for (int i = 0; i < 6; i++) b->dt[i] = rc->dt[i];
+    b->ds = rc->ds <= 9 ? rc->ds : 0;
+    b->lat_e7 = raw_to_e7(rc->lat_raw, rc->south);
+    b->lon_e7 = raw_to_e7(rc->lon_raw, rc->west);
+    b->spd_dkn = (unsigned short)(rc->spd_dkn > 65535u ? 65535u : rc->spd_dkn);
+    b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
+}
+
+/* seconds-of-day of a batch entry, for the delta against the base entry (the batch spans a few seconds,
+ * so only hh:mm:ss matters; a midnight wrap is handled by adding a day's worth of deciseconds). */
+static unsigned batch_ds_of(const batchfix_t *b)
+{
+    return ((unsigned)b->dt[3] * 3600u + (unsigned)b->dt[4] * 60u + (unsigned)b->dt[5]) * 10u + b->ds;
+}
+
+/* Serialise the accumulated fixes into d (needs 12 + 14*n bytes). Returns the payload length. */
+static int build_batch_data(unsigned char *d)
+{
+    int n = g_batch_n;
+    if (n > LOC_BATCH_MAX) n = LOC_BATCH_MAX;
+    d[0] = 1;
+    d[1] = (unsigned char)n;
+    d[2] = g_numsats8;
+    d[3] = g_fixtype;
+    d[4] = g_hdop_x10;
+    for (int i = 0; i < 6; i++) d[5 + i] = g_batch[0].dt[i];
+    d[11] = g_batch[0].ds;
+    unsigned base = batch_ds_of(&g_batch[0]);
+    int o = 12;
+    for (int i = 0; i < n; i++) {
+        const batchfix_t *b = &g_batch[i];
+        unsigned t = batch_ds_of(b);
+        unsigned dt_ds = (t >= base) ? (t - base) : (t + 864000u - base);   /* midnight wrap */
+        if (dt_ds > 65535u) dt_ds = 65535u;
+        d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
+        u32 la = (u32)b->lat_e7, lo = (u32)b->lon_e7;
+        d[o++] = (unsigned char)(la >> 24); d[o++] = (unsigned char)(la >> 16);
+        d[o++] = (unsigned char)(la >> 8);  d[o++] = (unsigned char)la;
+        d[o++] = (unsigned char)(lo >> 24); d[o++] = (unsigned char)(lo >> 16);
+        d[o++] = (unsigned char)(lo >> 8);  d[o++] = (unsigned char)lo;
+        d[o++] = (unsigned char)(b->spd_dkn >> 8); d[o++] = (unsigned char)b->spd_dkn;
+        d[o++] = (unsigned char)(b->hdg_deg >> 8); d[o++] = (unsigned char)b->hdg_deg;
+    }
+    return o;
 }
 
 /* ---- item 1: idle/tracking state, driven by the server TIMER command ----
@@ -1351,6 +1492,24 @@ static int handle_config_cmd(const char *cmd, char *out)
         g_blind_en = (unsigned char)(pv[0] - '0');
         int n = put_str(out, "SETOK:BLIND_EN=");
         out[n++] = (char)('0' + g_blind_en);
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#LOCBATCH")) {
+        int n = put_str(out, "READOK:LOCBATCH=");
+        n += put_uint(out + n, g_loc_batch);
+        return n;
+    }
+    if (prefix_eq(cmd, "SZCS#LOCBATCH")) {           /* 0 = off (legacy per-fix 0x12), 1..LOC_BATCH_MAX */
+        const char *pv = skip_to_val(cmd, "LOCBATCH");
+        if (!pv || pv[0] < '0' || pv[0] > '9') return put_str(out, "SET ERROR: LOCBATCH");
+        const char *q = pv;
+        unsigned v = 0;
+        while (*q >= '0' && *q <= '9' && v <= 999) { v = v * 10 + (unsigned)(*q - '0'); q++; }
+        if (v > LOC_BATCH_MAX) return put_str(out, "SET ERROR: LOCBATCH");
+        g_loc_batch = (unsigned char)v;
+        g_batch_n = 0;                               /* a rate change invalidates the partial batch */
+        int n = put_str(out, "SETOK:LOCBATCH=");
+        n += put_uint(out + n, g_loc_batch);
         return n;
     }
     if (prefix_eq(cmd, "SZCS#LEDSWAP")) {                    /* swap the blue/yellow gpio-id mapping */
@@ -2432,6 +2591,7 @@ void standalone_main(u32 loader_resolver)
     static char g_line[256]; static int g_llen;    /* NMEA line reassembly across URC chunks */
     static unsigned char acc[768]; static int acclen; /* server->device RX accumulator (>= max frame + one recv) */
     unsigned last_hbt = 0, last_loc = 0, last_csq = 0, last_batt = 0, last_blind = 0, last_sos = 0;
+    unsigned last_batch = 0;                       /* 0xF1 batch flush pacing */
     unsigned last_gps_power = 0;
     unsigned conn_start = 0, last_conn = 0u - (unsigned)CONN_RETRY_SEC;  /* first attempt immediately */
 
@@ -2596,6 +2756,25 @@ void standalone_main(u32 loader_resolver)
             last_gps_power = now;
         }
 
+        /* Batched LOC flush: every g_loc_batch seconds while tracking, ship whatever fixes we collected.
+         * Fewer than a full batch is fine (send what we have); ZERO fixes sends nothing at all, which is
+         * exactly the existing no-fix behaviour. Cleared unconditionally so a stale partial batch can
+         * never be emitted with the wrong base time after an outage. */
+        if (g_loc_batch && track && (now - last_batch) >= (unsigned)g_loc_batch) {
+            last_batch = now;
+            if (g_batch_n > 0) {
+                if (connected) {
+                    unsigned char bd[12 + 14 * LOC_BATCH_MAX];
+                    int blen = build_batch_data(bd);
+                    int flen = gt06_frame(0xF1, bd, blen, serial++, loc);
+                    int sret = se(fd, loc, flen, 0);
+                    vhex("S3c:batch_send", (unsigned)g_batch_n);
+                    if (sret != flen) connected = 0;   /* partial send corrupts the frame */
+                }
+                g_batch_n = 0;
+            }
+        }
+
         /* USB<->TCP forwarding bridge: keep the FWD socket up + pump both directions (independent of GT06).
          * g_fwd_req in the gate guarantees a disable/teardown pass runs even once the socket is already down. */
         if (g_fwd_en || g_fwd_active || g_fwd_req) fwd_poll(now, so, co, se, rv, cl);
@@ -2688,7 +2867,8 @@ void standalone_main(u32 loader_resolver)
                     if (!nmea_cksum_ok(g_line)) {  /* spliced/mangled line (AT interleave) -> drop, don't parse */
                         g_nmea_bad++; g_llen = 0; continue;
                     }
-                    parse_gga(g_line);             /* cache sats-in-use from any GGA line */
+                    parse_gga(g_line);             /* cache sats-in-use / HDOP from any GGA line */
+                    parse_gsa(g_line);             /* cache 2D/3D fix type from any GSA line */
                     rmc_t rc;
                     if (parse_rmc(g_line, &rc)) {
                         if (rc.valid && !fix_plausible(&rc, now))
@@ -2703,8 +2883,15 @@ void standalone_main(u32 loader_resolver)
                             for (int q = 0; q < 6; q++) g_fix_dt[q] = rc.dt[q];
                             g_have_fix = 1; g_fix_ts = now;   /* GPS-lock freshness for the status LEDs */
                         }
+                        /* Batched path (0xF1): collect every valid fix; the flush below ships them as one
+                         * frame every g_loc_batch seconds. Out of coverage we still use the blind buffer. */
+                        if (g_loc_batch && rc.valid) {
+                            if (connected) batch_push(&rc);
+                            else if (g_blind_en)
+                                blind_push(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1, g_numsats);
+                        }
                         /* one fix per T1-second period (GPS runs 1 Hz; T1>1 downsamples) */
-                        if (rc.valid && (now - last_loc) >= (unsigned)t1) {
+                        if (!g_loc_batch && rc.valid && (now - last_loc) >= (unsigned)t1) {
                             last_loc = now;
                             if (connected) {
                                 build_loc_data(ld, 0, rc.lat_raw, rc.lon_raw, rc.south, rc.west, 1, g_numsats, 0, 0);

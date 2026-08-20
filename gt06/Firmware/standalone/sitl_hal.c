@@ -382,16 +382,27 @@ static void *nmea_thread(void *arg)
         struct tm tmv; gmtime_r(&ts.tv_sec, &tmv);
         int hh = tmv.tm_hour, mm = tmv.tm_min, ss = tmv.tm_sec;
         int dd = tmv.tm_mday, mo = tmv.tm_mon + 1, yy = (tmv.tm_year + 1900) % 100;
-        /* GGA: fix quality 1, 9 sats */
+        /* Deciseconds: real receivers stamp a sub-second fraction. Rotate it deterministically rather
+         * than reading the host clock — the injector sleeps a whole second, so a clock-derived fraction
+         * would be near-constant and inter-fix deltas would always land on whole seconds, never
+         * exercising the 0.1 s resolution of the 0xF1 batch. */
+        static int ds_seq;
+        int dsf = ds_seq++ % 10;
+        /* GGA: fix quality 1, 17 sats (>15 on purpose — the 0xF1 header carries 8 bits, the old 0x12
+         * nibble saturates at 15), HDOP 1.2 */
         snprintf(body, sizeof body,
-                 "$GNGGA,%02d%02d%02d.00,%02d%07.4f,S,%03d%07.4f,E,1,09,0.9,560.0,M,0.0,M,,",
-                 hh, mm, ss, lad, lam, lod, lom);
+                 "$GNGGA,%02d%02d%02d.%d0,%02d%07.4f,S,%03d%07.4f,E,1,17,1.2,560.0,M,0.0,M,,",
+                 hh, mm, ss, dsf, lad, lam, lod, lom);
+        snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
+        urc_push(line);
+        /* GSA: mode A, fix type 3 (3D), then 12 sat slots, PDOP/HDOP/VDOP */
+        snprintf(body, sizeof body, "$GNGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,2.1,1.2,1.7");
         snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
         urc_push(line);
         /* RMC: valid 'A', speed 6.0 kn, course 45, date ddmmyy */
         snprintf(body, sizeof body,
-                 "$GNRMC,%02d%02d%02d.00,A,%02d%07.4f,S,%03d%07.4f,E,6.0,45.0,%02d%02d%02d,,,A",
-                 hh, mm, ss, lad, lam, lod, lom, dd, mo, yy);
+                 "$GNRMC,%02d%02d%02d.%d0,A,%02d%07.4f,S,%03d%07.4f,E,6.0,45.0,%02d%02d%02d,,,A",
+                 hh, mm, ss, dsf, lad, lam, lod, lom, dd, mo, yy);
         snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
         /* HW fidelity: real URC chunks split sentences mid-field. Deliver the RMC in TWO chunks (cut
          * inside the longitude); every 20th sentence insert a +CSQ reply between the halves AND

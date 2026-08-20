@@ -451,6 +451,76 @@ def gt06_parse_login(data):
     return imei.lstrip("0")
 
 
+# Horizontal accuracy is not reported by the NMEA stream the tracker parses; the only figure available
+# is HDOP. Convert with a nominal UERE so the value lands in the same `horizontal_accuracy` field the
+# phone apps fill (metres). This is an ESTIMATE, not a receiver-reported accuracy — the raw HDOP is kept
+# alongside it so nothing downstream has to trust the constant.
+GT06_HDOP_TO_METRES = 2.5
+
+# Batched location (protocol 0xF1) — a WSTR firmware extension, not vendor GT06. One frame carries up to
+# LOCBATCH fixes so a 1 Hz track costs one frame (and one jsonl record) every LOCBATCH seconds.
+#   header 12B: fmt u8 | count u8 | sats u8 | fixtype u8 | hdop*10 u8 | dt[6] | base_ds u8
+#   element 14B: dt_ds u16 | lat i32 (1e-7 deg) | lon i32 | speed u16 (0.1 kn) | heading u16 (deg)
+GT06_BATCH_PROTO = 0xF1
+GT06_BATCH_HDR = 12
+GT06_BATCH_ELEM = 14
+GT06_BATCH_MAX_FIXES = 64          # sanity bound; the firmware caps itself far lower
+
+
+def gt06_parse_batch(data):
+    """Parse a batched location packet (protocol 0xF1).
+
+    Returns {satellites, fix_type, hdop, horizontal_accuracy, fixes: [{ts, lat, lon,
+    speed_knots, heading}, ...]} or None if the payload is malformed. Timestamps are floats
+    with 0.1 s resolution.
+    """
+    if len(data) < GT06_BATCH_HDR:
+        return None
+    fmt, count, sats, fix_type, hdop_x10 = data[0], data[1], data[2], data[3], data[4]
+    if fmt != 1:
+        return None
+    if count < 1 or count > GT06_BATCH_MAX_FIXES:
+        return None
+    if len(data) < GT06_BATCH_HDR + GT06_BATCH_ELEM * count:
+        return None
+
+    yy, mo, dd, hh, mi, ss = data[5:11]
+    base_ds = data[11]
+    if base_ds > 9:
+        base_ds = 0
+    try:
+        base_ts = timegm((2000 + yy, mo, dd, hh, mi, ss)) + base_ds / 10.0
+    except Exception:
+        base_ts = time.time()
+
+    fixes = []
+    for i in range(count):
+        o = GT06_BATCH_HDR + GT06_BATCH_ELEM * i
+        dt_ds, lat_e7, lon_e7, spd_dkn, hdg = struct.unpack(">HiiHH", data[o:o + GT06_BATCH_ELEM])
+        lat = lat_e7 / 1e7
+        lon = lon_e7 / 1e7
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            continue                      # drop a corrupt element rather than the whole batch
+        fixes.append({
+            "ts": base_ts + dt_ds / 10.0,
+            "lat": lat,
+            "lon": lon,
+            "speed_knots": spd_dkn / 10.0,
+            "heading": hdg if hdg < 360 else 0,
+        })
+    if not fixes:
+        return None
+
+    hdop = hdop_x10 / 10.0 if hdop_x10 else None
+    return {
+        "satellites": sats,                     # 8 bits here, vs the 4-bit nibble in 0x12
+        "fix_type": fix_type,                   # 0 unknown, 1 no fix, 2 = 2D, 3 = 3D
+        "hdop": hdop,
+        "horizontal_accuracy": round(hdop * GT06_HDOP_TO_METRES, 1) if hdop else None,
+        "fixes": fixes,
+    }
+
+
 def gt06_parse_location(data):
     """Parse location packet (protocol 0x12 or 0x22).
 
@@ -1084,6 +1154,33 @@ class GT06Listener:
             if login_id in self._assigned_imeis():    # operator-added, awaiting onboarding
                 return (False, login_id, "onboard")
         return (False, None, "recovery")
+
+    def _adaptive_loc_rate(self, gt_conn, speed_knots):
+        """Reduce the LOC interval when moving slowly, restore it when fast again.
+
+        Shared by the 0x12 and batched-0xF1 paths. Suppressed while idle and during a lag drain, so
+        slow/fast TIMER pushes don't fight the drain.
+        """
+        if gt_conn.idle or gt_conn.lag_draining:
+            return
+        now_mono = time.monotonic()
+        if speed_knots < self.slow_speed_knots:
+            if gt_conn.slow_since == 0:
+                gt_conn.slow_since = now_mono
+            elif not gt_conn.slow_mode and (now_mono - gt_conn.slow_since >= self.slow_speed_seconds):
+                gt_conn.slow_mode = True
+                self._queue_commands(gt_conn, [f"TIMER,{self.slow_loc_interval},{self.slow_loc_interval}#"])
+                self._reset_rate_monitoring(gt_conn, self.slow_loc_interval)
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                self._log(f"[GT06] {label} slow ({speed_knots:.1f}kn) — LOC interval {self.slow_loc_interval}s")
+        else:
+            gt_conn.slow_since = 0
+            if gt_conn.slow_mode:
+                gt_conn.slow_mode = False
+                self._queue_commands(gt_conn, [f"TIMER,{self.interval},{self.interval}#"])
+                self._reset_rate_monitoring(gt_conn, self.interval)
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                self._log(f"[GT06] {label} fast ({speed_knots:.1f}kn) — LOC interval {self.interval}s")
 
     def _publishes(self, gt_conn):
         """Whether this connection should be mapped to a public event (event.html).
@@ -1986,27 +2083,7 @@ class GT06Listener:
             if len(gt_conn.pos_history) > 3:
                 gt_conn.pos_history.pop(0)
 
-            # Adaptive LOC rate: reduce interval when moving slowly. Suppressed
-            # during a lag drain so slow/fast TIMER pushes don't fight the drain.
-            if not gt_conn.idle and not gt_conn.lag_draining:
-                now_mono = time.monotonic()
-                if speed_knots < self.slow_speed_knots:
-                    if gt_conn.slow_since == 0:
-                        gt_conn.slow_since = now_mono
-                    elif not gt_conn.slow_mode and (now_mono - gt_conn.slow_since >= self.slow_speed_seconds):
-                        gt_conn.slow_mode = True
-                        self._queue_commands(gt_conn, [f"TIMER,{self.slow_loc_interval},{self.slow_loc_interval}#"])
-                        self._reset_rate_monitoring(gt_conn, self.slow_loc_interval)
-                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-                        self._log(f"[GT06] {label} slow ({speed_knots:.1f}kn) — LOC interval {self.slow_loc_interval}s")
-                else:
-                    gt_conn.slow_since = 0
-                    if gt_conn.slow_mode:
-                        gt_conn.slow_mode = False
-                        self._queue_commands(gt_conn, [f"TIMER,{self.interval},{self.interval}#"])
-                        self._reset_rate_monitoring(gt_conn, self.interval)
-                        label = gt_conn.sailor_id or gt_conn.imei or "unknown"
-                        self._log(f"[GT06] {label} fast ({speed_knots:.1f}kn) — LOC interval {self.interval}s")
+            self._adaptive_loc_rate(gt_conn, speed_knots)
 
             # Save last known position for idle heartbeat updates
             gt_conn.last_lat = loc["lat"]
@@ -2052,6 +2129,77 @@ class GT06Listener:
                 idle=gt_conn.idle,
                 did=gt_conn.imei,
                 battery_voltage=gt_conn.battery_voltage,
+            )
+
+        elif protocol == GT06_BATCH_PROTO:
+            # Batched location (WSTR firmware extension). One frame = up to LOCBATCH fixes, logged as a
+            # SINGLE jsonl record carrying a `pos` array — the same compaction the phone apps get at 1 Hz,
+            # which is what makes the web UI's incremental track load fast.
+            batch = gt06_parse_batch(data)
+            if not batch:
+                self._log(f"[GT06] Bad batch packet from {gt_conn.sailor_id or gt_conn.addr}")
+                return
+            if not gt_conn.sailor_id:
+                self._log(f"[GT06] Batch before login from {gt_conn.addr}")
+                return
+
+            fixes = batch["fixes"]
+            gt_conn.loc_count += len(fixes)
+            last = fixes[-1]
+
+            # The batch carries real per-fix speed (0.1 kn from RMC), unlike 0x12 whose speed byte our
+            # firmware always sent as 0 — so no position-delta estimation is needed here.
+            speed_knots = last["speed_knots"]
+
+            gt_conn.pos_history.append((last["lat"], last["lon"], last["ts"]))
+            if len(gt_conn.pos_history) > 3:
+                gt_conn.pos_history.pop(0)
+
+            self._adaptive_loc_rate(gt_conn, speed_knots)
+
+            gt_conn.last_lat = last["lat"]
+            gt_conn.last_lon = last["lon"]
+            gt_conn.last_ts = last["ts"]
+            gt_conn.last_loc_mono = time.monotonic()
+
+            if gt_conn.idle:
+                gt_conn.idle_loc_count += 1
+                label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+                self._log(f"[GT06] {label} IDLE BATCH {last['lat']:.5f},{last['lon']:.5f} "
+                          f"n={len(fixes)} sats={batch['satellites']} fix={batch['fix_type']}")
+
+            tracker = self.get_tracker(gt_conn.eid)
+            if tracker is None or not self._publishes(gt_conn):
+                return
+
+            # [ts, lat, lon, speed_kn, heading] per fix — readers older than the heading element simply
+            # stop at index 3, so this stays backward compatible.
+            pos_array = [[round(f["ts"], 1), round(f["lat"], 7), round(f["lon"], 7),
+                          round(f["speed_knots"], 1), f["heading"]] for f in fixes]
+
+            tracker.process_position(
+                sailor_id=gt_conn.sailor_id,
+                lat=last["lat"],
+                lon=last["lon"],
+                speed=round(speed_knots, 1),
+                heading=last["heading"],
+                ts=last["ts"],
+                assist=gt_conn.assist_active,
+                battery=gt_conn.battery,
+                signal=gt_conn.signal,
+                role="sailor",
+                version="gt06",
+                flags={},
+                src_ip=gt_conn.addr[0],
+                source="GT06",
+                nsats=batch["satellites"],
+                charging=gt_conn.charging,
+                stopped=gt_conn.idle,
+                idle=gt_conn.idle,
+                did=gt_conn.imei,
+                battery_voltage=gt_conn.battery_voltage,
+                horizontal_accuracy=batch["horizontal_accuracy"],
+                pos_array=pos_array,
             )
 
         elif protocol == 0x13:

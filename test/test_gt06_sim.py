@@ -900,3 +900,73 @@ def test_idle_stuck_gps_on_mode1_bounce_and_cap(gt06_sim_factory, server):
         _mgr_post(server, "/api/manage/gt06/config", {
             "reconnect_grace_sec": 60, "idle_stuck_window_sec": 60,
             "idle_stuck_max_bounces": 3})
+
+
+# ---------------------------------------------------------------------------
+# Batched LOC (protocol 0xF1)
+# ---------------------------------------------------------------------------
+
+def _read_track_log(server, eid=EID):
+    """Return the parsed jsonl track records for today's log."""
+    log_dir = server.data_dir / "html" / str(eid) / "logs"
+    if not log_dir.exists():
+        return []
+    out = []
+    for f in sorted(log_dir.glob("*.jsonl")):
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+    return out
+
+
+def test_batched_loc_lands_as_one_record_with_pos_array(gt06_sim_factory, server):
+    """A 0xF1 batch must publish a position AND be logged as ONE jsonl record holding
+    every fix in a `pos` array — that compaction is the point of the message."""
+    _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
+    sim = gt06_sim_factory("999010000201001", freq=1, loc_batch=5)
+    _wait_for_login(server, sim.sailor_id)
+
+    # wait for a batched record rather than a fixed sleep — under full-suite load the sim can take
+    # noticeably longer to connect, and a bare sleep makes this test flaky
+    recs = _wait_for(
+        lambda: [r for r in _read_track_log(server)
+                 if r.get("id") == sim.sailor_id and len(r.get("pos") or []) > 1],
+        timeout=25.0, interval=0.5)
+    assert recs, "no batched jsonl record with a pos array"
+
+    pos = _read_positions(server).get(sim.sailor_id, {})
+    assert pos.get("lat"), f"no position published from a batch: {pos}"
+    # 8-bit satellite count survives (the 0x12 nibble could not carry 17)
+    assert pos.get("nsats") == 17, f"nsats={pos.get('nsats')} — 8-bit count lost"
+
+    rec = recs[-1]
+    assert len(rec["pos"]) > 1, f"batch logged with only {len(rec['pos'])} fix(es)"
+    for p in rec["pos"]:
+        assert len(p) == 5, f"expected [ts,lat,lon,spd,hdg], got {p}"
+        ts, lat, lon, spd, hdg = p
+        assert -90 <= lat <= 90 and -180 <= lon <= 180
+        assert 0 <= hdg < 360
+    # timestamps carry 0.1 s resolution and are ordered
+    tss = [p[0] for p in rec["pos"]]
+    assert tss == sorted(tss), f"batch timestamps out of order: {tss}"
+
+
+def test_batched_loc_reports_horizontal_accuracy(gt06_sim_factory, server):
+    """HDOP in the batch header becomes a horizontal-accuracy estimate on the position."""
+    _admin_post(server, f"/api/event/{EID}/admin/state", body={"state": "tracking"})
+    sim = gt06_sim_factory("999010000202001", freq=1, loc_batch=3, batch_hdop=2.0)
+    _wait_for_login(server, sim.sailor_id)
+
+    recs = _wait_for(
+        lambda: [r for r in _read_track_log(server)
+                 if r.get("id") == sim.sailor_id and "pos" in r and r.get("hac")],
+        timeout=25.0, interval=0.5)
+    assert recs, "no batched record carrying a horizontal accuracy"
+    # 2.0 HDOP * GT06_HDOP_TO_METRES (2.5) = 5.0 m
+    assert any(abs((r.get("hac") or 0) - 5.0) < 0.51 for r in recs), \
+        f"no horizontal accuracy derived from HDOP: {[r.get('hac') for r in recs]}"
