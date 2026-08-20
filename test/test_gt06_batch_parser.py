@@ -161,3 +161,49 @@ def test_ancient_base_is_anchored_to_receipt_time():
     b = gt06_parse_batch(_hdr(count=1, dt=(1, 1, 1, 0, 0, 0)) + _elem(0))
     assert b is not None
     assert b["fixes"][0]["ts"] > time.time() - 3600, "a year-2001 base was trusted"
+
+
+# ---------------------------------------------------------------------------
+# Firmware-aware parameter sync
+# ---------------------------------------------------------------------------
+
+from protocol_GT06 import (  # noqa: E402
+    _is_wstr_firmware, _settings_for_firmware, _APPLY_ORDER, WSTR_SUPPORTED_SETTINGS,
+)
+
+
+@pytest.mark.parametrize("fw,ours", [
+    ("WSTR-STD1_00e8220", True),
+    ("WSTR-STD1_611a265", True),
+    ("NT19D_MG133_10F8G_B53_V667", False),
+    ("W07_MG133_10F8G_B53_V6.68", False),
+    ("W07_MG133_10F8G_B53_V6.68-TQ", False),
+    (None, False),
+    ("", False),
+])
+def test_own_firmware_is_recognised(fw, ours):
+    assert _is_wstr_firmware(fw) is ours
+
+
+def test_vendor_firmware_keeps_every_parameter():
+    """Vendor units must be unaffected — the whole point is to change nothing for them."""
+    assert _settings_for_firmware(_APPLY_ORDER, "NT19D_MG133_10F8G_B53_V667") == _APPLY_ORDER
+    assert _settings_for_firmware(_APPLY_ORDER, None) == _APPLY_ORDER
+
+
+def test_own_firmware_skips_parameters_it_does_not_implement():
+    kept = _settings_for_firmware(_APPLY_ORDER, "WSTR-STD1_00e8220")
+    assert set(kept) == WSTR_SUPPORTED_SETTINGS & set(_APPLY_ORDER)
+    # the ones our firmware has no notion of
+    for gone in ("SLPDISCONNECT", "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE",
+                 "SENDS", "SENALM", "MOVING"):
+        assert gone not in kept, f"{gone} is not implemented by our firmware"
+    # the ones it does
+    for keep in ("TIMER", "HBT", "BLIND_EN"):
+        assert keep in kept, f"{keep} IS implemented and must still be synced"
+
+
+def test_filter_preserves_apply_order():
+    """Order is deliberate (the legacy command sequence); filtering must not reshuffle it."""
+    kept = _settings_for_firmware(_APPLY_ORDER, "WSTR-STD1_00e8220")
+    assert kept == [k for k in _APPLY_ORDER if k in kept]

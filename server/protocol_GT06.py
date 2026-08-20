@@ -207,6 +207,31 @@ _SETTINGS = {
 _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
                 "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE", "BLIND_EN", "HBT"]
 
+# Our own firmware reports a "WSTR-..." build tag instead of a vendor one (e.g. WSTR-STD1_00e8220).
+WSTR_FW_PREFIX = "WSTR"
+
+# What OUR firmware actually implements out of _APPLY_ORDER. Everything else in that list is a vendor
+# behaviour we deliberately never wrote: no vibration/ACC line, no GPS reset timer, no sleep-disconnect.
+#
+# Skipping them is not just tidiness. The firmware answers ANY "SZCS#..." with "<cmd> OK" (an unknown
+# command must not be silently claimed as applied), so an unimplemented parameter looks successfully
+# set while doing nothing, and its CXCS# query returns no value — so the reconciler sees a permanent
+# mismatch and re-sends the whole group on every single login, filling the command queue behind the
+# commands that do matter.
+WSTR_SUPPORTED_SETTINGS = {"TIMER", "HBT", "BLIND_EN"}
+
+
+def _is_wstr_firmware(firmware):
+    """True if this unit runs our own standalone firmware rather than the vendor's."""
+    return bool(firmware) and str(firmware).startswith(WSTR_FW_PREFIX)
+
+
+def _settings_for_firmware(keys, firmware):
+    """Filter a list of _SETTINGS keys down to what `firmware` actually implements."""
+    if not _is_wstr_firmware(firmware):
+        return list(keys)
+    return [k for k in keys if k in WSTR_SUPPORTED_SETTINGS]
+
 
 # ---- Operator-visible device parameters (manage.html Params tab) ----
 #
@@ -1476,7 +1501,9 @@ class GT06Listener:
         gt_conn.observed = {}
         gt_conn.reconcile_phase = "query"
         queries, seen = ["cxzt#"], set()
-        for key in _APPLY_ORDER:
+        # cxzt# refreshes gt_conn.firmware, but the cached value (restored with device state) is
+        # already good enough to avoid asking our own firmware about vendor-only parameters.
+        for key in _settings_for_firmware(_APPLY_ORDER, getattr(gt_conn, "firmware", None)):
             q = _SETTINGS[key][1]
             if q and q not in seen:
                 queries.append(q)
@@ -1500,10 +1527,19 @@ class GT06Listener:
         desired = self._desired_settings(gt_conn, getattr(gt_conn, "target_state", None))
         observed = getattr(gt_conn, "observed", {})
         label = gt_conn.sailor_id or gt_conn.imei or "unknown"
+        firmware = getattr(gt_conn, "firmware", None)
+        # The cxzt# in the query phase has refreshed the build tag by now, so this is the authoritative
+        # filter even on a unit whose firmware changed since its last connection (e.g. just OTA'd).
+        order = _settings_for_firmware(_APPLY_ORDER, firmware)
+        if _is_wstr_firmware(firmware):
+            skipped = [k for k in _APPLY_ORDER if k in desired and k not in order]
+            if skipped:
+                self._log(f"[GT06] {label} own firmware ({firmware}) — "
+                          f"skipping unimplemented: {' '.join(skipped)}")
         obs = " ".join(f"{k}={observed.get(k, '?')}"
-                       for k in _APPLY_ORDER if k in desired)
+                       for k in order if k in desired)
         self._log(f"[GT06] {label} observed [{getattr(gt_conn,'target_state','?')}]: {obs}")
-        cmds = [_SETTINGS[k][0](desired[k]) for k in _APPLY_ORDER
+        cmds = [_SETTINGS[k][0](desired[k]) for k in order
                 if k in desired and _norm(observed.get(k)) != _norm(desired[k])]
         if cmds:
             self._log(f"[GT06] {label} applying: {' '.join(cmds)}")
