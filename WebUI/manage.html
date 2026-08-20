@@ -1584,7 +1584,8 @@
                     + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Settings" onclick="showTrackerSettings('${esc(t.imei)}')">⚙</button> `)
                     + (pending ? '' : `<button class="btn" style="padding:2px 7px" title="Parameters (get/set)" onclick="openParams('${esc(t.imei)}')">≡</button> `)
                     + `<button class="btn" style="padding:2px 7px" title="Reboot" onclick="rebootTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⏻</button> `
-                    + `<button class="btn" style="padding:2px 7px" title="Disconnect (close socket)" onclick="disconnectTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⊘</button>`
+                    + `<button class="btn" style="padding:2px 7px" title="Disconnect (close socket)" onclick="disconnectTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⊘</button> `
+                    + `<button class="btn" style="padding:2px 7px" title="Update firmware (OTA to latest)" onclick="firmwareUpdateTracker('${esc(tgt)}')" ${t.online ? '' : 'disabled'}>⬆</button>`
                     + `</td></tr>`;
             }
             html += '</table>';
@@ -1770,6 +1771,27 @@
                 if (!d.success) { alert('Disconnect failed: ' + (d.error || r.status)); return; }
                 setTimeout(loadTrackers, 2000);
             } catch (e) { alert('Disconnect failed: ' + e.message); }
+        }
+
+        // OTA the tracker to whatever the server's fota_url points at (a symlink to the latest
+        // build). The device reboots, downloads, verifies and reboots again — several minutes, with
+        // no completion report, so the firmware column is the only confirmation.
+        async function firmwareUpdateTracker(imei) {
+            const t = (window._trackers || []).find(x => x.imei === imei);
+            const cur = (t && t.firmware) ? t.firmware : 'unknown';
+            if (!confirm('Update firmware on ' + imei + '?\n\nCurrently: ' + cur
+                         + '\n\nIt will download and reboot (a few minutes offline). '
+                         + 'Check the Firmware column afterwards to confirm.')) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/manage/gt06/tracker/${encodeURIComponent(imei)}/firmware-update`, {
+                    method: 'POST', headers: { 'X-Manager-Password': managerPassword }
+                });
+                const d = await r.json();
+                if (!d.success) { alert('Firmware update failed: ' + (d.error || r.status)); return; }
+                alert('Update queued.\n\n' + (d.url || '')
+                      + '\n\nThe tracker will go offline while it downloads and reboots.');
+                setTimeout(loadTrackers, 5000);
+            } catch (e) { alert('Firmware update failed: ' + e.message); }
         }
 
         function showTrackerSettings(imei) {

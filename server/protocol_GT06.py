@@ -221,6 +221,21 @@ WSTR_FW_PREFIX = "WSTR"
 WSTR_SUPPORTED_SETTINGS = {"TIMER", "HBT", "BLIND_EN"}
 
 
+# Default OTA target. A symlink, so "latest" is published by repointing it rather than by editing
+# config; the served file must satisfy both consumers (see gt06/Firmware/OTA_notes.md).
+#
+# ⚠ The vendor bootloader requires the literal "B53" somewhere in the YCSJ command string, or it
+# refuses the download before it starts ("YCSJ Check File Error!"). That is why the symlink is not
+# simply "firmware_latest.bin" — a name without B53 works on our own firmware and silently fails on
+# every vendor unit, which is the worst of both.
+FOTA_DEFAULT_URL = "http://103.230.158.49/W07_FW/firmware_latest_B53.bin"
+
+# Port 80 is not negotiable for vendor units: their downloader hardcodes it and reads the trailing
+# YCSJ field as the expected XOR instead. Our firmware reads that field as the port, so ",80#" is
+# the one value both interpret compatibly.
+FOTA_YCSJ_PORT = 80
+
+
 def _is_wstr_firmware(firmware):
     """True if this unit runs our own standalone firmware rather than the vendor's."""
     return bool(firmware) and str(firmware).startswith(WSTR_FW_PREFIX)
@@ -1077,6 +1092,10 @@ class GT06Listener:
         # Periodic cxzt# poll (minutes; 0 = off) for mV battery sampling. Read
         # live by the run loop, so a config edit applies without restart.
         self.cxzt_poll_min = cfg.get("cxzt_poll_min", 0)
+        # OTA: the URL the "update firmware" action hands to YCSJ. It points at a symlink in the
+        # firmware fetch directory so publishing a new build is a symlink swap, with nothing to
+        # change here or in the UI.
+        self.fota_url = cfg.get("fota_url", FOTA_DEFAULT_URL)
         # Reconnect grace + stuck-GPS-on idle remediation (read live by run loop).
         self.reconnect_grace_sec = cfg.get("reconnect_grace_sec", 60)
         self.idle_stuck_bounce = cfg.get("idle_stuck_bounce", 1)
@@ -1219,6 +1238,22 @@ class GT06Listener:
             if login_id in self._assigned_imeis():    # operator-added, awaiting onboarding
                 return (False, login_id, "onboard")
         return (False, None, "recovery")
+
+    def firmware_update_device(self, imei):
+        """Queue an OTA of the current `fota_url` to one connected device.
+
+        Returns (ok, url_or_error). The device reboots into its FOTA path, downloads, verifies and
+        reboots again; nothing reports success back, so the result has to be read afterwards from the
+        firmware line in a cxzt# reply.
+        """
+        url = self.fota_url
+        if not url.startswith("http://"):
+            return False, "fota_url must be a plain http:// URL (the downloader has no TLS)"
+        if "B53" not in url:
+            return False, 'fota_url must contain "B53" or vendor firmware refuses the download'
+        cmd = f"YCSJ,{url},{FOTA_YCSJ_PORT}#"
+        ok = self.queue_command_any(imei, cmd)
+        return ok, (url if ok else "device not connected")
 
     def _adaptive_loc_rate(self, gt_conn, speed_knots):
         """Reduce the LOC interval when moving slowly, restore it when fast again.

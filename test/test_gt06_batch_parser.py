@@ -207,3 +207,65 @@ def test_filter_preserves_apply_order():
     """Order is deliberate (the legacy command sequence); filtering must not reshuffle it."""
     kept = _settings_for_firmware(_APPLY_ORDER, "WSTR-STD1_00e8220")
     assert kept == [k for k in _APPLY_ORDER if k in kept]
+
+
+# ---------------------------------------------------------------------------
+# Firmware-update (OTA) action
+# ---------------------------------------------------------------------------
+
+from protocol_GT06 import FOTA_DEFAULT_URL, FOTA_YCSJ_PORT, GT06Listener  # noqa: E402
+
+
+class _FakeListener:
+    """Minimal stand-in exercising firmware_update_device's guards + command shape."""
+    def __init__(self, url, connected=True):
+        self.fota_url = url
+        self.connected = connected
+        self.sent = []
+
+    def queue_command_any(self, imei, cmd):
+        self.sent.append((imei, cmd))
+        return self.connected
+
+    firmware_update_device = GT06Listener.firmware_update_device
+
+
+
+def test_default_fota_url_satisfies_the_vendor_bootloader():
+    """The vendor refuses a YCSJ whose command text lacks "B53", before downloading anything — so a
+    default without it would work on our firmware and silently fail on every vendor unit."""
+    assert "B53" in FOTA_DEFAULT_URL
+    assert FOTA_DEFAULT_URL.startswith("http://")
+    assert FOTA_YCSJ_PORT == 80
+
+
+def test_firmware_update_builds_the_ycsj_command():
+    l = _FakeListener(FOTA_DEFAULT_URL)
+    ok, url = l.firmware_update_device("863874081226122")
+    assert ok and url == FOTA_DEFAULT_URL
+    assert len(l.sent) == 1
+    imei, cmd = l.sent[0]
+    assert imei == "863874081226122"
+    assert cmd == f"YCSJ,{FOTA_DEFAULT_URL},80#"
+    assert "B53" in cmd
+
+
+def test_firmware_update_rejects_a_url_without_b53():
+    l = _FakeListener("http://103.230.158.49/W07_FW/firmware_latest.bin")
+    ok, err = l.firmware_update_device("863874081226122")
+    assert not ok and "B53" in err
+    assert l.sent == [], "a command that vendor firmware would refuse must not be queued"
+
+
+def test_firmware_update_rejects_https():
+    """The downloader has no TLS; an https URL would fail on the device, not here."""
+    l = _FakeListener("https://example.com/W07_FW/firmware_latest_B53.bin")
+    ok, err = l.firmware_update_device("863874081226122")
+    assert not ok and "http://" in err
+    assert l.sent == []
+
+
+def test_firmware_update_reports_a_disconnected_device():
+    l = _FakeListener(FOTA_DEFAULT_URL, connected=False)
+    ok, err = l.firmware_update_device("863874081226122")
+    assert not ok and "not connected" in err

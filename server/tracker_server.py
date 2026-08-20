@@ -4993,7 +4993,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
           POST /api/manage/gt06/tracker/{imei}/reboot     queue RESET#
           POST /api/manage/gt06/tracker/{imei}/disconnect close the TCP socket
           POST /api/manage/gt06/tracker/{imei}/command    queue arbitrary command
-          POST /api/manage/gt06/tracker/{imei}/firmware-update  (placeholder)
+          POST /api/manage/gt06/tracker/{imei}/firmware-update  OTA to gt06.json fota_url
           POST /api/manage/server/restart                 restart the server
         """
         if not self._check_manager_auth():
@@ -5139,9 +5139,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             200 if ok else 404)
             return
         if action == 'firmware-update':
-            # Not yet implemented — needs the vendor FOTA URL + A76XX flow.
-            self._send_json({"success": False, "imei": imei,
-                             "error": "firmware update not yet implemented"}, 501)
+            # Push the current firmware (gt06.json `fota_url`, normally a symlink to the latest
+            # build) to one connected device. The URL lives server-side so the UI cannot pin a
+            # stale build, and publishing a new one is a symlink swap.
+            ok, detail = _gt06_listener.firmware_update_device(imei)
+            self._send_json({"success": ok, "imei": imei,
+                             "url": detail if ok else None,
+                             "error": None if ok else detail},
+                            200 if ok else 404)
             return
         if action == '':
             # Set per-device config (eid / overnight_mode_number / name).
