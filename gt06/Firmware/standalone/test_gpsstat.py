@@ -10,6 +10,9 @@ there was no way to tell a dead receiver from one still acquiring.
 GPSSTAT has to separate exactly those two cases:
   nmea == 0            -> nothing at all from the receiver (wedged / wiring / never powered)
   nmea > 0, vrmc == 0  -> receiver alive and talking, but no fix (antenna, signal, or acquiring)
+
+and when the power call itself is failing, api/prc/pf say whether the resident slot is missing
+(api0, nothing to call) or present and rejecting us (api1 with a non-zero prc).
 """
 
 import os
@@ -94,8 +97,10 @@ def main():
     assert f["fix"] == 3, f"fix={f['fix']} (expected 3 = 3D): {text}"
     assert f["hdop"] == 12, f"hdop={f['hdop']} (expected 12 = 1.2): {text}"
     assert f["nage"] < 30 and f["fage"] < 30, f"stale ages on a healthy unit: {text}"
+    assert f["api"] == 1, f"resident GPS slot reported missing on a healthy unit: {text}"
+    assert f["pf"] == 0, f"power-call failures on a healthy unit: {text}"
     print(f"healthy: nmea={f['nmea']} vrmc={f['vrmc']} sats={f['sats']} fix={f['fix']} "
-          f"hdop={f['hdop']} fage={f['fage']} PASS")
+          f"hdop={f['hdop']} fage={f['fage']} api={f['api']} pf={f['pf']} PASS")
 
     # ---- receiver never comes up: the "is it dead?" case ----
     f, text = query_gpsstat({"SITL_GNSS_POWER_FAILS": "9999"}, tracking=True, settle=8)
@@ -104,7 +109,12 @@ def main():
     assert f["nage"] == 999, f"nage should be 'never' (999), got {f['nage']}: {text}"
     assert f["fage"] == 999, f"fage should be 'never' (999), got {f['fage']}: {text}"
     assert f["pwr"] != 2, f"power reported ON though every power call failed: {text}"
-    print(f"dead receiver: nmea=0 nage=999 pwr={f['pwr']} PASS")
+    # the whole point of the extra fields: say WHY it failed, not just that it did
+    assert f["api"] == 1, f"slot was present, so api should be 1: {text}"
+    assert f["pf"] > 0, f"failed power calls not counted: {text}"
+    assert "prc-" in text, f"the resident's error return is not reported: {text}"
+    print(f"dead receiver: nmea=0 nage=999 pwr={f['pwr']} api={f['api']} pf={f['pf']} "
+          f"(rc reported) PASS")
 
     # ---- idle: GPS deliberately off, and that must be distinguishable from a fault ----
     f, text = query_gpsstat({}, tracking=False, settle=4)

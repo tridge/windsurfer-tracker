@@ -875,20 +875,33 @@ static volatile unsigned char g_gps_power_state = GPS_POWER_UNKNOWN;
  * to idle -> OFF fails) would look "already off" and never retry, which is the case this flag exists for.
  * Any power-on request invalidates it, so the retry runs until the resident acknowledges THIS off. */
 static volatile unsigned char g_gps_off_confirmed;
+/* Why a GPS power call failed, not just that it did. Both diagnostics the firmware already had —
+ * "GPS power API missing" and the errno-ish return — print only to VCOM, which needs USB; a unit in
+ * the field could report pwr=UNKNOWN forever with no way to tell a null slot pointer from a resident
+ * that keeps returning an error. */
+static volatile int g_gps_pwr_rc;               /* last return from the GNSS power setter */
+static volatile int g_gps_cfg_rc;               /* last return from the NMEA-config call */
+static volatile unsigned g_gps_pwr_fails;       /* power calls that did not return 0 */
+static volatile unsigned char g_gps_api_ok = 1; /* 0 = the resident slot pointer was NULL */
 
 static int apply_gps(int track)
 {
     gnss1_fn pw = *(gnss1_fn *)SLOT_GNSS_POWER;
     if (!pw) {
+        g_gps_api_ok = 0;
+        g_gps_pwr_fails++;
         vputs("ST: GPS power API missing\r\n");
         return 0;
     }
+    g_gps_api_ok = 1;
 
     g_gps_off_confirmed = 0;                       /* unconfirmed until THIS call returns 0 for an off */
     g_wd_phase = 'G';
     int pwr_ret = pw(track ? 1 : 0);
     g_wd_phase = 0;
+    g_gps_pwr_rc = pwr_ret;
     if (pwr_ret != 0) {
+        g_gps_pwr_fails++;
         vhex(track ? "ST:gps_on_err" : "ST:gps_off_err", (unsigned)pwr_ret);
         vputs(track ? "ST: GPS power on FAILED\r\n" : "ST: GPS power off FAILED\r\n");
         return 0;
@@ -901,6 +914,7 @@ static int apply_gps(int track)
         g_wd_phase = 'G';
         int cfg_ret = cfg ? cfg(1, 1) : -1;
         g_wd_phase = 0;
+        g_gps_cfg_rc = cfg_ret;
         if (cfg_ret != 0) {
             vhex("ST:gps_cfg_err", (unsigned)cfg_ret);
             vputs("ST: GPS NMEA config FAILED\r\n");
@@ -1765,7 +1779,11 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " ok");   n += put_str(out + n, g_plmn_ok[0] ? g_plmn_ok : "any");
         return n;
     }
-    if (prefix_eq(cmd, "CXCS#GPSSTAT")) {                    /* GNSS health — its OWN reply (FWDSTAT is
+    if (prefix_eq(cmd, "CXCS#GPSSTAT")) {
+        /* return codes are errno-ish and usually negative */
+        #define PUT_SIGNED(v) do { int _v = (v); if (_v < 0) { out[n++] = '-'; \
+                                   n += put_uint(out + n, (unsigned)(-_v)); } \
+                                   else n += put_uint(out + n, (unsigned)_v); } while (0)                    /* GNSS health — its OWN reply (FWDSTAT is
                                                               * already at its buffer limit) */
         unsigned now = wd_uptime();
         int n = put_str(out, "READOK:GPSSTAT pwr");
@@ -1786,7 +1804,14 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_uint(out + n, g_nmea_ts ? (now - g_nmea_ts > 999 ? 999 : now - g_nmea_ts) : 999);
         n += put_str(out + n, " fage");
         n += put_uint(out + n, g_have_fix ? (now - g_fix_ts > 999 ? 999 : now - g_fix_ts) : 999);
+        /* api0 => the resident slot pointer is NULL (nothing to call); api1 with a non-zero prc =>
+         * the resident is there and rejecting us. Different faults, different fixes. */
+        n += put_str(out + n, " api"); out[n++] = (char)('0' + (g_gps_api_ok ? 1 : 0));
+        n += put_str(out + n, " prc"); PUT_SIGNED(g_gps_pwr_rc);
+        n += put_str(out + n, " cfg"); PUT_SIGNED(g_gps_cfg_rc);
+        n += put_str(out + n, " pf");  n += put_uint(out + n, g_gps_pwr_fails);
         return n;
+        #undef PUT_SIGNED
     }
     if (prefix_eq(cmd, "CXCS#FWDSTAT")) {                    /* forwarding counters (own reply: room to spare) */
         int n = put_str(out, "READOK:FWDSTAT a");
