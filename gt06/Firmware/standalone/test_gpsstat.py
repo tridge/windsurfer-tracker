@@ -112,7 +112,7 @@ def main():
     # the whole point of the extra fields: say WHY it failed, not just that it did
     assert f["api"] == 1, f"slot was present, so api should be 1: {text}"
     assert f["pf"] > 0, f"failed power calls not counted: {text}"
-    assert "prc-" in text, f"the resident's error return is not reported: {text}"
+    assert "prc-2" in text, f"the resident's error return is not reported: {text}"
     print(f"dead receiver: nmea=0 nage=999 pwr={f['pwr']} api={f['api']} pf={f['pf']} "
           f"(rc reported) PASS")
 
@@ -120,6 +120,16 @@ def main():
     f, text = query_gpsstat({}, tracking=False, settle=4)
     assert f["pwr"] == 1, f"idle should report power OFF (1), got pwr={f['pwr']}: {text}"
     print(f"idle: pwr={f['pwr']} (off, not a fault) PASS")
+
+    # ---- "already in that state" is success, not failure ----
+    # The resident returns -1 when the receiver is already off/on. At boot the GNSS is already off, so
+    # the boot power-off and every 10s idle retry get -1. Counting those as failures left the state
+    # UNKNOWN forever and made the tracking reassert bail before re-asserting NMEA delivery.
+    f, text = query_gpsstat({}, tracking=False, settle=25)
+    assert f["pwr"] == 1, f"repeated no-change returns must still confirm OFF: {text}"
+    assert f["pf"] == 0, f"'already in that state' was counted as a failure (pf={f['pf']}): {text}"
+    assert f["pnc"] > 0, f"no-change returns not counted separately: {text}"
+    print(f"no-change: pwr={f['pwr']} pf={f['pf']} pnc={f['pnc']} PASS")
 
     print("GPSSTAT separates a dead receiver from one that is merely not locked")
 

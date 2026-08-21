@@ -346,18 +346,26 @@ static unsigned g_nmea_period_us = 1000 * 1000;
 static long g_nmea_time_offset_s;
 static int sitl_gnss_power(int on)
 {
+    /* Injected faults return -2, not -1: -1 is the resident's "already in that state", which is a
+     * success. A mock that used -1 for a genuine failure could no longer express the difference. */
     if (on && g_gps_power_failures > 0) {
         g_gps_power_failures--;
         fprintf(stderr, "[SITL] GNSS power-on failure injected (%d remaining)\n", g_gps_power_failures);
-        return -1;
+        return -2;
     }
     if (!on && g_gps_poweroff_skip > 0) {
         g_gps_poweroff_skip--;                    /* let the boot power-off through before injecting */
     } else if (!on && g_gps_poweroff_failures > 0) {
         g_gps_poweroff_failures--;
         fprintf(stderr, "[SITL] GNSS power-off failure injected (%d remaining)\n", g_gps_poweroff_failures);
-        return -1;
+        return -2;
     }
+    /* HW fidelity: the real resident returns 0 only on an actual STATE CHANGE and -1 when the receiver
+     * is already in the requested state (measured on G306161 over USB, 2026-08-22: off->on and on->off
+     * both return 0, repeating either returns -1). The mock used to return 0 unconditionally, which is
+     * more forgiving than the hardware — which is why the firmware treating -1 as a failure went
+     * unnoticed in SITL for so long. Checked AFTER the injections so a simulated fault still wins. */
+    if (g_gps_on == (on ? 1 : 0)) return -1;
     g_gps_on = on ? 1 : 0;
     return 0;
 }

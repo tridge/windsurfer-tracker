@@ -881,7 +881,12 @@ static volatile unsigned char g_gps_off_confirmed;
  * that keeps returning an error. */
 static volatile int g_gps_pwr_rc;               /* last return from the GNSS power setter */
 static volatile int g_gps_cfg_rc;               /* last return from the NMEA-config call */
-static volatile unsigned g_gps_pwr_fails;       /* power calls that did not return 0 */
+static volatile unsigned g_gps_pwr_fails;       /* power calls that genuinely failed */
+static volatile unsigned g_gps_pwr_nochange;    /* ... vs "already in that state", which is success */
+/* What the resident returns when the receiver is already in the requested state. Counted separately
+ * so that if this assumption is ever wrong on some unit it shows up as a huge nochange count rather
+ * than hiding as silent success. */
+#define GNSS_PWR_NOCHANGE (-1)
 static volatile unsigned char g_gps_api_ok = 1; /* 0 = the resident slot pointer was NULL */
 
 static int apply_gps(int track)
@@ -900,6 +905,16 @@ static int apply_gps(int track)
     int pwr_ret = pw(track ? 1 : 0);
     g_wd_phase = 0;
     g_gps_pwr_rc = pwr_ret;
+    /* The resident returns 0 on an actual change and GNSS_PWR_NOCHANGE when the receiver is ALREADY in
+     * the requested state — measured on G306161 over USB (2026-08-22): off->on and on->off both return
+     * 0, repeating either returns -1. That is NOT a failure, and treating it as one did real damage:
+     * an idle unit never confirmed OFF (GPSSTAT reported pwr=UNKNOWN forever), and the 10-second
+     * tracking reassert bailed here on every pass, so the NMEA re-assertion below — the entire reason
+     * the reassert exists — had never executed even once. */
+    if (pwr_ret == GNSS_PWR_NOCHANGE) {
+        g_gps_pwr_nochange++;
+        pwr_ret = 0;
+    }
     if (pwr_ret != 0) {
         g_gps_pwr_fails++;
         vhex(track ? "ST:gps_on_err" : "ST:gps_off_err", (unsigned)pwr_ret);
@@ -1810,6 +1825,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " prc"); PUT_SIGNED(g_gps_pwr_rc);
         n += put_str(out + n, " cfg"); PUT_SIGNED(g_gps_cfg_rc);
         n += put_str(out + n, " pf");  n += put_uint(out + n, g_gps_pwr_fails);
+        n += put_str(out + n, " pnc"); n += put_uint(out + n, g_gps_pwr_nochange);
         return n;
         #undef PUT_SIGNED
     }
