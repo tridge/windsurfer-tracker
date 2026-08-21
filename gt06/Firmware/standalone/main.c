@@ -960,6 +960,13 @@ static char g_scan_acc[480]; static int g_scan_len;
 static volatile unsigned char g_cops_manual;    /* registered via manual COPS -> restore auto later */
 static unsigned g_urc_n;                        /* URC messages consumed since boot (payload-lifetime diagnostics) */
 static unsigned g_nmea_bad;                     /* NMEA lines dropped on checksum (AT-interleave splices) */
+/* GNSS health counters for CXCS#GPSSTAT. During a GPS-wait the batch message is never sent (no fixes),
+ * so without these the server cannot tell a dead receiver from one that is simply still acquiring —
+ * which is exactly the hole hit by G226122's 2h22m GPS-wait through a flight on 2026-08-21. */
+static unsigned g_nmea_lines;                   /* checksum-good NMEA sentences reassembled */
+static unsigned g_rmc_seen;                     /* RMC sentences parsed */
+static unsigned g_rmc_valid;                    /* ... of which reported a valid fix ('A') */
+static unsigned g_nmea_ts;                      /* wd_uptime() of the last good NMEA sentence */
 
 /* Release the heap payload carried in word 3 of a resident 16-byte URC envelope. The vendor consumer
  * (0x7e1d5948) calls free() for every successfully received non-NULL msg[3], after all type-specific use.
@@ -1756,6 +1763,29 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " plmn"); n += put_str(out + n, g_plmn_cur[0] ? g_plmn_cur : "-");
         n += put_str(out + n, " man");  out[n++] = (char)('0' + (g_cops_manual ? 1 : 0));
         n += put_str(out + n, " ok");   n += put_str(out + n, g_plmn_ok[0] ? g_plmn_ok : "any");
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#GPSSTAT")) {                    /* GNSS health — its OWN reply (FWDSTAT is
+                                                              * already at its buffer limit) */
+        unsigned now = wd_uptime();
+        int n = put_str(out, "READOK:GPSSTAT pwr");
+        /* 0=unknown (no power call has succeeded), 1=off, 2=on. NOT a query of the receiver: the
+         * resident API is a setter with no getter, so this is only what we last confirmed. */
+        n += put_uint(out + n, g_gps_power_state);
+        n += put_str(out + n, " nmea"); n += put_uint(out + n, g_nmea_lines);   /* 0 => nothing at all
+                                                                                * from the receiver */
+        n += put_str(out + n, " bad");  n += put_uint(out + n, g_nmea_bad);
+        n += put_str(out + n, " rmc");  n += put_uint(out + n, g_rmc_seen);
+        n += put_str(out + n, " vrmc"); n += put_uint(out + n, g_rmc_valid);    /* 0 with nmea>0 =>
+                                                                                * receiver alive, no lock */
+        n += put_str(out + n, " sats"); n += put_uint(out + n, g_numsats8);
+        n += put_str(out + n, " fix");  n += put_uint(out + n, g_fixtype);      /* 2=2D 3=3D */
+        n += put_str(out + n, " hdop"); n += put_uint(out + n, g_hdop_x10);
+        /* seconds since the last NMEA sentence / the last valid fix; 999 = never */
+        n += put_str(out + n, " nage");
+        n += put_uint(out + n, g_nmea_ts ? (now - g_nmea_ts > 999 ? 999 : now - g_nmea_ts) : 999);
+        n += put_str(out + n, " fage");
+        n += put_uint(out + n, g_have_fix ? (now - g_fix_ts > 999 ? 999 : now - g_fix_ts) : 999);
         return n;
     }
     if (prefix_eq(cmd, "CXCS#FWDSTAT")) {                    /* forwarding counters (own reply: room to spare) */
@@ -3081,10 +3111,13 @@ void standalone_main(u32 loader_resolver)
                     if (!nmea_cksum_ok(g_line)) {  /* spliced/mangled line (AT interleave) -> drop, don't parse */
                         g_nmea_bad++; g_llen = 0; continue;
                     }
+                    g_nmea_lines++; g_nmea_ts = now;
                     parse_gga(g_line);             /* cache sats-in-use / HDOP from any GGA line */
                     parse_gsa(g_line);             /* cache 2D/3D fix type from any GSA line */
                     rmc_t rc;
                     if (parse_rmc(g_line, &rc)) {
+                        g_rmc_seen++;
+                        if (rc.valid) g_rmc_valid++;
                         if (rc.valid && !fix_plausible(&rc, now))
                             rc.valid = 0;          /* impossible jump (checksum-colliding splice) -> drop */
                         vhex("S3c:valid", (unsigned)rc.valid);
