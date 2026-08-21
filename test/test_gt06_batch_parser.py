@@ -127,9 +127,15 @@ def test_out_of_order_elements_are_sorted():
     assert tss == sorted(tss), f"parser left the batch out of order: {tss}"
 
 
-def _sod_now_dt():
-    """A header datetime for 'now', so span tests are not fighting the receipt-time anchor."""
-    t = time.gmtime()
+def _sod_now_dt(offset=-130):
+    """A header datetime `offset` seconds from now (default: in the PAST).
+
+    Span tests must not fight the future bound. A real batch's base is always in the past — the fixes
+    already happened — so a full 120 s span still lands at or before receipt time. Building the base at
+    'now' would push the last element into the future and trip the (correct) future bound instead of
+    testing the span bound.
+    """
+    t = time.gmtime(time.time() + offset)
     return (t.tm_year - 2000, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
 
 
@@ -269,3 +275,40 @@ def test_firmware_update_reports_a_disconnected_device():
     l = _FakeListener(FOTA_DEFAULT_URL, connected=False)
     ok, err = l.firmware_update_device("863874081226122")
     assert not ok and "not connected" in err
+
+
+# ---------------------------------------------------------------------------
+# Fourth-review fixes
+# ---------------------------------------------------------------------------
+
+def test_future_bound_does_not_compose():
+    """The base may sit up to MAX_FUTURE ahead and each element up to MAX_SPAN further; checking those
+    separately let a fix land ~2x the intended limit in the future (base 119s + 120s delta = 239s)."""
+    t = time.gmtime(time.time() + 119)
+    dt = (t.tm_year - 2000, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+    b = gt06_parse_batch(_hdr(count=2, dt=dt) + _elem(0) + _elem(1200))
+    if b is not None:
+        for f in b["fixes"]:
+            assert f["ts"] <= time.time() + GT06_BATCH_MAX_FUTURE_S + 2, (
+                f"fix published {f['ts'] - time.time():.0f}s in the future — the bound composed")
+
+
+def test_fota_url_must_be_dotted_quad():
+    """Our firmware's YCSJ parser takes an IPv4 literal only, so a hostname URL would queue here and
+    then be rejected on the device, where nobody sees it."""
+    l = _FakeListener("http://fw.example.com/W07_FW/firmware_latest_B53.bin")
+    ok, err = l.firmware_update_device("863874081226122")
+    assert not ok and "IPv4" in err
+    assert l.sent == []
+
+
+def test_fota_url_rejects_out_of_range_octet():
+    l = _FakeListener("http://103.230.158.999/W07_FW/firmware_latest_B53.bin")
+    ok, err = l.firmware_update_device("863874081226122")
+    assert not ok and "IPv4" in err
+
+
+def test_fota_url_accepts_the_configured_default():
+    l = _FakeListener(FOTA_DEFAULT_URL)
+    ok, url = l.firmware_update_device("863874081226122")
+    assert ok, url

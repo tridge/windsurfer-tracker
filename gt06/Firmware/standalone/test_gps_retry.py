@@ -144,11 +144,14 @@ def test_power_off_retry():
         raise AssertionError(stdout.decode(errors="replace"))
     if stderr.count(b"GNSS power-off failure injected") != 2:
         raise AssertionError(stderr.decode(errors="replace"))
-    # exactly one success, and no further calls in the ~12 s after it settled
-    if stdout.count(b"ST: GPS off (idle)") != 1:
+    # The retry must STOP once the state settles. A confirming "GPS off (idle)" line only appears when
+    # the resident actually performs a transition; when the receiver was already off it answers -1,
+    # which is ambiguous and no longer promotes the state — evidence (no NMEA at all) settles it
+    # instead. So assert the behaviour, not the log line: the failures stop accumulating.
+    fails_at_settle = stdout.count(b"ST: GPS power off FAILED")
+    if fails_at_settle > 3:
         raise AssertionError(
-            "expected exactly one confirmed power-off, got "
-            f"{stdout.count(b'ST: GPS off (idle)')}\n"
+            f"power-off retries did not stop after the state settled ({fails_at_settle} failures)\n"
             + stdout.decode(errors="replace"))
 
     print("GPS power-OFF retry-until-confirmed PASS")
@@ -202,13 +205,18 @@ def test_power_off_retry_after_failed_power_on():
         listener.close()
         stdout, stderr = finish_sitl(proc)
 
-    if stdout.count(b"ST: GPS power off FAILED") != 2:
-        raise AssertionError("expected 2 failed power-offs\n" + stdout.decode(errors="replace"))
-    # boot success + the retried success after the failures
-    if stdout.count(b"ST: GPS off (idle)") != 2:
+    # The retry must have RUN (both injected failures consumed) and then stopped once the state
+    # settled. A confirming "GPS off (idle)" line appears only on a real transition; when the receiver
+    # is already off the resident answers -1, which no longer promotes the state on its own — evidence
+    # settles it. So assert the retry happened and did not run away, plus the GPS:OFF state above.
+    offs = stdout.count(b"ST: GPS power off FAILED")
+    if offs < 2:
         raise AssertionError(
-            "idle retry did not recover the power-off (stale-state hole)\n"
-            + stdout.decode(errors="replace"))
+            f"idle retry did not re-run after a failed power-on (only {offs} attempts) — the "
+            "stale-state hole is back\n" + stdout.decode(errors="replace"))
+    if offs > 6:
+        raise AssertionError(
+            f"power-off retries never stopped ({offs} attempts)\n" + stdout.decode(errors="replace"))
 
     print("GPS power-OFF retry after a failed power-ON PASS")
 

@@ -539,6 +539,7 @@ def gt06_parse_batch(data):
     if len(data) < GT06_BATCH_HDR + GT06_BATCH_ELEM * count:
         return None
 
+    now = time.time()
     yy, mo, dd, hh, mi, ss = data[5:11]
     base_ds = data[11]
     if base_ds > 9:
@@ -555,7 +556,6 @@ def gt06_parse_batch(data):
             base_ts = time.time()
     # Sanity-anchor against receipt time: a well-formed but absurd date (2099, or a year in the past)
     # passes every field check yet would freeze the live track for as long as it claims.
-    now = time.time()
     if base_ts > now + GT06_BATCH_MAX_FUTURE_S or base_ts < now - GT06_BATCH_MAX_AGE_S:
         base_ts = now
 
@@ -569,8 +569,15 @@ def gt06_parse_batch(data):
             continue                      # drop a corrupt element rather than the whole batch
         if dt_ds / 10.0 > GT06_BATCH_MAX_SPAN_S:
             continue                      # element claims to be far past the batch it arrived in
+        ts = base_ts + dt_ds / 10.0
+        # Bound the RESULT, not just the base: the base may legitimately sit up to
+        # GT06_BATCH_MAX_FUTURE_S ahead and each element may legitimately add up to
+        # GT06_BATCH_MAX_SPAN_S, so checking them separately composes into roughly double the intended
+        # limit (a base 119 s ahead with dt_ds=1200 lands 239 s ahead of receipt).
+        if ts > now + GT06_BATCH_MAX_FUTURE_S:
+            continue
         fixes.append({
-            "ts": base_ts + dt_ds / 10.0,
+            "ts": ts,
             "lat": lat,
             "lon": lon,
             "speed_knots": spd_dkn / 10.0,
@@ -1251,6 +1258,17 @@ class GT06Listener:
             return False, "fota_url must be a plain http:// URL (the downloader has no TLS)"
         if "B53" not in url:
             return False, 'fota_url must contain "B53" or vendor firmware refuses the download'
+        # Our firmware's YCSJ parser accepts a dotted-quad IPv4 ONLY (main.c fota_parse), so a hostname
+        # URL is queued happily here and then silently rejected on the device. Fail it where the
+        # operator can see it.
+        host = url[len("http://"):].split("/", 1)[0].split(":", 1)[0]
+        if not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", host) or \
+           any(int(o) > 255 for o in host.split(".")):
+            return False, f"fota_url host must be a dotted-quad IPv4 (our firmware cannot resolve names): {host}"
+        # NOTE: this is an accident guard, NOT authenticity. The image is fetched over plain HTTP and
+        # validated only by a CRC/XOR the attacker can recompute, so anyone able to intercept the
+        # transfer or write to the web root can supply executable firmware. Real protection needs a
+        # device-side signature or a pinned hash; see gt06/Firmware/OTA_notes.md.
         cmd = f"YCSJ,{url},{FOTA_YCSJ_PORT}#"
         ok = self.queue_command_any(imei, cmd)
         return ok, (url if ok else "device not connected")

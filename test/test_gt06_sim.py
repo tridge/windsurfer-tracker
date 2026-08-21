@@ -699,8 +699,14 @@ def test_gt06_manage_inventory_and_actions(gt06_sim_factory, server):
     status, body = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/reboot")
     assert status in (200, 404)
 
-    status, _ = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/firmware-update")
-    assert status == 501
+    # firmware-update is implemented now (was a 501 placeholder): it queues a YCSJ built from the
+    # server-side fota_url, so a connected device gets 200 with the URL it was told to fetch.
+    status, body = _mgr_post(server, f"/api/manage/gt06/tracker/{sim.imei}/firmware-update")
+    assert status in (200, 404)
+    if status == 200:
+        assert body["success"] is True
+        assert "B53" in body["url"], f"queued a URL vendor firmware would refuse: {body}"
+        assert body["url"].startswith("http://")
 
     status, _ = _mgr_post(server, "/api/manage/gt06/tracker/000000000000000/reboot")
     assert status == 404

@@ -121,12 +121,20 @@ def main():
     assert f["pwr"] == 1, f"idle should report power OFF (1), got pwr={f['pwr']}: {text}"
     print(f"idle: pwr={f['pwr']} (off, not a fault) PASS")
 
+    # ---- a -1 return must NOT be treated as a confirmation ----
+    # It proves the call was accepted, not that the receiver moved. State is confirmed from evidence:
+    # fresh NMEA proves ON; an off request followed by silence proves OFF.
+    f, text = query_gpsstat({}, tracking=True, settle=10)
+    assert f["pwr"] == 2 and f["nmea"] > 0, f"tracking should confirm ON from NMEA: {text}"
+    assert f["req"] == 2, f"requested state should be ON while tracking: {text}"
+    print(f"evidence: pwr={f['pwr']} req={f['req']} nmea={f['nmea']} PASS")
+
     # ---- "already in that state" is success, not failure ----
     # The resident returns -1 when the receiver is already off/on. At boot the GNSS is already off, so
     # the boot power-off and every 10s idle retry get -1. Counting those as failures left the state
     # UNKNOWN forever and made the tracking reassert bail before re-asserting NMEA delivery.
     f, text = query_gpsstat({}, tracking=False, settle=25)
-    assert f["pwr"] == 1, f"repeated no-change returns must still confirm OFF: {text}"
+    assert f["pwr"] == 1, f"repeated no-change returns must still settle to OFF via evidence: {text}"
     assert f["pf"] == 0, f"'already in that state' was counted as a failure (pf={f['pf']}): {text}"
     assert f["pnc"] > 0, f"no-change returns not counted separately: {text}"
     print(f"no-change: pwr={f['pwr']} pf={f['pf']} pnc={f['pnc']} PASS")

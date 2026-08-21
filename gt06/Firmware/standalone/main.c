@@ -875,6 +875,11 @@ static volatile unsigned char g_gps_power_state = GPS_POWER_UNKNOWN;
  * to idle -> OFF fails) would look "already off" and never retry, which is the case this flag exists for.
  * Any power-on request invalidates it, so the retry runs until the resident acknowledges THIS off. */
 static volatile unsigned char g_gps_off_confirmed;
+/* What we last ASKED for, as distinct from what the resident confirmed. A -1 return tells us the call
+ * was accepted but not whether the receiver moved, so the request and the confirmed state can differ
+ * until evidence settles it. */
+static volatile unsigned char g_gps_req = GPS_POWER_UNKNOWN;
+#define GPS_OFF_QUIET_SEC 30            /* NMEA silence after an off request that we accept as proof */
 /* Why a GPS power call failed, not just that it did. Both diagnostics the firmware already had —
  * "GPS power API missing" and the errno-ish return — print only to VCOM, which needs USB; a unit in
  * the field could report pwr=UNKNOWN forever with no way to tell a null slot pointer from a resident
@@ -911,9 +916,19 @@ static int apply_gps(int track)
      * an idle unit never confirmed OFF (GPSSTAT reported pwr=UNKNOWN forever), and the 10-second
      * tracking reassert bailed here on every pass, so the NMEA re-assertion below — the entire reason
      * the reassert exists — had never executed even once. */
+    /* -1 is AMBIGUOUS, not a confirmation. Measurement showed "already in that state" is ONE cause of
+     * it, but not that it is the only one: a busy/uninitialised GNSS service, a driver error or an
+     * unresponsive receiver could plausibly return it too, and promoting the state on that basis would
+     * make us report GPS:ON over a dead receiver — a confident lie, worse than the noisy truth it
+     * replaced. So on -1 we do NOT touch the confirmed state; we only carry on to the NMEA re-assert
+     * below, which is the part that was actually broken. The confirmed state is instead driven by
+     * EVIDENCE: fresh NMEA proves ON, and a request for OFF followed by the stream going quiet proves
+     * OFF (see gps_state_from_evidence). */
     if (pwr_ret == GNSS_PWR_NOCHANGE) {
         g_gps_pwr_nochange++;
-        pwr_ret = 0;
+        g_gps_req = track ? GPS_POWER_ON : GPS_POWER_OFF;
+        if (track) goto assert_nmea;             /* skip the state promotion, keep the cfg re-assert */
+        return 1;
     }
     if (pwr_ret != 0) {
         g_gps_pwr_fails++;
@@ -921,9 +936,12 @@ static int apply_gps(int track)
         vputs(track ? "ST: GPS power on FAILED\r\n" : "ST: GPS power off FAILED\r\n");
         return 0;
     }
+    /* rc == 0 means the resident actually performed the transition — that IS authoritative. */
     g_gps_power_state = track ? GPS_POWER_ON : GPS_POWER_OFF;
+    g_gps_req = g_gps_power_state;
     if (!track) g_gps_off_confirmed = 1;
 
+assert_nmea:
     if (track) {
         gnss2_fn cfg = *(gnss2_fn *)SLOT_GNSS_CFG;
         g_wd_phase = 'G';
@@ -996,6 +1014,34 @@ static unsigned g_nmea_lines;                   /* checksum-good NMEA sentences 
 static unsigned g_rmc_seen;                     /* RMC sentences parsed */
 static unsigned g_rmc_valid;                    /* ... of which reported a valid fix ('A') */
 static unsigned g_nmea_ts;                      /* wd_uptime() of the last good NMEA sentence */
+
+/* Resolve the GNSS power state from evidence rather than from a return code we cannot fully trust.
+ *
+ * ON  is proved by fresh NMEA: the receiver cannot emit sentences while unpowered.
+ * OFF is proved by asking for off and then hearing nothing for GPS_OFF_QUIET_SEC.
+ *
+ * Anything else leaves the previous confirmed state alone — a request whose outcome we do not know
+ * must not masquerade as a confirmation. This is what makes GPSSTAT's pwr trustworthy: it reports what
+ * the receiver is observably doing, not what we last asked it to do. */
+static void gps_state_from_evidence(unsigned now)
+{
+    if (g_nmea_ts && (now - g_nmea_ts) <= 3) {
+        g_gps_power_state = GPS_POWER_ON;        /* sentences are arriving: it is powered, whatever
+                                                  * the last call returned */
+        g_gps_off_confirmed = 0;
+        return;
+    }
+    /* Silence only corroborates an off request that the resident did not hard-reject. After a genuine
+     * error the retry must keep running — otherwise a receiver that failed to power down would be
+     * quietly declared off (it emits nothing while wedged either), which is how the retry added in
+     * 693bc40 would have been defeated. -1 is ambiguous but not an error, so it settles here. */
+    if (g_gps_req == GPS_POWER_OFF &&
+        (g_gps_pwr_rc == 0 || g_gps_pwr_rc == GNSS_PWR_NOCHANGE) &&
+        (!g_nmea_ts || (now - g_nmea_ts) >= GPS_OFF_QUIET_SEC)) {
+        g_gps_power_state = GPS_POWER_OFF;       /* asked for off, and the stream really did stop */
+        g_gps_off_confirmed = 1;
+    }
+}
 
 /* Release the heap payload carried in word 3 of a resident 16-byte URC envelope. The vendor consumer
  * (0x7e1d5948) calls free() for every successfully received non-NULL msg[3], after all type-specific use.
@@ -1826,6 +1872,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " cfg"); PUT_SIGNED(g_gps_cfg_rc);
         n += put_str(out + n, " pf");  n += put_uint(out + n, g_gps_pwr_fails);
         n += put_str(out + n, " pnc"); n += put_uint(out + n, g_gps_pwr_nochange);
+        n += put_str(out + n, " req"); n += put_uint(out + n, g_gps_req);   /* asked-for vs confirmed */
         return n;
         #undef PUT_SIGNED
     }
@@ -3004,8 +3051,24 @@ void standalone_main(u32 loader_resolver)
                         apply_gps(track);
                         /* Don't let a partial batch straddle the transition: on the next tracking
                          * session it would be flushed with a stale base time, dropping old fixes into
-                         * the new session's log and briefly showing an old position. */
-                        if (g_batch_n > 0) batch_spill_to_blind();
+                         * the new session's log and briefly showing an old position.
+                         * SEND it rather than spilling to the blind ring — the server marks the
+                         * connection idle before it sends TIMER, and idle positions skip daily
+                         * logging, so anything replayed after this point is acknowledged and then
+                         * dropped from the track. Sending now, while the server still counts us as
+                         * active, is the only way those tail fixes survive. */
+                        if (g_batch_n > 0 && connected) {
+                            int blen = build_batch_data(g_batch_pay);
+                            int flen = gt06_frame(0xF1, g_batch_pay, blen, serial++, g_batch_frame);
+                            if (se(fd, g_batch_frame, flen, 0) != flen) {
+                                connected = 0;
+                                batch_spill_to_blind();
+                            } else {
+                                g_batch_n = 0;
+                            }
+                        } else if (g_batch_n > 0) {
+                            batch_spill_to_blind();
+                        }
                         g_last_batch = now;
                         last_gps_power = now;
                         g_llen = 0;
@@ -3039,10 +3102,19 @@ void standalone_main(u32 loader_resolver)
          * Fewer than a full batch is fine (send what we have); ZERO fixes sends nothing at all, which is
          * exactly the existing no-fix behaviour. Cleared unconditionally so a stale partial batch can
          * never be emitted with the wrong base time after an outage. */
+        gps_state_from_evidence(now);
         if (g_batch_rephase) { g_last_batch = now; g_batch_rephase = 0; }
         if (g_loc_batch && track && (now - g_last_batch) >= (unsigned)g_loc_batch) {
             g_last_batch = now;
             if (g_batch_n > 0) {
+                if (connected) {
+                    /* Drain any backlog first. Replay runs later in the loop than this flush, so a live
+                     * batch could otherwise go out ahead of OLDER buffered fixes — leaving the jsonl
+                     * out of order and rewinding the connection's last_ts on the server. Batched replay
+                     * is fast enough (10 fixes/frame) that this costs little. */
+                    if (g_blind_count > 0 && !blind_replay_batched(fd, se, &serial))
+                        connected = 0;
+                }
                 if (connected) {
                     int blen = build_batch_data(g_batch_pay);
                     int flen = gt06_frame(0xF1, g_batch_pay, blen, serial++, g_batch_frame);
