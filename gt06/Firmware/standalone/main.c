@@ -1940,6 +1940,28 @@ static int handle_config_cmd(const char *cmd, char *out)
 
         int n = put_str(out, "READOK:SAPIFIND ");
         n += put_str(out + n, name);
+
+        /* CONTROL PATH: "0x<hex>" resolves that literal hash instead of guessing one. Without it a
+         * "none" answer is uninformative — it cannot distinguish "no candidate algorithm matched" from
+         * "the resolver call itself is broken". Feed a hash from sapi_pairs.h, which the resident
+         * demonstrably knows (we resolve all 458 of them every boot): a non-zero reply proves the
+         * instrument works, and only then is a negative result worth believing. */
+        if (name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
+            u32 h = 0;
+            for (int i = 2; name[i]; i++) {
+                char c = name[i];
+                u32 d;
+                if (c >= '0' && c <= '9') d = (u32)(c - '0');
+                else if (c >= 'a' && c <= 'f') d = (u32)(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F') d = (u32)(c - 'A' + 10);
+                else break;
+                h = (h << 4) | d;
+            }
+            n += put_str(out + n, " literal=");
+            n += put_hex32(out + n, rv(h, 0));
+            return n;
+        }
+
         int hits = 0;
         for (unsigned a = 0; a < SAPI_HASH_ALGOS && n < 150; a++) {
             u32 h = sapi_name_hash(a, name);
