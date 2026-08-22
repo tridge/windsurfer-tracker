@@ -846,6 +846,78 @@ static int blind_replay_batched(int fd, send_fn se, unsigned short *serial)
     return 1;
 }
 
+/* ---- sAPI symbol-hash candidates (CXCS#SAPIFIND) -------------------------------------------------
+ * We do not know how the vendor turns a symbol name into the 32-bit hash its resolver expects, and it
+ * is probably a build-time artifact rather than something present in either binary. So enumerate the
+ * usual suspects and let the live resolver adjudicate: a non-zero return means that hash is a real
+ * exported symbol, which for a name we chose is essentially proof of the algorithm.
+ *
+ * Index = algorithm * SAPI_HASH_XFORMS + transform, so one number identifies both. */
+typedef u32 (*resolver_fn)(u32 hash, u32 zero);
+
+#define SAPI_HASH_XFORMS 4u
+#define SAPI_HASH_FUNCS  9u
+#define SAPI_HASH_ALGOS  (SAPI_HASH_XFORMS * SAPI_HASH_FUNCS)
+
+/* Apply transform t to the name, one character at a time (no buffers: names are short and we only
+ * need the byte stream). Returns 0 when the character should be skipped. */
+static int sapi_xform_skip(unsigned t, const char *name, int i)
+{
+    if (t == 1) {                                   /* drop a leading "sAPI_" */
+        if (name[0]=='s' && name[1]=='A' && name[2]=='P' && name[3]=='I' && name[4]=='_')
+            return i < 5;
+    }
+    return 0;
+}
+static unsigned char sapi_xform_ch(unsigned t, unsigned char c)
+{
+    if (t == 2 && c >= 'A' && c <= 'Z') return (unsigned char)(c + 32);   /* lower */
+    if (t == 3 && c >= 'a' && c <= 'z') return (unsigned char)(c - 32);   /* UPPER */
+    return c;
+}
+
+static u32 sapi_name_hash(unsigned idx, const char *name)
+{
+    unsigned fn = idx / SAPI_HASH_XFORMS, t = idx % SAPI_HASH_XFORMS;
+    u32 h;
+    switch (fn) {
+    case 0: h = 5381u; break;                       /* djb2   */
+    case 1: h = 5381u; break;                       /* djb2^  */
+    case 2: h = 0u; break;                          /* sdbm   */
+    case 3: h = 0x811c9dc5u; break;                 /* fnv1   */
+    case 4: h = 0x811c9dc5u; break;                 /* fnv1a  */
+    case 5: h = 0u; break;                          /* elf    */
+    case 6: h = 0u; break;                          /* joaat  */
+    case 7: h = 0xFFFFFFFFu; break;                 /* crc32  */
+    default: h = 0u; break;                         /* sum    */
+    }
+    for (int i = 0; name[i]; i++) {
+        if (sapi_xform_skip(t, name, i)) continue;
+        unsigned char c = sapi_xform_ch(t, (unsigned char)name[i]);
+        switch (fn) {
+        case 0: h = h * 33u + c; break;
+        case 1: h = (h * 33u) ^ c; break;
+        case 2: h = c + (h << 6) + (h << 16) - h; break;
+        case 3: h = h * 0x01000193u; h ^= c; break;
+        case 4: h ^= c; h = h * 0x01000193u; break;
+        case 5: { h = (h << 4) + c; u32 g = h & 0xF0000000u; if (g) h ^= g >> 24; h &= ~g; break; }
+        case 6: h += c; h += h << 10; h ^= h >> 6; break;
+        case 7: { h ^= c; for (int b = 0; b < 8; b++) h = (h & 1u) ? ((h >> 1) ^ 0xEDB88320u) : (h >> 1); break; }
+        default: h += c; break;
+        }
+    }
+    if (fn == 6) { h += h << 3; h ^= h >> 11; h += h << 15; }
+    if (fn == 7) h ^= 0xFFFFFFFFu;
+    return h;
+}
+
+static int put_hex32(char *b, u32 v)
+{
+    static const char hx[] = "0123456789abcdef";
+    for (int i = 7; i >= 0; i--) b[7 - i] = hx[(v >> (i * 4)) & 0xF];
+    return 8;
+}
+
 /* ---- item 1: idle/tracking state, driven by the server TIMER command ----
  * The server pushes TIMER,T1,T2 (0x80 online command). We NEVER use the accelerometer / never wake on
  * movement — TIMER alone is the state+rate signal: T1<=5 => TRACKING (GPS on, LOC every T1 s); T1>5 =>
@@ -1838,6 +1910,48 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " plmn"); n += put_str(out + n, g_plmn_cur[0] ? g_plmn_cur : "-");
         n += put_str(out + n, " man");  out[n++] = (char)('0' + (g_cops_manual ? 1 : 0));
         n += put_str(out + n, " ok");   n += put_str(out + n, g_plmn_ok[0] ? g_plmn_ok : "any");
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#SAPIFIND")) {
+        /* Symbol-resolver oracle: CXCS#SAPIFIND=<name>
+         *
+         * Both sides of the sAPI mechanism use PRECOMPUTED hashes — the app resolves 458 compile-time
+         * constants — so the name->hash function probably exists only in the vendor's build tooling,
+         * not in either binary. But the resident resolver is a lookup we can query: resolver(hash)
+         * returns a pointer, or 0 for an unknown hash. So instead of reversing the algorithm we can
+         * GUESS it and let the device tell us which guess is right.
+         *
+         * This is safe: sapi_table_fill() already calls this exact resolver 458 times on every boot.
+         * We are only looking symbols up, never calling what comes back.
+         *
+         * A hit is self-validating when the returned pointer equals one already sitting in a known
+         * slot — that confirms the algorithm AND the naming convention in one shot. */
+        const char *nm = skip_to_val(cmd, "SAPIFIND");
+        char name[48];
+        int nl = 0;
+        if (nm) while (nm[nl] && nm[nl] != '#' && nl < (int)sizeof name - 1) { name[nl] = nm[nl]; nl++; }
+        name[nl] = 0;
+        if (!nl) return put_str(out, "SET ERROR: SAPIFIND needs a symbol name");
+
+        /* SL() so this works on the host too: RESOLVER_SLOT is a bare device address, and SITL
+         * remaps slot addresses into sitl_slots[]. Dereferencing it raw segfaults under SITL. */
+        resolver_fn rv = *(resolver_fn *)SL(RESOLVER_SLOT);
+        if (!rv) return put_str(out, "READOK:SAPIFIND resolver=0");
+
+        int n = put_str(out, "READOK:SAPIFIND ");
+        n += put_str(out + n, name);
+        int hits = 0;
+        for (unsigned a = 0; a < SAPI_HASH_ALGOS && n < 150; a++) {
+            u32 h = sapi_name_hash(a, name);
+            u32 p = rv(h, 0);
+            if (!p) continue;                      /* unknown hash: the overwhelmingly common case */
+            hits++;
+            n += put_str(out + n, " a");
+            n += put_uint(out + n, a);
+            n += put_str(out + n, "=");
+            n += put_hex32(out + n, p);
+        }
+        if (!hits) n += put_str(out + n, " none");
         return n;
     }
     if (prefix_eq(cmd, "CXCS#GPSSTAT")) {

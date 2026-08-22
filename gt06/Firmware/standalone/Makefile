@@ -102,10 +102,13 @@ test-battery-mv: sitl-asan           ## supervisor battery mV, including a unit 
 test-gpsstat: sitl-asan              ## CXCS#GPSSTAT tells a dead receiver from an unlocked one
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_gpsstat.py
 
-test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat  ## all SITL regression tests
+test-sapifind: sitl-asan             ## CXCS#SAPIFIND identifies the resolver's hash scheme
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_sapifind.py
+
+test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan
 
-.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test clean
+.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test clean

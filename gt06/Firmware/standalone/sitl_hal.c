@@ -331,6 +331,34 @@ static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ms)
     return got ? 0 : 1;                           /* fw only reads msg[3]; leaves it 0 when empty */
 }
 
+/* ================= symbol resolver mock (for CXCS#SAPIFIND) =================
+ * The real resident resolves a 32-bit name hash to a function pointer, returning 0 for anything it
+ * does not export. We do not know the vendor's hashing scheme, so SAPIFIND guesses: it tries a set of
+ * candidate algorithms and reports whichever the resolver accepts.
+ *
+ * This mock picks ONE scheme (djb2 over the name with the "sAPI_" prefix stripped) and knows a couple
+ * of names, so a test can verify SAPIFIND actually discovers an unknown scheme rather than merely not
+ * crashing. It deliberately does NOT tell the firmware which one it is. */
+static unsigned sitl_secret_hash(const char *name)
+{
+    const char *p = name;
+    if (!strncmp(p, "sAPI_", 5)) p += 5;             /* the transform the firmware must discover */
+    unsigned h = 5381u;
+    for (; *p; p++) h = h * 33u + (unsigned char)*p; /* djb2 */
+    return h;
+}
+static u32 sitl_resolver(u32 hash, u32 zero)
+{
+    (void)zero;
+    static const char *const known[] = {
+        "sAPI_TaskCreate", "sAPI_GnssPowerStatusGet", "sAPI_SmsDelAllMsg",
+    };
+    for (unsigned i = 0; i < sizeof known / sizeof known[0]; i++)
+        if (sitl_secret_hash(known[i]) == hash)
+            return 0x7E600000u + i * 4u;             /* plausible resident code pointer */
+    return 0;
+}
+
 /* ================= GNSS: power flag + NMEA injector thread ================= */
 static volatile int g_gps_on;
 static int g_gps_power_failures;                  /* SITL_GNSS_POWER_FAILS: fail the first N power-on calls */
@@ -815,6 +843,7 @@ int sapi_table_fill(u32 loader_resolver)
     PUTSLOT(0x7E1E23F8u, sitl_setsockopt);   /* SETSOCKOPT */
     PUTSLOT(0x7E1E2578u, sitl_ppp_dial);     /* PPP_DIAL */
 
+    PUTSLOT(0x7E1E2444u, sitl_resolver);     /* symbol resolver (CXCS#SAPIFIND oracle) */
     PUTSLOT(0x7E1E21ACu, sitl_gnss_power);   /* GNSS_POWER (== GPS_POWER) */
     PUTSLOT(0x7E1E2418u, sitl_gnss_cfg);     /* GNSS_CFG  */
     PUTSLOT(0x7E1E2344u, sitl_gnss_freq);    /* GNSS_FREQ */
