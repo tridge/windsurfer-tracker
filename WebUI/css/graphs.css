@@ -138,6 +138,7 @@
 .graph-panel[data-type="latency"] { --graph-color: #e67e22; }
 .graph-panel[data-type="heartrate"] { --graph-color: #e91e63; }
 .graph-panel[data-type="accuracy"] { --graph-color: #9b59b6; }
+.graph-panel[data-type="heading"] { --graph-color: #8e9bff; }
 .graph-panel[data-type="distance"] { --graph-color: #1abc9c; }
 
 /* Mobile responsive adjustments */

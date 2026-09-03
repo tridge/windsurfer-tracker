@@ -58,6 +58,7 @@
             <button id="graphs-btn">Graphs ▼</button>
             <div id="graphs-dropdown-content" class="graphs-dropdown-content">
                 <label><input type="checkbox" id="show-speed-graph"> Speed</label>
+                <label><input type="checkbox" id="show-heading-graph"> Heading</label>
                 <label><input type="checkbox" id="show-distance-graph"> Distance</label>
                 <label><input type="checkbox" id="show-battery-graph"> Battery</label>
                 <label><input type="checkbox" id="show-signal-graph"> Signal</label>
@@ -127,6 +128,28 @@
             <div class="graph-x-axis">
                 <span id="speed-time-start">--:--</span>
                 <span id="speed-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Heading graph panel -->
+    <div id="heading-graph-panel" class="graph-panel" data-type="heading">
+        <div id="heading-graph-resize" class="graph-resize"></div>
+        <div id="heading-graph-container" class="graph-container">
+            <div class="graph-title">Heading (degrees)</div>
+            <div class="graph-y-axis" id="heading-y-labels">
+                <span>360</span>
+                <span>270</span>
+                <span>180</span>
+                <span>90</span>
+                <span>0</span>
+            </div>
+            <canvas id="heading-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
+            <div class="graph-x-axis">
+                <span id="heading-time-start">--:--</span>
+                <span id="heading-time-end">--:--</span>
             </div>
         </div>
     </div>
@@ -645,6 +668,7 @@
             // Graphs
             const graphs = [];
             if (document.getElementById('show-speed-graph').checked) graphs.push('speed');
+            if (document.getElementById('show-heading-graph').checked) graphs.push('heading');
             if (document.getElementById('show-distance-graph').checked) graphs.push('distance');
             if (document.getElementById('show-battery-graph').checked) graphs.push('battery');
             if (document.getElementById('show-signal-graph').checked) graphs.push('signal');
@@ -684,6 +708,7 @@
             if (params.has('graphs')) {
                 const graphs = params.get('graphs').split(',');
                 if (graphs.includes('speed')) document.getElementById('show-speed-graph').checked = true;
+                if (graphs.includes('heading')) document.getElementById('show-heading-graph').checked = true;
                 if (graphs.includes('distance')) document.getElementById('show-distance-graph').checked = true;
                 if (graphs.includes('battery')) document.getElementById('show-battery-graph').checked = true;
                 if (graphs.includes('signal')) document.getElementById('show-signal-graph').checked = true;
@@ -2065,11 +2090,13 @@
             updateTimeDisplay();
             drawTracks();
             drawSpeedGraph();
+            drawHeadingGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawSatellitesGraph();
             drawDistanceGraph();
         }
 
@@ -2267,11 +2294,13 @@
         function redrawAll() {
             drawTracks();
             drawSpeedGraph();
+            drawHeadingGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawSatellitesGraph();
             drawDistanceGraph();
         }
 
@@ -3491,6 +3520,137 @@
             }
         }
 
+        // Normalise a stored heading to 0..360, or null when the entry has none
+        function headingOf(entry) {
+            if (entry.hdg === undefined || entry.hdg === null) return null;
+            const h = Number(entry.hdg);
+            if (!isFinite(h)) return null;
+            return ((h % 360) + 360) % 360;
+        }
+
+        function drawHeadingGraph() {
+            // Only draw if heading graph is visible
+            if (!document.getElementById('show-heading-graph').checked) return;
+
+            const canvas = document.getElementById('heading-graph');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size to match display size (for sharp rendering)
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Update time axis labels
+            document.getElementById('heading-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('heading-time-end').textContent = formatTimeShortInTz(rangeEndTime);
+
+            // Draw grid lines (fixed 0-360 scale, so the Y labels never change)
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // No users selected
+            if (selectedUsers.size === 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Select a user to see heading graph', width / 2, height / 2);
+                return;
+            }
+
+            const timeSpan = rangeEndTime - rangeStartTime;
+            if (timeSpan <= 0) return;
+
+            // Draw heading line for each selected user
+            let hasHeadingData = false;
+            let colorIdx = 0;
+            for (const [userId, entries] of sortedUserData()) {
+                const userColor = userColors[colorIdx % userColors.length];
+                colorIdx++;
+
+                if (!selectedUsers.has(userId)) continue;
+
+                // Filter entries by time range and having heading data
+                const filtered = entries.filter(e => e.ts >= rangeStartTime && e.ts <= rangeEndTime && headingOf(e) !== null);
+                if (filtered.length === 0) continue;
+                hasHeadingData = true;
+
+                ctx.strokeStyle = userColor;
+                ctx.fillStyle = userColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let prev = null, prevX = 0;
+                for (const entry of filtered) {
+                    const hdg = headingOf(entry);
+                    const x = ((entry.ts - rangeStartTime) / timeSpan) * width;
+                    const y = height - (hdg / 360) * height;
+
+                    if (prev === null) {
+                        ctx.moveTo(x, y);
+                    } else if (hdg - prev > 180) {
+                        // wrapped down through 0 (e.g. 10 -> 350): exit at 0, re-enter at 360
+                        const f = prev / (prev + (360 - hdg));
+                        const xEdge = prevX + (x - prevX) * f;
+                        ctx.lineTo(xEdge, height);
+                        ctx.moveTo(xEdge, 0);
+                        ctx.lineTo(x, y);
+                    } else if (prev - hdg > 180) {
+                        // wrapped up through 360 (e.g. 350 -> 10): exit at 360, re-enter at 0
+                        const f = (360 - prev) / ((360 - prev) + hdg);
+                        const xEdge = prevX + (x - prevX) * f;
+                        ctx.lineTo(xEdge, 0);
+                        ctx.moveTo(xEdge, height);
+                        ctx.lineTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                    prev = hdg;
+                    prevX = x;
+                }
+                ctx.stroke();
+
+                // A lone sample strokes nothing, so mark it with a dot
+                if (filtered.length === 1) {
+                    const only = filtered[0];
+                    ctx.beginPath();
+                    ctx.arc(((only.ts - rangeStartTime) / timeSpan) * width,
+                            height - (headingOf(only) / 360) * height, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Draw user label at the end of the line
+                const last = filtered[filtered.length - 1];
+                const lastHdg = headingOf(last);
+                const lastX = ((last.ts - rangeStartTime) / timeSpan) * width;
+                const lastY = height - (lastHdg / 360) * height;
+                ctx.fillStyle = userColor;
+                ctx.font = 'bold 10px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(`${getDisplayName(userId)}: ${Math.round(lastHdg)}\u00b0`, Math.min(lastX, width - 5), lastY - 5);
+            }
+
+            if (!hasHeadingData) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No heading data available', width / 2, height / 2);
+            }
+        }
+
         function drawSatellitesGraph() {
             // Only draw if satellites graph is visible
             if (!document.getElementById('show-satellites-graph').checked) return;
@@ -3814,6 +3974,9 @@
             if (document.getElementById('show-speed-graph').checked) {
                 drawSpeedGraph();
             }
+            if (document.getElementById('show-heading-graph').checked) {
+                drawHeadingGraph();
+            }
             if (document.getElementById('show-battery-graph').checked) {
                 drawBatteryGraph();
             }
@@ -4006,6 +4169,7 @@
             // Redraw graphs then overlay cursor line
             const graphIds = [
                 ['show-speed-graph', 'speed-graph', drawSpeedGraph],
+                ['show-heading-graph', 'heading-graph', drawHeadingGraph],
                 ['show-battery-graph', 'battery-graph', drawBatteryGraph],
                 ['show-signal-graph', 'signal-graph', drawSignalGraph],
                 ['show-latency-graph', 'latency-graph', drawLatencyGraph],
@@ -4051,6 +4215,7 @@
 
             // Redraw all visible graphs to clear the cursor overlay
             if (document.getElementById('show-speed-graph').checked) drawSpeedGraph();
+            if (document.getElementById('show-heading-graph').checked) drawHeadingGraph();
             if (document.getElementById('show-battery-graph').checked) drawBatteryGraph();
             if (document.getElementById('show-signal-graph').checked) drawSignalGraph();
             if (document.getElementById('show-latency-graph').checked) drawLatencyGraph();
@@ -4217,6 +4382,12 @@
                 drawHighlightOnGraph('accuracy-graph', highlightX, ratio, timestamp, 'hac', maxAcc, 0);
             }
 
+            // Draw heading graph with highlight if visible (fixed 0-360 scale)
+            if (document.getElementById('show-heading-graph').checked) {
+                drawHeadingGraph();
+                drawHighlightOnGraph('heading-graph', highlightX, ratio, timestamp, 'hdg', 360, 0, headingOf);
+            }
+
             // Draw satellites graph with highlight if visible
             if (document.getElementById('show-satellites-graph').checked) {
                 drawSatellitesGraph();
@@ -4299,7 +4470,7 @@
             }
         }
 
-        function drawHighlightOnGraph(canvasId, highlightX, ratio, timestamp, dataField, maxValue, minValue = 0) {
+        function drawHighlightOnGraph(canvasId, highlightX, ratio, timestamp, dataField, maxValue, minValue = 0, valueFn = null) {
             const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
             const rect = canvas.getBoundingClientRect();
@@ -4339,7 +4510,7 @@
                     }
                 }
 
-                const value = closest[dataField];
+                const value = valueFn ? valueFn(closest) : closest[dataField];
                 if (value !== undefined && value !== null) {
                     const x = ((closest.ts - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
                     const y = height - ((value - minValue) / valueRange) * height;
@@ -4363,6 +4534,16 @@
         });
 
         document.getElementById('speed-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+        });
+
+        document.getElementById('heading-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            showGraphHighlight(mouseX, 'heading-graph');
+        });
+
+        document.getElementById('heading-graph').addEventListener('mouseleave', () => {
             clearGraphHighlight();
         });
 
@@ -4468,7 +4649,7 @@
         });
 
         // Set up rubber-band selection on all graph canvases
-        ['speed-graph', 'battery-graph', 'signal-graph', 'latency-graph',
+        ['speed-graph', 'heading-graph', 'battery-graph', 'signal-graph', 'latency-graph',
          'heartrate-graph', 'accuracy-graph', 'satellites-graph', 'distance-graph'].forEach(id => {
             const canvas = document.getElementById(id);
             if (canvas) {
@@ -4487,6 +4668,7 @@
 
         // Graph resize functionality
         let speedGraphHeight = parseInt(localStorage.getItem('speedGraphHeight')) || 150;
+        let headingGraphHeight = parseInt(localStorage.getItem('headingGraphHeight')) || 150;
         let batteryGraphHeight = parseInt(localStorage.getItem('batteryGraphHeight')) || 150;
         let signalGraphHeight = parseInt(localStorage.getItem('signalGraphHeight')) || 150;
         let latencyGraphHeight = parseInt(localStorage.getItem('latencyGraphHeight')) || 150;
@@ -4495,6 +4677,7 @@
         let satellitesGraphHeight = parseInt(localStorage.getItem('satellitesGraphHeight')) || 150;
         let distanceGraphHeight = parseInt(localStorage.getItem('distanceGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
+        const headingPanel = document.getElementById('heading-graph-panel');
         const batteryPanel = document.getElementById('battery-graph-panel');
         const signalPanel = document.getElementById('signal-graph-panel');
         const latencyPanel = document.getElementById('latency-graph-panel');
@@ -4503,6 +4686,7 @@
         const satellitesPanel = document.getElementById('satellites-graph-panel');
         const distancePanel = document.getElementById('distance-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
+        const headingResizeHandle = document.getElementById('heading-graph-resize');
         const batteryResizeHandle = document.getElementById('battery-graph-resize');
         const signalResizeHandle = document.getElementById('signal-graph-resize');
         const latencyResizeHandle = document.getElementById('latency-graph-resize');
@@ -4517,6 +4701,7 @@
 
         // Apply saved heights
         speedPanel.style.height = speedGraphHeight + 'px';
+        headingPanel.style.height = headingGraphHeight + 'px';
         batteryPanel.style.height = batteryGraphHeight + 'px';
         signalPanel.style.height = signalGraphHeight + 'px';
         latencyPanel.style.height = latencyGraphHeight + 'px';
@@ -4528,6 +4713,7 @@
         function updateGraphPositions() {
             const mapEl = document.getElementById('map');
             const speedVisible = document.getElementById('show-speed-graph').checked;
+            const headingVisible = document.getElementById('show-heading-graph').checked;
             const batteryVisible = document.getElementById('show-battery-graph').checked;
             const signalVisible = document.getElementById('show-signal-graph').checked;
             const latencyVisible = document.getElementById('show-latency-graph').checked;
@@ -4541,7 +4727,7 @@
             let totalHeight = timelineHeight;
             let currentBottom = timelineHeight;
 
-            // Stack from bottom: distance, accuracy, heartrate, latency, signal, battery, speed
+            // Stack from bottom: distance, satellites, accuracy, heartrate, latency, signal, battery, heading, speed
             if (distanceVisible) {
                 distancePanel.style.display = 'block';
                 distancePanel.style.bottom = currentBottom + 'px';
@@ -4605,6 +4791,15 @@
                 batteryPanel.style.display = 'none';
             }
 
+            if (headingVisible) {
+                headingPanel.style.display = 'block';
+                headingPanel.style.bottom = currentBottom + 'px';
+                currentBottom += headingGraphHeight;
+                totalHeight += headingGraphHeight;
+            } else {
+                headingPanel.style.display = 'none';
+            }
+
             if (speedVisible) {
                 speedPanel.style.display = 'block';
                 speedPanel.style.bottom = currentBottom + 'px';
@@ -4627,6 +4822,17 @@
             startY = e.clientY;
             startHeight = speedGraphHeight;
             speedResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        headingResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'heading';
+            startY = e.clientY;
+            startHeight = headingPanel.offsetHeight;
+            headingResizeHandle.classList.add('dragging');
             document.body.style.cursor = 'ns-resize';
             document.body.style.userSelect = 'none';
             e.preventDefault();
@@ -4718,6 +4924,9 @@
             if (resizingPanel === 'speed') {
                 speedPanel.style.height = newHeight + 'px';
                 speedGraphHeight = newHeight;
+            } else if (resizingPanel === 'heading') {
+                headingPanel.style.height = newHeight + 'px';
+                headingGraphHeight = newHeight;
             } else if (resizingPanel === 'battery') {
                 batteryPanel.style.height = newHeight + 'px';
                 batteryGraphHeight = newHeight;
@@ -4745,6 +4954,7 @@
 
             // Redraw graphs at new size
             drawSpeedGraph();
+            drawHeadingGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
@@ -4758,6 +4968,7 @@
             if (isResizing) {
                 isResizing = false;
                 speedResizeHandle.classList.remove('dragging');
+                headingResizeHandle.classList.remove('dragging');
                 batteryResizeHandle.classList.remove('dragging');
                 signalResizeHandle.classList.remove('dragging');
                 latencyResizeHandle.classList.remove('dragging');
@@ -4768,6 +4979,7 @@
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 localStorage.setItem('speedGraphHeight', speedGraphHeight);
+                localStorage.setItem('headingGraphHeight', headingGraphHeight);
                 localStorage.setItem('batteryGraphHeight', batteryGraphHeight);
                 localStorage.setItem('signalGraphHeight', signalGraphHeight);
                 localStorage.setItem('latencyGraphHeight', latencyGraphHeight);
@@ -5196,6 +5408,13 @@
             }
         });
 
+        document.getElementById('show-heading-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawHeadingGraph();
+            }
+        });
+
         document.getElementById('show-accuracy-graph').addEventListener('change', (e) => {
             updateGraphPositions();
             if (e.target.checked) {
@@ -5225,11 +5444,13 @@
             resetPlaybackPosition();
             drawTracks();
             drawSpeedGraph();
+            drawHeadingGraph();
             drawBatteryGraph();
             drawSignalGraph();
             drawLatencyGraph();
             drawHeartRateGraph();
             drawAccuracyGraph();
+            drawSatellitesGraph();
             drawDistanceGraph();
         });
 
