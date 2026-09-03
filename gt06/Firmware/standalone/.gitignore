@@ -9,3 +9,10 @@ standalone_fw_cpad.bin
 standalone_fw_fill.bin
 standalone_fw_padded.bin
 standalone_fota.bin
+usb_debug.elf
+usb_debug.raw
+usb_debug_fw.bin
+customer_app_usb_debug.bin
+customer_app_usb_debug.bin.flash.zip
+W07_USBDBG_B53.bin
+usb-debug-sitl

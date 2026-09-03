@@ -361,6 +361,7 @@ static u32 sitl_resolver(u32 hash, u32 zero)
 
 /* ================= GNSS: power flag + NMEA injector thread ================= */
 static volatile int g_gps_on;
+/* SITL_GNSS_INITIAL_ON: model a receiver left powered across the app start. */
 static int g_gps_power_failures;                  /* SITL_GNSS_POWER_FAILS: fail the first N power-on calls */
 static int g_gps_poweroff_failures;               /* SITL_GNSS_POWEROFF_FAILS: fail N power-off calls */
 static int g_gps_poweroff_skip;                   /* SITL_GNSS_POWEROFF_SKIP: let the first N succeed first */
@@ -397,6 +398,7 @@ static int sitl_gnss_power(int on)
     g_gps_on = on ? 1 : 0;
     return 0;
 }
+static int sitl_gnss_power_status(void) { return g_gps_on; }
 static int sitl_gnss_cfg(int a, int b) { (void)a; (void)b; return 0; }
 static int sitl_gnss_freq(int a) { (void)a; return 0; }
 
@@ -845,6 +847,7 @@ int sapi_table_fill(u32 loader_resolver)
 
     PUTSLOT(0x7E1E2444u, sitl_resolver);     /* symbol resolver (CXCS#SAPIFIND oracle) */
     PUTSLOT(0x7E1E21ACu, sitl_gnss_power);   /* GNSS_POWER (== GPS_POWER) */
+    PUTSLOT(0x7E1E25DCu, sitl_gnss_power_status); /* sAPI_GnssPowerStatusGet */
     PUTSLOT(0x7E1E2418u, sitl_gnss_cfg);     /* GNSS_CFG  */
     PUTSLOT(0x7E1E2344u, sitl_gnss_freq);    /* GNSS_FREQ */
     PUTSLOT(0x7E1E25D0u, sitl_msgq_create);  /* MSGQ_CREATE */
@@ -928,6 +931,7 @@ int main(int argc, char **argv)
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_SKIP"))) g_gps_poweroff_skip = atoi(e);
+    if (getenv("SITL_GNSS_INITIAL_ON")) g_gps_on = 1;
     if ((e = getenv("SITL_BATT_MV"))) { int v = atoi(e); if (v > 0) g_batt_mv_sim = (unsigned)v; }
     if ((e = getenv("SITL_NMEA_TIME_OFFSET_S"))) g_nmea_time_offset_s = atol(e);
     if ((e = getenv("SITL_NMEA_HZ"))) {

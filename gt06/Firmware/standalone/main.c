@@ -931,9 +931,9 @@ static int put_hex32(char *b, u32 v)
 #define CONN_TIMEOUT_SEC 30    /* abandon a pending connect (covers lwIP SYN retransmits) */
 
 /* GPS power follows the state. Tracking brings GNSS up with its default 1 Hz NMEA URC — the LOC send is
- * gated to T1 s in the loop; idle forces GNSS power OFF. The resident power API is a setter, not a getter,
- * so g_gps_power_state records only states confirmed by a successful API return. A failed setter leaves the
- * previous confirmed state intact (or UNKNOWN at boot), rather than claiming the requested state happened.
+ * gated to T1 s in the loop; idle forces GNSS power OFF. WDBG work on G306161 identified the previously
+ * unnamed status getter at slot 0x7e1e25dc (hash 0xe6a5ffad). It is the authoritative state source; fresh
+ * NMEA / post-off silence remain a compatibility fallback if a different resident omits that export.
  *
  * GNSS_FREQ is intentionally not called: live probing proved gnss_set_freq(1) returns -1 on this resident,
  * while the receiver already defaults to the required 1 Hz. */
@@ -965,6 +965,41 @@ static volatile unsigned g_gps_pwr_nochange;    /* ... vs "already in that state
  * than hiding as silent success. */
 #define GNSS_PWR_NOCHANGE (-1)
 static volatile unsigned char g_gps_api_ok = 1; /* 0 = the resident slot pointer was NULL */
+static volatile unsigned char g_gps_status_api_ok = 1;
+static volatile unsigned char g_gps_status_raw = 0xff; /* last getter result; 0xff = never/invalid */
+static unsigned g_gps_status_ts;
+static unsigned char g_gps_status_seen;
+
+/* Refresh at most once per caller-selected tick. The real off->on transition is asynchronous: on
+ * G306161 the setter returned 0 immediately while this getter changed 0->1 roughly three seconds later.
+ * Consequently a successful setter must not promote the requested state ahead of this observation. */
+static int gps_status_refresh(unsigned now, int force)
+{
+    gnss_status_fn status = *(gnss_status_fn *)SLOT_GNSS_POWER_STATUS;
+    if (!status) {
+        g_gps_status_api_ok = 0;
+        return 0;
+    }
+    g_gps_status_api_ok = 1;
+    if (!force && g_gps_status_seen && g_gps_status_ts == now) return 1;
+    g_gps_status_seen = 1;
+    g_gps_status_ts = now;
+    g_wd_phase = 'G';
+    int raw = status();
+    g_wd_phase = 0;
+    g_gps_status_raw = (unsigned char)raw;
+    if (raw == 0) {
+        g_gps_power_state = GPS_POWER_OFF;
+        if (g_gps_req == GPS_POWER_OFF) g_gps_off_confirmed = 1;
+        return 1;
+    }
+    if (raw == 1) {
+        g_gps_power_state = GPS_POWER_ON;
+        g_gps_off_confirmed = 0;
+        return 1;
+    }
+    return 0;
+}
 
 static int apply_gps(int track)
 {
@@ -1008,10 +1043,13 @@ static int apply_gps(int track)
         vputs(track ? "ST: GPS power on FAILED\r\n" : "ST: GPS power off FAILED\r\n");
         return 0;
     }
-    /* rc == 0 means the resident actually performed the transition — that IS authoritative. */
-    g_gps_power_state = track ? GPS_POWER_ON : GPS_POWER_OFF;
-    g_gps_req = g_gps_power_state;
-    if (!track) g_gps_off_confirmed = 1;
+    g_gps_req = track ? GPS_POWER_ON : GPS_POWER_OFF;
+    /* Prefer the getter, even though it may still report the pre-transition state here. The periodic
+     * refresh observes completion. Preserve the old rc==0 inference only as a compatibility fallback. */
+    if (!gps_status_refresh(wd_uptime(), 1)) {
+        g_gps_power_state = g_gps_req;
+        if (!track) g_gps_off_confirmed = 1;
+    }
 
 assert_nmea:
     if (track) {
@@ -1097,6 +1135,7 @@ static unsigned g_nmea_ts;                      /* wd_uptime() of the last good 
  * the receiver is observably doing, not what we last asked it to do. */
 static void gps_state_from_evidence(unsigned now)
 {
+    if (gps_status_refresh(now, 0)) return;
     if (g_nmea_ts && (now - g_nmea_ts) <= 3) {
         g_gps_power_state = GPS_POWER_ON;        /* sentences are arriving: it is powered, whatever
                                                   * the last call returned */
@@ -1540,7 +1579,7 @@ static int build_text_resp(const char *ascii, int alen, unsigned short serial, u
     return gt06_frame(0x15, data, 5 + alen, serial, out);
 }
 /* STATUS# reply: battery at mV resolution (Battery:X.XXXV) + GPRS/signal for vendor-format parity.
- * GPS is the last power state confirmed by a successful resident GNSS API return, not a lock indicator. */
+ * GPS is the resident getter's actual power state (or the evidence fallback), not a lock indicator. */
 static int status_str(char *b)
 {
     unsigned mv = g_batt_mv, f = mv % 1000;
@@ -1984,8 +2023,7 @@ static int handle_config_cmd(const char *cmd, char *out)
                                                               * already at its buffer limit) */
         unsigned now = wd_uptime();
         int n = put_str(out, "READOK:GPSSTAT pwr");
-        /* 0=unknown (no power call has succeeded), 1=off, 2=on. NOT a query of the receiver: the
-         * resident API is a setter with no getter, so this is only what we last confirmed. */
+        /* 0=unknown, 1=off, 2=on. This is refreshed from the resident power-status getter. */
         n += put_uint(out + n, g_gps_power_state);
         n += put_str(out + n, " nmea"); n += put_uint(out + n, g_nmea_lines);   /* 0 => nothing at all
                                                                                 * from the receiver */
@@ -2004,6 +2042,8 @@ static int handle_config_cmd(const char *cmd, char *out)
         /* api0 => the resident slot pointer is NULL (nothing to call); api1 with a non-zero prc =>
          * the resident is there and rejecting us. Different faults, different fixes. */
         n += put_str(out + n, " api"); out[n++] = (char)('0' + (g_gps_api_ok ? 1 : 0));
+        n += put_str(out + n, " gapi"); out[n++] = (char)('0' + (g_gps_status_api_ok ? 1 : 0));
+        n += put_str(out + n, " gst"); n += put_uint(out + n, g_gps_status_raw);
         n += put_str(out + n, " prc"); PUT_SIGNED(g_gps_pwr_rc);
         n += put_str(out + n, " cfg"); PUT_SIGNED(g_gps_cfg_rc);
         n += put_str(out + n, " pf");  n += put_uint(out + n, g_gps_pwr_fails);

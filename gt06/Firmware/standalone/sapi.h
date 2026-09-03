@@ -110,8 +110,12 @@ typedef int (*fcntl_fn)(int s, int cmd, int val);
 /* GNSS (RE'd STAGE 3b): power/init are 3 resident slot calls; fixes arrive as NMEA RMC text pushed onto
  * the resident "URC QUEUE" message bus (subscribe via MsgQ slots, then MsgQRecv 16-byte messages). */
 #define SLOT_GNSS_POWER  SL(0x7E1E21ACu)   /* idx107: gnss_power(on) */
+#define SLOT_GNSS_POWER_STATUS SL(0x7E1E25DCu) /* hash 0xe6a5ffad: sAPI_GnssPowerStatusGet(void)
+                                               * -> 0 OFF, 1 ON. Identified and transition-tested on
+                                               * G306161 via the WDBG export-table debugger. */
 #define SLOT_GNSS_CFG    SL(0x7E1E2418u)   /* idx262: gnss_cfg(1,1) config URC */
 #define SLOT_GNSS_FREQ   SL(0x7E1E2344u)   /* idx209: gnss_set_freq(1) */
+typedef int (*gnss_status_fn)(void);
 #define SLOT_MSGQ_CREATE SL(0x7E1E25D0u)   /* create: (u32 *qid, name, elemsize, depth, flags) -> 0 ok */
 #define SLOT_URC_ATTACH  SL(0x7E1E1F88u)   /* attach(qid, -1): register the queue as the URC sink */
 #define SLOT_MSGQ_RECV   SL(0x7E1E1F18u)   /* recv: (qid, msgbuf16, timeout) blocking (was wrongly 0x7e1e20bc) */

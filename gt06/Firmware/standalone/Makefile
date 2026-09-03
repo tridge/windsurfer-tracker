@@ -25,6 +25,39 @@ stub_standalone.elf: $(SRCS) $(GEN) sapi.h link_standalone.ld
 standalone.raw: stub_standalone.elf
 	$(OBJCOPY) -O binary $< $@
 
+# Dedicated USB debugger variant.  It replaces the tracker app while installed and speaks WDBG on if04;
+# keep its artifacts distinct so it cannot be mistaken for a production tracker image.
+usb_debug.elf: start.S usb_debug.c sapi_table.c $(GEN) sapi.h link_standalone.ld
+	$(CC) $(CFLAGS) -Wl,-T,link_standalone.ld -Wl,--gc-sections -Wl,--build-id=none \
+		-o $@ start.S usb_debug.c sapi_table.c
+
+usb_debug.raw: usb_debug.elf
+	$(OBJCOPY) -O binary $< $@
+
+usb_debug_fw.bin: usb_debug.raw
+	python3 -c "import sys; sys.path.insert(0,'..'); import fwtool; \
+open('$@','wb').write(fwtool.pack(open('$<','rb').read())); \
+print('$@', __import__('os').path.getsize('$@'),'bytes')"
+
+customer_app_usb_debug.bin: usb_debug_fw.bin
+	python3 -c "import struct; d=open('$<','rb').read(); clen=struct.unpack('<I',d[:4])[0]; \
+body=d[:8+clen]; assert len(body)<=0x30000; \
+open('$@','wb').write(body+b'\0'*(0x30000-len(body))); print('$@',len(body),'->',0x30000)"
+
+customer_app_usb_debug.bin.flash.zip: customer_app_usb_debug.bin customer_app_standalone.bin.flash.zip
+	python3 -c "import zipfile; src=zipfile.ZipFile('customer_app_standalone.bin.flash.zip'); \
+dst=zipfile.ZipFile('$@','w',zipfile.ZIP_DEFLATED); \
+[dst.writestr(i,open('$<','rb').read() if i.filename=='fw_image.bin' else src.read(i.filename)) for i in src.infolist()]; \
+dst.close(); src.close(); print('$@')"
+
+W07_USBDBG_B53.bin: usb_debug_fw.bin
+	python3 -c "import functools,operator; d=bytearray(open('$<','rb').read()); \
+assert len(d)<65536; d+=b'\0'*(65536-len(d)); \
+assert functools.reduce(operator.xor,d,0)==0x80; open('$@','wb').write(d); \
+print('$@',len(d),'bytes (XOR 0x80)')"
+
+usb-debug: customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin
+
 # LZMA + [len][~crc32] wrapper + XOR pad (device-loadable), via the repo fwtool.
 standalone_fw.bin: standalone.raw
 	python3 -c "import sys; sys.path.insert(0,'..'); import fwtool; \
@@ -76,6 +109,9 @@ SITLCFLAGS := -DSITL -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-paramet
 sitl: $(SITLSRC) sapi.h              ## build the SITL host binary (plain)
 	$(HOSTCC) $(SITLCFLAGS) -o $@ $(SITLSRC) -pthread
 
+usb-debug-sitl: usb_debug.c sitl_hal.c sapi.h  ## WDBG firmware with if04 simulated by --usb-listen
+	$(HOSTCC) $(SITLCFLAGS) -o $@ usb_debug.c sitl_hal.c -pthread
+
 sitl-asan: $(SITLSRC) sapi.h         ## SITL under AddressSanitizer
 	$(HOSTCC) $(SITLCFLAGS) -fsanitize=address -fno-omit-frame-pointer -o $@ $(SITLSRC) -pthread
 
@@ -105,10 +141,15 @@ test-gpsstat: sitl-asan              ## CXCS#GPSSTAT tells a dead receiver from 
 test-sapifind: sitl-asan             ## CXCS#SAPIFIND identifies the resolver's hash scheme
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_sapifind.py
 
-test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind  ## all SITL regression tests
+test-usb-debug: usb-debug-sitl       ## binary WDBG framing, reads, resolver lookup, scratch call
+	python3 test_usb_debug.py
+
+test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
-	      sitl sitl-asan sitl-ubsan
+	      sitl sitl-asan sitl-ubsan usb_debug.elf usb_debug.raw usb_debug_fw.bin \
+	      customer_app_usb_debug.bin customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin usb-debug-sitl
 
-.PHONY: all flashimg fotaimg sitl-all test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test clean
+.PHONY: all flashimg fotaimg usb-debug sitl-all test-gps-retry test-loc-batch test-fota-image \
+	test-battery-mv test-gpsstat test-sapifind test-usb-debug test clean

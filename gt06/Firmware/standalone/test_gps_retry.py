@@ -112,8 +112,12 @@ def test_power_off_retry():
     listener.listen(1)
     port = listener.getsockname()[1]
 
-    # Boot is idle, so apply_gps(0) runs immediately; fail it twice.
-    proc = start_sitl(port, {"SITL_GNSS_POWEROFF_FAILS": "2"})
+    # Model GNSS left on across app start. Boot is idle, so apply_gps(0) runs immediately; fail it
+    # twice while the getter truthfully continues to report ON.
+    proc = start_sitl(port, {
+        "SITL_GNSS_INITIAL_ON": "1",
+        "SITL_GNSS_POWEROFF_FAILS": "2",
+    })
 
     conn = None
     try:
@@ -122,9 +126,9 @@ def test_power_off_retry():
         received = bytearray()
         receive_until(conn, received, b"\x78\x78", 5)
 
-        # A failed power-off must NOT be reported as OFF.
+        # A failed power-off must report the receiver's observed ON state, not the requested OFF state.
         conn.sendall(gt06_cmd("STATUS#", 1))
-        receive_until(conn, received, b"GPS:UNKNOWN", 5)
+        receive_until(conn, received, b"GPS:ON", 5)
 
         # Boot attempt and the first 10 s retry fail; the second retry succeeds at ~20 s.
         time.sleep(21)
@@ -157,12 +161,11 @@ def test_power_off_retry():
     print("GPS power-OFF retry-until-confirmed PASS")
 
 
-def test_power_off_retry_after_failed_power_on():
-    """Regression for the stale-state hole (found in review).
+def test_power_off_retry_after_tracking():
+    """Power-off failures while the getter still reports ON must keep retrying.
 
-    A failed power-ON leaves the last CONFIRMED state at OFF, so gating the idle retry on
-    g_gps_power_state would see "already off" and never retry a later power-off that really
-    failed. Sequence: boot OFF succeeds -> tracking ON fails -> back to idle -> OFF fails.
+    Sequence: boot OFF succeeds -> tracking powers ON -> return to idle -> OFF fails twice. The
+    authoritative getter prevents a stale requested state from suppressing the retries.
     """
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -172,7 +175,6 @@ def test_power_off_retry_after_failed_power_on():
 
     proc = start_sitl(port, {
         "SITL_GNSS_POWEROFF_SKIP": "1",    # boot power-off succeeds -> confirmed state OFF
-        "SITL_GNSS_POWER_FAILS": "99",     # every power-on fails, so the state stays OFF
         "SITL_GNSS_POWEROFF_FAILS": "2",   # then the idle power-off fails twice
     })
 
@@ -187,12 +189,12 @@ def test_power_off_retry_after_failed_power_on():
         conn.sendall(gt06_cmd("STATUS#", 1))
         receive_until(conn, received, b"GPS:OFF", 5)
 
-        # track: every power-on fails, so the confirmed state remains OFF
+        # Track successfully, making both the simulated receiver and the getter report ON.
         conn.sendall(gt06_cmd("TIMER,1,1#", 2))
         receive_until(conn, received, b"TIMER,1,1# OK", 5)
         time.sleep(3)
 
-        # back to idle: this power-off fails, and the stale OFF must NOT suppress the retry
+        # Back to idle: this power-off fails, and the observed ON state must drive retries.
         conn.sendall(gt06_cmd("TIMER,600,1800#", 3))
         receive_until(conn, received, b"TIMER,600,1800# OK", 5)
 
@@ -212,19 +214,19 @@ def test_power_off_retry_after_failed_power_on():
     offs = stdout.count(b"ST: GPS power off FAILED")
     if offs < 2:
         raise AssertionError(
-            f"idle retry did not re-run after a failed power-on (only {offs} attempts) — the "
-            "stale-state hole is back\n" + stdout.decode(errors="replace"))
+            f"idle retry stopped while the getter still reported ON (only {offs} attempts)\n"
+            + stdout.decode(errors="replace"))
     if offs > 6:
         raise AssertionError(
             f"power-off retries never stopped ({offs} attempts)\n" + stdout.decode(errors="replace"))
 
-    print("GPS power-OFF retry after a failed power-ON PASS")
+    print("GPS power-OFF retry while getter reports ON PASS")
 
 
 def main():
     test_power_on_retry()
     test_power_off_retry()
-    test_power_off_retry_after_failed_power_on()
+    test_power_off_retry_after_tracking()
 
 
 if __name__ == "__main__":

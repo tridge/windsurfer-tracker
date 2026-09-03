@@ -16,11 +16,15 @@ descriptor `+0x14` with `r0` = a resident symbol-resolver, the sAPI dispatch tab
   (`gen_table.py` → `sapi_table_baked.h`; its vendor input lives on the fwdev branch —
   the generated header is committed here so this tree builds standalone).
 - `main.c` — `standalone_main`: STAGE 0 fills the table and parks.
+- `usb_debug.c` / `usb_debug.py` / `usb_debug.md` — a separate if04 binary-debug firmware and host
+  client for guarded memory reads, resolver lookups, and explicitly dangerous API calls.
 
 ## Build
 ```
 make            # standalone_fw.bin           (OTA-loadable, XOR-padded)
 make flashimg   # customer_app_standalone.bin (partition body, padded to 0x30000)
+make usb-debug  # dedicated USB-debug flash zip + B53-named FOTA image
+make test-usb-debug
 ```
 
 ## Status

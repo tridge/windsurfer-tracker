@@ -2,10 +2,10 @@
 """SITL test for CXCS#GPSSTAT — the GNSS health reply.
 
 Motivation (G226122, 2026-08-21): the unit sat in GPS-wait for 2h22m, through a 25-minute flight with
-perfect sky view, and finally locked on the ground. STATUS said GPS:ON the whole time — but that only
-means our last power-on call returned 0, since the resident API is a setter with no getter. The batch
-message carries satellites/fix/HDOP, yet it is only sent when there ARE fixes, so during a GPS-wait
-there was no way to tell a dead receiver from one still acquiring.
+perfect sky view, and finally locked on the ground. At the time STATUS reflected only the setter result;
+USB exploration has since identified the resident power-status getter. The batch message carries
+satellites/fix/HDOP, yet it is only sent when there ARE fixes, so during a GPS-wait there was no way to
+tell a dead receiver from one still acquiring.
 
 GPSSTAT has to separate exactly those two cases:
   nmea == 0            -> nothing at all from the receiver (wedged / wiring / never powered)
@@ -74,7 +74,7 @@ def query_gpsstat(env_extra, tracking, settle, timeout=30):
             if b"READOK:GPSSTAT" in buf:
                 text = buf[buf.index(b"READOK:GPSSTAT"):].decode(errors="replace")
                 fields = dict(re.findall(r"([a-z]+)(\d+)", text))
-                if "fage" in fields:                      # last field -> reply is complete
+                if "req" in fields:                       # last field -> reply is complete
                     return {k: int(v) for k, v in fields.items()}, text
         raise AssertionError(f"no GPSSTAT reply\n{buf[-400:]!r}")
     finally:
@@ -98,6 +98,7 @@ def main():
     assert f["hdop"] == 12, f"hdop={f['hdop']} (expected 12 = 1.2): {text}"
     assert f["nage"] < 30 and f["fage"] < 30, f"stale ages on a healthy unit: {text}"
     assert f["api"] == 1, f"resident GPS slot reported missing on a healthy unit: {text}"
+    assert f["gapi"] == 1 and f["gst"] == 1, f"getter should report ON: {text}"
     assert f["pf"] == 0, f"power-call failures on a healthy unit: {text}"
     print(f"healthy: nmea={f['nmea']} vrmc={f['vrmc']} sats={f['sats']} fix={f['fix']} "
           f"hdop={f['hdop']} fage={f['fage']} api={f['api']} pf={f['pf']} PASS")
@@ -111,6 +112,7 @@ def main():
     assert f["pwr"] != 2, f"power reported ON though every power call failed: {text}"
     # the whole point of the extra fields: say WHY it failed, not just that it did
     assert f["api"] == 1, f"slot was present, so api should be 1: {text}"
+    assert f["gapi"] == 1 and f["gst"] == 0, f"getter should report OFF: {text}"
     assert f["pf"] > 0, f"failed power calls not counted: {text}"
     assert "prc-2" in text, f"the resident's error return is not reported: {text}"
     print(f"dead receiver: nmea=0 nage=999 pwr={f['pwr']} api={f['api']} pf={f['pf']} "
@@ -119,6 +121,7 @@ def main():
     # ---- idle: GPS deliberately off, and that must be distinguishable from a fault ----
     f, text = query_gpsstat({}, tracking=False, settle=4)
     assert f["pwr"] == 1, f"idle should report power OFF (1), got pwr={f['pwr']}: {text}"
+    assert f["gapi"] == 1 and f["gst"] == 0, f"getter should report OFF while idle: {text}"
     print(f"idle: pwr={f['pwr']} (off, not a fault) PASS")
 
     # ---- a -1 return must NOT be treated as a confirmation ----
