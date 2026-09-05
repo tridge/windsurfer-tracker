@@ -159,6 +159,7 @@ typedef int (*get_reg_fn)(unsigned *out);
  * the complete 152-byte object so a newer tail can never overwrite the caller's stack. */
 #define SLOT_NETWORK_INIT       SL(0x7E1E25C4u) /* hash 0xefc83346: int sAPI_NetworkInit(void) */
 #define SLOT_NETWORK_GET_CPSI   SL(0x7E1E2230u) /* hash 0xeacb3566: int sAPI_NetworkGetCpsi(SCcpsiParm *) */
+#define SLOT_NETWORK_GET_COPS   SL(0x7E1E263Cu) /* hash 0x2bfe7bba: int sAPI_NetworkGetCops(char *) */
 #define SLOT_SYSTEM_SLEEP_SET   SL(0x7E1E1F60u) /* hash 0xfd0619d9: int sAPI_SystemSleepSet(flag) */
 #define SLOT_SYSTEM_SLEEP_GET   SL(0x7E1E2194u) /* hash 0xe629127d: int sAPI_SystemSleepGet(void) */
 #define SLOT_SYSTEM_ALARM_WAKE  SL(0x7E1E22CCu) /* hash 0xb197aca7: int sAPI_SystemAlarmClock2Wakeup(ms) */
@@ -175,6 +176,7 @@ typedef struct {
     int observedPhysicalCellId, reservedTail;
 } cpsi_t;
 typedef int (*network_cpsi_fn)(cpsi_t *out);
+typedef int (*network_cops_fn)(char *out);
 typedef int (*system_sleep_set_fn)(int flag);
 typedef int (*system_sleep_get_fn)(void);
 typedef int (*system_alarm_wake_fn)(unsigned long ms);

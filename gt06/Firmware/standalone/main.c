@@ -1101,8 +1101,9 @@ static unsigned char sig_map(unsigned s)
 /* ---- item 16: cellular auto-recovery (carrier-denial wedge) ----
  * Seen live 2026-07-23 (G375349): after a reboot the modem camped on an Optus cell that rejected the
  * roaming SIM (EMM cause 15 "No Suitable Cells In Location Area") and sat emergency-only FOREVER —
- * app healthy, every connect failing, USB needed to fix it. The AT executor can do the whole recovery
- * in-firmware. Ladder (only while offline AND not registered, each rung given time to settle):
+ * app healthy, every connect failing, USB needed to fix it. Nonempty PLMNOK now uses the restricted
+ * selection policy below. With an explicitly empty list, retain the legacy recovery ladder (only
+ * while offline AND not registered, each rung given time to settle):
  *   rung 1: CFUN 0/1 (clears cached rejects)
  *   rung 2: COPS=2 then COPS=0 (force reselection)
  *   rung 3: COPS=? scan -> manual-select an available PLMN != the camped/denied one (this is the step
@@ -1172,8 +1173,95 @@ static void urc_free(unsigned payload)
  * first *available* network that isn't the one denying us — on 2026-07-24 that was vodafone AU (50503),
  * which this roaming SIM cannot register with, so AT+COPS=1,2,"50503" STRANDED the unit in manual mode
  * on an unusable carrier for 35 min (restore-to-auto only runs once the server link proves out, which
- * can never happen while stranded). Empty string = allow any (legacy). SZCS#PLMNOK=<csv> to change. */
+ * can never happen while stranded). The persisted list now also governs normal operator selection.
+ * Empty string = allow any (legacy). SZCS#PLMNOK=<csv> to change. */
 static char g_plmn_ok[32] = "50501,50502";      /* Telstra, Optus */
+static unsigned g_plmn_generation;
+static int g_plmn_slot = -1;
+static unsigned char g_plmn_changed;
+static unsigned g_plmn_changed_ts;
+static unsigned char g_plmn_busy;
+static int g_operator_mode = -1;               /* observed COPS mode; -1 = unavailable */
+
+/* Exact CSV validation before either RAM or flash is changed. No partial writes/truncation, empty
+ * entries, duplicate entries or command suffixes. Empty explicitly requests unrestricted selection. */
+static int plmn_csv_valid(const char *s)
+{
+    int len = 0;
+    while (len < 32 && s[len]) len++;
+    if (len >= 32) return 0;
+    for (int i = 0; i < len; ) {
+        int start = i;
+        while (i < len && s[i] >= '0' && s[i] <= '9') i++;
+        int n = i - start;
+        if (n < 5 || n > 6) return 0;
+        for (int prev = 0; prev < start; ) {
+            int j = 0;
+            while (j < n && s[prev + j] == s[start + j]) j++;
+            if (j == n && (s[prev + j] == ',' || !s[prev + j])) return 0;
+            while (s[prev] && s[prev] != ',') prev++;
+            prev++;
+        }
+        if (i < len && (s[i++] != ',' || i == len)) return 0;
+    }
+    return 1;
+}
+
+/* Two alternating, checksummed records. A torn write never destroys the last valid setting. The
+ * generation selects the newest complete record; the vendor configuration and SIM files are untouched.
+ * Layout: magic[2], generation LE[4], NUL-padded CSV[32], CRC-ITU BE[2]. */
+static const char *plmn_file(int slot)
+{
+    return slot ? "c:/wstrplmn.1" : "c:/wstrplmn.0";
+}
+static int plmn_read(int slot, unsigned char *b, unsigned *generation)
+{
+    fopen_fn fo = *(fopen_fn *)SLOT_FOPEN; fread_fn fr = *(fread_fn *)SLOT_FREAD;
+    fclose_fn fc = *(fclose_fn *)SLOT_FCLOSE;
+    if (!fo || !fr || !fc) return 0;
+    FILE_t fp = fo(plmn_file(slot), "rb");
+    if (!fp) return 0;
+    unsigned got = fr(b, 40, 1, fp); fc(fp);
+    if (got != 40 || b[0] != 'P' || b[1] != '1' || b[37] ||
+        crc_itu(b, 38) != (unsigned short)((b[38] << 8) | b[39]) ||
+        !plmn_csv_valid((const char *)b + 6)) return 0;
+    *generation = (unsigned)b[2] | ((unsigned)b[3] << 8) |
+                  ((unsigned)b[4] << 16) | ((unsigned)b[5] << 24);
+    return 1;
+}
+static void plmn_load(void)
+{
+    unsigned char b[40]; unsigned generation;
+    for (int slot = 0; slot < 2; slot++) {
+        if (plmn_read(slot, b, &generation) &&
+            (g_plmn_slot < 0 || (int)(generation - g_plmn_generation) > 0)) {
+            for (int i = 0; i < 32; i++) g_plmn_ok[i] = (char)b[6 + i];
+            g_plmn_slot = slot; g_plmn_generation = generation;
+        }
+    }
+    /* A reset between saving an empty list and applying it must still restore automatic mode. */
+    if (!g_plmn_ok[0]) g_plmn_changed = 1;
+}
+static int plmn_store(const char *value)
+{
+    unsigned char b[40] = { 'P', '1' }, check[40];
+    unsigned generation = g_plmn_generation + 1, observed;
+    int slot = g_plmn_slot == 0 ? 1 : 0;
+    for (int i = 0; i < 4; i++) b[2 + i] = (unsigned char)(generation >> (8 * i));
+    for (int i = 0; value[i]; i++) b[6 + i] = (unsigned char)value[i];
+    unsigned short crc = crc_itu(b, 38); b[38] = (unsigned char)(crc >> 8); b[39] = (unsigned char)crc;
+    fopen_fn fo = *(fopen_fn *)SLOT_FOPEN; fwrite_fn fw = *(fwrite_fn *)SLOT_FWRITE;
+    fclose_fn fc = *(fclose_fn *)SLOT_FCLOSE;
+    if (!fo || !fw || !fc) return 0;
+    FILE_t fp = fo(plmn_file(slot), "wb");
+    if (!fp) return 0;
+    unsigned wrote = fw(b, 40, 1, fp); int closed = fc(fp);
+    if (wrote != 40 || closed != 0 || !plmn_read(slot, check, &observed)) return 0;
+    for (int i = 0; i < 40; i++) if (check[i] != b[i]) return 0;
+    g_plmn_slot = slot; g_plmn_generation = generation;
+    return 1;
+}
+
 static int plmn_permitted(const char *p)
 {
     if (!g_plmn_ok[0]) return 1;
@@ -2003,12 +2091,17 @@ static int handle_config_cmd(const char *cmd, char *out)
     if (prefix_eq(cmd, "SZCS#PLMNOK")) {                     /* CSV of PLMNs this SIM may use ("" = any) */
         const char *pv = skip_to_val(cmd, "PLMNOK");
         if (!pv) return put_str(out, "SET ERROR: PLMNOK");
+        char value[32] = {0};
         int i = 0;
-        while (pv[i] && pv[i] != '#' && pv[i] != ' ' && i < (int)sizeof g_plmn_ok - 1) {
-            if (!((pv[i] >= '0' && pv[i] <= '9') || pv[i] == ',')) return put_str(out, "SET ERROR: PLMNOK");
-            g_plmn_ok[i] = pv[i]; i++;
-        }
-        g_plmn_ok[i] = 0;
+        while (pv[i] && pv[i] != '#' && i < 31) { value[i] = pv[i]; i++; }
+        if ((pv[i] && (pv[i] != '#' || pv[i + 1])) || !plmn_csv_valid(value))
+            return put_str(out, "SET ERROR: PLMNOK");
+        int same = 1;
+        for (int j = 0; j < 32; j++) if (value[j] != g_plmn_ok[j]) same = 0;
+        /* A same-value SET still persists the compiled default the first time. */
+        if ((!same || g_plmn_slot < 0) && !plmn_store(value)) return put_str(out, "SET ERROR: write");
+        for (int j = 0; j < 32; j++) g_plmn_ok[j] = value[j];
+        if (!same) { g_plmn_changed = 1; g_plmn_changed_ts = wd_uptime(); }
         int n = put_str(out, "SETOK:PLMNOK="); n += put_str(out + n, g_plmn_ok);
         return n;
     }
@@ -2019,6 +2112,8 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " plmn"); n += put_str(out + n, g_plmn_cur[0] ? g_plmn_cur : "-");
         n += put_str(out + n, " man");  out[n++] = (char)('0' + (g_cops_manual ? 1 : 0));
         n += put_str(out + n, " ok");   n += put_str(out + n, g_plmn_ok[0] ? g_plmn_ok : "any");
+        n += put_str(out + n, " policy1");   /* capability: persistent, enforced operator list */
+        n += put_str(out + n, " mode"); n += put_sint(out + n, g_operator_mode);
         return n;
     }
     if (prefix_eq(cmd, "CXCS#SAPIFIND")) {
@@ -2261,6 +2356,142 @@ static int handle_config_cmd(const char *cmd, char *out)
 #define REC_HOLDOFF_SEC 3600     /* pause after an exhausted ladder (no attach storms) */
 #endif
 
+/* Poll direct getters even while TCP is connected. COPS gives selection mode and numeric operator;
+ * CPSI supplies numeric PLMN when COPS is configured to display a carrier name. Never infer a PLMN
+ * from stale/uninitialised data, and never inject a polling AT reply into the GPS URC stream. */
+static void operator_refresh(void)
+{
+    get_reg_fn rf = *(get_reg_fn *)SLOT_GET_REG;
+    unsigned rv;
+    g_cereg_stat = (rf && rf(&rv) == 0) ? (signed char)(rv & 0x7f) : -1;
+    g_operator_mode = -1;
+    g_plmn_cur[0] = 0;
+    network_cops_fn cops = *(network_cops_fn *)SLOT_NETWORK_GET_COPS;
+    char out[128] = {0};
+    g_wd_phase = 'N';
+    int rc = cops ? cops(out) : -1;
+    g_wd_phase = 0;
+    out[sizeof out - 1] = 0;
+    if (rc == 0) {
+        for (int i = 0; out[i]; i++) {
+            const char *p = out + i;
+            if (!prefix_eq(p, "+COPS:")) continue;
+            p += 6;
+            int mode = at_num(&p);
+            if (mode >= 0 && mode <= 4) g_operator_mode = mode;
+            if (*p++ != ',' || at_num(&p) != 2 || *p++ != ',') break;
+            while (*p == ' ') p++;
+            if (*p++ != '"') break;
+            char plmn[8] = {0}; int n = 0;
+            while (n < 6 && *p >= '0' && *p <= '9') plmn[n++] = *p++;
+            if (*p == '"' && n >= 5)
+                for (int j = 0; j <= n; j++) g_plmn_cur[j] = plmn[j];
+            break;
+        }
+    }
+    if (!g_plmn_cur[0]) {
+        network_cpsi_fn get = *(network_cpsi_fn *)SLOT_NETWORK_GET_CPSI;
+        cpsi_t c = {0};
+        g_wd_phase = 'N';
+        rc = get ? get(&c) : -1;
+        g_wd_phase = 0;
+        if (rc == 0) {
+            char plmn[8] = {0}; int n = 0, i = 0;
+            while (i < 7 && c.Mnc_Mcc[i]) {
+                char ch = c.Mnc_Mcc[i++];
+                if (ch == '-' && i == 4) continue;
+                if (ch < '0' || ch > '9' || n == 6) { n = 0; break; }
+                plmn[n++] = ch;
+            }
+            if (!c.Mnc_Mcc[i] && n >= 5)
+                for (int j = 0; j <= n; j++) g_plmn_cur[j] = plmn[j];
+        }
+    }
+}
+
+/* Restricted selection is owned locally so a lost GT06 link cannot prevent recovery. Stay in manual
+ * operator mode (ordinary cell handovers within that operator still work). Try only the configured
+ * PLMNs, allow each a full settle interval, then back off after one round. A registered allowed modem
+ * with a broken server route must not be subjected to pointless network reselections. */
+static int plmn_policy(unsigned now, int connected)
+{
+    static unsigned last_try, failed_since, pause_since;
+    static unsigned char started, paused, attempts, next_index;
+    static char selected[8];
+    if (g_plmn_changed) {
+        /* Leave time for the SET response and its confirming read before moving off this network.
+         * Bound this from the setting change itself: periodic STATUS polls must not postpone it forever. */
+        if ((now - g_plmn_changed_ts) < SLEEP_QUIET_SEC) return 1;
+        g_plmn_changed = 0;
+        started = paused = attempts = next_index = 0;
+        failed_since = 0; selected[0] = 0;
+        if (!g_plmn_ok[0]) {
+            at_cmd("AT+COPS=0\r"); g_cops_manual = 0; g_plmn_busy = 0;
+            vputs("PLMN: unrestricted automatic selection\r\n");
+            return 1;
+        }
+    }
+    if (!g_plmn_ok[0]) return 0;
+
+    int permitted = g_plmn_cur[0] && plmn_permitted(g_plmn_cur);
+    int registered = g_cereg_stat == 1 || g_cereg_stat == 5;
+    int selected_matches = selected[0] && prefix_eq(selected, g_plmn_cur) && prefix_eq(g_plmn_cur, selected);
+    if (permitted && (registered || (g_cereg_stat < 0 && connected)) &&
+        (g_operator_mode == 1 || (g_operator_mode < 0 && started && selected_matches))) {
+        if (g_plmn_busy) vputs("PLMN: registered on allowed operator\r\n");
+        g_plmn_busy = 0; g_cops_manual = 1;
+        paused = attempts = 0; failed_since = 0;
+        return 1;
+    }
+    g_plmn_busy = 1;
+    if (started && (now - last_try) < REC_STEP_SEC) return 1;
+    if (paused) {
+        if ((now - pause_since) < REC_HOLDOFF_SEC) return 1;
+        paused = 0; attempts = 0;
+    }
+    /* A known disallowed operator or automatic mode is corrected promptly. Loss of coverage on an
+     * already selected allowed operator gets a grace period before trying another one. */
+    if ((started || g_operator_mode == 1) && (permitted || !g_plmn_cur[0]) &&
+        !registered && g_operator_mode != 0) {
+        if (!failed_since) failed_since = now ? now : 1;
+        if (!attempts && (now - failed_since) < REC_OFFLINE_SEC) return 1;
+    }
+    /* An unavailable diagnostic API must not churn a working link already pinned by this policy. */
+    if (started && connected && g_operator_mode < 0 && !g_plmn_cur[0]) return 1;
+
+    char candidates[5][8] = {{0}}; int count = 0, pos = 0;
+    while (g_plmn_ok[pos] && count < 5) {
+        int n = 0;
+        while (g_plmn_ok[pos] && g_plmn_ok[pos] != ',') candidates[count][n++] = g_plmn_ok[pos++];
+        if (g_plmn_ok[pos] == ',') pos++;
+        count++;
+    }
+    if (attempts >= count) {
+        paused = 1; pause_since = now;
+        vputs("PLMN: allowed operators exhausted, backing off\r\n");
+        return 1;
+    }
+    unsigned pick = next_index % (unsigned)count;
+    /* Pin a working allowed operator in place instead of needlessly moving to the first entry. */
+    if (!started && permitted && registered) {
+        for (int i = 0; i < count; i++) {
+            int j = 0; while (candidates[i][j] && candidates[i][j] == g_plmn_cur[j]) j++;
+            if (!candidates[i][j] && !g_plmn_cur[j]) pick = (unsigned)i;
+        }
+    }
+    for (int j = 0; j < 8; j++) selected[j] = candidates[pick][j];
+    next_index = (unsigned char)((pick + 1) % (unsigned)count);
+    char cmd[32]; int n = put_str(cmd, "AT+COPS=1,2,\"");
+    n += put_str(cmd + n, selected); n += put_str(cmd + n, "\"\r"); cmd[n] = 0;
+    if (g_plmn_cur[0] && !permitted) {
+        vputs("PLMN: blocked operator "); vputs(g_plmn_cur); vputs("\r\n");
+    }
+    at_cmd(cmd); g_cops_manual = 1;
+    started = 1; attempts++; last_try = now;
+    vputs("PLMN: selecting "); vputs(selected); vputs("\r\n");
+    return 1;
+}
+
 /* Cellular auto-recovery driver (item 16) — called every main-loop pass; all action is timer-gated.
  * Only escalates while the server is unreachable AND the modem is NOT registered (CEREG stat not 1/5):
  * if we're registered but can't connect, the PLMN isn't the problem and the ladder stays out of it. */
@@ -2269,6 +2500,21 @@ static void cell_recovery(unsigned now, int connected)
     static unsigned off_since, rung_ts, hold_until, poll_ts, stable_since;
     static unsigned char rung;          /* 0 idle; 1 cfun; 2 cops-auto; 3 scan; 4 settle/exhausted */
     static unsigned char two_phase;     /* rung 1/2 second half pending (CFUN=1 / COPS=0) */
+    static unsigned char polled;
+#ifdef SITL
+    const unsigned poll_sec = 1;
+#else
+    const unsigned poll_sec = 30;
+#endif
+    if (!polled || (now - poll_ts) >= poll_sec) {
+        poll_ts = now; polled = 1;
+        operator_refresh();
+    }
+    if (plmn_policy(now, connected)) {
+        rung = two_phase = 0; off_since = stable_since = 0;
+        g_scan_pend = 0; g_plmn_alt[0] = 0;
+        return;
+    }
     if (connected) {
         off_since = 0;
         if (rung) { rung = 0; two_phase = 0; vputs("REC: recovered\r\n"); }
@@ -2287,15 +2533,6 @@ static void cell_recovery(unsigned now, int connected)
     }
     stable_since = 0;
     if (!off_since) { off_since = now ? now : 1; return; }
-    /* poll registration (direct resident getter — no AT text near the NMEA/blind-buffer stream) and
-     * the camped PLMN (AT — no getter found; rare, offline-only, and the NMEA gates cover it) */
-    if ((now - poll_ts) >= 30) {
-        poll_ts = now;
-        get_reg_fn rf = *(get_reg_fn *)SLOT_GET_REG;
-        unsigned rv;
-        if (rf && rf(&rv) == 0) g_cereg_stat = (signed char)(rv & 0x7f);
-        at_cmd("AT+COPS?\r");
-    }
     if (g_cereg_stat == 1 || g_cereg_stat == 5) { rung = 0; two_phase = 0; return; }
     if (now < hold_until) return;
     switch (rung) {
@@ -2994,6 +3231,7 @@ void standalone_main(u32 loader_resolver)
     /* Claim if04 for forwarding (if configured) BEFORE any debug output, so a configured UAV data link
      * never sees watchdog/GT06 debug markers - not even during boot or a FWD-socket outage. */
     if (fwd_load()) g_fwd_en = (g_fwd_port > 0) ? 1 : 0;
+    plmn_load();
     vputs("S3c: GNSS -> LOC tracker\r\n");
 
     /* Initialise the public network getter service once, then arm the lower-level status getters. WDBG
@@ -3225,7 +3463,7 @@ void standalone_main(u32 loader_resolver)
          * track/SOS data is abandoned, and wake-up does not run apply_gps() or otherwise re-enable GNSS.
          * SystemSleepSet merely permits automatic module sleep, so keep this task dormant until the
          * alarm fires; then revoke permission before rebuilding TCP state. */
-        if (connected && !track && g_sleep_disconnect && !g_sleep_fault &&
+        if (connected && !track && g_sleep_disconnect && !g_sleep_fault && !g_plmn_busy &&
             !g_fwd_en && !g_fwd_active && !g_sos_active &&
             g_blind_count == 0 && g_batch_n == 0 &&
             g_gps_power_state == GPS_POWER_OFF && g_gps_off_confirmed &&

@@ -309,7 +309,9 @@ def _p_fwdstat(text):
 
 def _p_cellstat(text):
     m = re.search(r'READOK:CELLSTAT.*?\sok([^\s\x00-\x1f]*)', text)
-    return {'PLMNOK': m.group(1)} if m else {}
+    if not m:
+        return {}
+    return {'PLMNOK': '' if m.group(1) == 'any' else m.group(1)}
 
 
 _PLMN_CARRIERS = {
@@ -377,6 +379,18 @@ def _v_apn(v):
     return None
 
 
+def _v_plmn(v):
+    if not isinstance(v, str) or len(v) > 31:
+        return "at most 31 characters"
+    if v == '':
+        return None
+    if not re.fullmatch(r'[0-9]{5,6}(?:,[0-9]{5,6})*', v):
+        return "comma-separated 5 or 6 digit operator codes, without spaces; blank allows any carrier"
+    if len(set(v.split(','))) != len(v.split(',')):
+        return "operator codes must not be repeated"
+    return None
+
+
 _PARAMS = {
     "SERVIP":    {"read": "CXCS#SERVIP", "parse": _p_servip, "group": "Server",
                   "write": None, "fw": "any", "danger": True,
@@ -404,8 +418,13 @@ _PARAMS = {
                   "fw": "standalone", "volatile": True,
                   "help": "Non-blocking FWD socket. Diagnostic only."},
     "PLMNOK":    {"read": "CXCS#CELLSTAT", "parse": _p_cellstat, "group": "Cell",
-                  "write": None, "fw": "standalone", "volatile": True,
-                  "help": "PLMN whitelist for the recovery ladder."},
+                  "write": lambda v: f"SZCS#PLMNOK={v}", "validate": _v_plmn,
+                  "fw": "standalone", "danger": True,
+                  "help": "Allowed carriers, saved on the tracker across reboots. "
+                          "50501 = Telstra, 50502 = Optus; use 50501,50502 for these Simbase SIMs. "
+                          "Enter comma-separated 5 or 6 digit PLMN codes (31 characters maximum). "
+                          "Blank restores unrestricted automatic selection. "
+                          "The tracker retries only listed carriers when coverage is lost."},
 }
 
 # A queued command is abandoned after ~40s (30s TCP delivery + 10s app-ACK), so a
@@ -880,6 +899,7 @@ class GT06Connection:
         self.charging = None
         self.battery_voltage = None             # actual voltage from STATUS/cxzt (float)
         self.lte = None                         # latest atomic direct-CPSI snapshot
+        self.plmn_policy_supported = False       # confirmed by this connection's CELLSTAT reply
         self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
         self.last_overnight_probe = 0.0         # monotonic time of last overnight cxzt# re-probe
         self.last_gps_off_resend = 0.0          # monotonic time of last idle GPS-off re-push
@@ -3147,6 +3167,8 @@ class GT06Listener:
         """
         if not gt_conn or not gt_conn.imei or not text:
             return
+        if 'READOK:CELLSTAT' in text:
+            gt_conn.plmn_policy_supported = bool(re.search(r'\spolicy1(?:\s|$)', text))
         found = {}
         for parser in _PARAM_PARSERS:
             try:
@@ -3254,11 +3276,15 @@ class GT06Listener:
                 "value": _strip_ctrl(val) if isinstance(val, str) else val,
                 "fetched_at": ts,
                 # only the PRIMARY of a pair offers Edit — it writes both halves
-                "writable": bool(spec.get("write")) or any(
-                    key == pair[0] for pair in _PARAM_PAIRS),
+                "writable": (bool(spec.get("write")) or any(
+                    key == pair[0] for pair in _PARAM_PAIRS)) and (
+                        key != "PLMNOK" or bool(conn and conn.plmn_policy_supported)),
                 "danger": bool(spec.get("danger")),
                 "volatile": bool(spec.get("volatile")),
                 "help": spec.get("help"),
+                "unavailable_reason": (
+                    "Fetch parameters to check support. Firmware with persistent carrier selection is required."
+                    if key == "PLMNOK" and conn and not conn.plmn_policy_supported else None),
             })
         status = "idle"
         if op:
@@ -3334,6 +3360,8 @@ class GT06Listener:
                 return False, f"{key} is not settable"
             if spec.get("fw") == "standalone" and self._params_fw_kind(imei) != "standalone":
                 return False, f"{key} is not supported on this firmware"
+            if key == "PLMNOK" and not conn.plmn_policy_supported:
+                return False, "fetch parameters first; persistent carrier selection requires updated firmware"
             err = spec["validate"](value) if spec.get("validate") else None
             if err:
                 return False, f"{key}: {err}"

@@ -97,10 +97,9 @@ void hwwd_disable(void) {}
  * Toggling either back lets the firmware reconnect and replay. */
 static volatile sig_atomic_t g_cov_down;
 static volatile sig_atomic_t g_radio_off;
-/* SIGHUP = carrier denial: camped on a PLMN that rejects the SIM (EMM cause 15 — the live G375349
- * 2026-07-23 incident). Data fails; CEREG? reports denied (stat 3); CFUN/COPS=0/COPS=2 do NOT fix it;
- * only manual-selecting the alternate PLMN from the COPS=? scan recovers — exercises the item-16
- * in-firmware recovery ladder end to end. */
+/* SIGHUP = carrier denial: the current PLMN rejects the SIM (EMM cause 15 — the live G375349
+ * 2026-07-23 incident). Data fails; registration reports denied (stat 3); CFUN/COPS=0/COPS=2 do NOT
+ * fix it. Manual selection of an available alternate recovers without a server command. */
 static volatile sig_atomic_t g_carrier_denied;
 static volatile sig_atomic_t g_charging_sim;     /* SIGWINCH toggles the M0 charge-active flag (item 15) */
 static void charging_toggle(int s)
@@ -116,7 +115,10 @@ static void sos_toggle(int s)
     const char *m = g_sos_sim ? "[SITL] SOS button DOWN\n" : "[SITL] SOS button UP\n";
     if (write(2, m, strlen(m))) { }
 }
-static int g_plmn_manual;                        /* fw did COPS=1,2,"50501" (COPS=0 clears) */
+static int g_plmn_manual;                        /* fw requested manual selection (COPS=0 clears) */
+static char g_sim_plmn[8] = "50502";
+static char g_denied_plmn[8];
+static const char *g_available_plmns = "50501,50502";
 static void cov_toggle(int s)
 {
     (void)s; g_cov_down = !g_cov_down;
@@ -132,6 +134,7 @@ static void radio_toggle(int s)
 static void carrier_toggle(int s)
 {
     (void)s; g_carrier_denied = !g_carrier_denied;
+    for (int i = 0; i < 8; i++) g_denied_plmn[i] = g_carrier_denied ? g_sim_plmn[i] : 0;
     const char *m = g_carrier_denied ? "[SITL] carrier DENIED (EMM cause 15)\n" : "[SITL] carrier OK\n";
     if (write(2, m, strlen(m))) { }
 }
@@ -492,8 +495,8 @@ static void *nmea_thread(void *arg)
 }
 
 /* ================= AT command mock (replies on the URC queue, like the real executor) =============
- * Registration model: normally registered-roaming on 50501. While g_carrier_denied: camped on 50502
- * which denies the SIM (CEREG stat 3); CFUN/COPS=2/COPS=0 don't help; COPS=1,2,"50501" recovers.
+ * Registration model: normally registered-roaming on 50502. SIGHUP denies the current PLMN;
+ * SITL_PLMN_CURRENT/AVAILABLE/DENIED also model boot on a rejected carrier and absent alternatives.
  * The COPS=? scan reply is pushed in TWO chunks to exercise the firmware's chunk reassembly. */
 static int sitl_at_send(const char *cmd, int len)
 {
@@ -509,17 +512,30 @@ static int sitl_at_send(const char *cmd, int len)
         urc_push("(1,\"Telstra Mobile\",\"Telstra\",\"50501\",7),,(0-4),(0-2)\r\n\r\nOK\r\n");
         return len;
     }
-    if (strstr(cmd, "COPS=1,2,\"50501\"")) {       /* manual select of the good PLMN -> recovers */
-        if (g_carrier_denied) {
-            g_carrier_denied = 0;
-            const char *m = "[SITL] carrier OK (manual PLMN select)\n";
-            if (write(2, m, strlen(m))) { }
+    const char *manual = strstr(cmd, "COPS=1,2,\"");
+    if (manual) {
+        char target[8] = {0}; int n = 0;
+        manual += strlen("COPS=1,2,\"");
+        while (n < 6 && manual[n] >= '0' && manual[n] <= '9') { target[n] = manual[n]; n++; }
+        int available = 0;
+        for (const char *p = g_available_plmns; *p; ) {
+            if (strncmp(p, target, n) == 0 && (p[n] == ',' || p[n] == 0)) available = 1;
+            while (*p && *p != ',') p++;
+            if (*p) p++;
         }
+        g_carrier_denied = !available || strcmp(target, g_denied_plmn) == 0;
+        snprintf(g_sim_plmn, sizeof g_sim_plmn, "%s", target);
         g_plmn_manual = 1;
-        urc_push("\r\n+CEREG: 5,\"2036\",\"07fd1b01\",7\r\n");
+        fprintf(stderr, "[SITL] operator request %s: %s\n", target,
+                g_carrier_denied ? "denied" : "registered");
+        urc_push(g_carrier_denied ? "\r\n+CEREG: 3\r\n" : "\r\n+CEREG: 5\r\n");
         return len;
     }
-    if (strstr(cmd, "COPS=0")) { g_plmn_manual = 0; return len; }   /* auto: stays registered */
+    if (strstr(cmd, "COPS=0")) {
+        g_plmn_manual = 0;
+        fprintf(stderr, "[SITL] operator request AUTO\n");
+        return len;
+    }
     if (strstr(cmd, "COPS=2")) { urc_push("\r\n+CEREG: 0\r\n"); return len; }
     if (strstr(cmd, "COPS?")) {
         urc_push(g_carrier_denied && !g_plmn_manual ? "\r\n+COPS: 0,2,\"50502\",7\r\n\r\nOK\r\n"
@@ -748,17 +764,23 @@ static int sitl_get_csq(unsigned char *out)
 }
 static int sitl_get_reg(unsigned *out)
 {
-    *out = g_radio_off ? 0u : (g_carrier_denied ? 3u : 5u);
+    *out = (g_radio_off || g_cov_down) ? 0u : (g_carrier_denied ? 3u : 5u);
     return 0;
 }
 static void sitl_netstat_start(void) { }   /* getters are always armed in SITL — nothing to enable */
 static int sitl_network_init(void) { return 0; }
+static int sitl_network_get_cops(char *out)
+{
+    if (getenv("SITL_COPS_UNAVAILABLE")) return -1;
+    snprintf(out, 64, "+COPS: %d,2,\"%s\",7", g_plmn_manual, g_sim_plmn);
+    return 0;
+}
 static int sitl_network_get_cpsi(cpsi_t *out)
 {
     if (!out || g_cov_down || g_radio_off) return -1;
     memset(out, 0, sizeof *out);
     snprintf(out->networkmode, sizeof out->networkmode, "LTE,Online");
-    snprintf(out->Mnc_Mcc, sizeof out->Mnc_Mcc, "505-02");
+    snprintf(out->Mnc_Mcc, sizeof out->Mnc_Mcc, "%.3s-%s", g_sim_plmn, g_sim_plmn + 3);
     snprintf(out->LTEBandStr, sizeof out->LTEBandStr, "EUTRAN-BAND3");
     out->TAC = 52200;
     out->CellID = 36519691;
@@ -913,6 +935,7 @@ int sapi_table_fill(u32 loader_resolver)
     PUTSLOT(0x7E1E202Cu, sitl_netstat_start);/* NETSTAT_START (getter enable) */
     PUTSLOT(0x7E1E25C4u, sitl_network_init); /* sAPI_NetworkInit */
     PUTSLOT(0x7E1E2230u, sitl_network_get_cpsi); /* sAPI_NetworkGetCpsi */
+    PUTSLOT(0x7E1E263Cu, sitl_network_get_cops); /* sAPI_NetworkGetCops */
     PUTSLOT(0x7E1E1F60u, sitl_system_sleep_set); /* sAPI_SystemSleepSet */
     PUTSLOT(0x7E1E2194u, sitl_system_sleep_get); /* sAPI_SystemSleepGet */
     PUTSLOT(0x7E1E22CCu, sitl_system_alarm_wake); /* sAPI_SystemAlarmClock2Wakeup */
@@ -976,6 +999,9 @@ int main(int argc, char **argv)
 
     /* env defaults first; command-line flags override them */
     const char *e;
+    if ((e = getenv("SITL_PLMN_CURRENT"))) snprintf(g_sim_plmn, sizeof g_sim_plmn, "%s", e);
+    if ((e = getenv("SITL_PLMN_AVAILABLE"))) g_available_plmns = e;
+    if (getenv("SITL_PLMN_DENIED")) g_carrier_denied = 1;
     if ((e = getenv("SITL_SERVER"))) parse_server(e);
     if ((e = getenv("SITL_TERIID"))) snprintf(g_teriid, sizeof g_teriid, "%s", e);
     if (getenv("SITL_NO_REEXEC")) g_no_reexec = 1;

@@ -1890,19 +1890,27 @@
                     group = p.group;
                     html += `<tr><th colspan="4" style="text-align:left;padding-top:10px;border-bottom:2px solid #ddd">${esc(group)}</th></tr>`;
                 }
-                const val = (p.value === null || p.value === undefined || p.value === '')
+                let val = (p.value === null || p.value === undefined || p.value === '')
                     ? '<span style="color:#999">—</span>' : esc(String(p.value));
+                if (p.key === 'PLMNOK' && p.value != null) {
+                    const carriers = { '50501': 'Telstra', '50502': 'Optus', '50503': 'Vodafone AU' };
+                    val = p.value === '' ? 'Any carrier (automatic)'
+                        : String(p.value).split(',').map(code =>
+                            esc(carriers[code] ? `${carriers[code]} (${code})` : code)).join(', ');
+                }
                 let note = '';
                 if (p.volatile) note += ' <span style="color:#d97706" title="RAM-only on the device: resets on reboot">RAM-only</span>';
                 if (p.danger) note += ' <span style="color:#c00" title="Changing this can take the tracker off the air">⚠</span>';
                 html += '<tr style="border-bottom:1px solid #eee">'
-                    + `<td style="padding:4px 6px"><b>${esc(p.key)}</b>${note}</td>`
+                    + `<td style="padding:4px 6px"><b>${p.key === 'PLMNOK' ? 'Allowed carriers (PLMNOK)' : esc(p.key)}</b>${note}`
+                    + (p.key === 'PLMNOK' ? `<div style="max-width:420px;color:#666;font-size:12px">${esc(p.help || '')}</div>` : '')
+                    + '</td>'
                     + `<td style="padding:4px 6px">${val}</td>`
                     + `<td style="padding:4px 6px;color:#888">${paramAge(p.fetched_at)}</td>`
                     + '<td style="padding:4px 6px">'
                     + (p.writable && d.online
                         ? `<button class="btn" style="padding:2px 7px" onclick="editParam('${esc(p.key)}')">Edit</button>`
-                        : '')
+                        : (p.unavailable_reason ? `<span style="color:#888">${esc(p.unavailable_reason)}</span>` : ''))
                     + '</td></tr>';
             }
             html += '</table>';
