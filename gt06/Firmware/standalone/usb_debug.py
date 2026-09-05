@@ -28,6 +28,58 @@ STATUS = {
 DEFAULT_EXPORT_TABLE = 0x7E4643F0
 GNSS_POWER_STATUS_HASH = 0xE6A5FFAD
 
+# Exact name hashes recovered from SIMCom's generated api_map and confirmed against the live
+# G306161 resident resolver.  The resident's hash algorithm remains unknown; this small map makes
+# the APIs relevant to tracker diagnostics usable by name without pretending a guessed algorithm
+# is authoritative.  Keep the candidate search below as a fallback for names not listed here.
+KNOWN_SYMBOL_HASHES = {
+    # GNSS
+    "sAPI_GnssInfoGet": 0xB2D75D11,
+    "sAPI_GpsInfoGet": 0xAECA0A8C,
+    "sAPI_GnssNmeaSentenceGet": 0x54F93CA9,
+    "sAPI_GnssNmeaSentenceSet": 0x4FD63755,
+    "sAPI_GnssNmeaRateGet": 0x417D9C59,
+    "sAPI_GnssNmeaRateSet": 0x5A5297FD,
+    "sAPI_GnssModeGet": 0x98B919C3,
+    "sAPI_GnssModeSet": 0x8396122F,
+    "sAPI_GnssStartMode": 0x0D86568C,
+    "sAPI_GnssNmeaDataGet": 0xCA11A2FA,
+    "sAPI_GnssApFlashGet": 0xB78672AE,
+    "sAPI_GnssApFlashSet": 0xACA9794A,
+    "sAPI_GnssPowerStatusGet": GNSS_POWER_STATUS_HASH,
+    "sAPI_GnssPowerStatusSet": 0xFD8AF451,
+    "sAPI_GnssStateBindCB": 0x03F107AE,
+    # System sleep and health
+    "sAPI_SystemAlarmClock2Wakeup": 0xB197ACA7,
+    "sAPI_SystemSleepExSet": 0xC6F8B2E1,
+    "sAPI_SystemSleepGet": 0xE629127D,
+    "sAPI_SystemSleepSet": 0xFD0619D9,
+    "sAPI_GetSystemInfo": 0x1DEEE758,
+    "sAPI_TaskGetCurrentRef": 0x9DAFE707,
+    "sAPI_GetTaskStackInfo": 0x2C6189FD,
+    "sAPI_GetTaskInfo": 0x75E215ED,
+    # LTE/network and PSM
+    "sAPI_NetworkInit": 0xEFC83346,
+    "sAPI_NetworkGetCsq": 0xDB515814,
+    "sAPI_NetworkGetCreg": 0x126F7A00,
+    "sAPI_NetworkGetCpsi": 0xEACB3566,
+    "sAPI_NetworkGetCgreg": 0x41E775B1,
+    "sAPI_NetworkGetCops": 0x2BFE7BBA,
+    "sAPI_NetworkGetCgact": 0x8D638F00,
+    "sAPI_NetworkGetCgatt": 0x88E00A8E,
+    "sAPI_NetworkGetCfun": 0x3A5ED8C7,
+    "sAPI_NetworkGetCnetci": 0x03C7D079,
+    "sAPI_GetStatisticsData": 0x6A2F0972,
+    "sAPI_PSMSetT3324Timer": 0xA777F0EF,
+    "sAPI_PSMSetT3412Timer": 0x4A030058,
+    "sAPI_EnableHardWarePSM": 0x4F5F0B77,
+    # Hardware watchdog
+    "sAPI_FeedWtd": 0x7510198C,
+    "sAPI_SoftWtdEnable": 0xC9FE6AFB,
+    "sAPI_FalutWakeEnable": 0x7A5FB2D5,
+    "sAPI_SetWtdTimeOutPeriod": 0x22655D4C,
+}
+
 
 class DebugError(RuntimeError):
     pass
@@ -262,6 +314,17 @@ def resolve_hash(client, value):
 
 
 def resolve_name(client, name, quiet=False):
+    known = KNOWN_SYMBOL_HASHES.get(name)
+    if known is not None:
+        ptr = resolve_hash(client, known)
+        if ptr:
+            if not quiet:
+                print(f"{name}: mapped hash=0x{known:08x} -> 0x{ptr:08x}")
+            return [("mapped", known, ptr)]
+        if not quiet:
+            print(f"{name}: mapped hash=0x{known:08x} is absent from this resident")
+        return []
+
     hits = []
     seen = set()
     for label, value in hash_candidates(name):

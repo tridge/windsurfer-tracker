@@ -536,6 +536,8 @@ class GT06DeviceSim:
             volts = self.battery_mv / 1000.0
             resp = (f"Battery:{volts:.2f}V;GPRS:Online;GSM Signal Level:{self.signal*5};"
                     f"ACC:{'ON' if not self.charging else 'OFF'};GPS:OFF;Defense:OFF;")
+            if self.firmware.startswith("WSTR"):
+                resp += "LTE:505-02|EUTRAN-BAND3|52200|36519691|101|-102|-12|-75|8;"
             self._reply(resp, server_flag)
             return
 

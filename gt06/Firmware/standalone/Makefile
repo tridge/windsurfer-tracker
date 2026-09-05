@@ -144,7 +144,10 @@ test-sapifind: sitl-asan             ## CXCS#SAPIFIND identifies the resolver's 
 test-usb-debug: usb-debug-sitl       ## binary WDBG framing, reads, resolver lookup, scratch call
 	python3 test_usb_debug.py
 
-test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug  ## all SITL regression tests
+test-lte-sleep: sitl-asan            ## direct CPSI telemetry + GPS-safe disconnected alarm sleep
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_lte_sleep.py
+
+test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
@@ -152,4 +155,4 @@ clean:
 	      customer_app_usb_debug.bin customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin usb-debug-sitl
 
 .PHONY: all flashimg fotaimg usb-debug sitl-all test-gps-retry test-loc-batch test-fota-image \
-	test-battery-mv test-gpsstat test-sapifind test-usb-debug test clean
+	test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test clean

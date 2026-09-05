@@ -356,6 +356,10 @@ static u32 sitl_resolver(u32 hash, u32 zero)
     for (unsigned i = 0; i < sizeof known / sizeof known[0]; i++)
         if (sitl_secret_hash(known[i]) == hash)
             return 0x7E600000u + i * 4u;             /* plausible resident code pointer */
+    /* Exact hash recovered from the real generated API map.  Accepting it lets the USB host test
+     * cover mapped-name resolution while the entries above continue to cover hash guessing. */
+    if (hash == 0xE6A5FFADu)
+        return 0x7E600004u;                          /* sAPI_GnssPowerStatusGet */
     return 0;
 }
 
@@ -748,6 +752,49 @@ static int sitl_get_reg(unsigned *out)
     return 0;
 }
 static void sitl_netstat_start(void) { }   /* getters are always armed in SITL — nothing to enable */
+static int sitl_network_init(void) { return 0; }
+static int sitl_network_get_cpsi(cpsi_t *out)
+{
+    if (!out || g_cov_down || g_radio_off) return -1;
+    memset(out, 0, sizeof *out);
+    snprintf(out->networkmode, sizeof out->networkmode, "LTE,Online");
+    snprintf(out->Mnc_Mcc, sizeof out->Mnc_Mcc, "505-02");
+    snprintf(out->LTEBandStr, sizeof out->LTEBandStr, "EUTRAN-BAND3");
+    out->TAC = 52200;
+    out->CellID = 36519691;
+    out->Rsrp = -102;
+    out->Rsrq = -12;
+    out->Rssi = -75;
+    out->SINR = 8;
+    out->observedPhysicalCellId = 101;
+    return 0;
+}
+static int sitl_sleep_enabled;
+static int sitl_sleep_set_failures;
+static int sitl_sleep_alarm_failures;
+static int sitl_system_sleep_set(int flag)
+{
+    if (flag != 0 && flag != 1) return -1;
+    if (flag && sitl_sleep_set_failures > 0) {
+        sitl_sleep_set_failures--;
+        fprintf(stderr, "[SITL] injected system sleep failure\n");
+        return -1;
+    }
+    sitl_sleep_enabled = flag;
+    fprintf(stderr, "[SITL] system sleep %s\n", flag ? "enabled" : "disabled");
+    return 0;
+}
+static int sitl_system_sleep_get(void) { return sitl_sleep_enabled; }
+static int sitl_system_alarm_wake(unsigned long ms)
+{
+    if (sitl_sleep_alarm_failures > 0) {
+        sitl_sleep_alarm_failures--;
+        fprintf(stderr, "[SITL] injected wake alarm failure\n");
+        return -1;
+    }
+    fprintf(stderr, "[SITL] wake alarm %lu ms\n", ms);
+    return ms ? 0 : -1;
+}
 
 /* Status-LED GPIO mocks (item 14): log every level change so a test can assert the LED pattern. */
 static int sitl_gpio_config(unsigned id, unsigned mode) { (void)id; (void)mode; return 0; }
@@ -864,6 +911,11 @@ int sapi_table_fill(u32 loader_resolver)
     PUTSLOT(0x7E1E1F54u, sitl_get_csq);      /* GET_CSQ (direct, no AT) */
     PUTSLOT(0x7E1E23C0u, sitl_get_reg);      /* GET_REG (CEREG-equivalent) */
     PUTSLOT(0x7E1E202Cu, sitl_netstat_start);/* NETSTAT_START (getter enable) */
+    PUTSLOT(0x7E1E25C4u, sitl_network_init); /* sAPI_NetworkInit */
+    PUTSLOT(0x7E1E2230u, sitl_network_get_cpsi); /* sAPI_NetworkGetCpsi */
+    PUTSLOT(0x7E1E1F60u, sitl_system_sleep_set); /* sAPI_SystemSleepSet */
+    PUTSLOT(0x7E1E2194u, sitl_system_sleep_get); /* sAPI_SystemSleepGet */
+    PUTSLOT(0x7E1E22CCu, sitl_system_alarm_wake); /* sAPI_SystemAlarmClock2Wakeup */
     PUTSLOT(0x7E1E254Cu, sitl_gpio_config);  /* GPIO_CONFIG (LED) */
     PUTSLOT(0x7E1E2104u, sitl_gpio_set);     /* GPIO_SET (LED) */
 
@@ -904,6 +956,8 @@ static void usage(const char *prog)
         "Test injection: SITL_GNSS_POWER_FAILS=N fails the first N GNSS power-on calls,\n"
         "                SITL_GNSS_POWEROFF_FAILS=N power-off calls, after\n"
         "                SITL_GNSS_POWEROFF_SKIP=N of them have been allowed to succeed.\n"
+        "                SITL_SLEEP_ALARM_FAILS=N fails the first N wake-alarm calls,\n"
+        "                SITL_SLEEP_SET_FAILS=N fails the first N sleep-enable calls,\n"
         "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1),\n"
         "                SITL_NMEA_TIME_OFFSET_S=N shifts the stamped UTC (midnight tests),\n"
         "                SITL_BATT_MV=N sets the supervisor battery reading.\n"
@@ -931,6 +985,8 @@ int main(int argc, char **argv)
     if ((e = getenv("SITL_GNSS_POWER_FAILS"))) g_gps_power_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_FAILS"))) g_gps_poweroff_failures = atoi(e);
     if ((e = getenv("SITL_GNSS_POWEROFF_SKIP"))) g_gps_poweroff_skip = atoi(e);
+    if ((e = getenv("SITL_SLEEP_ALARM_FAILS"))) sitl_sleep_alarm_failures = atoi(e);
+    if ((e = getenv("SITL_SLEEP_SET_FAILS"))) sitl_sleep_set_failures = atoi(e);
     if (getenv("SITL_GNSS_INITIAL_ON")) g_gps_on = 1;
     if ((e = getenv("SITL_BATT_MV"))) { int v = atoi(e); if (v > 0) g_batt_mv_sim = (unsigned)v; }
     if ((e = getenv("SITL_NMEA_TIME_OFFSET_S"))) g_nmea_time_offset_s = atol(e);

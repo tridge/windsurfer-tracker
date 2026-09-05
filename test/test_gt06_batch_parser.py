@@ -201,11 +201,11 @@ def test_own_firmware_skips_parameters_it_does_not_implement():
     kept = _settings_for_firmware(_APPLY_ORDER, "WSTR-STD1_00e8220")
     assert set(kept) == WSTR_SUPPORTED_SETTINGS & set(_APPLY_ORDER)
     # the ones our firmware has no notion of
-    for gone in ("SLPDISCONNECT", "GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE",
+    for gone in ("GPS_RST_TIME", "GPSCODEWAIT", "VIBCHK", "ACCLINE",
                  "SENDS", "SENALM", "MOVING"):
         assert gone not in kept, f"{gone} is not implemented by our firmware"
     # the ones it does
-    for keep in ("TIMER", "HBT", "BLIND_EN"):
+    for keep in ("SLPDISCONNECT", "TIMER", "HBT", "BLIND_EN"):
         assert keep in kept, f"{keep} IS implemented and must still be synced"
 
 

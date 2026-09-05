@@ -1316,6 +1316,17 @@ static volatile unsigned char g_sos_active, g_sos_sends, g_sos_prev;
 #define SOS_BURST 10                            /* 0x16 alarms per delivery burst (per trigger / reconnect) */
 static volatile unsigned g_hbt_on = 15, g_hbt_off = 15;  /* HBT,X,Y heartbeat interval: X=ACC-ON, Y=ACC-OFF(idle) */
 #define HBT_MAX 3600  /* sanity ceiling (s): reject garbage that would silently disable the heartbeat */
+/* WSTR-only night-idle sleep policy. RAM-only and reconciled by the server on every login: ordinary
+ * race-day idle remains connected, while the configured night window closes TCP and lets the module
+ * sleep until the alarm. A failed sleep API latches the path off until the setting is explicitly reset. */
+static volatile unsigned char g_sleep_disconnect, g_sleep_fault;
+static volatile unsigned g_last_server_cmd_ts;
+#define SLEEP_QUIET_SEC 5
+#ifdef SITL
+#define SLEEP_MIN_SEC 2
+#else
+#define SLEEP_MIN_SEC 60
+#endif
 
 /* Resident UART RX callback — the resident UART thread calls this with (uart_ref, pending_len, reserve)
  * (ABI RE'd from vendor 0x7e1d4988). Drain the pending bytes via UartRead(uart_ref,...) into g_urx. */
@@ -1568,6 +1579,15 @@ static int put_uint(char *b, unsigned v)
     for (int i = 0; i < n; i++) b[i] = t[n - 1 - i];
     return n;
 }
+static int put_sint(char *b, int v)
+{
+    if (v < 0) {
+        b[0] = '-';
+        /* Avoid signed overflow for INT_MIN; CPSI values are tiny, but this keeps the formatter total. */
+        return 1 + put_uint(b + 1, 0u - (unsigned)v);
+    }
+    return put_uint(b, (unsigned)v);
+}
 /* Frame raw ASCII as a 0x15 command response (no "<cmd> OK" wrapper): [content_len][flag 4B=0][ascii]. */
 static int build_text_resp(const char *ascii, int alen, unsigned short serial, unsigned char *out)
 {
@@ -1593,6 +1613,35 @@ static int status_str(char *b)
     else if (g_gps_power_state == GPS_POWER_OFF) n += put_str(b + n, "OFF");
     else n += put_str(b + n, "UNKNOWN");
     n += put_str(b + n, ";Defense:OFF;");
+    /* One atomic direct CPSI sample: unlike AT+CPSI?, this cannot interleave response text into the
+     * shared NMEA URC queue. Only emit a fully-populated LTE sample; STATUS remains useful if the
+     * service is unavailable or the modem is between cells. Compact wire form stays under 200 bytes. */
+    network_cpsi_fn get = *(network_cpsi_fn *)SLOT_NETWORK_GET_CPSI;
+    if (get) {
+        int lte_start = n;
+        cpsi_t c;
+        unsigned char *raw = (unsigned char *)&c;
+        for (unsigned i = 0; i < sizeof c; i++) raw[i] = 0;
+        g_wd_phase = 'N';
+        int rc = get(&c);
+        g_wd_phase = 0;
+        if (rc == 0 && c.networkmode[0] == 'L' && c.networkmode[1] == 'T' && c.networkmode[2] == 'E') {
+            n += put_str(b + n, "LTE:");
+            n += put_strn(b + n, c.Mnc_Mcc, 19); b[n++] = '|';
+            n += put_strn(b + n, c.LTEBandStr, 19); b[n++] = '|';
+            n += put_uint(b + n, (unsigned)c.TAC); b[n++] = '|';
+            n += put_uint(b + n, (unsigned)c.CellID); b[n++] = '|';
+            n += put_uint(b + n, (unsigned)c.observedPhysicalCellId); b[n++] = '|';
+            n += put_sint(b + n, c.Rsrp); b[n++] = '|';
+            n += put_sint(b + n, c.Rsrq); b[n++] = '|';
+            n += put_sint(b + n, c.Rssi); b[n++] = '|';
+            n += put_sint(b + n, c.SINR); b[n++] = ';';
+            /* The builder's scratch buffer safely holds worst-case integers, but the GT06 STATUS wire
+             * contract is capped at 200 ASCII bytes. Drop the whole optional snapshot rather than let
+             * build_text_resp truncate its tail into an unparsable partial LTE field. */
+            if (n > 200) n = lte_start;
+        }
+    }
     return n;
 }
 /* cxzt# reply: the device-info line the server parses — *ID, server, *A(pn), *F(TIMER), *H(bt), *BT(mV). */
@@ -1888,6 +1937,27 @@ static int handle_config_cmd(const char *cmd, char *out)
         g_blind_en = (unsigned char)(pv[0] - '0');
         int n = put_str(out, "SETOK:BLIND_EN=");
         out[n++] = (char)('0' + g_blind_en);
+        return n;
+    }
+    /* Disconnected timed sleep is deliberately RAM-only. The server enables it only for WSTR firmware
+     * during night idle and disables it in every other state. Writing either value clears a latched API
+     * fault so an operator can retry after investigating without rebooting the tracker. */
+    if (prefix_eq(cmd, "CXCS#SLPDISCONNECT")) {
+        int n = put_str(out, "READOK:SLPDISCONNECT=");
+        /* Report effective state. A latched API fault reads back as disabled, making the server's normal
+         * desired-vs-observed reconciliation issue a fresh set (which clears the fault) next login. */
+        out[n++] = (char)('0' + (g_sleep_disconnect && !g_sleep_fault ? 1 : 0));
+        return n;
+    }
+    if (prefix_eq(cmd, "SZCS#SLPDISCONNECT")) {
+        const char *pv = skip_to_val(cmd, "SLPDISCONNECT");
+        if (!pv || (pv[0] != '0' && pv[0] != '1') ||
+            (pv[1] != 0 && pv[1] != '#' && pv[1] != ' '))
+            return put_str(out, "SET ERROR: SLPDISCONNECT");
+        g_sleep_disconnect = (unsigned char)(pv[0] - '0');
+        g_sleep_fault = 0;
+        int n = put_str(out, "SETOK:SLPDISCONNECT=");
+        out[n++] = (char)('0' + g_sleep_disconnect);
         return n;
     }
     if (prefix_eq(cmd, "CXCS#LOCBATCH")) {
@@ -2288,6 +2358,9 @@ static void handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int c
         if (i + total > *acclen) break;            /* frame incomplete — wait for more */
         if (acc[i + total - 2] != 0x0d || acc[i + total - 1] != 0x0a) { i++; continue; }  /* misframed */
         if (acc[i + 3] == 0x80) {
+            /* A quiet window after the last complete command prevents sleep from racing the server's
+             * login/reconcile sequence. It is updated before dispatch, regardless of command type. */
+            g_last_server_cmd_ts = wd_uptime();
             int dlen = acc[i + 2] - 5;             /* proto+data+serial+crc => data-block length */
             int alen = acc[i + 4] - 4;             /* content_len - server_flag(4) */
             if (alen < 0 || dlen < 5) alen = 0;    /* no room for [content_len][flag4][ascii] */
@@ -2923,6 +2996,10 @@ void standalone_main(u32 loader_resolver)
     if (fwd_load()) g_fwd_en = (g_fwd_port > 0) ? 1 : 0;
     vputs("S3c: GNSS -> LOC tracker\r\n");
 
+    /* Initialise the public network getter service once, then arm the lower-level status getters. WDBG
+     * proved CPSI returns uninitialised data before NetworkInit; the official OpenSDK contract requires
+     * this ordering. Both calls are one-shot and safe before registration completes. */
+    { network_init_fn ni = *(network_init_fn *)SLOT_NETWORK_INIT; if (ni) ni(); }
     /* Arm the resident network-status subsystem once at boot (item 3/5): creates the IPC handle that
      * gates get_csq()/get_reg_stat() — without it both return error. Vendor does this at network init
      * (its 0x7e1b6498). No-arg; safe to call before the modem attaches (the ready flag comes later). */
@@ -3143,6 +3220,47 @@ void standalone_main(u32 loader_resolver)
         }
         cell_recovery(now, connected);  /* item 16: un-wedge a camped-but-denied modem (timer-gated) */
 
+        /* Night-only disconnected idle sleep. Do this before reconnect processing, after all urgent
+         * work above. Preconditions preserve the two invariants that motivated this feature: no queued
+         * track/SOS data is abandoned, and wake-up does not run apply_gps() or otherwise re-enable GNSS.
+         * SystemSleepSet merely permits automatic module sleep, so keep this task dormant until the
+         * alarm fires; then revoke permission before rebuilding TCP state. */
+        if (connected && !track && g_sleep_disconnect && !g_sleep_fault &&
+            !g_fwd_en && !g_fwd_active && !g_sos_active &&
+            g_blind_count == 0 && g_batch_n == 0 &&
+            g_gps_power_state == GPS_POWER_OFF && g_gps_off_confirmed &&
+            (now - g_last_server_cmd_ts) >= SLEEP_QUIET_SEC) {
+            unsigned sleep_sec = g_hbt_off;
+            if (sleep_sec < SLEEP_MIN_SEC) sleep_sec = SLEEP_MIN_SEC;
+            if (sleep_sec > HBT_MAX) sleep_sec = HBT_MAX;
+            unsigned long sleep_ms = (unsigned long)sleep_sec * 1000ul;
+            system_alarm_wake_fn alarm = *(system_alarm_wake_fn *)SLOT_SYSTEM_ALARM_WAKE;
+            system_sleep_set_fn set_sleep = *(system_sleep_set_fn *)SLOT_SYSTEM_SLEEP_SET;
+            int arc = alarm ? alarm(sleep_ms) : -1;
+            if (arc == 0) {
+                /* Close while definitely awake. The alarm must be armed before granting sleep; should
+                 * the grant fail, an alarm expiring while awake is harmless and needs no cancellation. */
+                cl(fd); fd = -1; connected = 0; connecting = 0; acclen = 0;
+            }
+            int src = (arc == 0 && set_sleep) ? set_sleep(1) : -1;
+            if (arc != 0 || src != 0) {
+                g_sleep_fault = 1;
+                vhex("SLEEP:alarm_rc", (unsigned)arc);
+                vhex("SLEEP:set_rc", (unsigned)src);
+                vputs("SLEEP: disabled after API failure\r\n");
+            } else {
+                vhex("SLEEP:seconds", sleep_sec);
+                wd_arm(0);                  /* the main-task watchdog must ignore this deliberate absence */
+                wd_sleep((int)sleep_ms + 1000);
+                if (set_sleep(0) != 0) g_sleep_fault = 1;
+                wd_alive(); wd_arm(1);
+                now = wd_uptime();
+                last_conn = now - (unsigned)CONN_RETRY_SEC; /* reconnect immediately after the alarm */
+                vputs("SLEEP: awake, GPS remains off\r\n");
+                continue;
+            }
+        }
+
         /* (Re)connect + log in — NON-BLOCKING (item 12 follow-up). A blocking connect() stalls this
          * loop for the whole TCP timeout when the server is unreachable (radio up, route/server dead),
          * starving the 1 Hz blind-buffer capture. So: set the socket non-blocking, start the connect,
@@ -3193,6 +3311,10 @@ void standalone_main(u32 loader_resolver)
                     cl(fd); fd = -1;               /* login didn't go out whole -> paced retry */
                 } else {
                     connected = 1;
+                    /* Give the server a fresh command window on every login. Without this, a tracker
+                     * whose sleep flag remains enabled can reconnect and close again before recv() has
+                     * one chance to observe a TIMER/start or reconciliation command. */
+                    g_last_server_cmd_ts = now;
                     /* recv() is guarded by a select() poll in the loop below (this resident ignores
                      * SO_RCVTIMEO, so an unguarded recv blocks ~5s). No socket-option setup needed. */
                     last_hbt = now - (unsigned)t2;    /* emit one heartbeat right after connect (liveness) */

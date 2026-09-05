@@ -211,14 +211,15 @@ _APPLY_ORDER = ["SLPDISCONNECT", "TIMER", "SENDS", "SENALM", "MOVING",
 WSTR_FW_PREFIX = "WSTR"
 
 # What OUR firmware actually implements out of _APPLY_ORDER. Everything else in that list is a vendor
-# behaviour we deliberately never wrote: no vibration/ACC line, no GPS reset timer, no sleep-disconnect.
+# behaviour we deliberately never wrote: no vibration/ACC line or GPS reset timer. SLPDISCONNECT is our
+# GPS-safe, alarm-woken night-idle implementation; it is not the vendor command's opaque MODE behavior.
 #
 # Skipping them is not just tidiness. The firmware answers ANY "SZCS#..." with "<cmd> OK" (an unknown
 # command must not be silently claimed as applied), so an unimplemented parameter looks successfully
 # set while doing nothing, and its CXCS# query returns no value — so the reconciler sees a permanent
 # mismatch and re-sends the whole group on every single login, filling the command queue behind the
 # commands that do matter.
-WSTR_SUPPORTED_SETTINGS = {"TIMER", "HBT", "BLIND_EN"}
+WSTR_SUPPORTED_SETTINGS = {"SLPDISCONNECT", "TIMER", "HBT", "BLIND_EN"}
 
 
 # Default OTA target. A symlink, so "latest" is published by repointing it rather than by editing
@@ -309,6 +310,43 @@ def _p_fwdstat(text):
 def _p_cellstat(text):
     m = re.search(r'READOK:CELLSTAT.*?\sok([^\s\x00-\x1f]*)', text)
     return {'PLMNOK': m.group(1)} if m else {}
+
+
+_PLMN_CARRIERS = {
+    "505-01": "Telstra",
+    "505-02": "Optus",
+    "505-03": "Vodafone AU",
+}
+
+
+def _parse_lte_status(text):
+    """Parse WSTR's compact atomic CPSI snapshot from a STATUS# reply."""
+    m = re.search(r'(?:^|;)LTE:([^;]+);', text)
+    if not m:
+        return None
+    fields = m.group(1).split('|')
+    if len(fields) != 9:
+        return None
+    plmn, band = fields[:2]
+    if (not re.fullmatch(r'\d{3}-\d{2,3}', plmn)
+            or not re.fullmatch(r'[A-Za-z0-9_-]{1,19}', band)):
+        return None
+    try:
+        tac, cell_id, pci, rsrp, rsrq, rssi, sinr = map(int, fields[2:])
+    except ValueError:
+        return None
+    return {
+        "plmn": plmn,
+        "carrier": _PLMN_CARRIERS.get(plmn, plmn),
+        "band": band,
+        "tac": tac,
+        "cell_id": cell_id,
+        "pci": pci,
+        "rsrp": rsrp,
+        "rsrq": rsrq,
+        "rssi": rssi,
+        "sinr": sinr,
+    }
 
 
 def _v_ip(v):
@@ -841,6 +879,7 @@ class GT06Connection:
         self.signal = -1
         self.charging = None
         self.battery_voltage = None             # actual voltage from STATUS/cxzt (float)
+        self.lte = None                         # latest atomic direct-CPSI snapshot
         self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
         self.last_overnight_probe = 0.0         # monotonic time of last overnight cxzt# re-probe
         self.last_gps_off_resend = 0.0          # monotonic time of last idle GPS-off re-push
@@ -1538,7 +1577,10 @@ class GT06Listener:
             # unit doesn't assert ACC-ON (→ GPS). Intervals are the day set, or the
             # long night set when this unit's event is in its night-idle window.
             eff = self._idle_intervals(gt_conn)
-            return {"SLPDISCONNECT": 0,
+            # Only our firmware maps this flag to the proved OpenSDK alarm/sleep APIs. Vendor units keep
+            # their established long-connection setting even during this optional night-idle window.
+            sleep_disconnect = int(eff["night"] and _is_wstr_firmware(gt_conn.firmware))
+            return {"SLPDISCONNECT": sleep_disconnect,
                     "TIMER": f"{eff['acc_on']},{eff['acc_off']}",
                     "SENDS": 1,
                     "SENALM": "OFF", "MOVING": "OFF",
@@ -2714,6 +2756,19 @@ class GT06Listener:
                                 pt.current_positions, pt.positions_file,
                                 getattr(tracker, 'user_overrides', {}),
                                 pt.position_tails)
+            # WSTR appends one atomic direct-CPSI sample to STATUS. Preserve the modem's raw indicators
+            # (conversion/presentation can evolve server-side) and make handovers visible in gt06.log.
+            lte = _parse_lte_status(text)
+            if lte is not None:
+                gt_conn.lte = lte
+                st = self.device_state.get(gt_conn.imei)
+                if st is not None:
+                    st['lte'] = lte
+                self._log(
+                    f"[GT06] {label} LTE {lte['carrier']} ({lte['plmn']}) "
+                    f"{lte['band']} TAC={lte['tac']} cell={lte['cell_id']} "
+                    f"PCI={lte['pci']} RSRP={lte['rsrp']} RSRQ={lte['rsrq']} "
+                    f"RSSI={lte['rssi']} SINR={lte['sinr']}")
             # Parse battery voltage from STATUS response
             vmatch = re.search(r'Battery:(\d+\.\d+)V', text)
             if vmatch:
@@ -2855,6 +2910,8 @@ class GT06Listener:
             st['battery_voltage'] = gt_conn.battery_voltage
         if gt_conn.signal is not None and gt_conn.signal >= 0:
             st['signal'] = gt_conn.signal
+        if gt_conn.lte is not None:
+            st['lte'] = gt_conn.lte
         st['idle'] = gt_conn.idle
         st['overnight'] = gt_conn.overnight
         st['last_seen'] = now
@@ -3009,6 +3066,7 @@ class GT06Listener:
                                     else st.get("battery_voltage")),
                 "signal": (conn.signal if conn and conn.signal is not None
                            and conn.signal >= 0 else st.get("signal")),
+                "lte": (conn.lte if conn and conn.lte is not None else st.get("lte")),
                 "idle": (conn.idle if conn else st.get("idle")),
                 "overnight": (conn.overnight if conn else st.get("overnight")),
                 "mode": st.get("mode"),

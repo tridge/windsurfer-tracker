@@ -154,6 +154,30 @@ typedef int (*get_csq_fn)(unsigned char *out);
 #define SLOT_GET_REG SL(0x7E1E23C0u) /* hash 0x41e775b1: int get_reg_stat(u32 *out) -> 0 ok;
                                     * (*out & ~4)==1 => registered (1=home, 5=roaming). CEREG-equivalent. */
 typedef int (*get_reg_fn)(unsigned *out);
+/* OpenSDK network/system APIs recovered by exact hash through WDBG on G306161. NetworkGetCpsi fills
+ * the documented SCcpsiParm prefix; this resident also appends RSSI/EARFCN/radio-frame fields. Keep
+ * the complete 152-byte object so a newer tail can never overwrite the caller's stack. */
+#define SLOT_NETWORK_INIT       SL(0x7E1E25C4u) /* hash 0xefc83346: int sAPI_NetworkInit(void) */
+#define SLOT_NETWORK_GET_CPSI   SL(0x7E1E2230u) /* hash 0xeacb3566: int sAPI_NetworkGetCpsi(SCcpsiParm *) */
+#define SLOT_SYSTEM_SLEEP_SET   SL(0x7E1E1F60u) /* hash 0xfd0619d9: int sAPI_SystemSleepSet(flag) */
+#define SLOT_SYSTEM_SLEEP_GET   SL(0x7E1E2194u) /* hash 0xe629127d: int sAPI_SystemSleepGet(void) */
+#define SLOT_SYSTEM_ALARM_WAKE  SL(0x7E1E22CCu) /* hash 0xb197aca7: int sAPI_SystemAlarmClock2Wakeup(ms) */
+typedef int (*network_init_fn)(void);
+typedef struct {
+    char networkmode[40];
+    char Mnc_Mcc[20];
+    char GSMBandStr[20];
+    char LTEBandStr[20];
+    int LAC, CellID, TAC, Rsrp, Rsrq, RXLEV, TA, SINR, Rssi;
+    int dlEuArfcn, subframeAssignment;
+    /* This resident writes the physical-cell ID at +144. A newer public header calls the same tail word
+     * systemFrameNumber, so name it by measured semantics and retain one spare word for buffer safety. */
+    int observedPhysicalCellId, reservedTail;
+} cpsi_t;
+typedef int (*network_cpsi_fn)(cpsi_t *out);
+typedef int (*system_sleep_set_fn)(int flag);
+typedef int (*system_sleep_get_fn)(void);
+typedef int (*system_alarm_wake_fn)(unsigned long ms);
 /* Status-LED GPIO family (item 14, RE re_leds.md). Two app LEDs = gpio ids 7 and 0x78 driven by the
  * resident GPIO sAPI; all pairs already in sapi_pairs.h. Red charge LED is the M0's, not reachable here. */
 #define SLOT_GPIO_CONFIG SL(0x7E1E254Cu) /* hash 0x3c43521f: gpio_config(id, mode) -> mode 1 = output */

@@ -14,9 +14,9 @@ Artifacts:
 - `customer_app_usb_debug.bin.flash.zip` — ready for the existing `adownload` USB flash path.
 - `W07_USBDBG_B53.bin` — 64 KiB vendor/standalone FOTA image, whole-file XOR `0x80`.
 
-After flashing, follow the existing recovery note in `README.md`: this hardware normally needs one
-physical power-cycle before the new app boots. Reinstall `customer_app_standalone.bin.flash.zip` (or
-the golden vendor app) when exploration is finished.
+Flash with the ASR helper's `--reboot` option so its signed CRANEGM download agent performs the reset
+in software. A physical power-cycle is only a fallback if that reset agent fails. Reinstall the current
+production `customer_app_standalone.bin` (or the golden vendor app) when exploration is finished.
 
 ## Host tool
 
@@ -29,6 +29,7 @@ python3 usb_debug.py info
 python3 usb_debug.py read 0x7e1e1f00 0x100
 python3 usb_debug.py resolve 0x9fc0f60b
 python3 usb_debug.py resolve sAPI_GnssPowerStatusGet
+python3 usb_debug.py resolve sAPI_NetworkGetCpsi
 ```
 
 Ordinary reads are restricted to this app's image/BSS and `0x7e1e1c00..0x7e1e2868` (the complete sAPI
@@ -63,6 +64,11 @@ python3 usb_debug.py exports --output exports.csv
 Disassembly and live off/on/off probing identified export 106 as `sAPI_GnssPowerStatusGet`: hash
 `0xe6a5ffad`, function `0x7e6db0fb`, resolved standalone slot `0x7e1e25dc`. It returns 0 when GNSS is
 off and 1 when it is on; power transitions are asynchronous and may take a few seconds to appear.
+
+`usb_debug.py` also contains an exact, live-resolver-confirmed name map for the GNSS, sleep, LTE/PSM,
+task-health, and watchdog APIs investigated for the tracker. Named resolution consults this map before
+falling back to speculative hash algorithms. See `usb_api_findings.md` for ABIs, live results, and the
+distinction between functions that were called and functions that were only resolved.
 
 Always do resolver-only queries before calling a candidate. A timeout after a read/call is printed as
 `CRASH/REBOOT NOTICE`; at that point the CPU or USB task may need a physical power-cycle. A responsive

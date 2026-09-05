@@ -36,14 +36,19 @@ void wd_alive(void) { g_alive++; }
 void wd_arm(int on) { g_armed = on; }
 unsigned wd_uptime(void) { return g_uptime; }
 
-/* Blocking sleep: timed MsgQRecv on a private empty queue (the same primitive the monitor sleeps on). */
+/* Blocking sleep in milliseconds: MsgQRecv takes 5 ms RTOS ticks on this ThreadX resident (live timing
+ * also showed a timeout of 1000 lasts ~5 seconds). Convert here so every existing wd_sleep caller keeps
+ * the millisecond contract its name and comments already assume. */
 void wd_sleep(int ms)
 {
     static unsigned sq;
     static const char SQNAME[] = "wdslp2";
     unsigned char buf[16];
     if (!sq) (*(msgqc_fn *)SLOT_MSGQ_CREATE)(&sq, SQNAME, 16, 4, 11);
-    if (sq) (*(msgqr_fn *)SLOT_MSGQ_RECV)(sq, buf, ms);
+    if (sq) {
+        int ticks = ms > 0 ? (ms + 4) / 5 : 0;
+        (*(msgqr_fn *)SLOT_MSGQ_RECV)(sq, buf, ticks);
+    }
     else { volatile unsigned n = 4000000; while (n--) { } }
 }
 

@@ -59,14 +59,20 @@ def main():
             usb_debug.OP_READ, [0x80000000, 4], usb_debug.F_UNSAFE_READ)
         assert status == 0 and payload == b"\x00\x01\x02\x03"
 
-        known_hash = next(value for label, value in usb_debug.hash_candidates("sAPI_GnssPowerStatusGet")
-                          if label == "djb2/strip-sAPI")
-        ptr = usb_debug.resolve_hash(client, known_hash)
+        # A recovered exact map resolves useful APIs without guessing the vendor hash algorithm.
+        hits = usb_debug.resolve_name(client, "sAPI_GnssPowerStatusGet", quiet=True)
+        assert hits == [("mapped", usb_debug.GNSS_POWER_STATUS_HASH, 0x7E600004)]
+        ptr = hits[0][2]
         assert ptr == 0x7E600004
         status, payload = client.request(
             usb_debug.OP_CALL, [ptr, 0xFFFFFFFF, 0, 0], usb_debug.F_CALL_ACK)
         assert status == 0 and len(payload) == 260
         assert struct.unpack_from("<I", payload)[0] == 1 and payload[4] == 1
+
+        # Unmapped names still exercise the old candidate-algorithm fallback.
+        hits = usb_debug.resolve_name(client, "sAPI_SmsDelAllMsg", quiet=True)
+        assert any(label == "djb2/strip-sAPI" and hit_ptr == 0x7E600008
+                   for label, _, hit_ptr in hits)
 
         # Preload eight argument words and separate input data, pass a scratch+32 pointer, and verify
         # both the full AAPCS call path and output-buffer round trip.
