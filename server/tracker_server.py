@@ -2815,7 +2815,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                             summary = json.load(f)
                         date = summary.get('date', summary_file.stem.replace('_summary', ''))
 
-                        for log in summary.get('logs', []):
+                        logs = summary.get('logs', [])
+                        for log_idx, log in enumerate(logs):
+                            # Named sublogs (race markers), e.g. "Marathon"
+                            for sub_idx, sublog in enumerate(log.get('sublogs', []) or []):
+                                sub_name = str(sublog.get('name', ''))
+                                if query in sub_name.lower():
+                                    s_ts = sublog.get('start_ts', 0)
+                                    e_ts = sublog.get('end_ts', 0)
+                                    results.append({
+                                        'type': 'sublog',
+                                        'date': date,
+                                        'log_file': log.get('file', ''),
+                                        'log_num': len(logs) - log_idx,  # logs are start_ts-descending
+                                        'sublog_index': sub_idx,
+                                        'name': sub_name,
+                                        'start_ts': s_ts,
+                                        'end_ts': e_ts,
+                                        'duration_secs': e_ts - s_ts if e_ts > s_ts else 0
+                                    })
                             for key, sailor_data in log.get('sailors', {}).items():
                                 # Get the original tracker ID and displayid from summary
                                 # In new format: sailor_data has 'id' (original tracker ID) and optionally 'displayid'

@@ -106,3 +106,34 @@ def test_sublog_missing_fields(udp_client, http_client, server):
         headers={"X-Admin-Password": "subfields"},
     )
     assert status == 400
+
+
+def test_search_finds_sublog_name(udp_client, http_client, server):
+    """Search should return named sublogs (race markers) as well as sailors."""
+    eid = create_event(http_client, name="Sublog Search", admin_password="subadmin")
+    log_file = _setup_log_with_summary(udp_client, http_client, server, eid)
+
+    status, _ = http_client.post(
+        f"/api/event/{eid}/log/{log_file}/sublog",
+        data={"name": "Marathon", "start_ts": 1000, "end_ts": 4600},
+        headers={"X-Admin-Password": "subadmin"},
+    )
+    assert status == 200
+
+    status, body = http_client.get(f"/api/event/{eid}/search?q=marath")
+    assert status == 200
+    hits = [r for r in body["results"] if r.get("type") == "sublog"]
+    assert len(hits) == 1
+    hit = hits[0]
+    assert hit["name"] == "Marathon"
+    assert hit["log_file"] == log_file
+    assert hit["log_num"] == 1
+    assert hit["sublog_index"] == 0
+    assert hit["start_ts"] == 1000 and hit["end_ts"] == 4600
+    assert hit["duration_secs"] == 3600
+
+    # Sailor search still works and does not return sublog entries
+    status, body = http_client.get(f"/api/event/{eid}/search?q=sub01")
+    assert status == 200
+    assert any(r.get("type") != "sublog" and r["sailor_id"] == "SUB01" for r in body["results"])
+    assert not any(r.get("type") == "sublog" for r in body["results"])

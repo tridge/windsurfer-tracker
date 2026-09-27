@@ -77,7 +77,7 @@
                 <label><button id="export-geojson" class="export-format-btn">GeoJSON (Mapping)</button></label>
             </div>
         </div>
-        <button id="search-btn" title="Search sailors">🔍</button>
+        <button id="search-btn" title="Search sailors and races">🔍</button>
         <button id="reload-tiles-btn" title="Reload map tiles">⟳</button>
         <span id="status"></span>
     </div>
@@ -85,7 +85,7 @@
     <!-- Search modal -->
     <div id="search-modal" class="search-modal" style="display:none;">
         <div class="search-modal-content">
-            <input type="text" id="search-input" placeholder="Search sailor name...">
+            <input type="text" id="search-input" placeholder="Search sailor or race name...">
             <div id="search-results"></div>
             <button id="search-close">Close</button>
         </div>
@@ -5233,10 +5233,17 @@
             container.innerHTML = results.map(r => {
                 const duration = formatDurationSecs(r.duration_secs);
                 const dateDisplay = r.date.replace(/_/g, '-');
+                if (r.type === 'sublog') {
+                    const times = `${formatTimeShortInTz(r.start_ts)} - ${formatTimeShortInTz(r.end_ts)}`;
+                    return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sublog="${r.sublog_index}">
+                        <strong>${escapeHtml(r.name)}</strong> <span style="color:#999">[Race]</span><br>
+                        <span class="search-result-detail">${dateDisplay} | Log ${r.log_num} | ${times} | ${duration}</span>
+                    </div>`;
+                }
                 // Use r.key (displayid or original id) for selection - this matches how userData is keyed
                 const userKey = r.key || r.sailor_id;
-                return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${userKey}">
-                    <strong>${r.name}${r.sailor_id !== r.name ? ` <span style="color:#999">[${r.sailor_id}]</span>` : ''}</strong><br>
+                return `<div class="search-result" data-date="${r.date}" data-logfile="${r.log_file}" data-sailor="${escapeHtml(userKey)}">
+                    <strong>${escapeHtml(r.name)}${r.sailor_id !== r.name ? ` <span style="color:#999">[${escapeHtml(r.sailor_id)}]</span>` : ''}</strong><br>
                     <span class="search-result-detail">${dateDisplay} | ${duration}</span>
                 </div>`;
             }).join('');
@@ -5247,7 +5254,8 @@
                     const date = el.dataset.date;
                     const logFile = el.dataset.logfile;
                     const sailorId = el.dataset.sailor;
-                    selectSearchResult(date, logFile, sailorId);
+                    const subIndex = el.dataset.sublog !== undefined ? parseInt(el.dataset.sublog) : null;
+                    selectSearchResult(date, logFile, sailorId, subIndex);
                 });
             });
         }
@@ -5260,7 +5268,7 @@
             return `${mins} mins`;
         }
 
-        async function selectSearchResult(date, logFile, sailorId) {
+        async function selectSearchResult(date, logFile, sailorId, subIndex = null) {
             // Close modal
             document.getElementById('search-modal').style.display = 'none';
 
@@ -5278,6 +5286,23 @@
                     const logEntry = currentSummary.logs[logIndex];
                     await loadRace(logEntry);
 
+                    document.querySelectorAll('.race-item, .sublog-item').forEach(el => el.classList.remove('selected'));
+
+                    if (subIndex !== null) {
+                        // Sublog (race marker) hit: apply its time range and highlight it
+                        const sublog = (logEntry.sublogs || [])[subIndex];
+                        if (sublog) {
+                            applySublogTimeRange(logEntry, sublog);
+                            const subDiv = document.querySelector(`.sublog-item[data-log-index="${logIndex}"][data-sublog-index="${subIndex}"]`);
+                            if (subDiv) subDiv.classList.add('selected');
+                        }
+                        fitMapToData();
+                        return;
+                    }
+
+                    // Sailor hit: plain log selection, drop any previous race marker
+                    selectedSublog = null;
+
                     // Select the specific sailor
                     selectedUsers.clear();
                     if (userData[sailorId]) {
@@ -5289,7 +5314,6 @@
 
                     // Highlight the log in the race list
                     const raceItems = document.querySelectorAll('.race-item');
-                    raceItems.forEach(el => el.classList.remove('selected'));
                     if (raceItems[logIndex]) {
                         raceItems[logIndex].classList.add('selected');
                     }
@@ -6018,6 +6042,19 @@
             return `${date}_${users}${suffix}.${extension}`;
         }
 
+        // "<date>_log<N>" plus the sublog name if a race marker is selected
+        function getLogExportBase() {
+            const date = document.getElementById('date-picker').value || 'tracks';
+            let base = date;
+            const logs = (currentSummary && currentSummary.logs) || [];
+            const idx = logs.findIndex(l => l.file === currentLogFile);
+            if (idx >= 0) base += `_log${logs.length - idx}`;
+            if (selectedSublog && selectedSublog.name) {
+                base += '_' + selectedSublog.name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
+            }
+            return base;
+        }
+
         function getFilteredExportData() {
             // Get data for selected users within current time range
             const exportData = [];
@@ -6072,17 +6109,27 @@
                 alert('No data to export. Please select at least one user.');
                 return;
             }
-            // FIT files are per-user, export first selected
-            if (data.length > 1) {
-                alert('FIT format exports one user at a time. Exporting: ' + data[0].name);
-            }
-            const { name, entries } = data[0];
-            if (entries.length === 0) return;
-
-            const fitData = generateFIT(entries);
             const date = document.getElementById('date-picker').value || 'tracks';
-            const filename = `${date}_${name.replace(/\s+/g, '_')}.fit`;
-            downloadFile(fitData, filename, 'application/octet-stream');
+            const safeName = n => n.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
+
+            if (data.length === 1) {
+                const { name, entries } = data[0];
+                const fitData = generateFIT(entries);
+                downloadFile(fitData, `${date}_${safeName(name)}.fit`, 'application/octet-stream');
+            } else {
+                // FIT is a single-track format: one file per sailor, bundled in a zip
+                const used = new Set();
+                const files = [];
+                for (const { userId, name, entries } of data) {
+                    let base = `${date}_${safeName(name)}`;
+                    if (used.has(base)) base += `_${safeName(userId)}`;
+                    const stem = base;
+                    for (let n = 2; used.has(base); n++) base = `${stem}_${n}`;
+                    used.add(base);
+                    files.push({ name: `${base}.fit`, data: generateFIT(entries) });
+                }
+                downloadFile(createZip(files), `${getLogExportBase()}.zip`, 'application/zip');
+            }
             document.getElementById('export-dropdown-content').classList.remove('show');
         }
 
