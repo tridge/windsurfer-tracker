@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="../../favicon.svg">
+    <title>Capital Cup 2027 - Windsurfer Tracker</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .banner {
+            width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+            display: block;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a237e 0%, #1565c0 50%, #0288d1 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header img { height: 60px; margin-bottom: 12px; }
+        .header h1 { font-size: 2.2em; font-weight: 700; margin-bottom: 6px; }
+        .header .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .header .date-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 20px;
+            margin-top: 12px;
+            font-weight: 600;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 28px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .section h2 {
+            color: #1565c0;
+            font-size: 1.4em;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e3f2fd;
+        }
+        .section p { margin-bottom: 12px; }
+        .highlight {
+            background: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 14px 18px;
+            border-radius: 0 8px 8px 0;
+            margin: 12px 0;
+        }
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        .schedule-table th {
+            background: #1565c0;
+            color: white;
+            padding: 10px 14px;
+            text-align: left;
+        }
+        .schedule-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .schedule-table tr:last-child td { border-bottom: none; }
+        .schedule-table tbody tr:hover { background: #f5f9ff; }
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 14px;
+            margin-top: 8px;
+        }
+        .link-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #f5f9ff;
+            border: 1px solid #e3f2fd;
+            border-radius: 10px;
+            text-decoration: none;
+            color: #333;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .link-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .link-card .icon { font-size: 1.8em; }
+        .link-card .label { font-weight: 600; font-size: 0.95em; }
+        .link-card .desc { font-size: 0.8em; color: #666; }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            background: #e67e22;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-family: inherit;
+            text-decoration: none;
+        }
+        .btn:hover { background: #d35400; }
+        .btn-secondary { background: #1565c0; }
+        .btn-secondary:hover { background: #0d47a1; }
+
+        .footer {
+            text-align: center;
+            padding: 24px 20px;
+            color: #888;
+            font-size: 0.85em;
+        }
+        .footer a { color: #1565c0; text-decoration: none; }
+
+        @media (max-width: 600px) {
+            .header h1 { font-size: 1.6em; }
+            .container { padding: 12px; }
+            .section { padding: 20px 16px; }
+            .links-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<img class="banner" src="banner.jpg" alt="Capital Cup 2027">
+<div class="header">
+    <img src="../../logo.svg" alt="Windsurfer Tracker">
+    <h1>Capital Cup 2027</h1>
+    <div class="subtitle">Lake Burley Griffin, Canberra, Australia</div>
+    <div class="date-badge">Saturday 3 & Sunday 4 April 2027</div>
+</div>
+
+<div class="container">
+
+    <div class="section">
+        <h2>About</h2>
+        <p>The Capital Cup is a windsurfing regatta featuring
+        marathon-style racing around landmarks on Lake Burley
+        Griffin. Compete over one or two days with 2 races each day (4 races total). Your best 2 results count &mdash; drop your 2 worst.</p>
+        <div class="highlight">
+            <strong>Entry is $20.</strong> Prizes will include a (cheap!) trophy
+        </div>
+        The Capital Cup is back for its second year! Come along and
+        have fun in the spirit of windsurfing, 50% racing, 50% fun!
+        <h2>Eligible Boards</h2>
+        Elegible boards are Windsurfer LT or Windsurfer one-design
+        with 5.7m regatta sail or the new 5m class sail.
+        <h2>Eligible Sailors</h2>
+        You need to get a WCAA member with
+        insurance. See <a href="https://www.windsurfer-class-aus.com/">https://www.windsurfer-class-aus.com/</a>
+        and click the "Join the Windsurfer Class" if you aren't
+        already a member. The ClubSpot registration (once open) should
+        only allow you to register if you are a member.
+        <div class="highlight">
+            If you don't have an Australian Sailing (AS) sailing number,
+            the <a href="https://canberrayc.com/">Canberra Yacht Club</a>
+            has kindly offered to provide AS SailPasses to competitors
+            free of charge.
+        </div>
+        <h2>Tracking</h2>
+        We will be supplying GPS trackers for entrants which will make
+        scoring simpler. You can also optionally use your own phone
+        for tracking -
+        see <a href="https://wstracker.org">https://wstracker.org</a>
+        for details and how to install the tracker on your own device.
+        <br>Spectators (both local and remote) will be able to view
+        the races in real-time. See links below for the proposed
+        courses and live tracking web interface.
+        <h2>Water Quality</h2>
+        There can sometimes be issues with algae in the lake. Check
+        water quality at <a href="https://lbgweather.au">https://lbgweather.au</a>
+        (water quality map at the bottom of the page). See also
+        <a href="https://www.nca.gov.au/environment/lake-burley-griffin/water-quality">the NCA water quality page</a>. There are some areas closed in the eastern
+        part of the lake at times; courses will be designed to avoid
+        any closed areas.
+        <h2>WhatsApp Chat</h2>
+        We have a Windsurfer LT Canberra WhatsApp group. Message
+        Andrew Tridgell on 0412 666 929 to ask to be added. Please
+        join that group if you plan on attending as we will be doing
+        updates there.
+        <h2>Venue</h2>
+        This year the event will be hosted at
+        the <a href="https://canberrayc.com/">Canberra Yacht Club</a>
+        (CYC). Briefings will be held at the CYC and we will meet at
+        the CYC for the start of each race. Overnight board storage
+        will be available at the CYC on the Saturday night.
+    </div>
+
+    <div class="section">
+        <h2>Schedule</h2>
+        <table class="schedule-table">
+            <thead>
+                <tr><th>Time</th><th>Saturday 3 April</th><th>Sunday 4 April</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>10:30 am</td><td>Briefing</td><td>Briefing</td></tr>
+                <tr><td>~11:00 am</td><td>Race 1</td><td>Race 3</td></tr>
+                <tr><td>Afternoon</td><td>Race 2</td><td>Race 4</td></tr>
+            </tbody>
+        </table>
+        <p style="margin-top: 10px; color: #666; font-size: 0.9em;">Race times may be adjusted depending on wind conditions.</p>
+    </div>
+
+    <div class="section">
+        <h2>Start Procedure</h2>
+        <p>Meet at the Canberra Yacht Club for the start of each race. All sails in the water near the start area. On the whistle, raise your sail and go!</p>
+    </div>
+
+    <div class="section">
+        <h2>Register</h2>
+        <p>Registration will be handled through ClubSpot. Entry is $20. Registration link coming soon.</p>
+    </div>
+
+    <div class="section">
+        <h2>Links</h2>
+        <div class="links-grid">
+            <!-- TODO: switch to the 2027 eid and add Live Tracking (../../event.html?eid=N) once the 2027 event is created -->
+            <a class="link-card" href="../../courses.html?eid=6">
+                <div class="icon">&#x1f5fa;</div>
+                <div><div class="label">Likely Courses</div><div class="desc">Courses from 2026, to be updated</div></div>
+            </a>
+            <a class="link-card" href="NOR.html">
+                <div class="icon">&#x1f4c4;</div>
+                <div><div class="label">Notice of Race</div><div class="desc">View / print to PDF</div></div>
+            </a>
+            <a class="link-card" href="SI.html">
+                <div class="icon">&#x1f4cb;</div>
+                <div><div class="label">Sailing Instructions</div><div class="desc">View / print to PDF</div></div>
+            </a>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Entrants</h2>
+        <p>The entry list will be available on ClubSpot once registration opens.</p>
+    </div>
+
+</div>
+
+<div class="footer">
+    Powered by <a href="../../">wstracker.org</a>
+</div>
+
+
+</body>
+</html>
