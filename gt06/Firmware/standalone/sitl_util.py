@@ -199,7 +199,7 @@ def finish(proc):
 
 
 def reset_state():
-    for name in ("sitl_wdstat.bin",):
+    for name in ("sitl_wdstat.bin", "sitl_wdtrace.bin"):
         try:
             os.unlink(os.path.join(RUN_DIR, name))
         except FileNotFoundError:

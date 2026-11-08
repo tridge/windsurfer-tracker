@@ -63,6 +63,10 @@ unsigned wd_bootcount(void);
 unsigned wd_stall_max(void);          /* longest stall (ticks) the main loop has had this boot */
 unsigned char wd_stall_phase(void);   /* g_wd_phase during that stall */
 
+/* What the previous boot recorded in the RAM reset trace just before resetting (watchdog phase, or the
+ * reason of a reset we caused). 0 if there is none (power loss, crash, or RAM not retained). */
+int wd_prev_trace(unsigned *reason, unsigned *phase, unsigned *uptime);
+
 /* Persisted counter of consecutive no-data reboots (reset on a successful login). */
 unsigned wd_nodata_count(void);
 void wd_set_nodata_count(unsigned n);

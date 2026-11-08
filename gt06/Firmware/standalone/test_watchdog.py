@@ -27,6 +27,8 @@ def test_reset_reasons_and_send_hang():
         srv.accept_login(20)
         rr2, bc2 = bootstat(srv)
         assert rr2 == 2 and bc2 == bc + 1, f"RESET# should read COMMAND, got rr{rr2} bc{bc2}"
+        m = srv.query("CXCS#BOOTSTAT", r" wt(\S+)")
+        assert m.group(1).startswith("2,"), f"RESET# trace missing: wt{m.group(1)}"
 
         # A send() that never returns: the watchdog (timer thread, no I/O) must still reset us.
         open(FLAG, "w").close()
@@ -36,6 +38,8 @@ def test_reset_reasons_and_send_hang():
         rr3, bc3 = bootstat(srv)
         assert rr3 == 0 and bc3 == bc2 + 1, f"watchdog reset should read UNEXPECTED, got rr{rr3} bc{bc3}"
         assert took < 35, f"watchdog took {took:.0f}s"
+        m = srv.query("CXCS#BOOTSTAT", r" wt(\S+)")
+        assert m.group(1).startswith("1,S,"), f"watchdog trace should name the send phase: wt{m.group(1)}"
     finally:
         srv.close()
         _, err = finish(proc)

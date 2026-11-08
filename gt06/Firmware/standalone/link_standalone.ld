@@ -38,6 +38,8 @@ SECTIONS
 
   /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) *(.note*) }
 
+  /* reliability.c keeps its RAM reset trace at 0x7E1E1B00 */
+  ASSERT(__bss_end <= 0x7E1E1B00, "BSS overlaps the reset trace at 0x7E1E1B00")
   ASSERT(__image_end < SAPI_TABLE_BASE,
          "standalone image overlaps the sAPI table BSS at 0x7E1E2000")
 }

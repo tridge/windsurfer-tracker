@@ -37,6 +37,54 @@ static volatile int g_armed;
 static int g_hw_armed;
 static void *g_wd_timer;
 
+/* Reset trace: a checksummed record in RAM outside our zeroed BSS, written just before any reset we
+ * cause (including the watchdog, which cannot touch the FS) and read at the next boot. It only helps if
+ * RAM survives the resident's warm reset; the checksum rejects garbage when it does not. */
+struct wdtrace { unsigned magic, reason, phase, uptime, stalls, check; };
+#define WDT_MAGIC 0x57445452u                 /* "WDTR" */
+#ifdef SITL
+#include <stdio.h>
+static struct wdtrace g_trace_mem;
+#define TRACE (&g_trace_mem)
+#else
+#define TRACE ((volatile struct wdtrace *)0x7E1E1B00u)   /* below the sAPI table, above our BSS */
+#endif
+static struct wdtrace g_prev_trace;           /* what the previous boot left (magic 0 = none) */
+
+static unsigned trace_check(unsigned r, unsigned p, unsigned u, unsigned st)
+{
+    return WDT_MAGIC ^ r ^ (p << 8) ^ (u * 2654435761u) ^ (st << 16) ^ 0xA5A5A5A5u;
+}
+static void trace_write(unsigned reason, unsigned phase, unsigned stalls)
+{
+    unsigned u = g_uptime;
+    TRACE->reason = reason; TRACE->phase = phase; TRACE->uptime = u; TRACE->stalls = stalls;
+    TRACE->check = trace_check(reason, phase, u, stalls);
+    TRACE->magic = WDT_MAGIC;
+#ifdef SITL
+    FILE *f = fopen("sitl_wdtrace.bin", "wb");   /* stands in for RAM surviving the re-exec */
+    if (f) { fwrite(TRACE, sizeof *TRACE, 1, f); fclose(f); }
+#endif
+}
+static void trace_load(void)
+{
+#ifdef SITL
+    FILE *f = fopen("sitl_wdtrace.bin", "rb");
+    if (f) { if (fread(TRACE, sizeof *TRACE, 1, f) != 1) TRACE->magic = 0; fclose(f); remove("sitl_wdtrace.bin"); }
+    else TRACE->magic = 0;
+#endif
+    struct wdtrace t = { TRACE->magic, TRACE->reason, TRACE->phase, TRACE->uptime, TRACE->stalls, TRACE->check };
+    if (t.magic == WDT_MAGIC && t.check == trace_check(t.reason, t.phase, t.uptime, t.stalls))
+        g_prev_trace = t;
+    TRACE->magic = 0;
+}
+int wd_prev_trace(unsigned *reason, unsigned *phase, unsigned *uptime)
+{
+    if (g_prev_trace.magic != WDT_MAGIC) return 0;
+    *reason = g_prev_trace.reason; *phase = g_prev_trace.phase; *uptime = g_prev_trace.uptime;
+    return 1;
+}
+
 void wd_alive(void) { g_alive++; }
 void wd_arm(int on) { g_armed = on; }
 unsigned wd_uptime(void) { return g_uptime; }
@@ -86,6 +134,7 @@ static void soc_reset(void)
 void wd_reason_and_reset(int reason)
 {
     wd_write_stat((unsigned)reason);
+    trace_write((unsigned)reason, g_wd_phase, 0);
     soc_reset();
 }
 
@@ -101,7 +150,7 @@ static void wd_tick(unsigned long arg)
     if (!primed) {                     /* boot: wait for the first feed, but not forever */
         if (g_hw_armed) hwwd_feed();
         if (now != 0) { primed = 1; last = now; }
-        else if (g_uptime > WD_BOOT_TICKS && g_armed) soc_reset();
+        else if (g_uptime > WD_BOOT_TICKS && g_armed) { trace_write(RR_WATCHDOG, 'B', g_uptime); soc_reset(); }
         return;
     }
     if (now != last) {
@@ -112,7 +161,7 @@ static void wd_tick(unsigned long arg)
     stalls++;
     if (stalls > g_stall_max) { g_stall_max = stalls; g_stall_phase = g_wd_phase; }
     if ((int)(g_grace_until - g_uptime) > 0) return;       /* deliberate sleep in progress */
-    if (stalls >= WD_STALL_ROUNDS && g_armed) soc_reset();
+    if (stalls >= WD_STALL_ROUNDS && g_armed) { trace_write(RR_WATCHDOG, g_wd_phase, stalls); soc_reset(); }
 }
 
 void wd_hw_arm(unsigned secs)
@@ -124,6 +173,7 @@ void wd_hw_arm(unsigned secs)
 int reliability_init(int arm, int *timer_ok)
 {
     g_armed = arm;
+    trace_load();                      /* before anything can write a new one */
 
     /* Timer first: the boot deadline then also covers the boot-record FS I/O below. */
     int ok = 0;

@@ -2387,6 +2387,15 @@ static int handle_config_cmd(const char *cmd, char *out)
         { unsigned char ph = wd_stall_phase(); out[n++] = (ph >= 'A' && ph <= 'Z') ? (char)ph : '-'; }
         n += put_str(out + n, " nd");  n += put_uint(out + n, wd_nodata_count());
         n += put_str(out + n, " vh");  n += put_uint(out + n, g_vcom_holds);
+        {   /* wt = previous boot's RAM reset trace: reason,phase,uptime (wt- = none) */
+            unsigned tr, tp, tu;
+            n += put_str(out + n, " wt");
+            if (wd_prev_trace(&tr, &tp, &tu)) {
+                n += put_uint(out + n, tr); out[n++] = ',';
+                out[n++] = (tp >= 'A' && tp <= 'Z') ? (char)tp : '-'; out[n++] = ',';
+                n += put_uint(out + n, tu);
+            } else out[n++] = '-';
+        }
 #if FOTA
         n += put_str(out + n, " ff");  n += put_uint(out + n, g_fota_fail);
 #endif
