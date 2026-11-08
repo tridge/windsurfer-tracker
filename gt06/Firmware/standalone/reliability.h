@@ -33,7 +33,8 @@ void wd_alive(void);
 
 /* Stall-phase marker: the main loop sets this around every potentially-blocking call ('C' connect,
  * 'S' send, 'R' recv, 'A' at_cmd, 'Q' queue/select wait, 'F' FS, 'U' uart, 'G' gnss power,
- * 'V' vcom write, 'O' FOTA, 'N' network getter; 0 = none). The tick records the phase of the longest stall. */
+ * 'V' vcom write, 'O' FOTA, 'N' network getter, 'q' csq, 'r' reg, 'c' charger, 'g' gnss status,
+ * 'x' close; 0 = none). The tick records the phase of the longest stall. */
 extern volatile unsigned char g_wd_phase;
 
 /* Set while the USB<->TCP forwarding bridge is CONFIGURED (owns if04) — held from boot through any FWD

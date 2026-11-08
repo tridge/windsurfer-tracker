@@ -1115,7 +1115,9 @@ static int gps_status_refresh(unsigned now, int force)
     g_gps_status_seen = 1;
     g_gps_status_ts = now;
     g_wd_phase = 'G';
+    g_wd_phase = 'g';
     int raw = status();
+    g_wd_phase = 0;
     g_wd_phase = 0;
     g_gps_status_raw = (unsigned char)raw;
     if (raw == 0) {
@@ -1218,7 +1220,9 @@ static void csq_refresh(void)
 {
     get_csq_fn f = *(get_csq_fn *)SLOT_GET_CSQ;
     unsigned char v;
+    g_wd_phase = 'q';
     if (f && f(&v) == 0 && v <= 33) g_csq = v;
+    g_wd_phase = 0;
 }
 static unsigned char sig_map(unsigned s)
 {
@@ -2668,7 +2672,9 @@ static void operator_refresh(void)
 {
     get_reg_fn rf = *(get_reg_fn *)SLOT_GET_REG;
     unsigned rv;
+    g_wd_phase = 'r';
     g_cereg_stat = (rf && rf(&rv) == 0) ? (signed char)(rv & 0x7f) : -1;
+    g_wd_phase = 0;
     g_operator_mode = -1;
     g_plmn_cur[0] = 0;
     network_cops_fn cops = *(network_cops_fn *)SLOT_NETWORK_GET_COPS;
@@ -3259,6 +3265,16 @@ static int send_traced(int fd, const void *buf, int len, int flags)
     return r;
 }
 
+/* traced close: phase 'x' */
+static close_fn g_close_raw;
+static int close_traced(int fd)
+{
+    unsigned char pp = g_wd_phase; g_wd_phase = 'x';
+    int r = g_close_raw(fd);
+    g_wd_phase = pp;
+    return r;
+}
+
 /* GT06 socket send: only call the (blocking) send when select says the socket is writable. lwIP reports
  * writable once a low-water mark of buffer is free, far more than one of our <=162-byte frames, so the
  * send then cannot block. Not writable -> SEND_BUSY and the caller keeps its data for later. */
@@ -3795,7 +3811,8 @@ void standalone_main(u32 loader_resolver)
     g_send_raw     = *(send_fn    *)SLOT_SEND;
     send_fn    se = send_gt06;                /* GT06 socket: never blocks (see send_gt06) */
     recv_fn    rv = *(recv_fn    *)SLOT_RECV;
-    close_fn   cl = *(close_fn   *)SLOT_CLOSE;
+    g_close_raw = *(close_fn *)SLOT_CLOSE;
+    close_fn   cl = close_traced;
 
     /* ---- URC queue (independent of the network). GNSS is powered ON/OFF by the state machine
      * (apply_gps) — NOT here — because default is IDLE (GPS off). ---- */
@@ -3929,7 +3946,9 @@ void standalone_main(u32 loader_resolver)
             /* item 15: charging indicator — resident charger_state() (the vendor heartbeat bit2 source;
              * SoC/PMIC side, NOT the M0). 1 while the charger/VBUS is present. */
             charger_state_fn chg = *(charger_state_fn *)SLOT_CHARGER_STATE;
+            g_wd_phase = 'c';
             g_charging = (chg && chg() == 1) ? 1 : 0;
+            g_wd_phase = 0;
             vhex("BT:mv", g_batt_mv); vhex("CHG", g_charging); vhex("URC:n", g_urc_n);
             if (g_nmea_bad) vhex("NMEA:bad", g_nmea_bad);
             if (g_nmea_jump) vhex("NMEA:jump", g_nmea_jump);
