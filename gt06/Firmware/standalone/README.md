@@ -74,6 +74,9 @@ make test-usb-debug
   sleep also works while offline (each wake makes one real attempt); no server link for 20 min awake
   (registered or not, incl. no SIM) -> radio off/on, 40 min -> reboot (doubling per consecutive no-data
   reboot, idle only). "Link" here means a login that went out, not a confirmed server reply.
+- **Reset trace** (`wt` in BOOTSTAT): a RAM record at 0x7E1E1B00 written before every reset we cause,
+  incl. the watchdog. Tested on G371074 2026-11-08: NOT retained across the resident warm reset (`wt-`
+  after RESET#), so on HW a SoC-only reset (`m0b` >> `up`) stays "watchdog or resident crash". Works in SITL.
 - **Diagnostics**: `CXCS#LINKSTAT` = heartbeat intervals, un-ACKed/requeued fixes, blind backlog, dropped
   links, busy sends, bad-CRC frames, connect failures, SOS state.
 - **PLMN**: a failed round over the allowed operators ends with one CFUN 0/1, then a 15 min holdoff.
