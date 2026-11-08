@@ -1,10 +1,24 @@
-import json, sys, time, urllib.request
+import json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CFG = json.loads((ROOT / 'events.json').read_text())
 BASE = 'https://wstracker.org'
-FW = 'WSTR-STD1_dd6b96d'
-FOTA = 'YCSJ,http://103.230.158.49/W07_FW/W07_MG133_WSTR_B53_dd6b96d.bin,80#'
+H = os.environ.get('FW_HASH') or sys.exit('usage: FW_HASH=<hash> ota.py [--keep-latest] SID...')
+FW = f'WSTR-STD1_{H}'
+FOTA = f'YCSJ,http://103.230.158.49/W07_FW/W07_MG133_WSTR_B53_{H}.bin,80#'
+
+FW_DIR = '/srv/w07_fw'
+IMG = f'W07_MG133_WSTR_B53_{H}.bin'
+
+def set_latest():
+    """Point the admin UI's "upgrade to latest" symlink at the image being pushed (it must exist)."""
+    r = subprocess.run(['ssh', 'tracker@wstracker.org',
+                        f'cd {FW_DIR} && test -s {IMG} && ln -sfn {IMG} firmware_latest_B53.bin.new && '
+                        f'mv -T firmware_latest_B53.bin.new firmware_latest_B53.bin && readlink firmware_latest_B53.bin'],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or r.stdout.strip() != IMG:
+        sys.exit(f'{IMG} not on the server or symlink update failed: {r.stderr.strip()}')
+    log(event='latest_set', image=IMG)
 
 def api(path, data=None):
     h = {'X-Manager-Password': CFG['manager_password']}
@@ -21,7 +35,11 @@ def log(**k):
     print(json.dumps(k), flush=True)
 
 if __name__ == '__main__':
-    sids = sys.argv[1:]
+    args = sys.argv[1:]
+    keep_latest = '--keep-latest' in args          # one-off/diagnostic push: leave "latest" alone
+    sids = [a for a in args if a != '--keep-latest']
+    if not keep_latest:
+        set_latest()
     t = trackers()
     for sid in sids:
         imei = t[sid]['imei']
