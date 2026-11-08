@@ -4902,9 +4902,11 @@
         }
         
         // Start tracking device orientation
+        // Only iOS Safari gates compass events behind a user tap; iPadOS reports a Mac UA
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         if (window.DeviceOrientationEvent) {
-            // Check if we need to request permission (iOS 13+)
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            if (isIOS && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 // Add a button to request permission
                 const btn = document.createElement('button');
                 btn.textContent = 'Enable Compass';
@@ -4921,6 +4923,9 @@
                         console.error('Orientation permission error:', e);
                     }
                 });
+            } else if ('ondeviceorientationabsolute' in window) {
+                // Android Chrome: plain deviceorientation alpha is relative, not from north
+                window.addEventListener('deviceorientationabsolute', handleDeviceOrientation);
             } else {
                 window.addEventListener('deviceorientation', handleDeviceOrientation);
             }
