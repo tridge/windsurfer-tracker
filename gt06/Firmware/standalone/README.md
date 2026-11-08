@@ -55,6 +55,33 @@ make test-usb-debug
 - **NEXT:** outdoor GPS lock → real LOC on the map; then heartbeat frames, TERIID login, 0x80 command
   handling, blind buffer, OTA; refine sats (GGA), speed/course (RMC), real UTC datetime.
 
+## Reliability behaviour (2026-11-08 review fixes)
+
+- **Watchdog**: the resident-timer tick does no I/O at all; a boot that never reaches the main loop resets
+  after 90 s; night sleep uses a bounded grace instead of disarming. Uptime starts at 1 (0 = "unset").
+- **Reset reasons** in `c:/wdstat.bin`: 0 unexpected (power/watchdog/crash), 2 RESET#, 3 first boot,
+  5 FOTA commit, 6 FOTA failure, 7 no-data, 8 GPS dead, 9 timer failure. `CXCS#BOOTSTAT` reports
+  `rr bc up m0b m0 sm sp nd vh ff`; the server queries it once per connection, so reboots land in
+  gt06.log. An M0 uptime (`m0b`) far above our uptime at boot means a SoC-only reset, not power loss.
+- **Link**: the server ACKs every heartbeat, so no frame for `3*HBT+15` s drops and reconnects. Sends
+  only happen when select says writable (never block); stuck for 20 s drops the link. Fixes sent since
+  the last ACKed heartbeat go back into the blind buffer if the link dies (the server may see a few
+  duplicates). SOS keeps resending (1 Hz x10, then every 10 s) until a 0x16 ACK.
+- **Commands**: server frames must pass the GT06 CRC; TIMER/HBT/RESET/CANCELSOS must be exactly formed.
+- **GPS**: tracking with no NMEA for 45 s power-cycles the receiver; after 4 cycles one reboot
+  (not repeated for the same reason, never with an SOS or undelivered fixes).
+- **Offline idle**: connect retries back off 5 s -> 300 s (reset when the modem re-registers); night
+  sleep also works while offline (each wake makes one real attempt); no server link for 20 min awake
+  (registered or not, incl. no SIM) -> radio off/on, 40 min -> reboot (doubling per consecutive no-data
+  reboot, idle only). "Link" here means a login that went out, not a confirmed server reply.
+- **Diagnostics**: `CXCS#LINKSTAT` = heartbeat intervals, un-ACKed/requeued fixes, blind backlog, dropped
+  links, busy sends, bad-CRC frames, connect failures, SOS state.
+- **PLMN**: a failed round over the allowed operators ends with one CFUN 0/1, then a 15 min holdoff.
+- **Config**: primary then backup cwprm, each fully validated; default server port is 7711.
+- **FOTA**: non-blocking connect, 10 min / 60 s-stall deadlines, HTTP 200/206 required, LZMA header and
+  size checked before commit (a sanity check only: there is no LZMA decoder in the app, so a truncated
+  stream with a valid CRC is not detected); failures before the flash is opened return to service.
+
 ## Flashing (software, no window-timing needed)
 `AT+CFUN=1,1` to if05 opens arom on demand (as /dev/ttyACMn, n varies). Watch **any** raw `/dev/ttyACM*`
 (strip `ls` color codes) and fire `sudo ./adownload -p ACMn -q <zip>` — flashes reliably (SIGABRTs after

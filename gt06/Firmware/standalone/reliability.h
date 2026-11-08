@@ -1,11 +1,9 @@
 /* reliability.h — software watchdog + reset-reason logging for the standalone firmware.
  *
- * Goal (see reference_w07c_watchdog_por): catch a hang of OUR main loop and reset, and record WHY we
- * reset so a fresh boot can report it. The SoC sys_wdt is resident-fed (won't catch our hang) and the
- * PMIC HW watchdog needs a feed register we don't have yet; so step 1 is a SOFTWARE watchdog: an
- * independent monitor task watches a liveness counter and triggers a SoC reset if the main loop stalls.
- * Reset-reason is persisted to the resident FS (proven: fopen/fread/fwrite) — HW POR (PMIC reg 0x10) is a
- * later addition (needs the resident PMIC path / a live probe).
+ * A resident periodic timer (~1 Hz) watches a liveness counter fed by the main loop and resets the SoC
+ * when it stalls. It also provides the main loop's seconds timebase. The timer callback does no I/O at
+ * all (no USB, no FS): a blocked write there would disable the watchdog itself. Reset reasons are
+ * persisted to the resident FS from main-task context only.
  */
 #ifndef RELIABILITY_H
 #define RELIABILITY_H
@@ -13,39 +11,43 @@
 
 /* reset-reason codes stored in c:/wdstat.bin (why the LAST reboot happened). */
 enum reset_reason {
-    RR_POWERON  = 0,   /* not one of our intentional resets -> external: power pull / brownout / HW */
-    RR_WATCHDOG = 1,   /* our software watchdog fired (main loop stalled) */
-    RR_COMMAND  = 2,   /* an intentional reset we issued (e.g. a future RESET command) */
+    RR_UNEXPECTED = 0, /* none of our intentional resets: power loss, brownout, watchdog or crash */
+    RR_WATCHDOG = 1,   /* reserved: the timer callback cannot write the FS, so watchdog resets read 0 */
+    RR_COMMAND  = 2,   /* RESET# from the server */
     RR_FIRSTBOOT = 3,  /* wdstat.bin absent/invalid -> first boot on this fw */
     RR_FWD_RX_DEAD = 4,/* forwarding bridge: resident if04 RX callback died -> reboot to recover it */
+    RR_FOTA     = 5,   /* FOTA staged OK -> reboot to commit */
+    RR_FOTA_FAIL = 6,  /* FOTA aborted after the flash was opened */
+    RR_NODATA   = 7,   /* idle, registered but no server link for a long time */
+    RR_GPS_DEAD = 8,   /* tracking, GNSS silent through every power-cycle */
+    RR_TIMER_FAIL = 9, /* the watchdog timer could not be created */
     RR_ST_HUNG  = 0x50,/* self-test bookkeeping: main task marked itself about-to-hang (see WD_SELFTEST) */
 };
 
-/* Read+log the last reset reason, then re-arm the record; optionally start the monitor task.
- * `wr` is the USB-VCOM write fn (for logging). `arm` starts the software watchdog (ship disarmed until
- * the SoC-reset primitive is confirmed on-device). Returns the reset_reason of the last boot. */
-int reliability_init(vcom_write_fn wr, int arm);
+/* Read the last reset reason, re-arm the record as RR_UNEXPECTED and start the timer. Returns the last
+ * boot's reason. *timer_ok is 0 if the timer could not be created (no watchdog and no timebase). */
+int reliability_init(int arm, int *timer_ok);
 
 /* Call once per main-loop iteration — the liveness heartbeat the monitor watches. */
 void wd_alive(void);
 
 /* Stall-phase marker: the main loop sets this around every potentially-blocking call ('C' connect,
- * 'S' send, 'R' recv, 'A' at_cmd, 'Q' queue/select wait, 'F' cwprm FS, 'U' uart, 'G' gnss power,
- * 'V' vcom write; 0 = none). wd_tick prints it on each stalled tick, so a WD:FIRE capture names the
- * blocking call (added for the ~13.5-min tracking stall hunt, 2026-07-23). */
+ * 'S' send, 'R' recv, 'A' at_cmd, 'Q' queue/select wait, 'F' FS, 'U' uart, 'G' gnss power,
+ * 'V' vcom write, 'O' FOTA, 'N' network getter; 0 = none). The tick records the phase of the longest stall. */
 extern volatile unsigned char g_wd_phase;
 
 /* Set while the USB<->TCP forwarding bridge is CONFIGURED (owns if04) — held from boot through any FWD
- * outage (main.c). The watchdog's diagnostic writes (WD:alive etc.) are suppressed then, so they don't
- * corrupt the raw data stream — and, since those run from the resident timer thread, a stuck if04
- * endpoint can't block the watchdog task either. */
+ * outage (main.c). All debug output is suppressed then so it can't corrupt the raw data stream. */
 extern volatile unsigned char g_fwd_en;
 
-/* Seconds since boot (~1 Hz, from the watchdog tick) — the main loop's timebase for LOC/heartbeat cadence. */
+/* Seconds since boot (~1 Hz, from the watchdog tick) — the main loop's timebase. */
 unsigned wd_uptime(void);
 
-/* Enable/disable the watchdog at runtime (e.g. quiet it after a self-test proves out). */
+/* Enable/disable the watchdog reset at runtime (the self-test uses this). */
 void wd_arm(int on);
+
+/* Tolerate a deliberate stall of up to `secs` from now (night sleep). The deadline still applies. */
+void wd_grace(unsigned secs);
 
 /* Blocking sleep (~ms) via a timed MsgQRecv on a private empty queue. */
 void wd_sleep(int ms);
@@ -53,11 +55,19 @@ void wd_sleep(int ms);
 /* Persist a reset-reason code to wdstat.bin (main-task/FS-safe context only). */
 void wd_set_reason(int reason);
 
-/* Arm the MMP SoC HARDWARE watchdog (hwwd.c) with a `secs` timeout, fed from wd_tick. Needs arm=1.
- * Independent of the RTOS: if wd_tick/RTOS dies (nothing feeds it) the SoC hard-resets. Ship disarmed. */
-void wd_hw_arm(unsigned secs);
-
-/* Persist `reason` then hard-reset the SoC (used by the monitor and any future intentional reset). */
+/* Persist `reason` then reset the SoC (main-task context only). */
 void wd_reason_and_reset(int reason);
+
+/* Diagnostics for CXCS#BOOTSTAT. */
+unsigned wd_bootcount(void);
+unsigned wd_stall_max(void);          /* longest stall (ticks) the main loop has had this boot */
+unsigned char wd_stall_phase(void);   /* g_wd_phase during that stall */
+
+/* Persisted counter of consecutive no-data reboots (reset on a successful login). */
+unsigned wd_nodata_count(void);
+void wd_set_nodata_count(unsigned n);
+
+/* Arm the MMP SoC HARDWARE watchdog (hwwd.c). NOT viable on this SoC — see main.c WD_HW_ARM. */
+void wd_hw_arm(unsigned secs);
 
 #endif

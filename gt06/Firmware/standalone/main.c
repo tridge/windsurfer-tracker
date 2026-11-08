@@ -161,6 +161,56 @@ static int blind_peek_at(int i, blindfix_t *out)       /* i-th oldest (0 = oldes
 static void blind_drop(void) { if (g_blind_count > 0) g_blind_count--; }  /* remove oldest after a good send */
 static void blind_drop_n(int n) { while (n-- > 0) blind_drop(); }
 
+/* Put a fix back at the OLD end of the blind ring (it predates everything queued). Dropped if full. */
+static void blind_push_front(const blindfix_t *f)
+{
+    if (g_blind_count >= BLIND_CAP) return;
+    int tail = (g_blind_head - g_blind_count + BLIND_CAP) % BLIND_CAP;
+    g_blind[(tail - 1 + BLIND_CAP) % BLIND_CAP] = *f;
+    g_blind_count++;
+}
+
+/* ---- Fixes sent but not yet proven delivered ----
+ * The server ACKs heartbeats but not LOCs. TCP is in order, so a heartbeat ACK proves every fix sent
+ * before that heartbeat arrived. Until then a sent fix stays here; if the link dies first it goes back
+ * into the blind buffer instead of vanishing into a dead socket. */
+#define UNACK_CAP 320                    /* > BLIND_CAP: a full backlog fits; replay pauses if it fills */
+static blindfix_t g_unack[UNACK_CAP];
+static int g_unack_head, g_unack_count;
+static unsigned g_unack_pushed, g_unack_released;   /* running totals, for the heartbeat mark */
+static unsigned short g_hb_serial;                   /* serial of the newest un-ACKed heartbeat */
+static unsigned g_hb_mark;                           /* g_unack_pushed when that heartbeat was sent */
+static unsigned char g_hb_pending;
+static unsigned g_requeued;                          /* fixes put back after a dead link (diagnostic) */
+static unsigned g_tx_busy_since;                     /* GT06 socket not writable since (0 = writable) */
+static unsigned g_tx_busy_n;                         /* sends deferred as busy (diagnostic) */
+
+static void unack_push(const blindfix_t *f)
+{
+    g_unack[g_unack_head] = *f;
+    g_unack_head = (g_unack_head + 1) % UNACK_CAP;
+    if (g_unack_count < UNACK_CAP) g_unack_count++;
+    else g_unack_released++;                         /* overwrote the oldest: no longer tracked */
+    g_unack_pushed++;
+}
+static void unack_release_to(unsigned mark)
+{
+    while (g_unack_count > 0 && (int)(mark - g_unack_released) > 0) {
+        g_unack_count--; g_unack_released++;
+    }
+}
+/* Link died: return every unproven fix to the front of the blind ring, newest first so order holds. */
+static void unack_requeue(void)
+{
+    for (int i = 0; i < g_unack_count; i++) {
+        int idx = (g_unack_head - 1 - i + 2 * UNACK_CAP) % UNACK_CAP;
+        if (g_blind_en) { blind_push_front(&g_unack[idx]); g_requeued++; }
+    }
+    g_unack_released += (unsigned)g_unack_count;
+    g_unack_count = 0;
+    g_hb_pending = 0;
+}
+
 static int gt06_frame(unsigned char proto, const unsigned char *data, int dlen,
                       unsigned short serial, unsigned char *out)
 {
@@ -289,6 +339,8 @@ static volatile unsigned g_vcom_holds;             /* times a blocked write put 
  * BOTH debug (via vcom_raw) and the FWD bridge's TCP->USB data (via usb_tx). */
 /* Returns 1 if the bytes were handed to the resident write, 0 if suppressed by the backoff — the caller
  * needs that to count what actually reached if04 rather than what it hoped to send. */
+#define VCOM_HOLD_MAX_SEC 600                       /* repeated blocks back off up to 10 min */
+static unsigned g_vcom_hold_sec = VCOM_HOLD_SEC;
 static int vcom_write_guarded(const void *buf, int n)
 {
     unsigned now = wd_uptime();
@@ -297,9 +349,15 @@ static int vcom_write_guarded(const void *buf, int n)
     WR(buf, n);
     g_wd_phase = pp;
     if (wd_uptime() - now >= VCOM_STALL_SEC) {      /* the write blocked (no reader) -> back off */
-        unsigned hold = g_fwd_en ? VCOM_HOLD_FWD_SEC : VCOM_HOLD_SEC;
+        unsigned hold = g_fwd_en ? VCOM_HOLD_FWD_SEC : g_vcom_hold_sec;
+        if (!g_fwd_en && g_vcom_hold_sec < VCOM_HOLD_MAX_SEC) {
+            g_vcom_hold_sec *= 2;
+            if (g_vcom_hold_sec > VCOM_HOLD_MAX_SEC) g_vcom_hold_sec = VCOM_HOLD_MAX_SEC;
+        }
         g_vcom_hold = wd_uptime() + hold; if (!g_vcom_hold) g_vcom_hold = 1;
         g_vcom_holds++;
+    } else {
+        g_vcom_hold_sec = VCOM_HOLD_SEC;            /* a reader is back */
     }
     return 1;
 }
@@ -360,6 +418,10 @@ static void vhexbuf(const char *label, const unsigned char *p, int n)
     vcom_raw(b, i);
 }
 
+/* Returned by the GT06 send wrapper when the socket is not writable: nothing was sent, try again later.
+ * Checking first keeps a blocking send from stalling the loop on a dead link. */
+#define SEND_BUSY (-2)
+
 /* Replay the backlog as BATCHED frames when batching is on. This is the whole point of the message for
  * catch-up: the legacy path sends one 0x12 per fix, BLIND_REPLAY_HZ per RMC (5 fixes/s), so a full
  * 300-fix buffer takes a minute to drain. Packing LOC_BATCH_MAX fixes per 0xF1 frame moves the same
@@ -378,8 +440,12 @@ static int blind_replay(int fd, send_fn se, unsigned short *serial)
         if (!blind_peek(&bf)) break;
         build_loc_data(d, bf.dt, bf.lat, bf.lon, bf.flags & 1, bf.flags & 2,
                        (bf.flags & 4) ? 1 : 0, bf.sats, 0, 0);
+        if (g_unack_count >= UNACK_CAP) break;        /* wait for a heartbeat ACK to free room */
         int flen = gt06_frame(0x12, d, 18, (*serial)++, fr);
-        if (se(fd, fr, flen, 0) != flen) return 0;
+        int r = se(fd, fr, flen, 0);
+        if (r == SEND_BUSY) break;                     /* send buffer full: resume next pass */
+        if (r != flen) return 0;
+        unack_push(&bf);
         blind_drop();
     }
     vhex("BLIND:remaining", (unsigned)g_blind_count);
@@ -673,8 +739,6 @@ static int raw_to_e7(u32 raw, int neg)
     return neg ? -(int)e7 : (int)e7;
 }
 
-static unsigned batch_ds_of(const batchfix_t *b);
-
 /* Forward delta from `base` to `t` in deciseconds, both seconds-of-day*10.
  *
  * ONE rule, shared by the span check and the serialiser — they previously disagreed: batch_push
@@ -687,6 +751,39 @@ static unsigned batch_delta_ds(unsigned base, unsigned t)
     if (t >= base) return t - base;
     if ((base - t) > BATCH_WRAP_DS) return t + 864000u - base;
     return 0;
+}
+
+/* Seconds since 2000-01-01 from {yy,mo,dd,hh,mi,ss}; 0 if the date part is not valid. */
+static u32 dt_secs(const unsigned char *dt)
+{
+    static const unsigned short cum[12] = {0,31,59,90,120,151,181,212,243,273,304,334};
+    unsigned yy = dt[0], mo = dt[1], dd = dt[2];
+    if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || yy > 99) return 0;
+    u32 days = yy * 365u + (yy + 3) / 4 + cum[mo - 1] + dd - 1;
+    if (mo > 2 && (yy % 4) == 0) days++;
+    return days * 86400u + dt[3] * 3600u + dt[4] * 60u + dt[5];
+}
+
+/* Forward delta base->t in deciseconds using the full UTC date, so a gap of whole days is not mistaken
+ * for a few seconds. Backward clamps to 0. Without a valid date fall back to the time-of-day rule. */
+static unsigned fix_delta_ds(const unsigned char *bdt, unsigned bds, const unsigned char *tdt, unsigned tds)
+{
+    u32 b = dt_secs(bdt), t = dt_secs(tdt);
+    if (!b || !t) {
+        unsigned bs = ((unsigned)bdt[3] * 3600u + (unsigned)bdt[4] * 60u + bdt[5]) * 10u + bds;
+        unsigned ts = ((unsigned)tdt[3] * 3600u + (unsigned)tdt[4] * 60u + tdt[5]) * 10u + tds;
+        return batch_delta_ds(bs, ts);
+    }
+    if (t < b) return 0;
+    u32 d = t - b;
+    if (d > 100000u) d = 100000u;                 /* far beyond any span check; keeps the math in range */
+    unsigned v = d * 10u + tds;
+    return v > bds ? v - bds : 0;
+}
+static int fix_same(const unsigned char *a, unsigned ads, const unsigned char *b, unsigned bds)
+{
+    for (int i = 0; i < 6; i++) if (a[i] != b[i]) return 0;
+    return ads == bds;
 }
 
 static void batch_fill(batchfix_t *b, const rmc_t *rc)
@@ -719,8 +816,7 @@ static void batch_push(const rmc_t *rc)
         return;
     }
     if (g_batch_n > 0) {
-        unsigned base = batch_ds_of(&g_batch[0]), t = batch_ds_of(&nb);
-        if (batch_delta_ds(base, t) > BATCH_MAX_SPAN_DS) {
+        if (fix_delta_ds(g_batch[0].dt, g_batch[0].ds, nb.dt, nb.ds) > BATCH_MAX_SPAN_DS) {
             /* clock step or a stale base: the accumulated fixes can't share this base, so keep them
              * (blind buffer) rather than discarding, and restart the batch on the new fix. */
             batch_spill_to_blind();
@@ -734,8 +830,8 @@ static void batch_push(const rmc_t *rc)
          * 00:00:00 is numerically less than 23:59:59, so a raw compare rejected every post-midnight
          * fix until the batch flushed. A clamped (zero) delta for a fix that is not simply the same
          * instant is the real "went backwards" signal. */
-        unsigned prev = batch_ds_of(&g_batch[g_batch_n - 1]), tnew = batch_ds_of(&nb);
-        if (tnew != prev && batch_delta_ds(prev, tnew) == 0)
+        const batchfix_t *pv = &g_batch[g_batch_n - 1];
+        if (!fix_same(pv->dt, pv->ds, nb.dt, nb.ds) && fix_delta_ds(pv->dt, pv->ds, nb.dt, nb.ds) == 0)
             return;
     }
     g_batch[g_batch_n++] = nb;
@@ -755,12 +851,22 @@ static void batch_spill_to_blind(void)
     g_batch_n = 0;
 }
 
-/* seconds-of-day of a batch entry, for the delta against the base entry (the batch spans a few seconds,
- * so only hh:mm:ss matters; a midnight wrap is handled by adding a day's worth of deciseconds). */
-static unsigned batch_ds_of(const batchfix_t *b)
+/* The live batch just went out: track its fixes until a heartbeat ACK proves delivery. */
+static void batch_mark_sent(void)
 {
-    return ((unsigned)b->dt[3] * 3600u + (unsigned)b->dt[4] * 60u + (unsigned)b->dt[5]) * 10u + b->ds;
+    for (int i = 0; i < g_batch_n; i++) {
+        const batchfix_t *b = &g_batch[i];
+        blindfix_t f;
+        f.lat = b->lat_raw; f.lon = b->lon_raw;
+        for (int k = 0; k < 6; k++) f.dt[k] = b->dt[k];
+        f.sats = (unsigned char)(g_numsats & 0x0F);
+        f.flags = (unsigned char)((b->south ? 1 : 0) | (b->west ? 2 : 0) | 4);
+        f.ds = b->ds; f.spd_dkn = b->spd_dkn; f.hdg_deg = b->hdg_deg;
+        unack_push(&f);
+    }
+    g_batch_n = 0;
 }
+
 
 /* Serialise the accumulated fixes into d (needs 12 + 14*n bytes). Returns the payload length. */
 static int build_batch_data(unsigned char *d)
@@ -774,11 +880,10 @@ static int build_batch_data(unsigned char *d)
     d[4] = g_hdop_x10;
     for (int i = 0; i < 6; i++) d[5 + i] = g_batch[0].dt[i];
     d[11] = g_batch[0].ds;
-    unsigned base = batch_ds_of(&g_batch[0]);
     int o = 12;
     for (int i = 0; i < n; i++) {
         const batchfix_t *b = &g_batch[i];
-        unsigned dt_ds = batch_delta_ds(base, batch_ds_of(b));
+        unsigned dt_ds = fix_delta_ds(g_batch[0].dt, g_batch[0].ds, b->dt, b->ds);
         if (dt_ds > BATCH_MAX_SPAN_DS) dt_ds = BATCH_MAX_SPAN_DS;
         d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
         u32 la = (u32)raw_to_e7(b->lat_raw, b->south), lo = (u32)raw_to_e7(b->lon_raw, b->west);
@@ -807,13 +912,17 @@ static int build_batch_from_blind(unsigned char *d, int n)
     d[4] = g_hdop_x10;
     for (int i = 0; i < 6; i++) d[5 + i] = f0.dt[i];
     d[11] = f0.ds;
-    unsigned base = ((unsigned)f0.dt[3] * 3600u + (unsigned)f0.dt[4] * 60u + (unsigned)f0.dt[5]) * 10u + f0.ds;
     int o = 12;
+    blindfix_t prev = f0;
     for (int i = 0; i < n; i++) {
         blindfix_t f;
         if (!blind_peek_at(i, &f)) { d[1] = (unsigned char)i; break; }
-        unsigned t = ((unsigned)f.dt[3] * 3600u + (unsigned)f.dt[4] * 60u + (unsigned)f.dt[5]) * 10u + f.ds;
-        unsigned dt_ds = batch_delta_ds(base, t);
+        /* a backward time step (receiver clock correction) starts a new frame on its own base, so its
+         * original timestamp is kept rather than clamped onto this one */
+        if (i > 0 && !fix_same(prev.dt, prev.ds, f.dt, f.ds) &&
+            fix_delta_ds(prev.dt, prev.ds, f.dt, f.ds) == 0) { d[1] = (unsigned char)i; break; }
+        prev = f;
+        unsigned dt_ds = fix_delta_ds(f0.dt, f0.ds, f.dt, f.ds);
         if (dt_ds > BATCH_MAX_SPAN_DS) { d[1] = (unsigned char)i; break; }   /* older span than one frame
                                                                              * can express: stop short */
         d[o++] = (unsigned char)(dt_ds >> 8); d[o++] = (unsigned char)dt_ds;
@@ -838,8 +947,12 @@ static int blind_replay_batched(int fd, send_fn se, unsigned short *serial)
         int blen = build_batch_from_blind(g_batch_pay, want);
         if (blen <= 0) break;
         int sent_n = g_batch_pay[1];
+        if (g_unack_count + sent_n > UNACK_CAP) break;  /* wait for a heartbeat ACK to free room */
         int flen = gt06_frame(0xF1, g_batch_pay, blen, (*serial)++, g_batch_frame);
-        if (se(fd, g_batch_frame, flen, 0) != flen) return 0;   /* fixes stay buffered */
+        int r = se(fd, g_batch_frame, flen, 0);
+        if (r == SEND_BUSY) break;                     /* send buffer full: resume next pass */
+        if (r != flen) return 0;                       /* fixes stay buffered */
+        for (int k = 0; k < sent_n; k++) { blindfix_t f; if (blind_peek_at(k, &f)) unack_push(&f); }
         blind_drop_n(sent_n);
     }
     vhex("BLIND:remaining", (unsigned)g_blind_count);
@@ -929,6 +1042,23 @@ static int put_hex32(char *b, u32 v)
  * polled with a {0,0} select; these pace the attempts. */
 #define CONN_RETRY_SEC   5     /* wait between connect attempts */
 #define CONN_TIMEOUT_SEC 30    /* abandon a pending connect (covers lwIP SYN retransmits) */
+/* Idle and offline: back off the connect attempts (radio + SoC wakeups) up to this. Tracking and an
+ * active SOS always retry at CONN_RETRY_SEC. */
+#ifdef SITL
+#define CONN_BACKOFF_MAX 20
+#else
+#define CONN_BACKOFF_MAX 300
+#endif
+static unsigned g_conn_fails;                   /* consecutive failed connect/login attempts */
+static unsigned char g_wake_attempt;            /* woke from offline sleep: one real attempt before sleeping again */
+static unsigned char g_radio_cycle_pend;        /* bit0 no-data, bit1 PLMN: CFUN=0 sent, CFUN=1 still due */
+static unsigned conn_retry_sec(int urgent)       /* urgent: tracking or SOS -> no backoff */
+{
+    if (urgent || g_conn_fails < 3) return CONN_RETRY_SEC;
+    unsigned sh = g_conn_fails - 2; if (sh > 8) sh = 8;
+    unsigned v = (unsigned)CONN_RETRY_SEC << sh;
+    return v > CONN_BACKOFF_MAX ? CONN_BACKOFF_MAX : v;
+}
 
 /* GPS power follows the state. Tracking brings GNSS up with its default 1 Hz NMEA URC — the LOC send is
  * gated to T1 s in the loop; idle forces GNSS power OFF. WDBG work on G306161 identified the previously
@@ -1076,11 +1206,12 @@ assert_nmea:
  * remains for the recovery ladder (CFUN/COPS) only. sig_map maps rssi 0..31 -> GT06 level 0..4. */
 #define AT_SEND_SLOT  SL(0x7E1E2268u)
 typedef int (*at_send_fn)(const char *cmd, int len);
+static int g_at_rc = 0x7fff;                 /* last AT-send return (semantics unverified on HW) */
 static void at_cmd(const char *s)
 {
     at_send_fn f = *(at_send_fn *)AT_SEND_SLOT;
     int n = 0; while (s[n]) n++;
-    if (f) { g_wd_phase = 'A'; f(s, n); g_wd_phase = 0; }
+    if (f) { g_wd_phase = 'A'; g_at_rc = f(s, n); g_wd_phase = 0; }
 }
 static volatile unsigned char g_csq = 99;    /* last rssi (99 = unknown) */
 static void csq_refresh(void)
@@ -1125,6 +1256,17 @@ static unsigned g_nmea_lines;                   /* checksum-good NMEA sentences 
 static unsigned g_rmc_seen;                     /* RMC sentences parsed */
 static unsigned g_rmc_valid;                    /* ... of which reported a valid fix ('A') */
 static unsigned g_nmea_ts;                      /* wd_uptime() of the last good NMEA sentence */
+/* Any NMEA chunk at all, tracking or idle. Idle discards NMEA unparsed, so g_nmea_ts alone would let the
+ * silence test below "confirm" OFF while a receiver that ignored the off request is still talking. */
+static unsigned g_nmea_any_ts;
+static unsigned g_gps_cycles, g_gps_cycles_total;  /* power-cycles for a silent receiver */
+static unsigned g_gps_cycle_ts, g_track_since;
+#ifdef SITL
+#define GPS_SILENT_SEC 8
+#else
+#define GPS_SILENT_SEC 45                          /* tracking with no NMEA at all this long = wedged */
+#endif
+#define GPS_CYCLE_MAX 4
 
 /* Resolve the GNSS power state from evidence rather than from a return code we cannot fully trust.
  *
@@ -1137,7 +1279,7 @@ static unsigned g_nmea_ts;                      /* wd_uptime() of the last good 
 static void gps_state_from_evidence(unsigned now)
 {
     if (gps_status_refresh(now, 0)) return;
-    if (g_nmea_ts && (now - g_nmea_ts) <= 3) {
+    if (g_nmea_any_ts && (now - g_nmea_any_ts) <= 3) {
         g_gps_power_state = GPS_POWER_ON;        /* sentences are arriving: it is powered, whatever
                                                   * the last call returned */
         g_gps_off_confirmed = 0;
@@ -1149,7 +1291,7 @@ static void gps_state_from_evidence(unsigned now)
      * 693bc40 would have been defeated. -1 is ambiguous but not an error, so it settles here. */
     if (g_gps_req == GPS_POWER_OFF &&
         (g_gps_pwr_rc == 0 || g_gps_pwr_rc == GNSS_PWR_NOCHANGE) &&
-        (!g_nmea_ts || (now - g_nmea_ts) >= GPS_OFF_QUIET_SEC)) {
+        (!g_nmea_any_ts || (now - g_nmea_any_ts) >= GPS_OFF_QUIET_SEC)) {
         g_gps_power_state = GPS_POWER_OFF;       /* asked for off, and the stream really did stop */
         g_gps_off_confirmed = 1;
     }
@@ -1182,6 +1324,7 @@ static unsigned char g_plmn_changed;
 static unsigned g_plmn_changed_ts;
 static unsigned char g_plmn_busy;
 static int g_operator_mode = -1;               /* observed COPS mode; -1 = unavailable */
+static unsigned char g_plmn_paused;             /* allowed operators exhausted, in the holdoff */
 
 /* Exact CSV validation before either RAM or flash is changed. No partial writes/truncation, empty
  * entries, duplicate entries or command suffixes. Empty explicitly requests unrestricted selection. */
@@ -1385,6 +1528,12 @@ static int parse_at_urc(const char *s)
     return at;
 }
 static int read_signal(void)     { return sig_map(g_csq); }
+
+/* Boot diagnostics for CXCS#BOOTSTAT. The M0 supervisor keeps running through a SoC-only reset, so an M0
+ * uptime much larger than ours at boot means watchdog/crash/sys_reset rather than a power loss. */
+static unsigned char g_boot_reason;
+static volatile unsigned g_m0_up_min, g_m0_up_boot;
+static volatile unsigned char g_m0_up_seen;
 /* Battery (item 4): the M0 supervisor MCU owns the battery ADC and serves it over UART1 in a 55 AA framed
  * packet (RE: re_battery_voltage.md). We query it and cache the millivolts; read_batt_level() maps mV to the
  * GT06 0..6 level using the vendor's own thresholds. AT+CBC/CADC/CVAUXV all ERROR on this A7670SA, and the
@@ -1395,13 +1544,19 @@ static volatile int g_urxlen;
 static volatile unsigned short g_batt_mv;       /* last good supervisor mV (0 = none yet) */
 static volatile unsigned g_batt_mv_rejects;     /* samples outside the plausibility window (diagnostic) */
 /* Upper plausibility bound for the supervisor mV. Charging pushes the measured rail past a resting
- * cell's 4.2 V, so this has to be generous; 5.5 V still rejects framing garbage (a bad 16-bit read is
- * almost always far outside 2.6..5.5 V) while accepting any real charge voltage. */
-#define BATT_MV_MAX 5500
+ * cell's 4.2 V, so this has to be generous. G378517 on charge read >5.5 V (BT:0 on 2026-11-08), so the
+ * ceiling is 6.5 V; the frame is checksummed, so this only has to reject a misframed value. */
+#define BATT_MV_MAX 6500
 /* SOS button (item 17, SAFETY): 0x82 payload byte 1. g_sos_active latches on press; the main loop sends
  * a burst of 0x16 SOS alarms (survives packet loss + a reconnect) and re-arms on each reconnect. */
 static volatile unsigned char g_sos_active, g_sos_sends, g_sos_prev;
-#define SOS_BURST 10                            /* 0x16 alarms per delivery burst (per trigger / reconnect) */
+static volatile unsigned char g_sos_acked;      /* server ACKed a 0x16 of the current event/connection */
+static unsigned short g_sos_serial0;            /* first 0x16 serial of the current event/connection */
+static unsigned char g_sos_serial_set;
+#define SOS_BURST 10                            /* 1 Hz alarms before slowing to SOS_RETRY_SEC */
+#define SOS_RETRY_SEC 10                        /* then keep resending until the server ACKs one */
+static unsigned g_last_rx_ts;                   /* last complete frame from the server (link liveness) */
+static unsigned g_link_dead_n;                  /* links dropped by the liveness checks (diagnostic) */
 static volatile unsigned g_hbt_on = 15, g_hbt_off = 15;  /* HBT,X,Y heartbeat interval: X=ACC-ON, Y=ACC-OFF(idle) */
 #define HBT_MAX 3600  /* sanity ceiling (s): reject garbage that would silently disable the heartbeat */
 /* WSTR-only night-idle sleep policy. RAM-only and reconciled by the server on every login: ordinary
@@ -1484,13 +1639,16 @@ static void batt_mcu_parse(void)
             /* (pay[11..14] is a BE u32 uptime-minutes counter — the earlier "byte 13 = charge flag"
              * read was uptime bits coinciding with a bench power-cycle. Charging now comes from the
              * resident charger_state() sAPI instead; the M0 has no charger/VBUS state at all.) */
+            g_m0_up_min = ((unsigned)pay[11] << 24) | ((unsigned)pay[12] << 16) |
+                          ((unsigned)pay[13] << 8) | pay[14];
+            if (!g_m0_up_seen) { g_m0_up_boot = g_m0_up_min; g_m0_up_seen = 1; }
             /* SOS button (item 17, SAFETY): M0 status byte 1 = 1 while the SOS button is held (RE'd on
              * the bench 2026-07-23 — pay[1] tracked two 20 s holds, 0 at rest; pay[3] was an unrelated
              * edge pulse). A rising edge latches g_sos_active and arms a resend burst; the main loop then
              * sends 0x16 SOS alarms. Latched — stays set through release/reconnect until CANCELSOS# or a
              * reboot, so a real alarm can't be lost. */
             if ((pay[1] & 0x01) && !g_sos_prev) {
-                g_sos_active = 1; g_sos_sends = 0;
+                g_sos_active = 1; g_sos_sends = 0; g_sos_acked = 0; g_sos_serial_set = 0;
                 vputs("SOS: button pressed\r\n");
             }
             g_sos_prev = (unsigned char)(pay[1] & 0x01);
@@ -1625,6 +1783,38 @@ static int build_cmd_resp(const char *ascii, int alen, int ok, unsigned short se
 }
 
 static int prefix_eq(const char *a, const char *b);   /* defined below with the config-command helpers */
+static unsigned g_rx_crc_bad;                          /* server frames dropped on CRC (diagnostic) */
+/* One command reply that met a full send buffer, resent from the main loop (replies are rare). */
+static unsigned char g_reply_pend[224];
+static int g_reply_len;
+
+/* Exact command: `word` optionally followed by '#', nothing else. */
+static int cmd_is(const char *cmd, const char *word)
+{
+    int i = 0;
+    while (word[i]) { if (cmd[i] != word[i]) return 0; i++; }
+    return cmd[i] == 0 || (cmd[i] == '#' && cmd[i + 1] == 0);
+}
+
+/* "<word>,<a>[,<b>][#]" with nothing trailing. b = -1 when absent. */
+static int cmd_two_ints(const char *cmd, const char *word, int *a, int *b)
+{
+    int i = 0;
+    while (word[i]) { if (cmd[i] != word[i]) return 0; i++; }
+    if (cmd[i++] != ',') return 0;
+    const char *p = cmd + i;
+    *a = 0; *b = -1;
+    int n = 0;
+    while (*p >= '0' && *p <= '9') { if (++n > 6) return 0; *a = *a * 10 + (*p++ - '0'); }
+    if (!n) return 0;
+    if (*p == ',') {
+        p++; n = 0; *b = 0;
+        while (*p >= '0' && *p <= '9') { if (++n > 6) return 0; *b = *b * 10 + (*p++ - '0'); }
+        if (!n) return 0;
+    }
+    if (*p == '#') p++;
+    return *p == 0;
+}
 
 /* Is this a GT06 command we recognise (act on, or intentionally accept as a no-op the server sends
  * during reconcile)? Recognised -> "<cmd> OK"; anything else -> "<cmd> ERROR" so an unknown/garbage
@@ -1632,6 +1822,12 @@ static int prefix_eq(const char *a, const char *b);   /* defined below with the 
  * upstream and never reach here; SLPDISCONNECT/GPS_RST_TIME/VIBCHK/... arrive under SZCS#/CXCS#. */
 static int cmd_recognized(const char *cmd)
 {
+    int a, b;
+    if (prefix_eq(cmd, "TIMER,")) return cmd_two_ints(cmd, "TIMER", &a, &b) && a > 0;
+    if (prefix_eq(cmd, "HBT,")) return cmd_two_ints(cmd, "HBT", &a, &b) && a > 0 && a <= HBT_MAX &&
+                                       b != 0 && b <= HBT_MAX;
+    if (prefix_eq(cmd, "RESET")) return cmd_is(cmd, "RESET");
+    if (prefix_eq(cmd, "CANCELSOS")) return cmd_is(cmd, "CANCELSOS");
     static const char *const known[] = {
         "SZCS#", "CXCS#", "TIMER", "HBT", "SENDS", "SENALM", "MOVING", "CANCELSOS", "YCSJ", "RESET",
     };
@@ -1756,10 +1952,12 @@ static int cxzt_str(char *b, int t1, int t2)
 
 /* RESET# reboot request (set by handle_rx, run from the main loop so the ACK flushes first). item 11. */
 static volatile int g_reset_req;
+static unsigned g_reset_req_ts;
 
 #if FOTA
 /* --- FOTA request (set by handle_rx on YCSJ, run from the main loop) --- */
 static volatile int g_fota_req;
+static unsigned g_fota_fail;                    /* last FOTA abort step (diagnostic, CXCS#BOOTSTAT) */
 static unsigned char g_fota_ip[4];
 static unsigned g_fota_port;
 static char g_fota_path[128];
@@ -1814,38 +2012,76 @@ static volatile int g_srv_req;                  /* SERVIP/SERVPORT set -> main l
 static unsigned char g_srv_new_ip[4];
 static unsigned g_srv_new_port;
 
-static int cwprm_read_raw(unsigned char *buf)   /* read the active c:/cwprm.bin (exactly 0x800), no field checks */
+static int cwprm_read_name(const char *nm, unsigned char *buf)  /* exactly 0x800 bytes, no field checks */
 {
     fopen_fn fo = *(fopen_fn *)SLOT_FOPEN; fread_fn fr = *(fread_fn *)SLOT_FREAD; fclose_fn fc = *(fclose_fn *)SLOT_FCLOSE;
-    static const char nm[] = "c:/cwprm.bin", rb[] = "rb";
+    static const char rb[] = "rb";
     for (int i = 0; i < 0x800; i++) buf[i] = 0;
+    if (!fo || !fr || !fc) return 0;
     unsigned char pp = g_wd_phase; g_wd_phase = 'F';
     FILE_t fp = fo(nm, rb); if (!fp) { g_wd_phase = pp; return 0; }
     unsigned got = fr(buf, 0x800, 1, fp); fc(fp); g_wd_phase = pp;   /* this FS's fread returns BYTES */
     return got == 0x800;                            /* a short read must NOT be modify-written back over the file */
 }
-static int cwprm_read(unsigned char *buf)       /* read + validate the active c:/cwprm.bin (exactly 0x800) */
+static int cwprm_read_raw(unsigned char *buf) { return cwprm_read_name("c:/cwprm.bin", buf); }
+static int cwprm_teriid_ok(const unsigned char *buf)
 {
-    if (!cwprm_read_raw(buf)) return 0;
-    for (int i = 0; i < 15; i++)                    /* validate the full 15-digit TERIID (not just byte 0) */
+    for (int i = 0; i < 15; i++)                    /* the full 15-digit TERIID (not just byte 0) */
         if (buf[CFG_OFF_TERIID + i] < '0' || buf[CFG_OFF_TERIID + i] > '9') return 0;
     return 1;
 }
+static int cwprm_read_file(const char *nm, unsigned char *buf)
+{
+    return cwprm_read_name(nm, buf) && cwprm_teriid_ok(buf);
+}
+static int cwprm_server(const unsigned char *buf, unsigned char ip[4], unsigned *port)
+{
+    unsigned pt = (buf[CFG_OFF_PORT] << 8) | buf[CFG_OFF_PORT + 1];
+    unsigned char t[4];
+    if (!pt || !parse_ip((const char *)(buf + CFG_OFF_IP), t)) return 0;
+    if (ip) for (int i = 0; i < 4; i++) ip[i] = t[i];
+    if (port) *port = pt;
+    return 1;
+}
+/* The config copy this unit runs on: a fully valid primary, else a fully valid backup, else the first
+ * with a valid TERIID (identity matters more than the server, which has a production default).
+ * Returns 0 none, 1 primary, 2 backup; *srv_ok = its server fields are usable. Boot and every
+ * read-modify-write use this, so a write never copies a rejected primary over a good backup. */
+static int cwprm_select(unsigned char *buf, int *srv_ok)
+{
+    static const char f_prm[] = "c:/cwprm.bin", f_bank[] = "c:/cwbank.bin";
+    const char *names[2] = { f_prm, f_bank };
+    static unsigned char alt[0x800];
+    int alt_k = 0;
+    for (int k = 0; k < 2; k++) {
+        if (!cwprm_read_file(names[k], buf)) continue;
+        if (cwprm_server(buf, 0, 0)) { if (srv_ok) *srv_ok = 1; return 1 + k; }
+        if (!alt_k) { for (int i = 0; i < 0x800; i++) alt[i] = buf[i]; alt_k = 1 + k; }
+    }
+    if (srv_ok) *srv_ok = 0;
+    if (alt_k) for (int i = 0; i < 0x800; i++) buf[i] = alt[i];
+    return alt_k;
+}
+static int cwprm_read(unsigned char *buf) { return cwprm_select(buf, 0) != 0; }
 static int cwprm_write_one(const char *nm, const unsigned char *buf)
 {
     fopen_fn fo = *(fopen_fn *)SLOT_FOPEN; fwrite_fn fw = *(fwrite_fn *)SLOT_FWRITE; fclose_fn fc = *(fclose_fn *)SLOT_FCLOSE;
     static const char wb[] = "wb";
     unsigned char pp = g_wd_phase; g_wd_phase = 'F';
     FILE_t fp = fo(nm, wb); if (!fp) { g_wd_phase = pp; return 0; }
-    unsigned wrote = fw(buf, 0x800, 1, fp); fc(fp); g_wd_phase = pp;
-    return (wrote == 0x800);                         /* require the FULL 0x800 write (no truncated config) */
+    unsigned wrote = fw(buf, 0x800, 1, fp); int closed = fc(fp); g_wd_phase = pp;
+    return wrote == 0x800 && closed == 0;            /* the FULL 0x800, and a clean close */
 }
 static int cwprm_write(const unsigned char *buf)
 {
     static const char prm[] = "c:/cwprm.bin", bank[] = "c:/cwbank.bin";
-    int a = cwprm_write_one(prm, buf);              /* boot prefers any openable primary -> it MUST succeed */
-    cwprm_write_one(bank, buf);                     /* backup best-effort */
-    return a;
+    static unsigned char check[0x800];
+    /* Primary, verified by reading it back; only then the backup, so a failed primary write can never be
+     * paired with a backup that has already been replaced. Boot falls back to the backup if needed. */
+    if (!cwprm_write_one(prm, buf) || !cwprm_read_name(prm, check)) return 0;
+    for (int i = 0; i < 0x800; i++) if (check[i] != buf[i]) return 0;
+    cwprm_write_one(bank, buf);
+    return 1;
 }
 static void cfg_set_ascii(unsigned char *buf, int off, int maxlen, const char *s)  /* NUL-padded ASCII field */
 {
@@ -2079,7 +2315,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         const char *pv = skip_to_val(cmd, "VCOM");
         if (!pv || (pv[0] != '0' && pv[0] != '1')) return put_str(out, "SET ERROR: VCOM");
         g_vcom_en = (unsigned char)(pv[0] - '0');
-        g_vcom_hold = 0;                                     /* clear any backoff on explicit set */
+        g_vcom_hold = 0; g_vcom_hold_sec = VCOM_HOLD_SEC;                                  /* clear any backoff on explicit set */
         int n = put_str(out, "SETOK:VCOM=");
         out[n++] = (char)('0' + g_vcom_en);
         return n;
@@ -2114,6 +2350,46 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " ok");   n += put_str(out + n, g_plmn_ok[0] ? g_plmn_ok : "any");
         n += put_str(out + n, " policy1");   /* capability: persistent, enforced operator list */
         n += put_str(out + n, " mode"); n += put_sint(out + n, g_operator_mode);
+        n += put_str(out + n, " atrc"); n += put_sint(out + n, g_at_rc);
+        n += put_str(out + n, " cf");   n += put_uint(out + n, g_conn_fails);
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#LINKSTAT")) {
+        /* hb = heartbeat on/off (s), ua = fixes sent but not yet proven, rq = put back after dead links,
+         * bl = blind backlog, ld = links dropped by liveness, tb = sends deferred (busy), crc = bad
+         * server frames, cf = consecutive connect failures, sos = active/acked/sends */
+        int n = put_str(out, "READOK:LINKSTAT hb");
+        n += put_uint(out + n, g_hbt_on); out[n++] = '/'; n += put_uint(out + n, g_hbt_off);
+        n += put_str(out + n, " ua");  n += put_uint(out + n, (unsigned)g_unack_count);
+        n += put_str(out + n, " rq");  n += put_uint(out + n, g_requeued);
+        n += put_str(out + n, " bl");  n += put_uint(out + n, (unsigned)g_blind_count);
+        n += put_str(out + n, " ld");  n += put_uint(out + n, g_link_dead_n);
+        n += put_str(out + n, " tb");  n += put_uint(out + n, g_tx_busy_n);
+        n += put_str(out + n, " crc"); n += put_uint(out + n, g_rx_crc_bad);
+        n += put_str(out + n, " cf");  n += put_uint(out + n, g_conn_fails);
+        n += put_str(out + n, " sos"); out[n++] = (char)('0' + (g_sos_active ? 1 : 0));
+        out[n++] = (char)('0' + (g_sos_acked ? 1 : 0)); out[n++] = '/';
+        n += put_uint(out + n, g_sos_sends);
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#BOOTSTAT")) {
+        /* rr = why the last boot happened (reliability.h codes), bc = boot count, up = our uptime (s),
+         * m0b/m0 = M0 uptime (min) at our boot / now, sm/sp = longest main-loop stall (s) and its phase,
+         * nd = consecutive no-data reboots, vh = VCOM write backoffs */
+        int n = put_str(out, "READOK:BOOTSTAT rr");
+        n += put_uint(out + n, g_boot_reason);
+        n += put_str(out + n, " bc");  n += put_uint(out + n, wd_bootcount());
+        n += put_str(out + n, " up");  n += put_uint(out + n, wd_uptime());
+        n += put_str(out + n, " m0b"); n += put_uint(out + n, g_m0_up_seen ? g_m0_up_boot : 0);
+        n += put_str(out + n, " m0");  n += put_uint(out + n, g_m0_up_min);
+        n += put_str(out + n, " sm");  n += put_uint(out + n, wd_stall_max());
+        n += put_str(out + n, " sp");
+        { unsigned char ph = wd_stall_phase(); out[n++] = (ph >= 'A' && ph <= 'Z') ? (char)ph : '-'; }
+        n += put_str(out + n, " nd");  n += put_uint(out + n, wd_nodata_count());
+        n += put_str(out + n, " vh");  n += put_uint(out + n, g_vcom_holds);
+#if FOTA
+        n += put_str(out + n, " ff");  n += put_uint(out + n, g_fota_fail);
+#endif
         return n;
     }
     if (prefix_eq(cmd, "CXCS#SAPIFIND")) {
@@ -2214,6 +2490,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " pf");  n += put_uint(out + n, g_gps_pwr_fails);
         n += put_str(out + n, " pnc"); n += put_uint(out + n, g_gps_pwr_nochange);
         n += put_str(out + n, " req"); n += put_uint(out + n, g_gps_req);   /* asked-for vs confirmed */
+        n += put_str(out + n, " cy");  n += put_uint(out + n, g_gps_cycles_total);   /* silent-GPS cycles */
         return n;
         #undef PUT_SIGNED
     }
@@ -2349,11 +2626,14 @@ static int handle_config_cmd(const char *cmd, char *out)
 #define REC_STEP_SEC    20
 #define REC_STABLE_SEC  15
 #define REC_HOLDOFF_SEC 120
+#define PLMN_HOLDOFF_SEC 120
 #else
 #define REC_OFFLINE_SEC 300      /* offline + unregistered this long -> start the ladder */
 #define REC_STEP_SEC    120      /* settle time after each rung */
 #define REC_STABLE_SEC  120      /* connected this long after a manual COPS -> restore auto */
 #define REC_HOLDOFF_SEC 3600     /* pause after an exhausted ladder (no attach storms) */
+#define PLMN_HOLDOFF_SEC 900     /* allowed-operator rounds: a unit that sails into the other carrier's
+                                  * coverage must not sit an hour on the one it was pinned to */
 #endif
 
 /* Poll direct getters even while TCP is connected. COPS gives selection mode and numeric operator;
@@ -2415,15 +2695,21 @@ static void operator_refresh(void)
  * with a broken server route must not be subjected to pointless network reselections. */
 static int plmn_policy(unsigned now, int connected)
 {
-    static unsigned last_try, failed_since, pause_since;
-    static unsigned char started, paused, attempts, next_index;
+    static unsigned last_try, failed_since, pause_since, cfun_ts;
+    static unsigned char started, paused, attempts, next_index, cfun_stage;
     static char selected[8];
+    if (cfun_stage == 1) {                         /* second half of the end-of-round radio cycle */
+        if ((now - cfun_ts) < 5) return 1;
+        at_cmd("AT+CFUN=1\r"); cfun_stage = 2; last_try = now;
+        g_radio_cycle_pend &= (unsigned char)~2u;
+        return 1;
+    }
     if (g_plmn_changed) {
         /* Leave time for the SET response and its confirming read before moving off this network.
          * Bound this from the setting change itself: periodic STATUS polls must not postpone it forever. */
         if ((now - g_plmn_changed_ts) < SLEEP_QUIET_SEC) return 1;
         g_plmn_changed = 0;
-        started = paused = attempts = next_index = 0;
+        started = paused = attempts = next_index = cfun_stage = 0;
         failed_since = 0; selected[0] = 0;
         if (!g_plmn_ok[0]) {
             at_cmd("AT+COPS=0\r"); g_cops_manual = 0; g_plmn_busy = 0;
@@ -2440,14 +2726,15 @@ static int plmn_policy(unsigned now, int connected)
         (g_operator_mode == 1 || (g_operator_mode < 0 && started && selected_matches))) {
         if (g_plmn_busy) vputs("PLMN: registered on allowed operator\r\n");
         g_plmn_busy = 0; g_cops_manual = 1;
-        paused = attempts = 0; failed_since = 0;
+        paused = attempts = cfun_stage = 0; failed_since = 0; g_plmn_paused = 0;
         return 1;
     }
     g_plmn_busy = 1;
+    g_plmn_paused = paused;
     if (started && (now - last_try) < REC_STEP_SEC) return 1;
     if (paused) {
-        if ((now - pause_since) < REC_HOLDOFF_SEC) return 1;
-        paused = 0; attempts = 0;
+        if ((now - pause_since) < PLMN_HOLDOFF_SEC) return 1;
+        paused = 0; attempts = 0; cfun_stage = 0; g_plmn_paused = 0;
     }
     /* A known disallowed operator or automatic mode is corrected promptly. Loss of coverage on an
      * already selected allowed operator gets a grace period before trying another one. */
@@ -2467,7 +2754,14 @@ static int plmn_policy(unsigned now, int connected)
         count++;
     }
     if (attempts >= count) {
-        paused = 1; pause_since = now;
+        if (cfun_stage == 0) {                     /* clear cached rejects once before giving up */
+            vputs("PLMN: round failed, radio off/on\r\n");
+            at_cmd("AT+CFUN=0\r"); cfun_stage = 1; cfun_ts = now;
+            g_radio_cycle_pend |= 2;
+            return 1;
+        }
+        if (cfun_stage == 1) return 1;
+        paused = 1; pause_since = now; cfun_stage = 0;
         vputs("PLMN: allowed operators exhausted, backing off\r\n");
         return 1;
     }
@@ -2579,21 +2873,74 @@ static void cell_recovery(unsigned now, int connected)
     }
 }
 
+/* Last resort for "no server link for a long time" (registered with no data path, a wedged modem, or no
+ * SIM). Once per offline period: a radio off/on. Idle only, and never with an SOS or undelivered fixes:
+ * a reboot, at 40 min, then doubling per consecutive no-data reboot up to 5h20 (persisted, cleared on
+ * login). Time spent in deliberate night sleep does not count. */
+#ifdef SITL
+#define NODATA_CFUN_SEC   40
+#define NODATA_REBOOT_SEC 150
+#else
+#define NODATA_CFUN_SEC   1200
+#define NODATA_REBOOT_SEC 2400
+#endif
+static unsigned g_offline_since;                /* awake-offline baseline (0 = connected); sleep shifts it */
+static unsigned g_offline_episode;              /* bumped each time the link is lost */
+static void nodata_recovery(unsigned now, int track)
+{
+    static unsigned episode, cfun_ts;
+    static unsigned char stage;
+    if (stage == 1 && (now - cfun_ts) >= 5) {      /* always finish a started radio cycle */
+        at_cmd("AT+CFUN=1\r"); stage = 2; g_radio_cycle_pend &= (unsigned char)~1u;
+    }
+    if (!g_offline_since) return;
+    if (episode != g_offline_episode) { episode = g_offline_episode; if (stage != 1) stage = 0; }
+    unsigned off = now - g_offline_since;
+    if (stage == 0 && off >= NODATA_CFUN_SEC) {
+        vputs("NODATA: radio off/on\r\n");
+        at_cmd("AT+CFUN=0\r"); cfun_ts = now; stage = 1; g_radio_cycle_pend |= 1;
+    }
+    unsigned k = wd_nodata_count(); if (k > 3) k = 3;
+    if (!track && !g_sos_active && !g_fwd_en && g_blind_count == 0 && g_unack_count == 0 &&
+        off >= ((unsigned)NODATA_REBOOT_SEC << k)) {
+        vputs("NODATA: rebooting\r\n");
+        wd_set_nodata_count(wd_nodata_count() + 1);
+        wd_reason_and_reset(RR_NODATA);
+    }
+}
+
 /* Drain server->device bytes: accumulate across TCP reads, extract whole GT06 frames, ACK every 0x80
  * command (0x15) and apply TIMER. Sets *changed=1 when the track/idle state flips. All frame fields are
  * bounds-checked (a malformed/truncated frame can't read past the frame or the accumulator). */
-static void handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int cap,
-                      const unsigned char *in, int inlen,
-                      int *track, int *t1, int *t2, unsigned short *serial, int *changed)
+static int handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int cap,
+                     const unsigned char *in, int inlen,
+                     int *track, int *t1, int *t2, unsigned short *serial, int *changed)
 {
+    int ok = 1;
     if (*acclen + inlen > cap) *acclen = 0;        /* resync: drop the stale partial, never the new bytes */
     for (int i = 0; i < inlen; i++) acc[(*acclen)++] = in[i];
     int i = 0;
-    while (i + 5 <= *acclen) {
+    while (i + 5 <= *acclen && !g_reply_len) {   /* a deferred reply holds back later commands */
         if (acc[i] != 0x78 || acc[i + 1] != 0x78) { i++; continue; }
         int total = acc[i + 2] + 5;                /* 78 78 len [len bytes] 0d 0a */
         if (i + total > *acclen) break;            /* frame incomplete — wait for more */
         if (acc[i + total - 2] != 0x0d || acc[i + total - 1] != 0x0a) { i++; continue; }  /* misframed */
+        if (total < 10 ||
+            crc_itu(&acc[i + 2], total - 6) != (unsigned short)((acc[i + total - 4] << 8) | acc[i + total - 3])) {
+            g_rx_crc_bad++; i++; continue;         /* corrupt or not a frame: never act on it */
+        }
+        g_last_rx_ts = wd_uptime();
+        if (total == 10) {                         /* server ACK: 78 78 05 proto serial crc 0d 0a */
+            unsigned char ap = acc[i + 3];
+            unsigned short as = (unsigned short)((acc[i + 4] << 8) | acc[i + 5]);
+            if (ap == 0x13 && g_hb_pending && as == g_hb_serial) {
+                unack_release_to(g_hb_mark);       /* everything sent before that heartbeat arrived */
+                g_hb_pending = 0;
+            }
+            /* only an ACK of an alarm sent for THIS event counts (not a late one from an earlier event) */
+            if (ap == 0x16 && g_sos_active && !g_sos_acked && g_sos_serial_set &&
+                (short)(as - g_sos_serial0) >= 0) { g_sos_acked = 1; vputs("SOS: ACKed\r\n"); }
+        }
         if (acc[i + 3] == 0x80) {
             /* A quiet window after the last complete command prevents sleep from racing the server's
              * login/reconcile sequence. It is updated before dispatch, regardless of command type. */
@@ -2611,22 +2958,26 @@ static void handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int c
              * happens after the write — it cannot save an already-overflowed buffer. FWDSTAT is the
              * longest: ~247 chars with every counter at its 10-digit maximum. */
             char tb[288];
-            int cn;
+            int cn, rlen;
             if ((cn = handle_config_cmd(cmd, tb)) > 0) {
-                se(fd, resp, build_text_resp(tb, cn, (*serial)++, resp), 0);
+                rlen = build_text_resp(tb, cn, (*serial)++, resp);
             } else if (m >= 4 && cmd[0]=='c' && cmd[1]=='x' && cmd[2]=='z' && cmd[3]=='t') {
-                se(fd, resp, build_text_resp(tb, cxzt_str(tb, *t1, *t2), (*serial)++, resp), 0);
+                rlen = build_text_resp(tb, cxzt_str(tb, *t1, *t2), (*serial)++, resp);
             } else if (g_batt_mv && m >= 6 && cmd[0]=='S' && cmd[1]=='T' && cmd[2]=='A' &&
                        cmd[3]=='T' && cmd[4]=='U' && cmd[5]=='S') {
-                se(fd, resp, build_text_resp(tb, status_str(tb), (*serial)++, resp), 0);
+                rlen = build_text_resp(tb, status_str(tb), (*serial)++, resp);
             } else {
-                se(fd, resp, build_cmd_resp(cmd, m, cmd_recognized(cmd), (*serial)++, resp), 0);
+                rlen = build_cmd_resp(cmd, m, cmd_recognized(cmd), (*serial)++, resp);
             }
-            if (m >= 6 && cmd[0] == 'T' && cmd[1] == 'I' && cmd[2] == 'M' &&
-                cmd[3] == 'E' && cmd[4] == 'R' && cmd[5] == ',') {
-                const char *p = cmd + 6;
-                int a = parse_int(&p), b = -1;
-                if (*p == ',') { p++; b = parse_int(&p); }
+            {
+                int r = g_reply_len ? SEND_BUSY : se(fd, resp, rlen, 0);   /* keep reply order */
+                if (r == SEND_BUSY && !g_reply_len && rlen <= (int)sizeof g_reply_pend) {
+                    for (int k = 0; k < rlen; k++) g_reply_pend[k] = resp[k];
+                    g_reply_len = rlen;
+                } else if (r != rlen && r != SEND_BUSY) ok = 0;    /* a short reply breaks the framing */
+            }
+            int a, b, valid = cmd_recognized(cmd);
+            if (valid && cmd_two_ints(cmd, "TIMER", &a, &b)) {
                 if (a > 0) {
                     *t1 = a; if (b > 0) *t2 = b;
                     int nt = (a <= TRACK_T1_MAX) ? 1 : 0;
@@ -2638,22 +2989,18 @@ static void handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int c
             /* CANCELSOS# clears a latched SOS (item 17). The operator sends it (e.g. via the manage API)
              * after handling the alarm; a plain reboot also clears it. Nothing else clears g_sos_active —
              * a real alarm must not be droppable by the tracker itself. */
-            if (m >= 9 && cmd[0]=='C' && cmd[1]=='A' && cmd[2]=='N' && cmd[3]=='C' && cmd[4]=='E' &&
-                cmd[5]=='L' && cmd[6]=='S' && cmd[7]=='O' && cmd[8]=='S') {
-                g_sos_active = 0; g_sos_sends = 0;
+            if (cmd_is(cmd, "CANCELSOS")) {
+                g_sos_active = 0; g_sos_sends = 0; g_sos_acked = 0; g_sos_serial_set = 0;
                 vputs("SOS: cleared by CANCELSOS\r\n");
             }
             /* RESET# => reboot (item 11, management-UI reboot). The ACK was queued above; the main loop
              * runs the reset after a short flush so the server sees the OK, then a clean relogin. */
-            if (m >= 5 && cmd[0]=='R' && cmd[1]=='E' && cmd[2]=='S' && cmd[3]=='E' && cmd[4]=='T') {
-                g_reset_req = 1; vputs("RESET: reboot requested\r\n");
+            if (cmd_is(cmd, "RESET")) {
+                g_reset_req = 1; g_reset_req_ts = wd_uptime(); vputs("RESET: reboot requested\r\n");
             }
             /* HBT,<ACC-ON>,<ACC-OFF># sets the heartbeat interval; honour it (the server disconnects a unit
              * with no heartbeat, and idle must keep the connection alive) instead of using TIMER T2. */
-            if (m >= 4 && cmd[0]=='H' && cmd[1]=='B' && cmd[2]=='T' && cmd[3]==',') {
-                const char *p = cmd + 4;
-                int a = parse_int(&p), b = -1;
-                if (*p == ',') { p++; b = parse_int(&p); }
+            if (valid && cmd_two_ints(cmd, "HBT", &a, &b)) {
                 /* Clamp to a sane range: a garbage value (parse has no overflow guard) must never
                  * disable the heartbeat and let the server drop us. Out-of-range keeps the prior good value. */
                 if (a > 0 && a <= HBT_MAX) g_hbt_on = (unsigned)a;
@@ -2672,36 +3019,83 @@ static void handle_rx(int fd, send_fn se, unsigned char *acc, int *acclen, int c
     int rem = *acclen - i;
     for (int k = 0; k < rem; k++) acc[k] = acc[i + k];
     *acclen = rem;
+    return ok;
 }
 
 #if FOTA
 /* Run a queued FOTA: HTTP-GET the package from g_fota_ip/port/path, stream it into the resident flash API
  * (stages in `reserved`), verify the wrapper CRC, then reboot so the resident commits reserved->customer_app.
- * Blocking; feeds the watchdog. On ANY failure it reboots WITHOUT close() -> no pending marker -> customer_app
- * untouched (field-safe). Never returns on success (reboots); returns only on an early socket failure. */
+ * Bounded: FOTA_MAX_SEC overall and FOTA_STALL_SEC without a byte. Any failure before the flash is opened
+ * returns to normal service; after that it reboots WITHOUT close() -> no pending marker -> customer_app
+ * untouched. Never returns on success. */
+#ifdef SITL
+#define FOTA_MAX_SEC   30
+#define FOTA_STALL_SEC 8
+#else
+#define FOTA_MAX_SEC   600
+#define FOTA_STALL_SEC 60
+#endif
+/* Decompressed app must fit below the sAPI area (0x32000 above the load base); vendor ~200 KB, ours ~38 KB.
+ * This is a header sanity check only: without an LZMA decoder a truncated stream cannot be detected. */
+#define FOTA_MAX_UNCOMP 0x32000u
+#define FOTA_MIN_UNCOMP 0x1000u
+
+/* recv with a select timeout so the watchdog stays fed and the deadlines are checked */
+static int fota_recv(int fd, recv_fn rv, unsigned char *buf, int len)
+{
+    select_fn sel = *(select_fn *)SLOT_SELECT;
+    if (!sel || fd < 0 || fd >= 256) return rv(fd, buf, len, 0);
+    unsigned char rd[32];
+    for (int i = 0; i < 32; i++) rd[i] = 0;
+    rd[fd >> 3] |= (unsigned char)(1u << (fd & 7));
+    int tv[2] = {1, 0};
+    int nr = sel(fd + 1, rd, 0, 0, tv);
+    if (nr < 0) return -2;                           /* socket error */
+    if (nr == 0) return -1;                          /* nothing yet */
+    int n = rv(fd, buf, len, 0);
+    return n < 0 ? -2 : n;
+}
+
 static void fota_run(void)
 {
     g_fota_req = 0;
     g_wd_phase = 'O';
-    sys_reset_fn reset = *(sys_reset_fn *)SLOT_SYS_RESET;
     socket_fn  so = *(socket_fn  *)SLOT_SOCKET;
     connect_fn co = *(connect_fn *)SLOT_CONNECT;
     send_fn    se = *(send_fn    *)SLOT_SEND;
     recv_fn    rv = *(recv_fn    *)SLOT_RECV;
     close_fn   cl = *(close_fn   *)SLOT_CLOSE;
+    select_fn  sel = *(select_fn *)SLOT_SELECT;
+    fcntl_fn   fcn = *(fcntl_fn  *)SLOT_FCNTL;
     flash_prepare_fn fprep = *(flash_prepare_fn *)SLOT_FLASH_PREPARE;
     flash_open_fn    fopn  = *(flash_open_fn    *)SLOT_FLASH_OPEN;
     flash_write_fn   fwr   = *(flash_write_fn   *)SLOT_FLASH_WRITE;
     flash_close_fn   fcls  = *(flash_close_fn   *)SLOT_FLASH_CLOSE;
     flash_verify_fn  fver  = *(flash_verify_fn  *)SLOT_FLASH_VERIFY;
+    unsigned t0 = wd_uptime();
     vputs("FOTA: start\r\n");
     if (fprep) fprep();                                  /* modem coordination (fast when registered) */
 
     int fd = so(2, 1, 0);
-    if (fd < 0) { vputs("FOTA: sock fail\r\n"); return; }
+    if (fd < 0 || fd >= 256) { vputs("FOTA: sock fail\r\n"); g_fota_fail = 1; if (fd >= 0) cl(fd); return; }
     unsigned char sa[24];
     fill_server_addr(sa, g_fota_ip, g_fota_port);
-    if (co(fd, sa, 24) != 0) { vputs("FOTA: connect fail\r\n"); cl(fd); return; }
+    /* non-blocking connect, polled with the watchdog fed (an unreachable host must not hang us) */
+    if (fcn) fcn(fd, F_SETFL_NB, 1);
+    int up = co(fd, sa, 24) == 0;
+    while (!up) {
+        wd_alive();
+        unsigned char ws[32], es[32];
+        for (int i = 0; i < 32; i++) { ws[i] = 0; es[i] = 0; }
+        ws[fd >> 3] |= (unsigned char)(1u << (fd & 7)); es[fd >> 3] = ws[fd >> 3];
+        int tv[2] = {1, 0};
+        int nr = sel ? sel(fd + 1, 0, ws, es, tv) : -1;
+        if (nr < 0 || (es[fd >> 3] & (1u << (fd & 7))) || (wd_uptime() - t0) > CONN_TIMEOUT_SEC) {
+            vputs("FOTA: connect fail\r\n"); g_fota_fail = 2; cl(fd); return;
+        }
+        if (nr > 0 && (ws[fd >> 3] & (1u << (fd & 7)))) up = 1;
+    }
+    if (fcn) fcn(fd, F_SETFL_NB, 0);
 
     char req[224];
     int rl = put_str(req, "GET ");
@@ -2710,39 +3104,60 @@ static void fota_run(void)
     for (int k = 0; k < 4; k++) { rl += put_uint(req + rl, g_fota_ip[k]); if (k < 3) req[rl++] = '.'; }
     if (g_fota_port != 80) { req[rl++] = ':'; rl += put_uint(req + rl, g_fota_port); }
     rl += put_str(req + rl, "\r\nConnection: close\r\n\r\n");
-    for (int sent = 0; sent < rl; ) {              /* send() may be short: loop until the whole request is out */
+    for (int sent = 0; sent < rl; ) {              /* a fresh socket: the request fits its send buffer */
         int w = se(fd, req + sent, rl - sent, 0);
-        if (w <= 0) { vputs("FOTA: send fail\r\n"); cl(fd); return; }
+        if (w <= 0) { vputs("FOTA: send fail\r\n"); g_fota_fail = 3; cl(fd); return; }
         sent += w;
     }
 
-    unsigned char mode = 0x77;
-    if (!fopn || fopn(&mode) != 0) { vputs("FOTA: flash open fail\r\n"); cl(fd); return; }
-
-    /* Stream the response: skip HTTP headers (\r\n\r\n), then write the body to flash while CRC'ing the
-     * payload (bytes after the 8-byte [clen][~crc32] wrapper). recv() on this fresh socket blocks ~5s per
-     * timeout; a body byte resets the stall counter. Any write/socket fault -> reboot without close(). */
-    unsigned char buf[512], wrap[8];
-    int hdr_done = 0, h4 = 0, wrapn = 0;
-    unsigned total = 0, crc = 0xFFFFFFFFu, idle = 0, rx_total = 0, cap = 0;
+    /* Headers first (status must be 200/206), then the body to flash while CRC'ing the payload (bytes after
+     * the 8-byte [clen][~crc32] wrapper). The flash is opened only once a body is actually arriving. */
+    unsigned char buf[512], wrap[8], lz[13];
+    char status[16];
+    int hdr_done = 0, h4 = 0, wrapn = 0, lzn = 0, sl = 0, opened = 0;
+    unsigned total = 0, crc = 0xFFFFFFFFu, rx_total = 0, cap = 0, last_rx = wd_uptime();
     for (;;) {
         wd_alive();
-        int n = rv(fd, buf, sizeof buf, 0);
+        unsigned now = wd_uptime();
+        int bad = 0;
+        if ((now - t0) > FOTA_MAX_SEC) { vputs("FOTA: deadline\r\n"); bad = 4; }
+        else if ((now - last_rx) > FOTA_STALL_SEC) { vputs("FOTA: dl stalled\r\n"); bad = 5; }
+        int n = bad ? 0 : fota_recv(fd, rv, buf, sizeof buf);
+        if (!bad && n == -2) { vputs("FOTA: recv error\r\n"); bad = 6; }
+        if (bad) {
+            cl(fd);
+            if (opened) wd_reason_and_reset(RR_FOTA_FAIL);
+            g_fota_fail = (unsigned)bad; return;
+        }
         if (n == 0) break;                               /* peer closed => body complete */
-        if (n < 0) { if (++idle > 12) { vputs("FOTA: dl timeout\r\n"); reset(); } continue; }
-        idle = 0;
-        rx_total += (unsigned)n;                         /* bound the whole transfer (slow-loris / endless body) */
-        if ((!hdr_done && rx_total > 8192u) || rx_total > 0x50000u) { vputs("FOTA: rx too big\r\n"); reset(); }
+        if (n < 0) continue;
+        last_rx = now;
+        rx_total += (unsigned)n;
+        if ((!hdr_done && rx_total > 8192u) || rx_total > 0x50000u) {
+            vputs("FOTA: rx too big\r\n"); cl(fd);
+            if (opened) wd_reason_and_reset(RR_FOTA_FAIL);
+            g_fota_fail = 7; return;
+        }
         int off = 0;
         if (!hdr_done) {
             for (; off < n; off++) {
                 unsigned char c = buf[off];
+                if (sl < (int)sizeof status - 1 && h4 == 0 && rx_total - (unsigned)n + (unsigned)off < 15u)
+                    status[sl++] = (char)c;              /* "HTTP/1.1 200" */
                 if ((h4 == 0 || h4 == 2) && c == '\r') h4++;
                 else if ((h4 == 1 || h4 == 3) && c == '\n') h4++;
                 else h4 = 0;
                 if (h4 == 4) { hdr_done = 1; off++; break; }
             }
             if (!hdr_done) continue;
+            status[sl] = 0;
+            if (!(prefix_eq(status, "HTTP/1.") && sl >= 12 && status[8] == ' ' &&
+                  status[9] == '2' && status[10] == '0' && (status[11] == '0' || status[11] == '6'))) {
+                vputs("FOTA: bad HTTP status\r\n"); cl(fd); g_fota_fail = 8; return;
+            }
+            unsigned char mode = 0x77;
+            if (!fopn || fopn(&mode) != 0) { vputs("FOTA: flash open fail\r\n"); cl(fd); g_fota_fail = 9; return; }
+            opened = 1;
         }
         int m2 = n - off;
         for (int j = 0; j < m2; ) {
@@ -2759,31 +3174,39 @@ static void fota_run(void)
             if (cap && total + wchunk > cap) wchunk = (total < cap) ? (cap - total) : 0u;   /* drop pad tail */
             if (wchunk) {
                 /* Never write past `reserved` (0x3c000): cap the staged image at customer_app size (0x30000). */
-                if (total + wchunk > 0x30000u) { vputs("FOTA: oversize - reboot, no commit\r\n"); reset(); }
+                if (total + wchunk > 0x30000u) { vputs("FOTA: oversize - reboot, no commit\r\n"); wd_reason_and_reset(RR_FOTA_FAIL); }
                 int pstart = (total < 8) ? (int)(8 - total) : 0;    /* CRC only over payload (skip 8B wrapper) */
+                for (int c = pstart; c < (int)wchunk && lzn < 13; c++) lz[lzn++] = buf[off + j + c];
                 if ((unsigned)pstart < wchunk) crc = crc32_upd(crc, buf + off + j + pstart, (int)(wchunk - (unsigned)pstart));
-                if (fwr(buf + off + j, wchunk) != 0) { vputs("FOTA: write fail\r\n"); reset(); }
+                if (fwr(buf + off + j, wchunk) != 0) { vputs("FOTA: write fail\r\n"); wd_reason_and_reset(RR_FOTA_FAIL); }
                 total += wchunk;
             }
             j += chunk;
         }
     }
     cl(fd);
+    if (!opened) { vputs("FOTA: no body\r\n"); g_fota_fail = 10; return; }
 
     unsigned clen = 0, wantcrc = 0;
     if (wrapn >= 8) {
         clen    = wrap[0] | (wrap[1] << 8) | (wrap[2] << 16) | ((unsigned)wrap[3] << 24);
         wantcrc = wrap[4] | (wrap[5] << 8) | (wrap[6] << 16) | ((unsigned)wrap[7] << 24);
     }
+    /* LZMA-alone header: props byte (lc/lp/pb), then a known uncompressed size that fits in RAM. */
+    unsigned usize_lo = lzn >= 13 ? (lz[5] | (lz[6] << 8) | (lz[7] << 16) | ((unsigned)lz[8] << 24)) : 0;
+    unsigned usize_hi = lzn >= 13 ? (lz[9] | (lz[10] << 8) | (lz[11] << 16) | ((unsigned)lz[12] << 24)) : 1;
+    /* props 0x5D (lc3 lp0 pb2) is what both our fwtool and the vendor images use */
+    int lzma_ok = lzn >= 13 && lz[0] == 0x5D && usize_hi == 0 &&
+                  usize_lo >= FOTA_MIN_UNCOMP && usize_lo <= FOTA_MAX_UNCOMP && clen >= 64;
     vhex("FOTA:total", total); vhex("FOTA:clen", clen); vhex("FOTA:crc", crc); vhex("FOTA:want", wantcrc);
     /* Validate BEFORE close() — close() sets the pending-update marker and there is no clean abort, so we
      * must never mark a bad image. Reject anything malformed or that the resident verifier would reject. */
-    if (total < 9 || total != clen + 8 || crc != wantcrc ||
+    if (total < 9 || total != clen + 8 || crc != wantcrc || !lzma_ok ||
         clen == 0 || 8u + clen > 0x30000u || wantcrc == 0 || wantcrc == 0xFFFFFFFFu) {
         vputs("FOTA: BAD image - reboot, no commit\r\n");
-        reset();                                         /* no close() => no marker => customer_app untouched */
+        wd_reason_and_reset(RR_FOTA_FAIL);               /* no close() => no marker => customer_app untouched */
     }
-    if (fcls() != 0) { vputs("FOTA: close fail\r\n"); reset(); }
+    if (fcls() != 0) { vputs("FOTA: close fail\r\n"); wd_reason_and_reset(RR_FOTA_FAIL); }
     /* Resident re-reads the STAGED image and re-CRCs it: require it matches the package we just downloaded
      * (so a stale or partially-written `reserved` cannot be committed). Only then reboot for the boot path to
      * commit reserved->customer_app. On any mismatch we do NOT reboot: the marker is set, but the resident's
@@ -2791,10 +3214,11 @@ static void fota_run(void)
     unsigned info[3] = {0, 0, 0};
     if (fver(info) == 0 && info[0] == 1 && info[1] == clen && info[2] == wantcrc) {
         vputs("FOTA: staged OK - reboot to commit\r\n");
-        for (volatile int d = 0; d < 8000000; d++) { }   /* let the VCOM prints flush before reset */
-        reset();
+        wd_sleep(1000);                                  /* let the VCOM prints flush before reset */
+        wd_reason_and_reset(RR_FOTA);
     }
     vhex("FOTA:vfy", info[0]); vputs("FOTA: verify FAIL - staying on current app\r\n");
+    g_fota_fail = 11;
 }
 #endif /* FOTA */
 
@@ -2810,12 +3234,45 @@ static int send_traced(int fd, const void *buf, int len, int flags)
     return r;
 }
 
+/* GT06 socket send: only call the (blocking) send when select says the socket is writable. lwIP reports
+ * writable once a low-water mark of buffer is free, far more than one of our <=162-byte frames, so the
+ * send then cannot block. Not writable -> SEND_BUSY and the caller keeps its data for later. */
+#define TX_BUSY_MAX_SEC 20                 /* writable never came back this long -> treat the link as dead */
+static int send_gt06(int fd, const void *buf, int len, int flags)
+{
+    select_fn sel = *(select_fn *)SLOT_SELECT;
+    if (sel && fd >= 0 && fd < 256) {
+        unsigned char ws[32];
+        for (int i = 0; i < 32; i++) ws[i] = 0;
+        ws[fd >> 3] |= (unsigned char)(1u << (fd & 7));
+        int tv[2] = {0, 0};
+        int nr = sel(fd + 1, 0, ws, 0, tv);
+        if (nr < 0) return -1;
+        if (nr == 0 || !(ws[fd >> 3] & (1u << (fd & 7)))) {
+            if (!g_tx_busy_since) { g_tx_busy_since = wd_uptime(); if (!g_tx_busy_since) g_tx_busy_since = 1; }
+            g_tx_busy_n++;
+            return SEND_BUSY;
+        }
+    }
+    g_tx_busy_since = 0;
+    return send_traced(fd, buf, len, flags);
+}
+
+/* Every path that drops the GT06 link ends here: keep what was in flight for replay. */
+static void link_down_cleanup(void)
+{
+    if (g_batch_n > 0) batch_spill_to_blind();
+    unack_requeue();
+    g_tx_busy_since = 0;
+}
+
 /* ================= USB<->TCP forwarding bridge runtime (UAV LTE modem link) =================
  * FWDSERVER/FWDPORT set -> keep a SECOND TCP socket to that host connected (non-blocking, auto-reconnect)
  * and bridge raw bytes: if04 (USB) -> TCP, and TCP -> if04. Independent of the GT06 tracking socket, which
  * keeps running. On (re)connect the USB->TCP buffer is flushed so no stale data replays. */
 #define FWD_RING_SZ      32768u  /* USB->TCP ring (power of 2). 8K was ~1 s of buffer at the observed rate,
                                   * so a brief uplink dip overflowed it; 32K rides out cellular stalls. */
+#define MQ_TICKS(ms)     ((ms) / 5)  /* MsgQRecv timeout unit is a 5 ms RTOS tick */
 #define FWD_PUMP_MS      20      /* loop wait cap while forwarding -> ~50 Hz bridge pump (low latency) */
 #define FWD_TX_STALL_SEC 10      /* USB->TCP data stuck this long (half-open socket) -> drop + reconnect */
 #define FWD_WD_MIN_UP     180    /* never fire the RX-death reboot in the first N s after boot */
@@ -3223,6 +3680,16 @@ fwd_rx:
 void standalone_main(u32 loader_resolver)
 {
     sapi_table_fill(loader_resolver);
+    /* Watchdog + timebase first, so a hang anywhere in boot is covered by the boot deadline. */
+    int timer_ok = 0;
+    int wd_reason = reliability_init((WD_SELFTEST || WD_ARM || (WD_HW_ARM && !WD_HW_SELFTEST)) ? 1 : 0,
+                                     &timer_ok);
+    g_boot_reason = (unsigned char)wd_reason;
+    if (!timer_ok) {
+        /* No timebase: nothing timed would ever run. Back off, then reset. */
+        wd_sleep(60000);
+        wd_reason_and_reset(RR_TIMER_FAIL);
+    }
 #ifdef SITL
     { extern int sitl_vcom_write(const void *, int); WR = (vcom_write_fn)sitl_vcom_write; }
 #else
@@ -3245,10 +3712,8 @@ void standalone_main(u32 loader_resolver)
 
 
 
-    /* Reliability: log why we last rebooted. WD_SELFTEST arms + validates the auto-reset (see top of file);
-     * a normal build passes arm=0 (proven FS reset-reason path only). */
-    int wd_reason = reliability_init(WR, (WD_SELFTEST || WD_ARM || (WD_HW_ARM && !WD_HW_SELFTEST)) ? 1 : 0);
-    (void)wd_reason;
+    vhex("WD:reset_reason", (unsigned)wd_reason);
+    vhex("WD:bootcount", wd_bootcount());
 #if WD_SELFTEST
     vhex("WD:selftest_reason", (unsigned)wd_reason);
     if (wd_reason == RR_ST_HUNG) {
@@ -3303,7 +3768,7 @@ void standalone_main(u32 loader_resolver)
     socket_fn  so = *(socket_fn  *)SLOT_SOCKET;
     connect_fn co = *(connect_fn *)SLOT_CONNECT;
     g_send_raw     = *(send_fn    *)SLOT_SEND;
-    send_fn    se = send_traced;
+    send_fn    se = send_gt06;                /* GT06 socket: never blocks (see send_gt06) */
     recv_fn    rv = *(recv_fn    *)SLOT_RECV;
     close_fn   cl = *(close_fn   *)SLOT_CLOSE;
 
@@ -3320,20 +3785,15 @@ void standalone_main(u32 loader_resolver)
     /* ---- read the vendor config from the resident FS (c:/cwprm.bin, backup cwbank.bin) for SEAMLESS
      * migration: login with the provisioned TERIID + connect to the config's server/port. Falls back to
      * the real modem IMEI (un-provisioned/new units) and a default server if the config is unreadable. ---- */
+    /* Primary first, then the backup, each fully validated (whole file, 15-digit TERIID, dotted-quad
+     * IP, port 1..65535). A readable but corrupt primary must not win over a good backup. */
     static unsigned char cfg[0x800];
-    fopen_fn  fopen_  = *(fopen_fn  *)SLOT_FOPEN;
-    fread_fn  fread_  = *(fread_fn  *)SLOT_FREAD;
-    fclose_fn fclose_ = *(fclose_fn *)SLOT_FCLOSE;
-    static const char f_prm[] = "c:/cwprm.bin", f_bank[] = "c:/cwbank.bin", f_rb[] = "rb";
-    FILE_t fp = fopen_(f_prm, f_rb);
-    if (!fp) fp = fopen_(f_bank, f_rb);
-    unsigned fret = 0;
-    if (fp) { fret = fread_(cfg, 0x800, 1, fp); fclose_(fp); }
-    /* Validate by CONTENT, not the fread return (this FS's fread returns bytes, not element-count):
-     * the config is good if the TERIID field holds ASCII digits. */
-    int have = (fp != 0) && (cfg[CFG_OFF_TERIID] >= '0' && cfg[CFG_OFF_TERIID] <= '9');
-    vhex("S4:cfg_fp", (unsigned)(unsigned long)fp);   /* nonzero -> resident FS works */
-    vhex("S4:cfg_fret", fret);
+    unsigned char srv_ip[4] = {103, 230, 158, 49};
+    unsigned port = 7711;                             /* production, if no config is usable */
+    int srv_ok = 0;
+    int have = cwprm_select(cfg, &srv_ok);          /* 1 = primary, 2 = backup */
+    if (srv_ok) cwprm_server(cfg, srv_ip, &port);
+    vhex("S4:srv_ok", (unsigned)srv_ok);
     vhex("S4:cfg_ok", (unsigned)have);
 
     char login_id[16];
@@ -3346,12 +3806,6 @@ void standalone_main(u32 loader_resolver)
             static const char fallback[] = "356823030000001";
             for (int i = 0; i < 16; i++) login_id[i] = fallback[i];
         }
-    }
-    unsigned char srv_ip[4] = {103, 230, 158, 49};
-    unsigned port = 8711;
-    if (have) {
-        parse_ip((const char *)(cfg + CFG_OFF_IP), srv_ip);   /* keep default if not dotted-quad */
-        port = (cfg[CFG_OFF_PORT] << 8) | cfg[CFG_OFF_PORT + 1];
     }
     /* FORCE_TEST_SERVER: bench override — connect to the LOCAL test server (103.230.158.49:8711) instead
      * of the cwprm.bin server (:7711 = production), while still logging in with the unit's real TERIID.
@@ -3371,9 +3825,11 @@ void standalone_main(u32 loader_resolver)
     for (int i = 0; i < 16; i++) g_login_id_s[i] = login_id[i];
     for (int i = 0; i < 4; i++) g_srv_ip_s[i] = srv_ip[i];
     g_port_s = port;
-    { const char *a = (const char *)(cfg + CFG_OFF_APN); int i = 0;
-      for (; i < 47 && a[i] >= 0x20 && a[i] < 0x7f; i++) { g_apn_s[i] = a[i]; }
-      g_apn_s[i] = 0; }
+    if (have) {
+        const char *a = (const char *)(cfg + CFG_OFF_APN); int i = 0;
+        for (; i < 47 && a[i] >= 0x20 && a[i] < 0x7f; i++) { g_apn_s[i] = a[i]; }
+        g_apn_s[i] = 0;
+    }
 
     /* USB<->TCP forwarding bridge: register the if04 RX callback (FWDSERVER/FWDPORT already loaded early,
      * before boot debug, so if04 ownership is claimed from the first byte). */
@@ -3398,18 +3854,36 @@ void standalone_main(u32 loader_resolver)
     vhex("BT:boot_mv", g_batt_mv);
 #endif
 
-    int fd = -1, connected = 0, connecting = 0;
+    int fd = -1, connected = 0, connecting = 0, was_connected = 0;
     unsigned short serial = 2;
     unsigned char ld[18], loc[40];
     static char g_line[256]; static int g_llen;    /* NMEA line reassembly across URC chunks */
     static unsigned char acc[768]; static int acclen; /* server->device RX accumulator (>= max frame + one recv) */
     unsigned last_hbt = 0, last_loc = 0, last_csq = 0, last_batt = 0, last_blind = 0, last_sos = 0;
     unsigned last_gps_power = 0;
+    int urc_backlog = 0;
     unsigned conn_start = 0, last_conn = 0u - (unsigned)CONN_RETRY_SEC;  /* first attempt immediately */
 
     for (;;) {
         wd_alive();                                /* liveness heartbeat for the software watchdog */
         unsigned now = wd_uptime();
+
+        /* Link liveness: the server ACKs every heartbeat, so total silence for several heartbeat
+         * intervals means the link is dead even if TCP has not noticed. */
+        if (connected) {
+            unsigned hiv = track ? g_hbt_on : g_hbt_off;
+            if ((now - g_last_rx_ts) > 3 * hiv + 15) {
+                connected = 0; g_link_dead_n++;
+                vputs("LINK: no server response, reconnecting\r\n");
+            } else if (g_tx_busy_since && (now - g_tx_busy_since) > TX_BUSY_MAX_SEC) {
+                connected = 0; g_link_dead_n++;
+                vputs("LINK: send buffer stuck, reconnecting\r\n");
+            }
+        }
+        if (was_connected && !connected) link_down_cleanup();
+        was_connected = connected;
+        if (!connected) { if (!g_offline_since) { g_offline_since = now; g_offline_episode++; } }
+        else g_offline_since = 0;
         leds_update(track, connected, g_sos_active, now);   /* item 14: status LEDs each pass */
 
         if (g_srv_req) {                           /* SZCS#SERVIP/SERVPORT wrote a new server -> apply live */
@@ -3438,7 +3912,7 @@ void standalone_main(u32 loader_resolver)
         }
 #endif
 #if FOTA
-        if (g_fota_req) fota_run();     /* a YCSJ was queued -> download + stage the update (reboots on done) */
+        if (g_fota_req && !g_reply_len) fota_run();   /* YCSJ queued (after its reply went out) */
 #endif
         if (g_usbrst_req) {          /* USB off/on: re-arms a stalled resident Modem1 RX pipeline. The host
                                       * must reopen the tty afterwards (the device re-enumerates). */
@@ -3449,25 +3923,50 @@ void standalone_main(u32 loader_resolver)
             usb_rx_start();          /* re-register after re-enumeration */
             vputs("USB: switch reset\r\n");
         }
-        if (g_reset_req) {              /* RESET# (item 11): let the ACK flush, then reboot via sys_reset */
+        if (connected && g_reply_len) {            /* a reply that met a full send buffer */
+            int r = se(fd, g_reply_pend, g_reply_len, 0);
+            if (r == g_reply_len) {
+                g_reply_len = 0;
+                int changed = 0;                   /* now dispatch commands held behind it */
+                if (acclen && !handle_rx(fd, se, acc, &acclen, (int)sizeof acc, 0, 0, &track, &t1, &t2,
+                                         &serial, &changed))
+                    connected = 0;
+                if (changed) apply_gps(track);
+            } else if (r != SEND_BUSY) connected = 0;
+        }
+        if (!connected) g_reply_len = 0;
+        if (g_reset_req && g_reply_len && (now - g_reset_req_ts) < 5) {
+            /* RESET#'s own reply is still queued: give it a few seconds */
+        } else if (g_reset_req) {       /* RESET# (item 11): let the ACK flush, then reboot via sys_reset */
             vputs("RESET: rebooting\r\n");
             wd_sleep(1500);             /* ~1.5 s for the TCP ACK to go out (well under the 12-tick WD) */
-            sys_reset_fn rst = *(sys_reset_fn *)SLOT_SYS_RESET;
-            if (rst) rst();
-            g_reset_req = 0;            /* unreached if the reset takes; clears the flag if the slot is null */
+            wd_reason_and_reset(RR_COMMAND);
         }
         cell_recovery(now, connected);  /* item 16: un-wedge a camped-but-denied modem (timer-gated) */
+        nodata_recovery(now, track);
+        {   /* the modem just (re)registered: the backoff no longer applies, try the server now */
+            static int was_reg;
+            int reg = g_cereg_stat == 1 || g_cereg_stat == 5;
+            if (reg && !was_reg && !connected && !connecting) {
+                g_conn_fails = 0; last_conn = now - (unsigned)CONN_RETRY_SEC;
+            }
+            was_reg = reg;
+        }
 
         /* Night-only disconnected idle sleep. Do this before reconnect processing, after all urgent
          * work above. Preconditions preserve the two invariants that motivated this feature: no queued
          * track/SOS data is abandoned, and wake-up does not run apply_gps() or otherwise re-enable GNSS.
          * SystemSleepSet merely permits automatic module sleep, so keep this task dormant until the
          * alarm fires; then revoke permission before rebuilding TCP state. */
-        if (connected && !track && g_sleep_disconnect && !g_sleep_fault && !g_plmn_busy &&
-            !g_fwd_en && !g_fwd_active && !g_sos_active &&
+        /* Also while offline (after a few failed attempts): an idle unit out of coverage overnight
+         * should not stay awake retrying. Each wake makes one connection attempt. */
+        int offline_idle = !connected && !connecting && g_conn_fails >= 3 && !g_wake_attempt;
+        if ((connected || offline_idle) && !track && g_sleep_disconnect && !g_sleep_fault &&
+            (!g_plmn_busy || g_plmn_paused) &&
+            !g_fwd_en && !g_fwd_active && !g_sos_active && !g_radio_cycle_pend &&
             g_blind_count == 0 && g_batch_n == 0 &&
             g_gps_power_state == GPS_POWER_OFF && g_gps_off_confirmed &&
-            (now - g_last_server_cmd_ts) >= SLEEP_QUIET_SEC) {
+            (!connected || (now - g_last_server_cmd_ts) >= SLEEP_QUIET_SEC)) {
             unsigned sleep_sec = g_hbt_off;
             if (sleep_sec < SLEEP_MIN_SEC) sleep_sec = SLEEP_MIN_SEC;
             if (sleep_sec > HBT_MAX) sleep_sec = HBT_MAX;
@@ -3478,7 +3977,8 @@ void standalone_main(u32 loader_resolver)
             if (arc == 0) {
                 /* Close while definitely awake. The alarm must be armed before granting sleep; should
                  * the grant fail, an alarm expiring while awake is harmless and needs no cancellation. */
-                cl(fd); fd = -1; connected = 0; connecting = 0; acclen = 0;
+                if (fd >= 0) cl(fd);
+                fd = -1; connected = 0; connecting = 0; acclen = 0;
             }
             int src = (arc == 0 && set_sleep) ? set_sleep(1) : -1;
             if (arc != 0 || src != 0) {
@@ -3488,11 +3988,13 @@ void standalone_main(u32 loader_resolver)
                 vputs("SLEEP: disabled after API failure\r\n");
             } else {
                 vhex("SLEEP:seconds", sleep_sec);
-                wd_arm(0);                  /* the main-task watchdog must ignore this deliberate absence */
+                wd_grace(sleep_sec + 60);   /* deliberate absence, but still bounded */
                 wd_sleep((int)sleep_ms + 1000);
+                wd_alive(); wd_grace(0);    /* protection back on before the wake cleanup call */
                 if (set_sleep(0) != 0) g_sleep_fault = 1;
-                wd_alive(); wd_arm(1);
                 now = wd_uptime();
+                if (g_offline_since) g_offline_since += sleep_sec + 1;   /* asleep is not "offline" */
+                g_wake_attempt = 1;
                 last_conn = now - (unsigned)CONN_RETRY_SEC; /* reconnect immediately after the alarm */
                 vputs("SLEEP: awake, GPS remains off\r\n");
                 continue;
@@ -3506,7 +4008,10 @@ void standalone_main(u32 loader_resolver)
          * lwIP semantics: non-blocking connect returns "in progress"; completion = socket WRITABLE,
          * failure = EXCEPT set (errevent). A fast-failed connect that raises neither is caught by the
          * CONN_TIMEOUT_SEC deadline. */
-        if (!connected && !connecting && (now - last_conn) >= CONN_RETRY_SEC) {
+        if (was_connected && !connected) link_down_cleanup();   /* before a same-pass reconnect */
+        was_connected = connected;
+        if (!connected && !connecting &&
+            (g_wake_attempt || (now - last_conn) >= conn_retry_sec(track || g_sos_active))) {
             last_conn = now;
             vhex("S4:cfg_ok", (unsigned)have);     /* echo the config summary each retry (survives the */
             vdump("S4:loginid", (const unsigned char *)login_id, 15);  /* USB-enum race that eats the  */
@@ -3515,6 +4020,7 @@ void standalone_main(u32 loader_resolver)
             if (fd >= 0) { cl(fd); fd = -1; }
             acclen = 0;
             fd = so(2, 1, 0);
+            if (fd < 0) { g_conn_fails++; g_wake_attempt = 0; }
             if (fd >= 0) {
                 fcntl_fn fcn = *(fcntl_fn *)SLOT_FCNTL;
                 if (fcn) fcn(fd, F_SETFL_NB, 1);   /* missing slot => blocking connect, as before */
@@ -3539,7 +4045,8 @@ void standalone_main(u32 loader_resolver)
             else if (nr > 0 && (ws[fd >> 3] & (1u << (fd & 7)))) up = 1;   /* writable = connected */
             if (!up && !fail && (now - conn_start) >= CONN_TIMEOUT_SEC) fail = 1;
             if (fail) {
-                cl(fd); fd = -1; connecting = 0;   /* paced retry (CONN_RETRY_SEC) */
+                cl(fd); fd = -1; connecting = 0;   /* paced retry (conn_retry_sec) */
+                g_conn_fails++; g_wake_attempt = 0;
                 vputs("S4: connect retry\r\n");
             } else if (up) {
                 connecting = 0;
@@ -3547,8 +4054,12 @@ void standalone_main(u32 loader_resolver)
                 if (fcn) fcn(fd, F_SETFL_NB, 0);   /* back to blocking: a short send() means "drop" */
                 if (se(fd, login_frame, login_len, 0) != login_len) {
                     cl(fd); fd = -1;               /* login didn't go out whole -> paced retry */
+                    g_conn_fails++; g_wake_attempt = 0;
                 } else {
                     connected = 1;
+                    g_conn_fails = 0; g_wake_attempt = 0;
+                    if (wd_nodata_count()) wd_set_nodata_count(0);
+                    g_last_rx_ts = now; g_tx_busy_since = 0; g_hb_pending = 0;
                     /* Give the server a fresh command window on every login. Without this, a tracker
                      * whose sleep flag remains enabled can reconnect and close again before recv() has
                      * one chance to observe a TIMER/start or reconciliation command. */
@@ -3558,7 +4069,7 @@ void standalone_main(u32 loader_resolver)
                     last_hbt = now - (unsigned)t2;    /* emit one heartbeat right after connect (liveness) */
                     last_loc = now;                   /* but don't blast LOC immediately */
                     csq_refresh();                    /* refresh signal for the first heartbeat */
-                    if (g_sos_active) g_sos_sends = 0;  /* re-deliver a live SOS to the (re)established session */
+                    if (g_sos_active) { g_sos_sends = 0; g_sos_acked = 0; g_sos_serial_set = 0; }  /* re-deliver */
                     vputs("S4: connected\r\n");
                 }
             }
@@ -3574,15 +4085,18 @@ void standalone_main(u32 loader_resolver)
             rdset[fd >> 3] |= (unsigned char)(1u << (fd & 7));
             int tv[2] = {0, 0};                    /* {tv_sec=0, tv_usec=0} = non-blocking poll */
             int nr = sel(fd + 1, rdset, 0, 0, tv);
+            if (nr < 0) connected = 0;             /* select on our own socket failed: it is broken */
             if (nr > 0 && (rdset[fd >> 3] & (1u << (fd & 7)))) {
                 unsigned char rx[256];
                 g_wd_phase = 'R';
                 int n = rv(fd, rx, sizeof rx, 0);  /* data ready -> returns immediately, no block */
                 g_wd_phase = 0;
-                if (n == 0) { connected = 0; }     /* peer closed */
-                else if (n > 0) {
+                if (n <= 0) { connected = 0; }     /* peer closed, or readable-with-error (reset) */
+                else {
                     int changed = 0;
-                    handle_rx(fd, se, acc, &acclen, (int)sizeof acc, rx, n, &track, &t1, &t2, &serial, &changed);
+                    if (!handle_rx(fd, se, acc, &acclen, (int)sizeof acc, rx, n, &track, &t1, &t2,
+                                   &serial, &changed))
+                        connected = 0;             /* a reply went out short: framing is gone */
                     if (changed) {
                         apply_gps(track);
                         /* Don't let a partial batch straddle the transition: on the next tracking
@@ -3593,20 +4107,23 @@ void standalone_main(u32 loader_resolver)
                          * logging, so anything replayed after this point is acknowledged and then
                          * dropped from the track. Sending now, while the server still counts us as
                          * active, is the only way those tail fixes survive. */
-                        if (g_batch_n > 0 && connected) {
+                        if (g_batch_n > 0 && connected && g_blind_count > 0) {
+                            batch_spill_to_blind();        /* older backlog still queued: keep order */
+                        } else if (g_batch_n > 0 && connected) {
                             int blen = build_batch_data(g_batch_pay);
                             int flen = gt06_frame(0xF1, g_batch_pay, blen, serial++, g_batch_frame);
-                            if (se(fd, g_batch_frame, flen, 0) != flen) {
-                                connected = 0;
+                            int r = se(fd, g_batch_frame, flen, 0);
+                            if (r == flen) batch_mark_sent();
+                            else {
+                                if (r != SEND_BUSY) connected = 0;
                                 batch_spill_to_blind();
-                            } else {
-                                g_batch_n = 0;
                             }
                         } else if (g_batch_n > 0) {
                             batch_spill_to_blind();
                         }
                         g_last_batch = now;
                         last_gps_power = now;
+                        g_track_since = now; g_gps_cycles = 0; g_gps_cycle_ts = now;
                         g_llen = 0;
                         last_loc = now;
                     }
@@ -3625,6 +4142,25 @@ void standalone_main(u32 loader_resolver)
          * keep reasserting once the resident has acknowledged OFF. The gate is g_gps_off_confirmed, NOT
          * g_gps_power_state: a failed power-on leaves the confirmed state at OFF, which would otherwise
          * suppress the retry for a later off that genuinely failed. */
+        /* A receiver that is "on" but silent is not fixed by reasserting ON. Power-cycle it; if that keeps
+         * failing, reboot (once per boot reason, and never while holding undelivered fixes or an SOS). */
+        if (track) {
+            unsigned ref = (int)(g_nmea_any_ts - g_track_since) > 0 ? g_nmea_any_ts : g_track_since;
+            if ((now - ref) >= GPS_SILENT_SEC && (now - g_gps_cycle_ts) >= GPS_SILENT_SEC) {
+                g_gps_cycle_ts = now;
+                if (g_gps_cycles >= GPS_CYCLE_MAX && g_boot_reason != RR_GPS_DEAD && !g_sos_active &&
+                    g_blind_count == 0 && g_unack_count == 0) {
+                    vputs("GPS: silent through every power-cycle, rebooting\r\n");
+                    wd_reason_and_reset(RR_GPS_DEAD);
+                }
+                vputs("GPS: no NMEA, power-cycling the receiver\r\n");
+                apply_gps(0);
+                wd_sleep(2000);
+                apply_gps(1);
+                g_gps_cycles++; g_gps_cycles_total++;
+                last_gps_power = now;
+            }
+        }
         if (track && (now - last_gps_power) >= GPS_RETRY_SEC) {
             apply_gps(1);
             last_gps_power = now;
@@ -3651,16 +4187,17 @@ void standalone_main(u32 loader_resolver)
                     if (g_blind_count > 0 && !blind_replay_batched(fd, se, &serial))
                         connected = 0;
                 }
-                if (connected) {
+                if (connected && g_blind_count > 0) {
+                    batch_spill_to_blind();            /* backlog not drained yet: queue behind it */
+                } else if (connected) {
                     int blen = build_batch_data(g_batch_pay);
                     int flen = gt06_frame(0xF1, g_batch_pay, blen, serial++, g_batch_frame);
                     int sret = se(fd, g_batch_frame, flen, 0);
                     vhex("S3c:batch_send", (unsigned)g_batch_n);
-                    if (sret != flen) {                /* partial send corrupts the frame */
-                        connected = 0;
+                    if (sret == flen) batch_mark_sent();
+                    else {
+                        if (sret != SEND_BUSY) connected = 0;   /* partial send corrupts the frame */
                         batch_spill_to_blind();        /* keep the fixes for replay */
-                    } else {
-                        g_batch_n = 0;
                     }
                 } else {
                     batch_spill_to_blind();            /* link went down before the flush */
@@ -3670,7 +4207,7 @@ void standalone_main(u32 loader_resolver)
 
         /* USB<->TCP forwarding bridge: keep the FWD socket up + pump both directions (independent of GT06).
          * g_fwd_req in the gate guarantees a disable/teardown pass runs even once the socket is already down. */
-        if (g_fwd_en || g_fwd_active || g_fwd_req) fwd_poll(now, so, co, se, rv, cl);
+        if (g_fwd_en || g_fwd_active || g_fwd_req) fwd_poll(now, so, co, send_traced, rv, cl);
 
         /* Poll signal periodically (reply lands on the URC queue below). */
         if (connected && (now - last_csq) >= 20) { csq_refresh(); last_csq = now; }
@@ -3681,10 +4218,20 @@ void standalone_main(u32 loader_resolver)
         unsigned hbt_iv = track ? g_hbt_on : g_hbt_off;
         if (connected && (now - last_hbt) >= hbt_iv) {
             unsigned char hb[8];
-            int hl = gt06_frame(0x13, hb, build_heartbeat(hb), serial++, loc);
-            if (se(fd, loc, hl, 0) != hl) connected = 0;   /* partial/failed send -> drop + reconnect */
-            last_hbt = now;
-            vputs("ST: heartbeat\r\n");
+            unsigned short hs = serial++;
+            int hl = gt06_frame(0x13, hb, build_heartbeat(hb), hs, loc);
+            int r = se(fd, loc, hl, 0);
+            if (r == hl) {
+                /* Track the OLDEST outstanding heartbeat until its ACK (or a reconnect): replacing it
+                 * would mean a link whose ACK latency exceeds HBT never releases anything. */
+                if (!g_hb_pending) {
+                    g_hb_serial = hs; g_hb_mark = g_unack_pushed; g_hb_pending = 1;
+                }
+                last_hbt = now;
+                vputs("ST: heartbeat\r\n");
+            } else if (r != SEND_BUSY) {
+                connected = 0;                     /* partial/failed send -> drop + reconnect */
+            }
         }
 
         /* SOS alarm (item 17, SAFETY): while an SOS is latched, send a burst of 0x16 alarms so one press
@@ -3692,11 +4239,19 @@ void standalone_main(u32 loader_resolver)
          * and re-sends the burst on each reconnect via the g_sos_sends reset above). Runs in ANY state —
          * an SOS in idle still fires; the server then exits idle + starts tracking via TIMER. Paced to one
          * send per second by an explicit gate — the loop runs faster than 1 Hz while forwarding is active. */
-        if (connected && g_sos_active && g_sos_sends < SOS_BURST && (now - last_sos) >= 1) {
+        /* Sending is not delivery: keep going (1 Hz for SOS_BURST, then every SOS_RETRY_SEC) until the
+         * server ACKs one on this connection. */
+        if (connected && g_sos_active && !g_sos_acked &&
+            (now - last_sos) >= (g_sos_sends < SOS_BURST ? 1u : (unsigned)SOS_RETRY_SEC)) {
             unsigned char ad[40];
-            int fl = gt06_frame(0x16, ad, build_alarm_data(ad), serial++, loc);
-            if (se(fd, loc, fl, 0) == fl) { g_sos_sends++; last_sos = now; vputs("SOS: 0x16 alarm sent\r\n"); }
-            else connected = 0;
+            unsigned short ss = serial++;
+            int fl = gt06_frame(0x16, ad, build_alarm_data(ad), ss, loc);
+            int r = se(fd, loc, fl, 0);
+            if (r == fl && !g_sos_serial_set) { g_sos_serial0 = ss; g_sos_serial_set = 1; }
+            if (r == fl) {
+                if (g_sos_sends < 255) g_sos_sends++;
+                last_sos = now; vputs("SOS: 0x16 alarm sent\r\n");
+            } else if (r != SEND_BUSY) connected = 0;
         }
 
         /* Idle catch-up: fixes buffered at the tail of a tracking period (or across a TIMER idle flip)
@@ -3719,20 +4274,26 @@ void standalone_main(u32 loader_resolver)
         g_wd_phase = 'Q';
         int fast = g_fwd_active;
         if (track || !connected || fd < 0 || fd >= 256) {
-            if (qid) mqr(qid, msg, fast ? FWD_PUMP_MS : 1000);
+            /* queue timeouts are 5 ms RTOS ticks: these are the long-standing HW values (100 ms / 5 s) */
+            if (qid) mqr(qid, msg, fast ? MQ_TICKS(100) : MQ_TICKS(5000));
         } else {
             select_fn selw = *(select_fn *)SLOT_SELECT;
             unsigned char rw[32];
             for (int i = 0; i < 32; i++) rw[i] = 0;
             rw[fd >> 3] |= (unsigned char)(1u << (fd & 7));
             int tvw[2]; tvw[0] = fast ? 0 : 1; tvw[1] = fast ? (FWD_PUMP_MS * 1000) : 0;   /* fast: FWD_PUMP_MS */
-            selw(fd + 1, rw, 0, 0, tvw);
+            if (urc_backlog) { tvw[0] = 0; tvw[1] = 0; }   /* queue not empty: don't sleep, drain it */
+            if (selw(fd + 1, rw, 0, 0, tvw) < 0) {
+                connected = 0;                     /* broken socket: don't spin on an instant error */
+                wd_sleep(1000);
+            }
             /* select() only waits on the socket, so still drain the URC queue non-blocking (timeout 0 =
              * return at once) — else the CSQ replies polled in idle go stale and fill the 50-slot queue. */
             if (qid) mqr(qid, msg, 0);
         }
         g_wd_phase = 0;
         unsigned p = msg[3];
+        urc_backlog = (p != 0);                    /* got one: there may be more queued behind it */
 #ifdef SITL
         if (!p) continue;                          /* host URC pointers aren't in the resident VA range */
 #else
@@ -3747,6 +4308,7 @@ void standalone_main(u32 loader_resolver)
         if (parse_at_urc((const char *)(unsigned long)p))
             goto urc_done;                         /* AT/modem text: NOT NMEA — feeding it to the line
                                                     * assembler corrupted split sentences (bad LOCs) */
+        g_nmea_any_ts = now;
         if (!track) goto urc_done;                 /* idle: ignore any stray NMEA, never build a LOC */
 
         /* The URC queue delivers NMEA in CHUNKS that cut mid-sentence, so reassemble complete lines
@@ -3760,7 +4322,7 @@ void standalone_main(u32 loader_resolver)
                     if (!nmea_cksum_ok(g_line)) {  /* spliced/mangled line (AT interleave) -> drop, don't parse */
                         g_nmea_bad++; g_llen = 0; continue;
                     }
-                    g_nmea_lines++; g_nmea_ts = now;
+                    g_nmea_lines++; g_nmea_ts = now; g_gps_cycles = 0;
                     parse_gga(g_line);             /* cache sats-in-use / HDOP from any GGA line */
                     parse_gsa(g_line);             /* cache 2D/3D fix type from any GSA line */
                     rmc_t rc;
@@ -3802,10 +4364,18 @@ void standalone_main(u32 loader_resolver)
                             if (connected) {
                                 build_loc_data(ld, 0, rc.lat_raw, rc.lon_raw, rc.south, rc.west, 1, g_numsats, 0, 0);
                                 int flen = gt06_frame(0x12, ld, 18, serial++, loc);
-                                int sret = se(fd, loc, flen, 0);
+                                int sret = g_blind_count > 0 ? SEND_BUSY   /* queue behind the backlog */
+                                                             : se(fd, loc, flen, 0);
                                 vhex("S3c:loc_send", (unsigned)sret);
-                                if (sret != flen) {         /* partial or failed send corrupts the frame -> */
-                                    connected = 0;
+                                if (sret == flen) {
+                                    blindfix_t f = {0};
+                                    f.lat = rc.lat_raw; f.lon = rc.lon_raw;
+                                    for (int q = 0; q < 6; q++) f.dt[q] = rc.dt[q];
+                                    f.sats = g_numsats;
+                                    f.flags = (unsigned char)((rc.south ? 1 : 0) | (rc.west ? 2 : 0) | 4);
+                                    unack_push(&f);
+                                } else {                    /* partial or failed send corrupts the frame -> */
+                                    if (sret != SEND_BUSY) connected = 0;
                                     if (g_blind_en)
                                         blind_push(rc.lat_raw, rc.lon_raw, rc.dt, rc.south, rc.west, 1, g_numsats);
                                 }

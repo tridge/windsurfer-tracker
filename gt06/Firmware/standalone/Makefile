@@ -6,7 +6,8 @@
 # See ../standalone_sapi_test.md. Loads at 0x7E1B0000; descriptor first; entry = _start (r0 = resolver).
 CC      := arm-none-eabi-gcc
 OBJCOPY := arm-none-eabi-objcopy
-GIT_HASH := $(shell git -C . rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
+# last commit that touched this firmware (not the repo HEAD), "-dirty" if it has uncommitted changes
+GIT_HASH := $(shell git log -1 --format=%h --abbrev=7 -- . 2>/dev/null || echo nogit)$(shell git diff --quiet HEAD -- . 2>/dev/null || echo -dirty)
 CFLAGS  := -mcpu=cortex-r5 -mthumb -mfloat-abi=soft -Os -ffreestanding -nostdlib \
            -fno-exceptions -fno-unwind-tables -ffunction-sections -fdata-sections -Wall -Werror \
            -DGIT_HASH='"$(GIT_HASH)"'
@@ -102,20 +103,20 @@ fotaimg: standalone_fota.bin   ## build the ONE OTA image (vendor + our firmware
 # Built 64-bit; the one 32-bit-pointer dependency (the URC message word the fw casts to a pointer) is met by
 # allocating those buffers low via mmap(MAP_32BIT) in sitl_hal.c. Run e.g.:  SITL_SERVER=127.0.0.1:8711 ./sitl
 HOSTCC   := gcc
-SITLSRC  := main.c sitl_hal.c
+SITLSRC  := main.c sitl_hal.c reliability.c
 SITLCFLAGS := -DSITL -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -pthread \
               -DGIT_HASH='"$(GIT_HASH)-sitl"'
 
-sitl: $(SITLSRC) sapi.h              ## build the SITL host binary (plain)
+sitl: $(SITLSRC) sapi.h reliability.h              ## build the SITL host binary (plain)
 	$(HOSTCC) $(SITLCFLAGS) -o $@ $(SITLSRC) -pthread
 
 usb-debug-sitl: usb_debug.c sitl_hal.c sapi.h  ## WDBG firmware with if04 simulated by --usb-listen
 	$(HOSTCC) $(SITLCFLAGS) -o $@ usb_debug.c sitl_hal.c -pthread
 
-sitl-asan: $(SITLSRC) sapi.h         ## SITL under AddressSanitizer
+sitl-asan: $(SITLSRC) sapi.h reliability.h         ## SITL under AddressSanitizer
 	$(HOSTCC) $(SITLCFLAGS) -fsanitize=address -fno-omit-frame-pointer -o $@ $(SITLSRC) -pthread
 
-sitl-ubsan: $(SITLSRC) sapi.h        ## SITL under UndefinedBehaviorSanitizer
+sitl-ubsan: $(SITLSRC) sapi.h reliability.h        ## SITL under UndefinedBehaviorSanitizer
 	$(HOSTCC) $(SITLCFLAGS) -fsanitize=undefined -fno-sanitize-recover=all -o $@ $(SITLSRC) -pthread
 
 sitl-all: sitl sitl-asan sitl-ubsan  ## build all SITL variants
@@ -150,7 +151,22 @@ test-lte-sleep: sitl-asan            ## direct CPSI telemetry + GPS-safe disconn
 test-plmn-policy: sitl-asan          ## persistent carrier restrictions and offline recovery
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_plmn_policy.py
 
-test: test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy  ## all SITL regression tests
+test-watchdog: sitl-asan            ## real reliability.c: hung send + boot hang reset, reset reasons
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_watchdog.py
+
+test-link: sitl-asan                 ## dead-link detection, in-flight replay, SOS until ACK, bad commands
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_link.py
+
+test-gps-stall: sitl-asan            ## silent GNSS: power-cycle, one reboot, recovery
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_stall.py
+
+test-offline: sitl-asan              ## idle offline: connect backoff, sleep, no-data reboot
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_offline.py
+
+test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never commit a bad image
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_fail.py
+
+test: test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
@@ -158,4 +174,4 @@ clean:
 	      customer_app_usb_debug.bin customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin usb-debug-sitl
 
 .PHONY: all flashimg fotaimg usb-debug sitl-all test-gps-retry test-loc-batch test-fota-image \
-	test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test clean
+	test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-watchdog test-link test-gps-stall test-offline test-fota-fail test clean
