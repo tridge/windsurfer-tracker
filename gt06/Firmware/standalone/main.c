@@ -2354,6 +2354,19 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " cf");   n += put_uint(out + n, g_conn_fails);
         return n;
     }
+    if (prefix_eq(cmd, "CXCS#WDSTALL")) {
+        int n = put_str(out, "READOK:WDSTALL="); n += put_uint(out + n, wd_stall_limit());
+        return n;
+    }
+    if (prefix_eq(cmd, "SZCS#WDSTALL")) {                    /* diagnostic: RAM only, reverts on reboot */
+        const char *pv = skip_to_val(cmd, "WDSTALL");
+        const char *q = pv;
+        int v = pv ? parse_int(&q) : -1;
+        if (v < 0 || (*q && *q != '#')) return put_str(out, "SET ERROR: WDSTALL");
+        wd_set_stall_limit((unsigned)v);
+        int n = put_str(out, "SETOK:WDSTALL="); n += put_uint(out + n, wd_stall_limit());
+        return n;
+    }
     if (prefix_eq(cmd, "CXCS#LINKSTAT")) {
         /* hb = heartbeat on/off (s), ua = fixes sent but not yet proven, rq = put back after dead links,
          * bl = blind backlog, ld = links dropped by liveness, tb = sends deferred (busy), crc = bad

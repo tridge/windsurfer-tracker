@@ -34,6 +34,7 @@ static volatile unsigned char g_stall_phase;
 static unsigned g_bootcount = 1;
 static unsigned g_nodata;
 static volatile int g_armed;
+static volatile unsigned g_stall_limit = WD_STALL_ROUNDS;   /* SZCS#WDSTALL: diagnostic override */
 static int g_hw_armed;
 static void *g_wd_timer;
 
@@ -93,6 +94,13 @@ unsigned wd_bootcount(void) { return g_bootcount; }
 unsigned wd_stall_max(void) { return g_stall_max; }
 unsigned char wd_stall_phase(void) { return g_stall_phase; }
 unsigned wd_nodata_count(void) { return g_nodata; }
+unsigned wd_stall_limit(void) { return g_stall_limit; }
+void wd_set_stall_limit(unsigned secs)
+{
+    if (secs < WD_STALL_ROUNDS) secs = WD_STALL_ROUNDS;
+    if (secs > 300) secs = 300;
+    g_stall_limit = secs;
+}
 
 /* MsgQRecv takes 5 ms RTOS ticks on this ThreadX resident; convert so callers keep a ms contract. */
 void wd_sleep(int ms)
@@ -161,7 +169,7 @@ static void wd_tick(unsigned long arg)
     stalls++;
     if (stalls > g_stall_max) { g_stall_max = stalls; g_stall_phase = g_wd_phase; }
     if ((int)(g_grace_until - g_uptime) > 0) return;       /* deliberate sleep in progress */
-    if (stalls >= WD_STALL_ROUNDS && g_armed) { trace_write(RR_WATCHDOG, g_wd_phase, stalls); soc_reset(); }
+    if (stalls >= g_stall_limit && g_armed) { trace_write(RR_WATCHDOG, g_wd_phase, stalls); soc_reset(); }
 }
 
 void wd_hw_arm(unsigned secs)

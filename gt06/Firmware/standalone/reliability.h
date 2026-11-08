@@ -67,6 +67,11 @@ unsigned char wd_stall_phase(void);   /* g_wd_phase during that stall */
  * reason of a reset we caused). 0 if there is none (power loss, crash, or RAM not retained). */
 int wd_prev_trace(unsigned *reason, unsigned *phase, unsigned *uptime);
 
+/* Stall limit before the watchdog resets (12..300 s, RAM only). Raising it lets a slow-but-returning
+ * call show up as sm/sp in BOOTSTAT instead of being killed. */
+unsigned wd_stall_limit(void);
+void wd_set_stall_limit(unsigned secs);
+
 /* Persisted counter of consecutive no-data reboots (reset on a successful login). */
 unsigned wd_nodata_count(void);
 void wd_set_nodata_count(unsigned n);
