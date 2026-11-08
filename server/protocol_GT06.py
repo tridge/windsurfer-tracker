@@ -1395,7 +1395,8 @@ class GT06Listener:
         The night switch is per-event (timezone-aware), so it must be resolved
         per connection — different events can be in night vs day at once."""
         night = False
-        if self.get_event_night_active and self.night_idle.get("enabled"):
+        # get_event_night_active already folds in global/per-event enablement
+        if self.get_event_night_active:
             try:
                 night = bool(self.get_event_night_active(gt_conn.eid))
             except Exception:

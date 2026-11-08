@@ -119,10 +119,10 @@ def test_idle_intervals_night_when_active():
     assert eff["hbt"] == 900 and eff["keepalive"] == 1800 and eff["cxzt_min"] == 30
 
 
-def test_idle_intervals_day_when_feature_disabled():
-    # night_idle.enabled False -> always day, even if the callback says active.
-    lst = _listener(night_idle={"enabled": False, "hbt_interval": 900})
-    lst.get_event_night_active = lambda eid: True
+def test_idle_intervals_day_when_callback_inactive():
+    # Enablement (global or per-event) is folded into the callback, so the listener just follows it.
+    lst = _listener(night_idle={"enabled": True, "hbt_interval": 900})
+    lst.get_event_night_active = lambda eid: False
     eff = lst._idle_intervals(_Conn())
     assert eff["night"] is False and eff["hbt"] == lst.idle_hbt_interval
 
@@ -184,3 +184,32 @@ def test_mode5_window_active_when_night_idle_disabled(monkeypatch):
 def test_night_idle_inactive_outside_window(monkeypatch):
     _wire(monkeypatch, night_enabled=True, in_window=False)
     assert tracker_server.event_night_idle_active(1) is False
+
+
+def _wire_event(monkeypatch, global_enabled, event_night_idle):
+    start, end = _enclosing_window()
+    lst = _listener(night_idle={"enabled": global_enabled},
+                    sleep_schedule={"enabled": True, "start": start, "end": end,
+                                    "overnight_mode_number": 5, "overnight_interval_min": 60})
+    monkeypatch.setattr(tracker_server, "_gt06_listener", lst)
+    ev = {"timezone": "UTC", "sleep_schedule": {"night_idle": event_night_idle}}
+    monkeypatch.setattr(tracker_server, "_event_manager", _EvMgr(ev))
+    return lst
+
+
+def test_per_event_night_idle_overrides_global_off(monkeypatch):
+    _wire_event(monkeypatch, global_enabled=False, event_night_idle=True)
+    assert tracker_server.event_night_idle_active(1) is True
+    assert tracker_server.event_sleep_window_active(1) is None
+
+
+def test_per_event_night_idle_overrides_global_on(monkeypatch):
+    _wire_event(monkeypatch, global_enabled=True, event_night_idle=False)
+    assert tracker_server.event_night_idle_active(1) is False
+    assert tracker_server.event_sleep_window_active(1) is not None
+
+
+def test_clean_sleep_schedule_night_idle_must_be_bool():
+    assert tracker_server.clean_sleep_schedule({"night_idle": True}) == {"night_idle": True}
+    with pytest.raises(ValueError):
+        tracker_server.clean_sleep_schedule({"night_idle": "yes"})
