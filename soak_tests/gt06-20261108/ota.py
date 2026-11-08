@@ -3,8 +3,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CFG = json.loads((ROOT / 'events.json').read_text())
 BASE = 'https://wstracker.org'
-FW = 'WSTR-STD1_f655071'
-FOTA = 'YCSJ,http://103.230.158.49/W07_FW/W07_MG133_WSTR_B53_f655071.bin,80#'
+FW = 'WSTR-STD1_dd6b96d'
+FOTA = 'YCSJ,http://103.230.158.49/W07_FW/W07_MG133_WSTR_B53_dd6b96d.bin,80#'
 
 def api(path, data=None):
     h = {'X-Manager-Password': CFG['manager_password']}
