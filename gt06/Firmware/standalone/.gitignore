@@ -16,3 +16,8 @@ customer_app_usb_debug.bin
 customer_app_usb_debug.bin.flash.zip
 W07_USBDBG_B53.bin
 usb-debug-sitl
+sitl_*.bin
+sitl_*.flag
+sitl_wstrplmn.*
+snap*-asan
+__pycache__/

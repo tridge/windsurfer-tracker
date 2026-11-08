@@ -156,7 +156,9 @@ def test_exhaustion_backoff():
             out, err = t.stop()
         assert err.count(b"operator request ") == 2, err
         assert b"operator request 50503" not in err and b"operator request AUTO" not in err, err
-        assert b"allowed operators exhausted, backing off" in out, out
+        # a failed round ends with one radio off/on, then the holdoff
+        assert (b"round failed, radio off/on" in out or
+                b"allowed operators exhausted, backing off" in out), out
         assert b"SLEEP: awake, GPS remains off" in out, out
     print("No allowed coverage: bounded backoff, recovery and night sleep PASS", flush=True)
 

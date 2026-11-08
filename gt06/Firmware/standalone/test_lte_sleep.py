@@ -8,6 +8,7 @@ import time
 
 from test_gps_retry import gt06_cmd, receive_until
 from test_loc_batch import finish_sitl
+from sitl_util import server_acks, gt06_cmd as _crc_cmd  # noqa: E402
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +20,9 @@ def wait_for_close(conn, message):
     conn.settimeout(1)
     while time.monotonic() < deadline:
         try:
-            if conn.recv(4096) == b"":
+            chunk = conn.recv(4096)
+            server_acks(conn, chunk)
+            if chunk == b"":
                 return
         except socket.timeout:
             continue
@@ -143,7 +146,9 @@ def main():
         conn.settimeout(1)
         while time.monotonic() < deadline:
             try:
-                if conn.recv(4096) == b"":
+                chunk = conn.recv(4096)
+                server_acks(conn, chunk)
+                if chunk == b"":
                     break
             except socket.timeout:
                 continue

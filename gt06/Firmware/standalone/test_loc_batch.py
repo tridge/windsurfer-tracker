@@ -17,6 +17,7 @@ import struct
 import signal
 import subprocess
 import time
+from sitl_util import server_acks, gt06_cmd as _crc_cmd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITL = os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl")
@@ -26,12 +27,8 @@ LOC_PROTO = 0x12
 
 
 def gt06_cmd(command, serial):
-    """Build a GT06 0x80 server-to-device command frame."""
-    text = command.encode()
-    length = 10 + len(text)
-    body = (bytes([0x80, 4 + len(text)]) + b"\x00\x00\x00\x00" + text
-            + serial.to_bytes(2, "big") + b"\x00\x00")
-    return b"\x78\x78" + bytes([length]) + body + b"\x0d\x0a"
+    """Build a GT06 0x80 server-to-device command frame (valid CRC)."""
+    return _crc_cmd(command, serial)
 
 
 def frames(buf):
@@ -91,6 +88,7 @@ def drain(conn, seconds, allow_close=False):
         conn.settimeout(max(0.05, deadline - time.monotonic()))
         try:
             chunk = conn.recv(4096)
+            server_acks(conn, chunk)
         except socket.timeout:
             continue
         except OSError:

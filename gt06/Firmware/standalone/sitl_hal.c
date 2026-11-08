@@ -64,22 +64,7 @@ int sitl_vcom_write(const void *buf, int len)
     return len;
 }
 
-/* ================= clock / watchdog stubs (replace reliability.c/hwwd.c) ================= */
-static unsigned g_boot_sec;
-static unsigned host_sec(void)
-{
-    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (unsigned)ts.tv_sec;
-}
-unsigned wd_uptime(void) { return host_sec() - g_boot_sec; }
-void wd_alive(void) {}
-volatile unsigned char g_wd_phase;      /* stall-phase marker (real wd lives in reliability.c) */
-void wd_arm(int on) { (void)on; }
-void wd_sleep(int ms) { if (ms > 0) usleep((useconds_t)ms * 1000); }
-void wd_set_reason(int r) { (void)r; }
-void wd_hw_arm(unsigned s) { (void)s; }
-void wd_reason_and_reset(int r) { (void)r; }
-int  reliability_init(vcom_write_fn wr, int arm) { (void)wr; (void)arm; return 0; }
+/* ================= hwwd stubs (reliability.c itself is the real code, see the timer model) ========= */
 void hwwd_enable(unsigned s) { (void)s; }
 void hwwd_enable_wdtonly(unsigned s) { (void)s; }
 void hwwd_feed(void) {}
@@ -173,9 +158,20 @@ static int sitl_connect(int fd, const void *saddr, int salen)
     }
     return connect(fd, (struct sockaddr *)&in, sizeof in);   /* non-blocking: -1/EINPROGRESS is normal */
 }
+/* SITL_HANG_SEND_FLAG=<path>: when that file appears, delete it and block the next send() forever (a
+ * resident send that never returns). One-shot, so the re-exec after the watchdog reset runs normally. */
+static void maybe_hang_send(void)
+{
+    const char *e = getenv("SITL_HANG_SEND_FLAG");
+    if (!e || access(e, F_OK) != 0) return;
+    unlink(e);
+    fprintf(stderr, "[SITL] send() hang injected\n");
+    for (;;) pause();
+}
 static int sitl_send(int fd, const void *buf, int len, int flags)
 {
     (void)flags;
+    maybe_hang_send();
     if (g_cov_down || g_radio_off || g_carrier_denied ||   /* no network: fw disconnects + buffers */
         (fd >= 0 && fd < 256 && g_bh[fd] != BH_NONE)) { errno = ENETUNREACH; return -1; }
     ssize_t n = send(fd, buf, (size_t)len, MSG_NOSIGNAL);
@@ -255,6 +251,11 @@ static int sitl_select(int maxfdp1, void *rd, void *wr, void *ex, void *timeout)
         if (hr && FWBIT(frd, fd)) { ord[fd >> 3] |= (unsigned char)(1u << (fd & 7)); nready++; }
         if (hw && FWBIT(fwr, fd)) { owr[fd >> 3] |= (unsigned char)(1u << (fd & 7)); nready++; }
     }
+    /* SITL_TX_STUCK_FLAG=<path>: while that file exists no socket reports writable (TCP send buffer
+     * full on a link that has silently died). */
+    { const char *e = getenv("SITL_TX_STUCK_FLAG");
+      if (e && access(e, F_OK) == 0)
+          for (int i = 0; i < 32; i++) if (owr[i]) { nready -= __builtin_popcount(owr[i]); owr[i] = 0; } }
     if (frd) memcpy(frd, ord, 32);
     if (fwr) memcpy(fwr, owr, 32);
     if (fex) memcpy(fex, oex, 32);
@@ -300,16 +301,23 @@ static void urc_push(const char *text)
     }
     pthread_mutex_unlock(&urc_mtx);
 }
+/* qid 1 = the URC queue; anything else is a private, always-empty queue (wd_sleep's timer). */
 static int sitl_msgq_create(void *qid, const char *name, int es, int depth, int flags)
 {
-    (void)name; (void)es; (void)depth; (void)flags;
-    *(unsigned *)qid = 1;                         /* single URC queue */
+    (void)es; (void)depth; (void)flags;
+    static unsigned next_private = 2;
+    *(unsigned *)qid = (name && strcmp(name, "URC QUEUE") == 0) ? 1 : next_private++;
     return 0;
 }
 static int sitl_urc_attach(unsigned qid, int arg) { (void)qid; (void)arg; return 0; }
-static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ms)
+/* HW fidelity: the resident timeout is in 5 ms RTOS ticks, not ms. */
+static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ticks)
 {
-    (void)qid;
+    int timeout_ms = timeout_ticks > 0 ? timeout_ticks * 5 : timeout_ticks;
+    if (qid != 1) {
+        if (timeout_ms > 0) usleep((useconds_t)timeout_ms * 1000);
+        return 1;
+    }
     unsigned *out = msgout;
     pthread_mutex_lock(&urc_mtx);
     if (urc_tail == urc_head && timeout_ms != 0) {
@@ -403,6 +411,7 @@ static int sitl_gnss_power(int on)
      * unnoticed in SITL for so long. Checked AFTER the injections so a simulated fault still wins. */
     if (g_gps_on == (on ? 1 : 0)) return -1;
     g_gps_on = on ? 1 : 0;
+    fprintf(stderr, "[SITL] GNSS power %s\n", on ? "on" : "off");
     return 0;
 }
 static int sitl_gnss_power_status(void) { return g_gps_on; }
@@ -423,6 +432,10 @@ static void *nmea_thread(void *arg)
     for (;;) {
         usleep(g_nmea_period_us);                /* 1 Hz by default, like the real GNSS */
         if (!g_gps_on) continue;
+        { const char *sf = getenv("SITL_GNSS_SILENT_FLAG");  /* receiver on but emitting nothing */
+          if (sf && access(sf, F_OK) == 0) continue; }
+        { const char *jf = getenv("SITL_NMEA_JUMP_FLAG");   /* one-shot: GPS time jumps a day + 1 s */
+          if (jf && access(jf, F_OK) == 0) { unlink(jf); { const char *js = getenv("SITL_NMEA_JUMP_S"); g_nmea_time_offset_s += js ? atol(js) : 86401; } } }
         lat += 0.00002; lon += 0.00003;
         int lad = (int)(-lat);                   /* south -> magnitude */
         double lam = (-lat - lad) * 60.0;
@@ -528,7 +541,8 @@ static int sitl_at_send(const char *cmd, int len)
         g_plmn_manual = 1;
         fprintf(stderr, "[SITL] operator request %s: %s\n", target,
                 g_carrier_denied ? "denied" : "registered");
-        urc_push(g_carrier_denied ? "\r\n+CEREG: 3\r\n" : "\r\n+CEREG: 5\r\n");
+        urc_push(g_carrier_denied ? "\r\n+CEREG: 3\r\n"
+                 : (g_cov_down || g_radio_off) ? "\r\n+CEREG: 2\r\n" : "\r\n+CEREG: 5\r\n");
         return len;
     }
     if (strstr(cmd, "COPS=0")) {
@@ -544,7 +558,9 @@ static int sitl_at_send(const char *cmd, int len)
     }
     if (strstr(cmd, "CFUN=0")) { urc_push("\r\n+CEREG: 0\r\n"); return len; }
     if (strstr(cmd, "CFUN=1")) {                   /* re-attach: still denied while the flag is set */
-        urc_push(g_carrier_denied ? "\r\n+CEREG: 3\r\n" : "\r\n+CEREG: 5,\"2036\",\"07fd1b01\",7\r\n");
+        urc_push(g_carrier_denied ? "\r\n+CEREG: 3\r\n"
+                 : (g_cov_down || g_radio_off) ? "\r\n+CEREG: 2\r\n"
+                 : "\r\n+CEREG: 5,\"2036\",\"07fd1b01\",7\r\n");
         return len;
     }
     return len;
@@ -683,6 +699,7 @@ static void fwd_seed_file(const char *ipport)
 /* ================= config file (cwprm.bin) + FOTA flash (file-backed) ================= */
 struct sitl_file { unsigned char *buf; unsigned len, pos; int writable; char path[64]; int isfile; };
 static unsigned char g_cwprm[0x800];
+static unsigned char g_cwbank[0x800];          /* the backup copy, separate so a bad primary can be tested */
 
 #define CWPRM_PERSIST_PATH "sitl_cwprm.bin"
 static void cwprm_persist(void)                    /* flush g_cwprm to disk so a reboot re-reads the write */
@@ -696,7 +713,7 @@ static void cwprm_build(void)
     if (g_persist_cwprm) {                          /* prefer the persisted config (survives re-exec, as HW flash) */
         FILE *pf = fopen(CWPRM_PERSIST_PATH, "rb");
         if (pf) { size_t got = fread(g_cwprm, 1, sizeof g_cwprm, pf); fclose(pf);
-                  if (got == sizeof g_cwprm) return; }
+                  if (got == sizeof g_cwprm) { memcpy(g_cwbank, g_cwprm, sizeof g_cwbank); return; } }
     }
     memset(g_cwprm, 0, sizeof g_cwprm);
     /* server IP/host ASCII @0x034; the fw parses a dotted quad here, else keeps its default. We store the
@@ -707,6 +724,11 @@ static void cwprm_build(void)
     snprintf((char *)g_cwprm + CFG_OFF_TERIID, 16, "%s", g_teriid);
     snprintf((char *)g_cwprm + CFG_OFF_APN, 0x20, "%s", "simbase");
     cwprm_persist();                               /* seed the persist file on first boot */
+    memcpy(g_cwbank, g_cwprm, sizeof g_cwbank);
+    if (getenv("SITL_CWPRM_CORRUPT")) {            /* readable primary with a garbage TERIID */
+        memset(g_cwprm + CFG_OFF_TERIID, 'X', 15);
+        fprintf(stderr, "[SITL] primary config corrupted\n");
+    }
 }
 static FILE_t sitl_fopen(const char *name, const char *mode)
 {
@@ -714,7 +736,7 @@ static FILE_t sitl_fopen(const char *name, const char *mode)
     if (!f) return 0;
     f->writable = (mode && (mode[0] == 'w' || (mode[0] && mode[1] == '+')));
     if (strstr(name, "cwprm") || strstr(name, "cwbank")) {
-        f->buf = g_cwprm; f->len = sizeof g_cwprm; f->isfile = 0;
+        f->buf = strstr(name, "cwbank") ? g_cwbank : g_cwprm; f->len = sizeof g_cwprm; f->isfile = 0;
         return f;
     }
     /* otherwise a real host file (rarely used) */
@@ -768,7 +790,15 @@ static int sitl_get_reg(unsigned *out)
     return 0;
 }
 static void sitl_netstat_start(void) { }   /* getters are always armed in SITL — nothing to enable */
-static int sitl_network_init(void) { return 0; }
+static int sitl_network_init(void)
+{
+    if (getenv("SITL_HANG_BOOT")) {                /* resident init that never returns (boot deadline test) */
+        fprintf(stderr, "[SITL] boot hang injected\n");
+        unsetenv("SITL_HANG_BOOT");               /* the re-exec after the reset boots normally */
+        for (;;) pause();
+    }
+    return 0;
+}
 static int sitl_network_get_cops(char *out)
 {
     if (getenv("SITL_COPS_UNAVAILABLE")) return -1;
@@ -888,14 +918,44 @@ static void sitl_sys_reset(void)
     }
     fflush(0);
     if (g_no_reexec || getenv("SITL_NO_REEXEC")) exit(0);
+    for (int fd = 3; fd < 1024; fd++) close(fd);   /* a real reset drops every socket */
     execv("/proc/self/exe", g_argv);
     _exit(0);
 }
 
-/* timers (only reliability.c used these; harmless stubs) */
-static int  sitl_timer_create(void **h) { if (h) *h = (void *)1; return 0; }
-static void sitl_timer_start(void *h, unsigned long a, unsigned long b, void (*cb)(unsigned long), unsigned long in)
-{ (void)h; (void)a; (void)b; (void)cb; (void)in; }
+/* Resident periodic timer: a thread calling the callback every `period` 5 ms ticks, like the
+ * ThreadX timer thread. SITL_TIMER_FAIL makes create fail (watchdog timer-failure path). */
+static void (*g_tmr_cb)(unsigned long);
+static unsigned long g_tmr_arg, g_tmr_period, g_tmr_initial;
+static void *timer_thread(void *arg)
+{
+    (void)arg;
+    /* absolute deadlines: a periodic RTOS timer does not drift by the callback's run time */
+    struct timespec next; clock_gettime(CLOCK_MONOTONIC, &next);
+    unsigned long step = g_tmr_initial * 5000000ul;
+    for (;;) {
+        next.tv_nsec += (long)(step % 1000000000ul); next.tv_sec += (time_t)(step / 1000000000ul);
+        if (next.tv_nsec >= 1000000000L) { next.tv_nsec -= 1000000000L; next.tv_sec++; }
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, 0) != 0) { }
+        g_tmr_cb(g_tmr_arg);
+        step = g_tmr_period * 5000000ul;
+    }
+    return 0;
+}
+static int sitl_timer_create(void **h)
+{
+    if (getenv("SITL_TIMER_FAIL")) { fprintf(stderr, "[SITL] timer create failure injected\n"); return -1; }
+    if (h) *h = (void *)1;
+    return 0;
+}
+static void sitl_timer_start(void *h, unsigned long initial, unsigned long period,
+                             void (*cb)(unsigned long), unsigned long in)
+{
+    (void)h;
+    if (g_tmr_cb) return;
+    g_tmr_cb = cb; g_tmr_arg = in; g_tmr_initial = initial; g_tmr_period = period ? period : 200;
+    pthread_t th; pthread_create(&th, 0, timer_thread, 0); pthread_detach(th);
+}
 static int  sitl_task_create(void **h0, void **h1, unsigned st, unsigned pr,
                              const char *nm, void (*e)(void), unsigned ar)
 { (void)h0; (void)h1; (void)st; (void)pr; (void)nm; (void)e; (void)ar; return 0; }
@@ -994,7 +1054,6 @@ static void usage(const char *prog)
 int main(int argc, char **argv)
 {
     g_argv = argv;
-    g_boot_sec = host_sec();
     urc_init();
 
     /* env defaults first; command-line flags override them */

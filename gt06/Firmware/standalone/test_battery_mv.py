@@ -16,17 +16,15 @@ import subprocess
 import time
 
 from test_loc_batch import finish_sitl
+from sitl_util import server_acks, gt06_cmd as _crc_cmd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITL = os.path.abspath(os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl"))
 
 
 def gt06_cmd(command, serial):
-    text = command.encode()
-    length = 10 + len(text)
-    body = (bytes([0x80, 4 + len(text)]) + b"\x00\x00\x00\x00" + text
-            + serial.to_bytes(2, "big") + b"\x00\x00")
-    return b"\x78\x78" + bytes([length]) + body + b"\x0d\x0a"
+    """Build a GT06 0x80 server-to-device command frame (valid CRC)."""
+    return _crc_cmd(command, serial)
 
 
 def read_bt(mv, timeout=25):
@@ -54,6 +52,7 @@ def read_bt(mv, timeout=25):
             conn.settimeout(1.0)
             try:
                 chunk = conn.recv(4096)
+                server_acks(conn, chunk)
             except socket.timeout:
                 conn.sendall(gt06_cmd("cxzt#", 2))
                 continue
@@ -98,6 +97,11 @@ def main():
         f"charging battery reported as {bt} — a real reading above the old 4500 limit was rejected, "
         "which is what made a fully charged unit report 0%")
     print(f"charging 4700 mV -> BT:{bt} PASS")
+
+    # G378517 on charge (2026-11-08) read above the 5500 ceiling and showed BT:0
+    bt = read_bt(5800)
+    assert bt == 5800, f"charging battery at 5800 mV reported as {bt}"
+    print(f"charging 5800 mV -> BT:{bt} PASS")
 
     # framing garbage must still be rejected rather than published
     bt = read_bt(9000)

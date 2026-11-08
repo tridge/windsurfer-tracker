@@ -25,6 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from sitl_util import gt06_cmd as _crc_cmd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # absolute: the SITL process runs with cwd set to a temp dir so its staging files are isolated
@@ -42,11 +43,8 @@ VENDOR_XOR = 0x80           # the value our YCSJ commands assert
 
 
 def gt06_cmd(command, serial):
-    text = command.encode()
-    length = 10 + len(text)
-    body = (bytes([0x80, 4 + len(text)]) + b"\x00\x00\x00\x00" + text
-            + serial.to_bytes(2, "big") + b"\x00\x00")
-    return b"\x78\x78" + bytes([length]) + body + b"\x0d\x0a"
+    """Build a GT06 0x80 server-to-device command frame (valid CRC)."""
+    return _crc_cmd(command, serial)
 
 
 def pad_to_vendor_form(raw):

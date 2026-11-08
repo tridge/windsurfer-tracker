@@ -25,6 +25,7 @@ import subprocess
 import time
 
 from test_loc_batch import finish_sitl
+from sitl_util import server_acks, gt06_cmd as _crc_cmd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITL = os.path.abspath(os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl"))
@@ -37,11 +38,8 @@ EXPECTED_ALGO = DJB2_FUNC * XFORMS + STRIP_PREFIX
 
 
 def gt06_cmd(command, serial):
-    text = command.encode()
-    length = 10 + len(text)
-    body = (bytes([0x80, 4 + len(text)]) + b"\x00\x00\x00\x00" + text
-            + serial.to_bytes(2, "big") + b"\x00\x00")
-    return b"\x78\x78" + bytes([length]) + body + b"\x0d\x0a"
+    """Build a GT06 0x80 server-to-device command frame (valid CRC)."""
+    return _crc_cmd(command, serial)
 
 
 def sapifind(conn, name, serial, timeout=20):
@@ -53,6 +51,7 @@ def sapifind(conn, name, serial, timeout=20):
         conn.settimeout(1.0)
         try:
             chunk = conn.recv(4096)
+            server_acks(conn, chunk)
         except socket.timeout:
             continue
         if not chunk:
