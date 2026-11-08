@@ -167,8 +167,8 @@ static void wd_tick(unsigned long arg)
         return;
     }
     stalls++;
+    if ((int)(g_grace_until - g_uptime) > 0) return;       /* deliberate sleep: not a stall */
     if (stalls > g_stall_max) { g_stall_max = stalls; g_stall_phase = g_wd_phase; }
-    if ((int)(g_grace_until - g_uptime) > 0) return;       /* deliberate sleep in progress */
     if (stalls >= g_stall_limit && g_armed) { trace_write(RR_WATCHDOG, g_wd_phase, stalls); soc_reset(); }
 }
 

@@ -1938,7 +1938,10 @@ static int cxzt_str(char *b, int t1, int t2)
     n += put_str(b + n, "*A:"); n += put_str(b + n, g_apn_s);
     n += put_str(b + n, "*G:A*4G:14*M:1|2|0*F:");
     n += put_uint(b + n, (unsigned)t1); b[n++] = '|'; n += put_uint(b + n, (unsigned)t2);
-    n += put_str(b + n, "*H:15*SP:1*SF:0*V:0*BT:");
+    /* *H is the real idle heartbeat: the server reconciles HBT from it, and a hardcoded 15 left a unit
+     * on the 600 s night interval in day idle after a night-idle window. */
+    n += put_str(b + n, "*H:"); n += put_uint(b + n, g_hbt_off);
+    n += put_str(b + n, "*SP:1*SF:0*V:0*BT:");
     n += put_uint(b + n, g_batt_mv);
     n += put_str(b + n, "*LBS:1*R:14|1|1*CHG:");
     b[n++] = (char)('0' + (g_charging ? 1 : 0));

@@ -263,7 +263,24 @@ def test_backward_gps_time_kept_in_replay():
     print("backward GPS time step keeps its true timestamp in replay PASS")
 
 
+def test_cxzt_reports_the_real_heartbeat():
+    """The server reconciles HBT from cxzt *H: a hardcoded value left units on the night interval."""
+    srv = Server()
+    proc = start(srv, "888800000000411")
+    try:
+        srv.accept_login()
+        srv.query("HBT,600,600#", r"HBT,600,600# OK")
+        assert srv.query("cxzt#", r"\*H:(\d+)").group(1) == "600"
+        srv.query("HBT,15,15#", r"HBT,15,15# OK")
+        assert srv.query("cxzt#", r"\*H:(\d+)").group(1) == "15"
+    finally:
+        srv.close()
+        finish(proc)
+    print("cxzt *H reports the heartbeat actually in use PASS")
+
+
 if __name__ == "__main__":
+    test_cxzt_reports_the_real_heartbeat()
     test_second_sos_on_the_same_connection()
     test_slow_acks_still_release_inflight_fixes()
     test_rejected_hbt_changes_nothing()
