@@ -900,6 +900,7 @@ class GT06Connection:
         self.battery_voltage = None             # actual voltage from STATUS/cxzt (float)
         self.lte = None                         # latest atomic direct-CPSI snapshot
         self.plmn_policy_supported = False       # confirmed by this connection's CELLSTAT reply
+        self.bootstat_queried = False            # CXCS#BOOTSTAT asked once per connection (WSTR fw)
         self.last_status_time = time.monotonic()  # monotonic time of last STATUS# send
         self.last_overnight_probe = 0.0         # monotonic time of last overnight cxzt# re-probe
         self.last_gps_off_resend = 0.0          # monotonic time of last idle GPS-off re-push
@@ -2583,6 +2584,11 @@ class GT06Listener:
                 if fw_cxzt and gt_conn.firmware != fw_cxzt.group(1):
                     gt_conn.firmware = fw_cxzt.group(1)
                     self._log(f"[GT06] {label} firmware: {gt_conn.firmware}")
+                # Our firmware reports why it last rebooted; ask once per connection so every
+                # reboot lands in the log (the reply is logged as a Command ACK).
+                if (gt_conn.firmware or "").startswith("WSTR-STD1") and not gt_conn.bootstat_queried:
+                    gt_conn.bootstat_queried = True
+                    self._queue_commands(gt_conn, ["CXCS#BOOTSTAT"])
                 # cxzt# carries *BT:<mV> and lands on EVERY overnight wake (unlike
                 # STATUS#, whose round-trip often doesn't finish in the short
                 # MODE5 dwell), so use it as the per-wake battery-voltage source.
