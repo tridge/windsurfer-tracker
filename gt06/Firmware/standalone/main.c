@@ -1568,7 +1568,8 @@ static volatile unsigned g_hbt_on = 15, g_hbt_off = 15;  /* HBT,X,Y heartbeat in
  * sleep until the alarm. A failed sleep API latches the path off until the setting is explicitly reset. */
 static volatile unsigned char g_sleep_disconnect, g_sleep_fault;
 static volatile unsigned g_last_server_cmd_ts;
-#define SLEEP_QUIET_SEC 5
+#define PLMN_SETTLE_SEC 5  /* time for a carrier-list SET reply + readback before moving network */
+#define SLEEP_CMD_QUIET_SEC 15  /* no server command this long before night sleep: covers one slow ACK */
 #ifdef SITL
 #define SLEEP_MIN_SEC 2
 #else
@@ -2738,7 +2739,7 @@ static int plmn_policy(unsigned now, int connected)
     if (g_plmn_changed) {
         /* Leave time for the SET response and its confirming read before moving off this network.
          * Bound this from the setting change itself: periodic STATUS polls must not postpone it forever. */
-        if ((now - g_plmn_changed_ts) < SLEEP_QUIET_SEC) return 1;
+        if ((now - g_plmn_changed_ts) < PLMN_SETTLE_SEC) return 1;
         g_plmn_changed = 0;
         started = paused = attempts = next_index = cfun_stage = 0;
         failed_since = 0; selected[0] = 0;
@@ -4010,7 +4011,7 @@ void standalone_main(u32 loader_resolver)
             !g_fwd_en && !g_fwd_active && !g_sos_active && !g_radio_cycle_pend &&
             g_blind_count == 0 && g_batch_n == 0 &&
             g_gps_power_state == GPS_POWER_OFF && g_gps_off_confirmed &&
-            (!connected || (now - g_last_server_cmd_ts) >= SLEEP_QUIET_SEC)) {
+            (!connected || (now - g_last_server_cmd_ts) >= SLEEP_CMD_QUIET_SEC)) {
             unsigned sleep_sec = g_hbt_off;
             if (sleep_sec < SLEEP_MIN_SEC) sleep_sec = SLEEP_MIN_SEC;
             if (sleep_sec > HBT_MAX) sleep_sec = HBT_MAX;

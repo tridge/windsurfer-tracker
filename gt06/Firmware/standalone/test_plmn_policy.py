@@ -149,7 +149,7 @@ def test_exhaustion_backoff():
             t.connect()
             t.command("HBT,1,1#", "HBT,1,1# OK")
             t.command("SZCS#SLPDISCONNECT=1", "SETOK:SLPDISCONNECT=1")
-            time.sleep(6)
+            time.sleep(17)   # SLEEP_CMD_QUIET_SEC, then sleep and reconnect
             t.connect()
             t.command("STATUS#", "GPS:OFF")
         finally:

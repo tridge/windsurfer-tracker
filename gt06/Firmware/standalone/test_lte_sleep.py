@@ -16,7 +16,7 @@ SITL = os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl")
 
 
 def wait_for_close(conn, message):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 25   # SLEEP_CMD_QUIET_SEC (15) + margin
     conn.settimeout(1)
     while time.monotonic() < deadline:
         try:
@@ -65,7 +65,7 @@ def test_fault_readback_and_recovery(injection, closes_before_failure):
             receive_until(fault_reconnect, received, b"\x78\x78", 5)
             active = fault_reconnect
         else:
-            time.sleep(6)
+            time.sleep(17)   # past SLEEP_CMD_QUIET_SEC so the failing sleep attempt has run
             active = conn
 
         # The effective setting must read disabled so server reconciliation can see the failure instead
@@ -140,9 +140,9 @@ def main():
         conn.sendall(gt06_cmd("HBT,1,1#", 4))
         receive_until(conn, received, b"HBT,1,1# OK", 5)
 
-        # Five quiet seconds, then the firmware closes TCP before sleeping. EOF proves it did not leave
+        # 15 quiet seconds, then the firmware closes TCP before sleeping. EOF proves it did not leave
         # a half-open connection for the server to mistake as reachable.
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 25
         conn.settimeout(1)
         while time.monotonic() < deadline:
             try:
