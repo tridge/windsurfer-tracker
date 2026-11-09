@@ -1621,10 +1621,11 @@ class GT06Listener:
         gt_conn.observed = {}
         gt_conn.reconcile_phase = "query"
         queries, seen = ["cxzt#"], set()
-        # A night-sleeping WSTR unit goes back to sleep ~SLEEP_QUIET_SEC after the last server
-        # command; one slow ACK during the read-back would then lose the start for a whole wake
-        # interval. Turn its sleep off before anything else.
-        if state == "active" and _is_wstr_firmware(getattr(gt_conn, "firmware", None)):
+        # A night-sleeping WSTR unit goes back to sleep a few seconds after the last server command;
+        # one slow ACK during the read-back would then cost a whole wake interval (a start, or the
+        # morning wake). When the target has sleep off, turn it off before anything else.
+        if (_is_wstr_firmware(getattr(gt_conn, "firmware", None)) and
+                self._desired_settings(gt_conn, state).get("SLPDISCONNECT") == 0):
             queries.insert(0, _SETTINGS["SLPDISCONNECT"][0](0))
         # cxzt# refreshes gt_conn.firmware, but the cached value (restored with device state) is
         # already good enough to avoid asking our own firmware about vendor-only parameters.

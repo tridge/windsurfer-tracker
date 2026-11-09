@@ -1,5 +1,5 @@
-"""A start reaching a night-sleeping WSTR unit must turn its sleep off before the read-back,
-so one slow ACK can't let it go back to sleep for a whole wake interval."""
+"""When a WSTR unit's target has night sleep off (a start, or the morning wake), the reconcile
+must turn sleep off before the read-back, so one slow ACK can't cost a whole wake interval."""
 
 import sys
 from pathlib import Path
@@ -21,11 +21,12 @@ class FakeSock:
         self.sent.append(data)
 
 
-def first_commands(firmware, state):
+def first_commands(firmware, state, night=False):
     listener = GT06Listener(
         port=None, interval=1, id_prefix="G", get_tracker_func=lambda eid: None,
         gt06_config={"default_eid": 1, "devices": {}}, gt06_config_path=None,
         log_func=lambda *args, **kwargs: None,
+        get_event_night_active_func=lambda eid: night,
     )
     conn = GT06Connection(FakeSock(), ("127.0.0.1", 1))
     conn.imei, conn.firmware, conn.authenticated = "888800000000179", firmware, True
@@ -35,16 +36,17 @@ def first_commands(firmware, state):
     return sent, [c for c, _ in conn.cmd_queue]
 
 
-def test_wstr_active_disables_sleep_first():
-    sent, queue = first_commands("WSTR-STD1_test", "active")
+@pytest.mark.parametrize("state", ["active", "idle"])   # a start, and the morning wake to day idle
+def test_wstr_disables_sleep_first(state):
+    sent, queue = first_commands("WSTR-STD1_test", state)
     assert "SZCS#SLPDISCONNECT=0" in sent
     assert queue[0] == "cxzt#"
 
 
-@pytest.mark.parametrize("firmware,state", [("W07_MG133_10F8G_B53_V667", "active"),
-                                            (None, "active"),
-                                            ("WSTR-STD1_test", "idle")])
-def test_others_start_with_cxzt(firmware, state):
-    sent, queue = first_commands(firmware, state)
+@pytest.mark.parametrize("firmware,state,night", [("W07_MG133_10F8G_B53_V667", "active", False),
+                                                  (None, "active", False),
+                                                  ("WSTR-STD1_test", "idle", True)])  # sleep wanted
+def test_others_start_with_cxzt(firmware, state, night):
+    sent, queue = first_commands(firmware, state, night)
     assert "cxzt#" in sent
     assert "SZCS#SLPDISCONNECT" not in sent and "SZCS#SLPDISCONNECT=0" not in queue
