@@ -1984,6 +1984,9 @@ class GT06Listener:
             # Authenticated → real IMEI (or sim/legacy login_id), sailor_id, event.
             gt_conn.imei = imei
             gt_conn.sailor_id = self._imei_to_sailor_id(imei)
+            # Last known build until this connection's cxzt# confirms it: the login reconcile
+            # needs it before any reply (e.g. to stop a WSTR unit's night sleep first).
+            gt_conn.firmware = (self.device_state.get(imei) or {}).get("firmware")
             # Event routing. Sim convention: 999-prefixed ids carry the eid in
             # positions 3..5; real GT06 hardware never uses 999 as a TAC prefix.
             dev_cfg = self.gt06_config["devices"].get(imei, {})
