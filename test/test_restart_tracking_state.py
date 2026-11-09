@@ -82,6 +82,9 @@ def connect(srv, imei):
 def login_mode(srv, imei):
     """Fresh connection after a restart: which TIMER does the server send?"""
     c, cmds = connect(srv, imei)
+    deadline = time.time() + 15     # the TIMER can trail the read-back on a loaded host
+    while ACTIVE_TIMER not in cmds and IDLE_TIMER not in cmds and time.time() < deadline:
+        cmds += c.recv_all_queued_commands(timeout=1)
     c.close()
     if ACTIVE_TIMER in cmds:
         return "tracking"
