@@ -1035,7 +1035,8 @@ class GT06Listener:
                  write_positions_func=None, get_event_state_func=None,
                  get_event_idle_submode_func=None, gt06_config_path=None,
                  get_event_sleep_active_func=None,
-                 get_event_night_active_func=None, battery_cal_path=None):
+                 get_event_night_active_func=None, battery_cal_path=None,
+                 get_event_state_updated_func=None):
         self.port = port
         self.interval = interval
         self.id_prefix = id_prefix
@@ -1046,6 +1047,8 @@ class GT06Listener:
         self._log = lambda msg: _base_log(_redact_teriid(msg)
                                           if msg and ("TERIID" in msg or "ID:" in msg) else msg)
         self.get_event_state = get_event_state_func  # callable(eid) -> "tracking" | "idle"
+        # callable(eid) -> epoch of the last event-wide state change (0 if never)
+        self.get_event_state_updated = get_event_state_updated_func
         # callable(eid) -> "race" | "overnight" — when an idle tracker
         # reconnects, picks the command set. Default "race" if unset.
         self.get_event_idle_submode = get_event_idle_submode_func
@@ -2020,13 +2023,16 @@ class GT06Listener:
             #   1. In-session per-sailor explicit override (active_sailors /
             #      idle_sailors) — only populated by set_idle() calls, i.e.
             #      explicit operator actions during this server run.
-            #   2. Explicit event-scope state (set via /admin/start-all,
+            #   2. Persisted per-sailor state set by set_idle() after the last
+            #      event-wide change (idle_set_at) — keeps a single-unit
+            #      start/stop across a server restart.
+            #   3. Explicit event-scope state (set via /admin/start-all,
             #      /admin/stop-all, or /admin/state). This represents the
             #      current operator intent for the whole event and overrides
             #      any per-sailor state that wasn't explicitly chosen.
-            #   3. Persisted per-sailor idle from current_positions (a fallback
+            #   4. Persisted per-sailor idle from current_positions (a fallback
             #      for trackers seen before any event-level intent was set).
-            #   4. Default: idle.
+            #   5. Default: idle.
             #
             # Note: we intentionally do NOT auto-add this sailor to
             # idle_sailors/active_sailors. Those sets represent explicit
@@ -2040,6 +2046,7 @@ class GT06Listener:
                     event_state = None
 
             saved_idle = None
+            idle_set_at = 0
             manual_sleep = False  # manual /admin/sleep override still in force
             sleep_until = None    # its expiry (epoch) — clamps the sleep interval
             tracker_for_lookup = self.get_tracker(gt_conn.eid)
@@ -2052,6 +2059,7 @@ class GT06Listener:
                 if existing_pos is not None:
                     if "idle" in existing_pos:
                         saved_idle = bool(existing_pos["idle"])
+                        idle_set_at = existing_pos.get("idle_set_at") or 0
                     # A manual /admin/sleep stores sleep_until = the next morning
                     # wake (or a far-future sentinel when there's no schedule).
                     # It forces overnight until that time, then expires so the
@@ -2062,11 +2070,20 @@ class GT06Listener:
                     sleep_until = existing_pos.get("sleep_until")
                     manual_sleep = sleep_until is not None and time.time() < sleep_until
 
+            event_updated = 0
+            if self.get_event_state_updated:
+                try:
+                    event_updated = self.get_event_state_updated(gt_conn.eid) or 0
+                except Exception:
+                    event_updated = 0
+
             sailor_key = (gt_conn.eid, gt_conn.sailor_id)
             if sailor_key in self.active_sailors:
                 use_active = True
             elif sailor_key in self.idle_sailors:
                 use_active = False
+            elif saved_idle is not None and idle_set_at > event_updated:
+                use_active = not saved_idle
             elif event_state == "tracking":
                 use_active = True
             elif event_state == "idle":
@@ -3670,44 +3687,52 @@ class GT06Listener:
                     cmds = None
                 if cmds:
                     self._queue_commands(gt_conn, cmds)
-                # Immediately update tracker so UI reflects idle/active state
-                # (direct metadata update to avoid advancing dedup timestamp)
-                tracker = self.get_tracker(gt_conn.eid)
-                if tracker:
-                    pt = tracker.position_tracker if hasattr(tracker, 'position_tracker') else tracker
-                    with pt._lock:
-                        existing = pt.current_positions.get(sailor_id)
-                        if existing:
-                            existing["stopped"] = idle
-                            existing["idle"] = idle
-                            # Per-sailor sleep flag — persisted to
-                            # current_positions.json so the state survives
-                            # server restart. WebUI reads it to show "SLEEP"
-                            # vs "Idle"; login handler reads it to pick
-                            # MODE5 vs MODE1 commands on reconnect.
-                            existing["sleep"] = bool(idle and submode == "overnight")
-                            # Waking (race/active) clears any manual-sleep
-                            # override; sleep_until itself is set by the
-                            # /admin/sleep handler, not here.
-                            if not (idle and submode == "overnight"):
-                                existing.pop("sleep_until", None)
-                            now = time.time()
-                            existing["last_seen"] = now
-                            existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()
-                    if pt.positions_file and self._write_positions:
-                        overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
-                        self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
+                self._persist_idle(eid, sailor_id, idle, submode)
                 mode_label = ("Overnight idle" if (idle and submode == "overnight")
                               else "Idle" if idle else "Active")
                 self._log(f"[GT06] {mode_label} mode for {sailor_id}")
                 found = True
         if not found:
+            if sailor_id.startswith(self.id_prefix):  # ours, not a phone/JT808
+                self._persist_idle(eid, sailor_id, idle, submode, connected=False)
             # Only log if this (eid, sailor_id) has been touched by set_idle
             # at least once (which the .add above always does, so this always
             # holds — but keep the gate for symmetry with prior behaviour).
             if key in self.idle_sailors or key in self.active_sailors:
                 self._log(f"[GT06] {'Idle' if idle else 'Active'} mode queued for {sailor_id} (not connected)")
         return found
+
+    def _persist_idle(self, eid, sailor_id, idle, submode, connected=True):
+        """Record idle/active in current_positions (connected or not) so it survives a restart."""
+        # Immediately update tracker so UI reflects idle/active state
+        # (direct metadata update to avoid advancing dedup timestamp)
+        tracker = self.get_tracker(eid)
+        if tracker:
+            pt = tracker.position_tracker if hasattr(tracker, 'position_tracker') else tracker
+            with pt._lock:
+                existing = pt.current_positions.get(sailor_id)
+                if existing:
+                    existing["stopped"] = idle
+                    existing["idle"] = idle
+                    existing["idle_set_at"] = time.time()
+                    # Per-sailor sleep flag — persisted to
+                    # current_positions.json so the state survives
+                    # server restart. WebUI reads it to show "SLEEP"
+                    # vs "Idle"; login handler reads it to pick
+                    # MODE5 vs MODE1 commands on reconnect.
+                    existing["sleep"] = bool(idle and submode == "overnight")
+                    # Waking (race/active) clears any manual-sleep
+                    # override; sleep_until itself is set by the
+                    # /admin/sleep handler, not here.
+                    if not (idle and submode == "overnight"):
+                        existing.pop("sleep_until", None)
+                    if connected:
+                        now = time.time()
+                        existing["last_seen"] = now
+                        existing["last_seen_iso"] = datetime.fromtimestamp(now).isoformat()
+            if pt.positions_file and self._write_positions:
+                overrides = tracker.user_overrides if hasattr(tracker, 'user_overrides') else {}
+                self._write_positions(pt.current_positions, pt.positions_file, overrides, pt.position_tails)
 
     def _on_readable(self, fd):
         """Handle readable event on a GT06 connection."""

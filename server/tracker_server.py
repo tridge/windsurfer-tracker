@@ -804,6 +804,11 @@ class EventManager:
                 return None
             return event.get("event_state")
 
+    def get_event_state_updated(self, eid: int) -> float:
+        """Epoch of the last event-wide state change, 0 if never set."""
+        with self._lock:
+            return (self.events.get(eid) or {}).get("event_state_updated") or 0
+
     def set_event_state(self, eid: int, state: str, idle_submode: str | None = None) -> bool:
         """Set the event-scope tracking state ("tracking" or "idle"). Persisted to events.json.
 
@@ -1090,7 +1095,7 @@ class PositionTracker:
                     # admin overrides (set_idle) and start-all/stop-all see the
                     # correct state, and reconnecting trackers inherit it via
                     # the login handler.
-                    for k in ("idle", "stopped", "sleep", "sleep_until", "chg", "bat_v"):
+                    for k in ("idle", "stopped", "idle_set_at", "sleep", "sleep_until", "chg", "bat_v"):
                         if k in pos:
                             self.current_positions[sailor_id][k] = pos[k]
                     if "did" in pos:
@@ -1178,6 +1183,8 @@ class PositionTracker:
                 # sticky) override on the next reconnect.
                 if "sleep_until" in existing:
                     pos_data["sleep_until"] = existing["sleep_until"]
+                if "idle_set_at" in existing:
+                    pos_data["idle_set_at"] = existing["idle_set_at"]
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1258,6 +1265,8 @@ class PositionTracker:
                 # sticky) override on the next reconnect.
                 if "sleep_until" in existing:
                     pos_data["sleep_until"] = existing["sleep_until"]
+                if "idle_set_at" in existing:
+                    pos_data["idle_set_at"] = existing["idle_set_at"]
                 self.current_positions[sailor_id] = pos_data
 
             bat_str = f"{battery}%" if battery >= 0 else "?"
@@ -1430,6 +1439,11 @@ class PositionTracker:
                     pos_data["nsats"] = nsats
                 if stopped:
                     pos_data["stopped"] = True
+                # Keep an explicit per-unit start (set_idle) across restarts.
+                existing = self.current_positions.get(sailor_id) or {}
+                if existing.get("idle") is False and "idle_set_at" in existing:
+                    pos_data["idle"] = False
+                    pos_data["idle_set_at"] = existing["idle_set_at"]
                 self.current_positions[sailor_id] = pos_data
 
                 # Update position tail (last 20 seconds of positions)
@@ -1693,7 +1707,7 @@ class EventTracker:
         # time, no position data. Must stay in sync with _load_from_file at line
         # ~988 so restart and midnight-clear behave identically.
         keep_keys = ("id", "did", "role", "name", "displayid", "bat", "sig",
-                     "idle", "stopped", "sleep", "sleep_until", "chg", "bat_v",
+                     "idle", "stopped", "idle_set_at", "sleep", "sleep_until", "chg", "bat_v",
                      "last_seen", "last_seen_iso")
         pt = self.position_tracker
         with pt._lock:
@@ -5843,6 +5857,8 @@ def run_server(port: int, http_port: int | None = None,
             return get_event_tracker(eid)
         def _gt06_get_event_state(eid):
             return _event_manager.get_event_state(eid) if _event_manager else "idle"
+        def _gt06_get_event_state_updated(eid):
+            return _event_manager.get_event_state_updated(eid) if _event_manager else 0
         def _gt06_get_event_idle_submode(eid):
             return _event_manager.get_event_idle_submode(eid) if _event_manager else "race"
         global _gt06_listener
@@ -5851,6 +5867,7 @@ def run_server(port: int, http_port: int | None = None,
                                       save_overrides_func=save_user_overrides,
                                       write_positions_func=write_current_positions,
                                       get_event_state_func=_gt06_get_event_state,
+                                      get_event_state_updated_func=_gt06_get_event_state_updated,
                                       get_event_idle_submode_func=_gt06_get_event_idle_submode,
                                       gt06_config_path=gt06_config_path,
                                       get_event_sleep_active_func=event_sleep_window_active,
