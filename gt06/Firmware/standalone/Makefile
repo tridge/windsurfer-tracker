@@ -151,6 +151,9 @@ test-lte-sleep: sitl-asan            ## direct CPSI telemetry + GPS-safe disconn
 test-plmn-policy: sitl-asan          ## persistent carrier restrictions and offline recovery
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_plmn_policy.py
 
+test-gnss-avg: sitl-asan           ## 5 Hz receiver averaged to 1 Hz, GNSSCMD/GNSSLOG, RMC rate
+	SITL_BIN=$(SITL_TEST_BIN) python3 test_gnss_avg.py
+
 test-track-recovery: sitl-asan     ## tracking: early, repeated no-data radio cycles
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_track_recovery.py
 
@@ -169,7 +172,7 @@ test-offline: sitl-asan              ## idle offline: connect backoff, sleep, no
 test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never commit a bad image
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_fail.py
 
-test: test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery  ## all SITL regression tests
+test: test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg  ## all SITL regression tests
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \

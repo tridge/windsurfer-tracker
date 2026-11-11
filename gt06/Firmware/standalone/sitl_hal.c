@@ -466,10 +466,14 @@ static void *nmea_thread(void *arg)
         snprintf(body, sizeof body, "$GNGSA,A,3,01,02,03,04,05,06,07,08,09,10,11,12,2.1,1.2,1.7");
         snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
         urc_push(line);
-        /* RMC: valid 'A', speed 6.0 kn, course 45, date ddmmyy */
+        /* RMC: valid 'A', speed 6.0 kn, course 45, date ddmmyy. SITL_NMEA_JITTER alternates
+         * 5.0 kn/35 deg and 7.0 kn/55 deg (GNSSAVG test). */
+        static int jit;
+        int jon = getenv("SITL_NMEA_JITTER") != NULL, odd = jit++ & 1;
         snprintf(body, sizeof body,
-                 "$GNRMC,%02d%02d%02d.%d0,A,%02d%07.4f,S,%03d%07.4f,E,6.0,45.0,%02d%02d%02d,,,A",
-                 hh, mm, ss, dsf, lad, lam, lod, lom, dd, mo, yy);
+                 "$GNRMC,%02d%02d%02d.%d0,A,%02d%07.4f,S,%03d%07.4f,E,%.1f,%.1f,%02d%02d%02d,,,A",
+                 hh, mm, ss, dsf, lad, lam, lod, lom,
+                 jon ? (odd ? 7.0 : 5.0) : 6.0, jon ? (odd ? 55.0 : 35.0) : 45.0, dd, mo, yy);
         snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
         /* HW fidelity: real URC chunks split sentences mid-field. Deliver the RMC in TWO chunks (cut
          * inside the longitude); every 20th sentence insert a +CSQ reply between the halves AND
@@ -515,6 +519,11 @@ static int sitl_at_send(const char *cmd, int len)
 {
     if (!cmd || len <= 0) return len;
     if (strstr(cmd, "CSQ")) { urc_push("\r\n+CSQ: 22,0\r\n"); return len; }
+    if (strstr(cmd, "CGNSSCMD=")) {                /* receiver command: log it, reply like the modem */
+        fprintf(stderr, "[SITL] %.*s\n", len - 1, cmd);
+        urc_push("\r\nOK\r\n");
+        return len;
+    }
     if (strstr(cmd, "CEREG?")) {
         urc_push(g_carrier_denied ? "\r\n+CEREG: 3,3,\"4f47\",\"006f1e34\",7\r\n\r\nOK\r\n"
                                   : "\r\n+CEREG: 3,5,\"2036\",\"07fd1b01\",7\r\n\r\nOK\r\n");
