@@ -74,12 +74,16 @@ make test-usb-debug
   sleep also works while offline (each wake makes one real attempt); no server link for 20 min awake
   (registered or not, incl. no SIM) -> radio off/on, 40 min -> reboot (doubling per consecutive no-data
   reboot, idle only). "Link" here means a login that went out, not a confirmed server reply.
+- **Offline tracking/SOS**: no server link for 3 min -> radio off/on, then every 10 min while still
+  offline; never a no-data reboot. The blind buffer holds 30 min at 1 Hz (RAM, lost on reboot).
 - **Reset trace** (`wt` in BOOTSTAT): a RAM record at 0x7E1E1B00 written before every reset we cause,
   incl. the watchdog. Tested on G371074 2026-11-08: NOT retained across the resident warm reset (`wt-`
   after RESET#), so on HW a SoC-only reset (`m0b` >> `up`) stays "watchdog or resident crash". Works in SITL.
 - **Diagnostics**: `CXCS#LINKSTAT` = heartbeat intervals, un-ACKed/requeued fixes, blind backlog, dropped
   links, busy sends, bad-CRC frames, connect failures, SOS state.
-- **PLMN**: a failed round over the allowed operators ends with one CFUN 0/1, then a 15 min holdoff.
+- **PLMN**: idle: 5 min grace, 2 min per allowed operator, a failed round ends with one CFUN 0/1, then a
+  15 min holdoff. Tracking/SOS: 60 s for each of these. `CXCS#CELLSTAT` `ps` = operator selections,
+  `nc` = no-data radio cycles.
 - **Config**: primary then backup cwprm, each fully validated; default server port is 7711.
 - **FOTA**: non-blocking connect, 10 min / 60 s-stall deadlines, HTTP 200/206 required, LZMA header and
   size checked before commit (a sanity check only: there is no LZMA decoder in the app, so a truncated

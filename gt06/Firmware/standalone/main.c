@@ -104,8 +104,8 @@ static void build_loc_data(unsigned char *d, const unsigned char *dt, u32 lat_ra
 
 /* ---- Blind buffer: store fixes while out of coverage, replay on reconnect (in RAM; lost on reboot) ----
  * The vendor keeps this in flash; we keep it in RAM — no flash wear, and a stale backlog can't survive a
- * reboot. A fix is 16 B; BLIND_CAP*16 lives in bss (well under the ~180 KB free below the sAPI table). */
-#define BLIND_CAP       300     /* 5 min at 1 Hz */
+ * reboot. A fix is 22 B; BLIND_CAP*22 (~40 KB) lives in bss, checked by the linker script. */
+#define BLIND_CAP       1800    /* 30 min at 1 Hz */
 #define BLIND_REPLAY_HZ 5       /* catch-up rate: 5 buffered fixes per 1 Hz live fix => 5 Hz to the server */
 typedef struct {
     u32 lat, lon;
@@ -174,7 +174,7 @@ static void blind_push_front(const blindfix_t *f)
  * The server ACKs heartbeats but not LOCs. TCP is in order, so a heartbeat ACK proves every fix sent
  * before that heartbeat arrived. Until then a sent fix stays here; if the link dies first it goes back
  * into the blind buffer instead of vanishing into a dead socket. */
-#define UNACK_CAP 320                    /* > BLIND_CAP: a full backlog fits; replay pauses if it fills */
+#define UNACK_CAP 320                    /* replay pauses when full; an early heartbeat frees it */
 static blindfix_t g_unack[UNACK_CAP];
 static int g_unack_head, g_unack_count;
 static unsigned g_unack_pushed, g_unack_released;   /* running totals, for the heartbeat mark */
@@ -424,8 +424,8 @@ static void vhexbuf(const char *label, const unsigned char *p, int n)
 
 /* Replay the backlog as BATCHED frames when batching is on. This is the whole point of the message for
  * catch-up: the legacy path sends one 0x12 per fix, BLIND_REPLAY_HZ per RMC (5 fixes/s), so a full
- * 300-fix buffer takes a minute to drain. Packing LOC_BATCH_MAX fixes per 0xF1 frame moves the same
- * backlog in BLIND_REPLAY_HZ * LOC_BATCH_MAX fixes per second — a full buffer drains in ~6 s.
+ * buffer takes BLIND_CAP/5 s to drain. Packing LOC_BATCH_MAX fixes per 0xF1 frame moves the same
+ * backlog in BLIND_REPLAY_HZ * LOC_BATCH_MAX fixes per second, paced by UNACK_CAP per heartbeat ACK.
  * Declared here; defined after the batch serialiser it depends on. */
 static int blind_replay_batched(int fd, send_fn se, unsigned short *serial);
 
@@ -1052,6 +1052,8 @@ static int put_hex32(char *b, u32 v)
 static unsigned g_conn_fails;                   /* consecutive failed connect/login attempts */
 static unsigned char g_wake_attempt;            /* woke from offline sleep: one real attempt before sleeping again */
 static unsigned char g_radio_cycle_pend;        /* bit0 no-data, bit1 PLMN: CFUN=0 sent, CFUN=1 still due */
+static unsigned g_plmn_selects;  /* manual operator selections made (CELLSTAT ps) */
+static unsigned g_nodata_cfuns;  /* no-data radio cycles (CELLSTAT nc) */
 static unsigned conn_retry_sec(int urgent)       /* urgent: tracking or SOS -> no backoff */
 {
     if (urgent || g_conn_fails < 3) return CONN_RETRY_SEC;
@@ -2360,6 +2362,8 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " mode"); n += put_sint(out + n, g_operator_mode);
         n += put_str(out + n, " atrc"); n += put_sint(out + n, g_at_rc);
         n += put_str(out + n, " cf");   n += put_uint(out + n, g_conn_fails);
+        n += put_str(out + n, " ps");   n += put_uint(out + n, g_plmn_selects);
+        n += put_str(out + n, " nc");   n += put_uint(out + n, g_nodata_cfuns);
         return n;
     }
     if (prefix_eq(cmd, "CXCS#WDSTALL")) {
@@ -2657,6 +2661,7 @@ static int handle_config_cmd(const char *cmd, char *out)
 #define REC_STABLE_SEC  15
 #define REC_HOLDOFF_SEC 120
 #define PLMN_HOLDOFF_SEC 120
+#define PLMN_URGENT_SEC  10
 #else
 #define REC_OFFLINE_SEC 300      /* offline + unregistered this long -> start the ladder */
 #define REC_STEP_SEC    120      /* settle time after each rung */
@@ -2664,6 +2669,7 @@ static int handle_config_cmd(const char *cmd, char *out)
 #define REC_HOLDOFF_SEC 3600     /* pause after an exhausted ladder (no attach storms) */
 #define PLMN_HOLDOFF_SEC 900     /* allowed-operator rounds: a unit that sails into the other carrier's
                                   * coverage must not sit an hour on the one it was pinned to */
+#define PLMN_URGENT_SEC  60      /* tracking/SOS: grace, per-operator settle and holdoff */
 #endif
 
 /* Poll direct getters even while TCP is connected. COPS gives selection mode and numeric operator;
@@ -2725,8 +2731,11 @@ static void operator_refresh(void)
  * operator mode (ordinary cell handovers within that operator still work). Try only the configured
  * PLMNs, allow each a full settle interval, then back off after one round. A registered allowed modem
  * with a broken server route must not be subjected to pointless network reselections. */
-static int plmn_policy(unsigned now, int connected)
+static int plmn_policy(unsigned now, int connected, int urgent)
 {
+    const unsigned grace = urgent ? PLMN_URGENT_SEC : REC_OFFLINE_SEC;
+    const unsigned step = urgent ? PLMN_URGENT_SEC : REC_STEP_SEC;
+    const unsigned holdoff = urgent ? PLMN_URGENT_SEC : PLMN_HOLDOFF_SEC;
     static unsigned last_try, failed_since, pause_since, cfun_ts;
     static unsigned char started, paused, attempts, next_index, cfun_stage;
     static char selected[8];
@@ -2763,9 +2772,9 @@ static int plmn_policy(unsigned now, int connected)
     }
     g_plmn_busy = 1;
     g_plmn_paused = paused;
-    if (started && (now - last_try) < REC_STEP_SEC) return 1;
+    if (started && (now - last_try) < step) return 1;
     if (paused) {
-        if ((now - pause_since) < PLMN_HOLDOFF_SEC) return 1;
+        if ((now - pause_since) < holdoff) return 1;
         paused = 0; attempts = 0; cfun_stage = 0; g_plmn_paused = 0;
     }
     /* A known disallowed operator or automatic mode is corrected promptly. Loss of coverage on an
@@ -2773,7 +2782,7 @@ static int plmn_policy(unsigned now, int connected)
     if ((started || g_operator_mode == 1) && (permitted || !g_plmn_cur[0]) &&
         !registered && g_operator_mode != 0) {
         if (!failed_since) failed_since = now ? now : 1;
-        if (!attempts && (now - failed_since) < REC_OFFLINE_SEC) return 1;
+        if (!attempts && (now - failed_since) < grace) return 1;
     }
     /* An unavailable diagnostic API must not churn a working link already pinned by this policy. */
     if (started && connected && g_operator_mode < 0 && !g_plmn_cur[0]) return 1;
@@ -2813,7 +2822,7 @@ static int plmn_policy(unsigned now, int connected)
         vputs("PLMN: blocked operator "); vputs(g_plmn_cur); vputs("\r\n");
     }
     at_cmd(cmd); g_cops_manual = 1;
-    started = 1; attempts++; last_try = now;
+    started = 1; attempts++; last_try = now; g_plmn_selects++;
     vputs("PLMN: selecting "); vputs(selected); vputs("\r\n");
     return 1;
 }
@@ -2821,7 +2830,7 @@ static int plmn_policy(unsigned now, int connected)
 /* Cellular auto-recovery driver (item 16) — called every main-loop pass; all action is timer-gated.
  * Only escalates while the server is unreachable AND the modem is NOT registered (CEREG stat not 1/5):
  * if we're registered but can't connect, the PLMN isn't the problem and the ladder stays out of it. */
-static void cell_recovery(unsigned now, int connected)
+static void cell_recovery(unsigned now, int connected, int urgent)
 {
     static unsigned off_since, rung_ts, hold_until, poll_ts, stable_since;
     static unsigned char rung;          /* 0 idle; 1 cfun; 2 cops-auto; 3 scan; 4 settle/exhausted */
@@ -2836,7 +2845,7 @@ static void cell_recovery(unsigned now, int connected)
         poll_ts = now; polled = 1;
         operator_refresh();
     }
-    if (plmn_policy(now, connected)) {
+    if (plmn_policy(now, connected, urgent)) {
         rung = two_phase = 0; off_since = stable_since = 0;
         g_scan_pend = 0; g_plmn_alt[0] = 0;
         return;
@@ -2912,9 +2921,13 @@ static void cell_recovery(unsigned now, int connected)
 #ifdef SITL
 #define NODATA_CFUN_SEC   40
 #define NODATA_REBOOT_SEC 150
+#define NODATA_URGENT_SEC 15
+#define NODATA_REPEAT_SEC 30
 #else
 #define NODATA_CFUN_SEC   1200
 #define NODATA_REBOOT_SEC 2400
+#define NODATA_URGENT_SEC 180     /* tracking/SOS: first radio cycle */
+#define NODATA_REPEAT_SEC 600     /* tracking/SOS: then again this often while still offline */
 #endif
 static unsigned g_offline_since;                /* awake-offline baseline (0 = connected); sleep shifts it */
 static unsigned g_offline_episode;              /* bumped each time the link is lost */
@@ -2928,9 +2941,13 @@ static void nodata_recovery(unsigned now, int track)
     if (!g_offline_since) return;
     if (episode != g_offline_episode) { episode = g_offline_episode; if (stage != 1) stage = 0; }
     unsigned off = now - g_offline_since;
-    if (stage == 0 && off >= NODATA_CFUN_SEC) {
+    int urgent = track || g_sos_active;
+    int due = stage == 0 ? off >= (urgent ? NODATA_URGENT_SEC : NODATA_CFUN_SEC)
+                         : stage == 2 && urgent && (now - cfun_ts) >= NODATA_REPEAT_SEC;
+    if (due && !(g_radio_cycle_pend & 2)) {         /* not on top of a PLMN radio cycle */
         vputs("NODATA: radio off/on\r\n");
         at_cmd("AT+CFUN=0\r"); cfun_ts = now; stage = 1; g_radio_cycle_pend |= 1;
+        g_nodata_cfuns++;
     }
     unsigned k = wd_nodata_count(); if (k > 3) k = 3;
     if (!track && !g_sos_active && !g_fwd_en && g_blind_count == 0 && g_unack_count == 0 &&
@@ -3987,7 +4004,7 @@ void standalone_main(u32 loader_resolver)
             wd_sleep(1500);             /* ~1.5 s for the TCP ACK to go out (well under the 12-tick WD) */
             wd_reason_and_reset(RR_COMMAND);
         }
-        cell_recovery(now, connected);  /* item 16: un-wedge a camped-but-denied modem (timer-gated) */
+        cell_recovery(now, connected, track || g_sos_active);  /* item 16: un-wedge a camped-but-denied modem (timer-gated) */
         nodata_recovery(now, track);
         {   /* the modem just (re)registered: the backoff no longer applies, try the server now */
             static int was_reg;
@@ -4261,7 +4278,10 @@ void standalone_main(u32 loader_resolver)
          * server disconnects a unit it hears no heartbeat from, so idle must keep sending them (was wrongly
          * gated on TIMER T2 = up to 30 min). Carries battery LEVEL + signal; mV comes via STATUS#/cxzt#. */
         unsigned hbt_iv = track ? g_hbt_on : g_hbt_off;
-        if (connected && (now - last_hbt) >= hbt_iv) {
+        /* catch-up: heartbeat early so its ACK frees g_unack for more replay */
+        int hb_early = g_blind_count > 0 && !g_hb_pending && g_unack_count >= UNACK_CAP / 2 &&
+                       (now - last_hbt) >= 1;
+        if (connected && ((now - last_hbt) >= hbt_iv || hb_early)) {
             unsigned char hb[8];
             unsigned short hs = serial++;
             int hl = gt06_frame(0x13, hb, build_heartbeat(hb), hs, loc);
