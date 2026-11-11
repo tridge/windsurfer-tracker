@@ -797,6 +797,88 @@ static void batch_fill(batchfix_t *b, const rmc_t *rc)
     b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
 }
 
+/* ---- GNSS rate test (diagnostic, RAM only) ----
+ * SZCS#GNSSAVG=1: fold all valid fixes within one RMC second into one fix: mean position, vector mean
+ * of velocity, mean sub-second. A 5 Hz receiver then still ships 1 Hz, with less noise. */
+static unsigned char g_gnss_avg;
+static const unsigned short g_sin1e4[91] = {0,175,349,523,698,872,1045,1219,1392,1564,1736,1908,2079,2250,2419,2588,2756,2924,3090,3256,3420,3584,3746,3907,4067,4226,4384,4540,4695,4848,5000,5150,5299,5446,5592,5736,5878,6018,6157,6293,6428,6561,6691,6820,6947,7071,7193,7314,7431,7547,7660,7771,7880,7986,8090,8192,8290,8387,8480,8572,8660,8746,8829,8910,8988,9063,9135,9205,9272,9336,9397,9455,9511,9563,9613,9659,9703,9744,9781,9816,9848,9877,9903,9925,9945,9962,9976,9986,9994,9998,10000};
+static int sin1e4(int d)                       /* sin(d degrees) * 10000, any d */
+{
+    d %= 360; if (d < 0) d += 360;
+    if (d <= 90) return g_sin1e4[d];
+    if (d <= 180) return g_sin1e4[180 - d];
+    if (d <= 270) return -g_sin1e4[d - 180];
+    return -g_sin1e4[360 - d];
+}
+static unsigned isqrt64(unsigned long long v)
+{
+    unsigned long long r = 0, b = 1ull << 62;
+    while (b > v) b >>= 2;
+    while (b) {
+        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1;
+        b >>= 2;
+    }
+    return (unsigned)r;
+}
+static unsigned hdg_from(long long e, long long n)   /* degrees clockwise from north */
+{
+    long long ae = e < 0 ? -e : e, an = n < 0 ? -n : n;
+    int a = 0;                                  /* smallest a with tan(a) >= ae/an */
+    while (a < 90 && ae * g_sin1e4[90 - a] > an * g_sin1e4[a]) a++;
+    if (n >= 0) return (unsigned)(e >= 0 ? a : (360 - a) % 360);
+    return (unsigned)(e >= 0 ? 180 - a : 180 + a);
+}
+static rmc_t g_avg_first;
+static int g_avg_n, g_avg_dlat, g_avg_dlon, g_avg_ds;
+static int g_avg_ve, g_avg_vn;                /* 0.1 kn * 1e4, speed capped 200 kn */
+static void avg_out(rmc_t *o)
+{
+    *o = g_avg_first;
+    int n = g_avg_n;
+    o->lat_raw = (u32)((int)g_avg_first.lat_raw + g_avg_dlat / n);
+    o->lon_raw = (u32)((int)g_avg_first.lon_raw + g_avg_dlon / n);
+    long long ve = g_avg_ve / n, vn = g_avg_vn / n;
+    o->spd_dkn = (isqrt64((unsigned long long)(ve * ve + vn * vn)) + 5000) / 10000;
+    o->hdg_deg = o->spd_dkn ? hdg_from(ve, vn) : g_avg_first.hdg_deg;
+    o->ds = (unsigned char)(g_avg_ds / n);
+    g_avg_n = 0;
+}
+/* Returns 1 with *o set when a completed second is ready. */
+static int avg_add(const rmc_t *rc, rmc_t *o)
+{
+    int ready = 0;
+    if (g_avg_n && (g_avg_first.dt[5] != rc->dt[5] || g_avg_first.dt[4] != rc->dt[4] ||
+                    g_avg_first.south != rc->south || g_avg_first.west != rc->west || g_avg_n >= 10)) {
+        avg_out(o); ready = 1;
+    }
+    if (!g_avg_n) {
+        g_avg_first = *rc; g_avg_dlat = g_avg_dlon = g_avg_ds = 0; g_avg_ve = g_avg_vn = 0;
+    }
+    g_avg_dlat += (int)rc->lat_raw - (int)g_avg_first.lat_raw;
+    g_avg_dlon += (int)rc->lon_raw - (int)g_avg_first.lon_raw;
+    g_avg_ds += rc->ds;
+    int sp = rc->spd_dkn > 2000u ? 2000 : (int)rc->spd_dkn;
+    g_avg_ve += sp * sin1e4((int)rc->hdg_deg);
+    g_avg_vn += sp * sin1e4(90 - (int)rc->hdg_deg);
+    g_avg_n++;
+    return ready;
+}
+
+/* Non-NMEA receiver output ($CFG..., $OK, $fail) and AT replies after SZCS#GNSSCMD, for CXCS#GNSSLOG. */
+#define GNSSLOG_N 4
+static char g_gnsslog[GNSSLOG_N][44];   /* 4 fit the 200-char reply */
+static unsigned g_gnsslog_n, g_gnsscmd_ts;
+static void gnsslog_add(const char *pre, const char *s)
+{
+    char *d = g_gnsslog[g_gnsslog_n++ % GNSSLOG_N];
+    int i = 0;
+    while (*pre && i < 43) d[i++] = *pre++;
+    while (*s && *s != '\r' && *s != '\n' && i < 43) d[i++] = *s++;
+    d[i] = 0;
+}
+static int strchr_c(const char *set, char c) { while (*set) if (*set++ == c) return 1; return 0; }
+static unsigned g_rmc_10, g_rmc_win_base, g_rmc_win_ts;   /* RMC lines in the last 10 s window */
+
 static void batch_spill_to_blind(void);
 
 static void batch_push(const rmc_t *rc)
@@ -1488,6 +1570,8 @@ static int parse_at_urc(const char *s)
         else if (q[0] == 'O' && q[1] == 'K') at = 1;
         else if (q[0] == 'E' && q[1] == 'R' && q[2] == 'R') at = 1;
         else if (q[0] == 'S' && q[1] == 'M' && q[2] == 'S') at = 1;   /* "SMS DONE" boot URC */
+        if (at && g_gnsscmd_ts && (wd_uptime() - g_gnsscmd_ts) < 5 && q[0] != '+')
+            gnsslog_add("AT:", q);
     }
     for (int i = 0; i < 200 && s[i]; i++) {
         if (s[i]=='C' && s[i+1]=='S' && s[i+2]=='Q') {
@@ -2490,6 +2574,36 @@ static int handle_config_cmd(const char *cmd, char *out)
         if (!hits) n += put_str(out + n, " none");
         return n;
     }
+    if (prefix_eq(cmd, "SZCS#GNSSCMD=")) {                   /* diagnostic: raw command to the receiver */
+        const char *b = cmd + 13;
+        char at[96]; int n = put_str(at, "AT+CGNSSCMD=\"$");
+        unsigned x = 0;
+        for (int i = 0; b[i] && b[i] != '#'; i++) {
+            char c = b[i];
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                  c == ',' || c == '.' || c == '-') || n > 80)
+                return put_str(out, "SET ERROR: GNSSCMD");
+            at[n++] = c; x ^= (unsigned char)c;
+        }
+        const char *hx = "0123456789ABCDEF";
+        at[n++] = '*'; at[n++] = hx[(x >> 4) & 15]; at[n++] = hx[x & 15];
+        at[n++] = '"'; at[n++] = '\r'; at[n] = 0;
+        g_gnsscmd_ts = wd_uptime(); g_gnsscmd_ts += !g_gnsscmd_ts;
+        at_cmd(at);
+        n = put_str(out, "SETOK:GNSSCMD rc"); n += put_sint(out + n, g_at_rc);
+        return n;
+    }
+    if (prefix_eq(cmd, "CXCS#GNSSLOG")) {
+        int n = put_str(out, "READOK:GNSSLOG n"); n += put_uint(out + n, g_gnsslog_n);
+        unsigned k = g_gnsslog_n > GNSSLOG_N ? g_gnsslog_n - GNSSLOG_N : 0;
+        for (; k < g_gnsslog_n; k++) { out[n++] = '|'; n += put_str(out + n, g_gnsslog[k % GNSSLOG_N]); }
+        return n;
+    }
+    if (prefix_eq(cmd, "SZCS#GNSSAVG=")) {
+        g_gnss_avg = cmd[13] == '1'; g_avg_n = 0;
+        int n = put_str(out, "SETOK:GNSSAVG="); out[n++] = (char)('0' + g_gnss_avg);
+        return n;
+    }
     if (prefix_eq(cmd, "CXCS#GPSSTAT")) {
         /* return codes are errno-ish and usually negative */
         #define PUT_SIGNED(v) do { int _v = (v); if (_v < 0) { out[n++] = '-'; \
@@ -2525,6 +2639,8 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " pnc"); n += put_uint(out + n, g_gps_pwr_nochange);
         n += put_str(out + n, " req"); n += put_uint(out + n, g_gps_req);   /* asked-for vs confirmed */
         n += put_str(out + n, " cy");  n += put_uint(out + n, g_gps_cycles_total);   /* silent-GPS cycles */
+        n += put_str(out + n, " r10"); n += put_uint(out + n, g_rmc_10);     /* RMC per 10 s */
+        n += put_str(out + n, " avg"); out[n++] = (char)('0' + g_gnss_avg);
         return n;
         #undef PUT_SIGNED
     }
@@ -4384,6 +4500,9 @@ void standalone_main(u32 loader_resolver)
             if (ch == '\r' || ch == '\n') {
                 if (g_llen >= 8) {
                     g_line[g_llen] = 0;
+                    if (g_line[0] == '$' && !(g_line[1] == 'G' && g_line[2] &&
+                                              strchr_c("PNBLAQ", g_line[2])))
+                        gnsslog_add("", g_line);   /* receiver reply, not a standard sentence */
                     if (!nmea_cksum_ok(g_line)) {  /* spliced/mangled line (AT interleave) -> drop, don't parse */
                         g_nmea_bad++; g_llen = 0; continue;
                     }
@@ -4393,9 +4512,17 @@ void standalone_main(u32 loader_resolver)
                     rmc_t rc;
                     if (parse_rmc(g_line, &rc)) {
                         g_rmc_seen++;
+                        if ((now - g_rmc_win_ts) >= 10) {
+                            g_rmc_10 = g_rmc_seen - g_rmc_win_base;
+                            g_rmc_win_base = g_rmc_seen; g_rmc_win_ts = now;
+                        }
                         if (rc.valid) g_rmc_valid++;
                         if (rc.valid && !fix_plausible(&rc, now))
                             rc.valid = 0;          /* impossible jump (checksum-colliding splice) -> drop */
+                        if (g_gnss_avg && rc.valid) {   /* ship one averaged fix per second */
+                            rmc_t ao;
+                            if (avg_add(&rc, &ao)) rc = ao; else rc.valid = 0;
+                        }
                         vhex("S3c:valid", (unsigned)rc.valid);
                         vhex("S3c:lat", rc.lat_raw);
                         vhex("S3c:lon", rc.lon_raw);
