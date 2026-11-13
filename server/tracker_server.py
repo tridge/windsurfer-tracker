@@ -95,6 +95,49 @@ def rotate_file(filepath: Path) -> Path | None:
     return new_path
 
 
+DELETED_COURSES_KEEP = 200   # newest deleted named courses kept in the recycle bin
+COURSE_HISTORY_MAX = 500     # newest live-course versions listed by course-history
+
+
+def load_json_file(path: Path, default):
+    """Parsed JSON from path, or default if it doesn't exist."""
+    if not path.exists():
+        return default
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def save_json_atomic(path: Path, obj) -> None:
+    """Write JSON via a temp file and rename."""
+    tmp_file = path.with_suffix('.tmp')
+    with open(tmp_file, 'w') as f:
+        json.dump(obj, f, indent=2)
+    tmp_file.rename(path)
+
+
+def course_history(event_dir: Path) -> list[dict]:
+    """Live course versions: course.json and its rotations course.json.N, newest
+    first, as {file, time, course}. Every save of a named course also saves the
+    live course, so this holds earlier versions of deleted named courses too."""
+    out = []
+    for p in [event_dir / "course.json"] + list(event_dir.glob("course.json.[0-9]*")):
+        if p.name != "course.json" and not p.name[len("course.json."):].isdigit():
+            continue
+        try:
+            with open(p, 'r') as f:
+                course = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(course, dict) or not course.get('start'):
+            continue
+        ts = course.get('updated')
+        if not isinstance(ts, (int, float)):
+            ts = p.stat().st_mtime
+        out.append({"file": p.name, "time": ts, "course": course})
+    out.sort(key=lambda e: e["time"], reverse=True)
+    return out[:COURSE_HISTORY_MAX]
+
+
 def _unique_archive_path(parent: Path, base_name: str, date_str: str) -> Path:
     """Return parent/old_logs/<base>.<date>[.<N>] picking the first non-existing N."""
     old_dir = parent / "old_logs"
@@ -1551,6 +1594,7 @@ class EventTracker:
         self.course_file = data_dir / "course.json"
         self.users_file = data_dir / "users.json"
         self.courses_file = data_dir / "courses.json"
+        self.deleted_courses_file = data_dir / "deleted_courses.json"  # recycle bin for named courses
         self.log_dir = data_dir / "logs"
 
         # Ensure directories exist
@@ -2966,6 +3010,26 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"races": []})
 
+        elif subpath == '/admin/deleted-courses':
+            # Recycle bin of deleted named courses, newest first (admin only)
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            tracker = get_event_tracker(eid)
+            try:
+                deleted = load_json_file(tracker.deleted_courses_file, []) if tracker else []
+                self._send_json({"deleted": sorted(deleted, key=lambda e: e.get('deleted', 0), reverse=True)})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath == '/admin/course-history':
+            # Earlier versions of the live course (admin only)
+            if not self._check_event_admin_auth(eid):
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            tracker = get_event_tracker(eid)
+            self._send_json({"history": course_history(tracker.data_dir) if tracker else []})
+
         elif subpath == '/admin/state':
             # Return event-scope tracking state (admin only)
             if not self._check_event_admin_auth(eid):
@@ -4365,23 +4429,44 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not course_name:
                 self._send_json({"error": "Course name required"}, 400)
                 return
+            # ?rename=1: the course lives on under a new name, so not kept in the bin
+            renamed = parse_qs(urlparse(self.path).query).get('rename', [''])[0] == '1'
             tracker = get_event_tracker(eid)
             if tracker and tracker.courses_file.exists():
                 try:
                     with open(tracker.courses_file, 'r') as f:
                         courses = json.load(f)
                     if course_name in courses:
+                        if not renamed:
+                            deleted = load_json_file(tracker.deleted_courses_file, [])
+                            deleted.append({"name": course_name, "deleted": time.time(), "course": courses[course_name]})
+                            deleted.sort(key=lambda e: e.get('deleted', 0))
+                            save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:])
                         del courses[course_name]
-                        tmp_file = tracker.courses_file.with_suffix('.tmp')
-                        with open(tmp_file, 'w') as f:
-                            json.dump(courses, f, indent=2)
-                        tmp_file.rename(tracker.courses_file)
-                        log(f"[EVENT {eid}] Named course deleted: '{course_name}'")
+                        save_json_atomic(tracker.courses_file, courses)
+                        log(f"[EVENT {eid}] Named course {'renamed away' if renamed else 'deleted'}: '{course_name}'")
                     self._send_json({"success": True})
                 except Exception as e:
                     self._send_json({"error": str(e)}, 500)
             else:
                 self._send_json({"success": True})
+
+        elif subpath.startswith('/admin/deleted-courses/'):
+            # Remove an entry from the recycle bin (e.g. once restored): /admin/deleted-courses/<deleted ts>
+            try:
+                ts = float(subpath[len('/admin/deleted-courses/'):])
+            except ValueError:
+                self._send_json({"error": "Bad entry"}, 400)
+                return
+            tracker = get_event_tracker(eid)
+            try:
+                deleted = load_json_file(tracker.deleted_courses_file, []) if tracker else []
+                kept = [e for e in deleted if abs(e.get('deleted', 0) - ts) > 1e-3]
+                if len(kept) != len(deleted):
+                    save_json_atomic(tracker.deleted_courses_file, kept)
+                self._send_json({"success": True, "removed": len(deleted) - len(kept)})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
 
         elif subpath.startswith('/admin/user/'):
             from urllib.parse import unquote

@@ -170,3 +170,54 @@ def test_course_invalid_json(http_client):
         headers={"X-Admin-Password": "coursejson", "Content-Type": "application/json"},
     )
     assert status == 400
+
+
+def test_deleted_named_course_kept_in_bin(http_client):
+    """Deleting a named course keeps it in the recycle bin; a rename doesn't."""
+    eid = create_event(http_client, name="Course Bin", admin_password="bin1")
+    headers = {"X-Admin-Password": "bin1"}
+    course = {"start": {"lat": -36.85, "lon": 174.76}, "marks": [{"lat": -36.84, "lon": 174.76}],
+              "finish": {"lat": -36.84, "lon": 174.77}, "order": "S1F"}
+    http_client.post(f"/api/event/{eid}/admin/courses/Slalom", data=course, headers=headers)
+    http_client.post(f"/api/event/{eid}/admin/courses/Old", data=course, headers=headers)
+
+    status, _ = http_client.delete(f"/api/event/{eid}/admin/courses/Slalom", headers=headers)
+    assert status == 200
+    status, _ = http_client.delete(f"/api/event/{eid}/admin/courses/Old?rename=1", headers=headers)
+    assert status == 200
+
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert status == 200
+    names = [e["name"] for e in body["deleted"]]
+    assert names == ["Slalom"]
+    entry = body["deleted"][0]
+    assert entry["course"]["order"] == "S1F" and entry["deleted"] > 0
+
+    # removing the entry (after restoring it) empties the bin
+    status, body = http_client.delete(f"/api/event/{eid}/admin/deleted-courses/{entry['deleted']}", headers=headers)
+    assert status == 200 and body["removed"] == 1
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert body["deleted"] == []
+
+
+def test_deleted_courses_requires_auth(http_client):
+    eid = create_event(http_client, name="Course Bin Auth", admin_password="bin2")
+    # a unique client address so these failed logins don't rate-limit other tests
+    status, _ = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers={"X-Forwarded-For": "10.77.0.1"})
+    assert status == 401
+    status, _ = http_client.get(f"/api/event/{eid}/admin/course-history", headers={"X-Forwarded-For": "10.77.0.2"})
+    assert status == 401
+
+
+def test_course_history_lists_earlier_versions(http_client):
+    """Each live-course save rotates the old one; history lists them newest first."""
+    eid = create_event(http_client, name="Course History", admin_password="hist1")
+    headers = {"X-Admin-Password": "hist1"}
+    for lat in (-36.1, -36.2, -36.3):
+        course = {"start": {"lat": lat, "lon": 174.76}, "finish": {"lat": lat, "lon": 174.77}}
+        http_client.post(f"/api/event/{eid}/admin/course", data=course, headers=headers)
+    status, body = http_client.get(f"/api/event/{eid}/admin/course-history", headers=headers)
+    assert status == 200
+    lats = [h["course"]["start"]["lat"] for h in body["history"]]
+    assert lats == [-36.3, -36.2, -36.1]
+    assert body["history"][0]["file"] == "course.json"
