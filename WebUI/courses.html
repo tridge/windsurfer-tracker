@@ -950,8 +950,11 @@
         let transformPicking = false;
         let transformDragging = false;  // drag mode on
         let tfDrag = null;              // active pointer drag
-        let tfSession = null;           // {name, base, loadSeq}: course being transformed and its snapshot
-        let loadSeqCounter = 0;         // number of course reloads started
+        let tfSession = null;           // {name, base}: course being transformed and its snapshot
+        let markOrderTarget = null;     // {name, data}: course the Mark Order dialog was opened on
+        let reselectAfterEdit = false;  // a reload skipped re-selecting while a panel was open
+        const pendingSaves = new Map(); // name -> {data}: saves not yet confirmed by the server
+        let saveChain = Promise.resolve();  // saves go to the server one at a time, in order
         let tfPointers = new Set();     // pointers down in drag mode
         let transformPreview = null;
 
@@ -1405,6 +1408,7 @@
 
         function selectCourse(name, course, fromUser) {
             closeTransform();
+            closeMarkOrder();
             selectedCourseName = name;
             courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
             if (fromUser) userInteracted = true;
@@ -1511,7 +1515,22 @@
             return saveCourse(selectedCourseName, courseData);
         }
 
+        // Saves are queued so the server applies them in order, and until confirmed the
+        // saved data stands in for the course in reloads (so a reselect shows it).
         async function saveCourse(name, data) {
+            const snap = JSON.parse(JSON.stringify(data));
+            const entry = { data: snap };
+            pendingSaves.set(name, entry);
+            allCourses[name] = snap;
+            const run = saveChain.then(() => postCourse(name, snap));
+            saveChain = run;
+            const ok = await run;
+            if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
+            await reloadAndReselect();
+            return ok;
+        }
+
+        async function postCourse(name, data) {
             try {
                 const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
                     method: 'POST',
@@ -1532,7 +1551,6 @@
                         },
                         body: JSON.stringify(data)
                     });
-                    await reloadAndReselect();
                     return true;
                 } else {
                     alert('Error: ' + (result.error || 'Unknown error'));
@@ -2141,6 +2159,7 @@
             if (!selectedCourseName || !courseData) { alert('No course selected'); return; }
             const nm = courseData.marks ? courseData.marks.length : 0;
             if (nm === 0) { alert('This course has no marks to order'); return; }
+            markOrderTarget = { name: selectedCourseName, data: courseData };
             document.getElementById('markOrderCourse').textContent = `"${selectedCourseName}"`;
             document.getElementById('markOrderMax').textContent = nm;
             document.getElementById('markOrderInput').value = courseData.order || '';
@@ -2150,11 +2169,15 @@
         }
 
         function closeMarkOrder() {
+            if (!markOrderTarget) return;
+            markOrderTarget = null;
             document.getElementById('markOrderOverlay').classList.remove('visible');
+            editorClosed();
         }
 
         function validateMarkOrderInput() {
-            const nm = courseData && courseData.marks ? courseData.marks.length : 0;
+            const c = markOrderTarget && markOrderTarget.data;
+            const nm = c && c.marks ? c.marks.length : 0;
             const r = parseMarkOrder(document.getElementById('markOrderInput').value, nm);
             const err = document.getElementById('markOrderError');
             err.textContent = r.error || (r.seq ? `${r.seq.join(' → ')}` : 'Default order');
@@ -2165,10 +2188,15 @@
 
         async function saveMarkOrder() {
             const r = validateMarkOrderInput();
-            if (r.error || !courseData) return;
+            const t = markOrderTarget;
+            if (r.error || !t) return;
+            closeMarkOrder();
+            if (t.name !== selectedCourseName || t.data !== courseData || !allCourses[t.name]) {
+                alert(`Course "${t.name}" changed while the dialog was open; order not saved`);
+                return;
+            }
             if (r.seq) courseData.order = formatMarkOrder(r.seq);
             else delete courseData.order;
-            closeMarkOrder();
             await saveSelectedCourse();
         }
 
@@ -2265,8 +2293,7 @@
             cancelDrawing();
             cancelMoveMark();
             map.closePopup();
-            tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)),
-                          loadSeq: loadSeqCounter };
+            tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)) };
             transformActive = true;
             document.getElementById('tfCourseName').textContent = `"${tfSession.name}"`;
             resetTransform();
@@ -2472,6 +2499,12 @@
                 displayCourse(courseData, false);
                 updateInfoBox(selectedCourseName, courseData);
             }
+            editorClosed();
+        }
+
+        // A reload that came in while a panel was open re-selects on the next poll
+        function editorClosed() {
+            if (reselectAfterEdit) { reselectAfterEdit = false; lastCoursesJSON = null; }
         }
 
         // Saves the preview under the course the session started on. The result becomes
@@ -2499,14 +2532,12 @@
         async function loadCourses(isRefresh) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
-            if (isRefresh && transformActive) return;  // don't clobber the transform preview
-            const mySeq = ++loadSeqCounter;
+            if (isRefresh && (transformActive || markOrderTarget)) return;  // don't clobber an open panel
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
-                // a panel opened while fetching owns the editor; this reload is stale
-                if (transformActive && (isRefresh || tfSession.loadSeq >= mySeq)) return;
                 const newCourses = data.courses || {};
+                for (const [n, p] of pendingSaves) newCourses[n] = p.data;
 
                 // Skip UI rebuild if nothing has changed
                 const newJSON = JSON.stringify(newCourses);
@@ -2519,6 +2550,8 @@
                 const names = Object.keys(allCourses).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
                 if (names.length === 0) {
+                    closeTransform();
+                    closeMarkOrder();
                     listEl.innerHTML = '<div class="no-courses">No courses available</div>';
                     dropdown.innerHTML = '<option value="">No courses available</option>';
                     document.getElementById('courseInfoBox').style.display = 'none';
@@ -2541,7 +2574,7 @@
                         <div class="course-meta">${formatCourseLength(length)}</div>
                         ${timeStr ? `<div class="course-meta">${timeStr}</div>` : ''}
                     `;
-                    item.addEventListener('click', () => selectCourse(name, course, true));
+                    item.addEventListener('click', () => { if (allCourses[name]) selectCourse(name, allCourses[name], true); });
                     listEl.appendChild(item);
                 });
 
@@ -2555,6 +2588,16 @@
                     opt.textContent = `${name} — ${formatCourseLength(length)}`;
                     dropdown.appendChild(opt);
                 });
+
+                // an open Transform/Mark Order panel owns the editor: leave the selection alone
+                if (transformActive || markOrderTarget) {
+                    reselectAfterEdit = true;
+                    document.querySelectorAll('.course-item').forEach(el => {
+                        el.classList.toggle('selected', el.dataset.name === selectedCourseName);
+                    });
+                    if (allCourses[selectedCourseName]) dropdown.value = selectedCourseName;
+                    return;
+                }
 
                 // Preserve previous selection if it still exists, otherwise auto-select first
                 const selectName = selectedCourseName && allCourses[selectedCourseName] ? selectedCourseName : names[0];
