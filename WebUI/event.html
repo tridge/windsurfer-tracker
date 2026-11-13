@@ -3526,50 +3526,8 @@
                 return;
             }
 
-            // Find current point and previous point
-            let currentLat, currentLon, prevLat, prevLon;
-            let insertIndex;
-
-            if (markIndex === 'finish') {
-                currentLat = courseData.finish.lat;
-                currentLon = courseData.finish.lon;
-                if (courseData.marks && courseData.marks.length > 0) {
-                    const lastMark = courseData.marks[courseData.marks.length - 1];
-                    prevLat = lastMark.lat;
-                    prevLon = lastMark.lon;
-                } else {
-                    prevLat = courseData.start.lat;
-                    prevLon = courseData.start.lon;
-                }
-                insertIndex = courseData.marks ? courseData.marks.length : 0;
-            } else {
-                // Regular mark
-                if (!courseData.marks) return;
-                const mark = courseData.marks[markIndex];
-                currentLat = mark.lat;
-                currentLon = mark.lon;
-                if (markIndex === 0) {
-                    prevLat = courseData.start.lat;
-                    prevLon = courseData.start.lon;
-                } else {
-                    const prevMark = courseData.marks[markIndex - 1];
-                    prevLat = prevMark.lat;
-                    prevLon = prevMark.lon;
-                }
-                insertIndex = markIndex;
-            }
-
-            // Create new mark at midpoint
-            const newMark = {
-                lat: (currentLat + prevLat) / 2,
-                lon: (currentLon + prevLon) / 2
-            };
-
-            // Insert new mark
-            if (!courseData.marks) courseData.marks = [];
-            CourseOrder.insertMark(courseData, insertIndex, insertIndex === 0 ? 'S' : insertIndex,
-                                   markIndex === 'finish' ? 'F' : insertIndex + 1);
-            courseData.marks.splice(insertIndex, 0, newMark);
+            // new mark in the middle of the leg sailed into this one
+            if (!CourseOrder.splitLeg(courseData, markIndex)) return;
 
             // Save to server
             try {

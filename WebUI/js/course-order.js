@@ -183,14 +183,34 @@ const CourseOrder = (() => {
         const ks = keys(course);
         if (!ks) return;
         const num = insertIndex + 1;
-        const shifted = ks.map(k => typeof k === 'number' && k >= num ? k + 1 : k);
-        const nk = typeof nextKey === 'number' && nextKey >= num ? nextKey + 1 : nextKey;
+        const shift = k => typeof k === 'number' && k >= num ? k + 1 : k;
+        const shifted = ks.map(shift);
+        const pk = shift(prevKey), nk = shift(nextKey);
         const out = [];
         shifted.forEach((k, i) => {
             out.push(k);
-            if (k === prevKey && shifted[i + 1] === nk) out.push(num);
+            if (k === pk && shifted[i + 1] === nk) out.push(num);
         });
         course.order = format(out);
+    }
+
+    // Split the leg sailed into a mark (0-based index, or 'finish') with a new mark at
+    // its middle. With a custom order this is the leg into the mark's first visit; the
+    // new mark goes into every occurrence of that leg. Returns false if nothing to split.
+    function splitLeg(course, target) {
+        const key = target === 'finish' ? 'F' : target + 1;
+        if (key !== 'F' && !(course.marks && course.marks[target])) return false;
+        const seq = sequence(course);
+        const i = seq.findIndex(e => e.key === key);
+        if (i < 1) return false;
+        const a = seq[i - 1].pt, b = seq[i].pt;
+        let lon = (a.lon + unwrapLon(b.lon, a.lon)) / 2;
+        lon = ((lon + 540) % 360) - 180;
+        const insertIndex = key === 'F' ? (course.marks ? course.marks.length : 0) : target;
+        if (!course.marks) course.marks = [];
+        insertMark(course, insertIndex, seq[i - 1].key, key);
+        course.marks.splice(insertIndex, 0, { lat: (a.lat + b.lat) / 2, lon });
+        return true;
     }
 
     // Keep a custom order consistent when deleting the 1-based mark num
@@ -424,7 +444,7 @@ const CourseOrder = (() => {
 
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
-        pinLine, pinLayers, escHtml, commentHtml, safeColor,
+        pinLine, pinLayers, splitLeg, escHtml, commentHtml, safeColor,
         setLabelOptions: o => Object.assign(labelOpts, o),
         labelOptions: () => ({ ...labelOpts }),
         routeLayer: (course, opts = {}) => zoomLayer((m, add) => draw(m, course, opts, add)),

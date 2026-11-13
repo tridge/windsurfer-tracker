@@ -988,7 +988,6 @@
         const courseSequence = CourseOrder.sequence;
         const autoRoundingSide = CourseOrder.autoSide;
         const markRoundingSide = CourseOrder.markSide;
-        const orderInsertMark = CourseOrder.insertMark;
         const orderDeleteMark = CourseOrder.deleteMark;
 
         // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm"
@@ -1978,41 +1977,7 @@
                 return;
             }
 
-            let currentLat, currentLon, prevLat, prevLon, insertIndex;
-
-            if (markIndex === 'finish') {
-                currentLat = courseData.finish.lat;
-                currentLon = courseData.finish.lon;
-                if (courseData.marks && courseData.marks.length > 0) {
-                    const lastMark = courseData.marks[courseData.marks.length - 1];
-                    prevLat = lastMark.lat; prevLon = lastMark.lon;
-                } else {
-                    prevLat = courseData.start.lat; prevLon = courseData.start.lon;
-                }
-                insertIndex = courseData.marks ? courseData.marks.length : 0;
-            } else {
-                if (!courseData.marks) return;
-                const mark = courseData.marks[markIndex];
-                currentLat = mark.lat; currentLon = mark.lon;
-                if (markIndex === 0) {
-                    prevLat = courseData.start.lat; prevLon = courseData.start.lon;
-                } else {
-                    prevLat = courseData.marks[markIndex - 1].lat;
-                    prevLon = courseData.marks[markIndex - 1].lon;
-                }
-                insertIndex = markIndex;
-            }
-
-            const newMark = {
-                lat: (currentLat + prevLat) / 2,
-                lon: (currentLon + prevLon) / 2
-            };
-            if (!courseData.marks) courseData.marks = [];
-            const prevKey = insertIndex === 0 ? 'S' : insertIndex;
-            const nextKey = markIndex === 'finish' ? 'F' : insertIndex + 1;
-            orderInsertMark(courseData, insertIndex, prevKey, nextKey);
-            courseData.marks.splice(insertIndex, 0, newMark);
-
+            if (!CourseOrder.splitLeg(courseData, markIndex)) return;
             await saveSelectedCourse();
         }
 
