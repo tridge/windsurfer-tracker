@@ -273,7 +273,8 @@ const CourseOrder = (() => {
             html: legLabelHtml(seq[i].pt, seq[i + 1].pt, decl, `${seq[i].key}→${seq[i + 1].key}: `)
         }));
         const obstacles = P.map(p => box(p, 30, 30)).concat(arrows.map(p => box(p, 18, 18)));
-        placeLabels(map, items, obstacles).forEach((c, i) => add(labelMarker(map, c, items[i].html)));
+        const shown = items.filter(it => it.html);
+        placeLabels(map, shown, obstacles).forEach((c, i) => add(labelMarker(map, c, shown[i].html)));
     }
 
     // --- leg labels with overlap avoidance (screen space, so redrawn on zoom) ---
@@ -287,10 +288,19 @@ const CourseOrder = (() => {
                               pts.reduce((a, p) => a + unwrapLon(p.lon, ref), 0) / pts.length);
     }
 
+    // what leg labels show; both off = no labels
+    const labelOpts = { bearing: true, distance: true };
+
     function legLabelHtml(a, b, decl, prefix = '') {
-        const t = bearingDeg(a, b);
-        const hdg = decl === null ? `${fmt3(t)}°T` : `${fmt3(t)}°T / ${fmt3((t - decl + 360) % 360)}°M`;
-        return `<div>${prefix}${hdg}<br>${legLengthText(a, b)}</div>`;
+        const lines = [];
+        if (labelOpts.bearing) {
+            const t = bearingDeg(a, b);
+            lines.push(decl === null ? `${fmt3(t)}°T` : `${fmt3(t)}°T / ${fmt3((t - decl + 360) % 360)}°M`);
+        }
+        if (labelOpts.distance) lines.push(legLengthText(a, b));
+        if (!lines.length) return null;
+        lines[0] = prefix + lines[0];
+        return `<div>${lines.join('<br>')}</div>`;
     }
 
     const box = (c, w, h) => ({ x0: c.x - w / 2, y0: c.y - h / 2, x1: c.x + w / 2, y1: c.y + h / 2 });
@@ -369,7 +379,8 @@ const CourseOrder = (() => {
             items.push({ a: P[i], b: P[i + 1], n: L.point(-u.y, u.x), pref: 1,
                          html: legLabelHtml(pts[i], pts[i + 1], decl) });
         }
-        placeLabels(map, items, P.map(p => box(p, 30, 30))).forEach((c, i) => add(labelMarker(map, c, items[i].html)));
+        const shown = items.filter(it => it.html);
+        placeLabels(map, shown, P.map(p => box(p, 30, 30))).forEach((c, i) => add(labelMarker(map, c, shown[i].html)));
     }
 
     // Layer that redraws itself on zoom (offsets and label placement are in pixels).
@@ -401,6 +412,8 @@ const CourseOrder = (() => {
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
         pinLine, pinLayers,
+        setLabelOptions: o => Object.assign(labelOpts, o),
+        labelOptions: () => ({ ...labelOpts }),
         routeLayer: (course, opts = {}) => zoomLayer((m, add) => draw(m, course, opts, add)),
         legLabelLayer: (pts, opts = {}) => zoomLayer((m, add) => drawLegLabels(m, pts, opts, add))
     };

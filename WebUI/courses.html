@@ -431,6 +431,7 @@
         }
         .move-status.visible { display: block; }
         .menu-item.active { background: #e3f2fd; color: #1976d2; }
+        .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .custom-scale {
             position: fixed;
@@ -705,6 +706,25 @@
             <div class="menu-submenu-item" data-wind="13-17" onclick="setWindRange('13-17')">13 to 17 knots</div>
             <div class="menu-submenu-item" data-wind="18-25" onclick="setWindRange('18-25')">18 to 25 knots</div>
         </div>
+        <div class="menu-item" onclick="toggleLegDisplay('bearing')">
+            <span>🧭</span>
+            <span>Leg bearings</span>
+            <span class="menu-check" id="chkLegBearing">✓</span>
+        </div>
+        <div class="menu-item" onclick="toggleLegDisplay('distance')">
+            <span>📏</span>
+            <span>Leg distances</span>
+            <span class="menu-check" id="chkLegDistance">✓</span>
+        </div>
+        <div class="menu-item admin-only" onclick="exportCourses()" style="display:none">
+            <span>📤</span>
+            <span>Export Courses</span>
+        </div>
+        <div class="menu-item admin-only" onclick="importCourses()" style="display:none">
+            <span>📥</span>
+            <span>Import Courses</span>
+        </div>
+        <input type="file" id="importCoursesFile" accept=".zip,application/zip" style="display:none" onchange="onImportCoursesFile(event)">
         <div class="menu-item" onclick="refreshCourses()">
             <span>🔄</span>
             <span>Refresh</span>
@@ -729,6 +749,7 @@
     <script src="js/map-utils.js"></script>
     <script src="js/wmm.js"></script>
     <script src="js/course-order.js"></script>
+    <script src="js/zip.js"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -986,6 +1007,146 @@
         ];
         let selectedWind = localStorage.getItem('windRange') || null;  // remembered like mapType
         updateWindSubmenuSelection();  // reflect the remembered selection on load
+
+        // Leg label content (bearings / distances), remembered like the wind range
+        CourseOrder.setLabelOptions({
+            bearing: localStorage.getItem('legBearings') !== '0',
+            distance: localStorage.getItem('legDistances') !== '0'
+        });
+        updateLegDisplayChecks();
+
+        function updateLegDisplayChecks() {
+            const o = CourseOrder.labelOptions();
+            document.getElementById('chkLegBearing').textContent = o.bearing ? '✓' : '';
+            document.getElementById('chkLegDistance').textContent = o.distance ? '✓' : '';
+        }
+
+        function toggleLegDisplay(what) {
+            const o = CourseOrder.labelOptions();
+            o[what] = !o[what];
+            CourseOrder.setLabelOptions(o);
+            localStorage.setItem(what === 'bearing' ? 'legBearings' : 'legDistances', o[what] ? '1' : '0');
+            updateLegDisplayChecks();
+            if (transformActive) updateTransformPreview();
+            else if (courseData) displayCourse(courseData, false);
+            if (drawingMode) updateDrawingLine();
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // --- Courses export / import (zip, one JSON file per course) ---
+
+        const SERVER_COURSE_FIELDS = ['saved', 'updated', 'updated_iso'];
+
+        function courseFileName(name) {
+            return (name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '_').trim().slice(0, 100)) || 'course';
+        }
+
+        function exportCourses() {
+            document.getElementById('menuPanel').classList.remove('visible');
+            const names = Object.keys(allCourses).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            if (!names.length) { alert('No courses to export'); return; }
+            const used = new Set(), files = [];
+            for (const name of names) {
+                const c = JSON.parse(JSON.stringify(allCourses[name]));
+                SERVER_COURSE_FIELDS.forEach(k => delete c[k]);
+                let fn = courseFileName(name), base = fn, k = 2;
+                while (used.has(fn.toLowerCase())) fn = `${base} (${k++})`;
+                used.add(fn.toLowerCase());
+                files.push({ name: `${fn}.json`, data: JSON.stringify({ name, ...c }, null, 2) + '\n' });
+            }
+            const date = new Date().toISOString().slice(0, 10);
+            const blob = new Blob([createZip(files)], { type: 'application/zip' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `courses-event${EVENT_ID}-${date}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
+        function importCourses() {
+            document.getElementById('menuPanel').classList.remove('visible');
+            document.getElementById('importCoursesFile').click();
+        }
+
+        const validPoint = p => p && typeof p === 'object' && isFinite(p.lat) && isFinite(p.lon) &&
+                                Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+
+        // Course from an imported file, or throws with the reason
+        function importedCourse(j) {
+            if (!j || typeof j !== 'object') throw new Error('not a course');
+            if (!validPoint(j.start) || !validPoint(j.finish)) throw new Error('missing or invalid start/finish');
+            if (j.marks !== undefined && (!Array.isArray(j.marks) || !j.marks.every(validPoint))) throw new Error('invalid marks');
+            const c = JSON.parse(JSON.stringify(j));
+            delete c.name;
+            SERVER_COURSE_FIELDS.forEach(k => delete c[k]);
+            if (c.order && !CourseOrder.keys(c)) delete c.order;  // order doesn't fit these marks
+            return c;
+        }
+
+        async function onImportCoursesFile(ev) {
+            const file = ev.target.files[0];
+            ev.target.value = '';
+            if (!file) return;
+            let entries;
+            try {
+                entries = await readZip(await file.arrayBuffer());
+            } catch (e) {
+                alert(`Could not read ${file.name}: ${e.message}`);
+                return;
+            }
+            const byName = new Map(), bad = [];
+            for (const e of entries) {
+                const base = e.name.split('/').pop();
+                if (!base.toLowerCase().endsWith('.json') || e.name.startsWith('__MACOSX/') || base.startsWith('._')) continue;
+                try {
+                    const j = JSON.parse(new TextDecoder().decode(e.data));
+                    const name = typeof j.name === 'string' && j.name.trim() ? j.name.trim() : base.slice(0, -5);
+                    byName.set(name, importedCourse(j));
+                } catch (err) {
+                    bad.push(`${base}: ${err.message}`);
+                }
+            }
+            if (!byName.size) {
+                alert('No valid courses found in the zip' + (bad.length ? ':\n' + bad.join('\n') : ''));
+                return;
+            }
+            const existing = [...byName.keys()].filter(n => allCourses[n]);
+            let overwrite = true;
+            if (existing.length) {
+                overwrite = confirm(`${existing.length} course${existing.length > 1 ? 's' : ''} already exist:\n` +
+                                    `${existing.join(', ')}\n\nOK to overwrite, Cancel to skip ${existing.length > 1 ? 'them' : 'it'}.`);
+            }
+            closeTransform();
+            cancelMoveMark();
+            cancelDrawing();
+            let saved = 0, skipped = 0;
+            const failed = [];
+            for (const [name, course] of byName) {
+                if (allCourses[name] && !overwrite) { skipped++; continue; }
+                try {
+                    const r = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                        body: JSON.stringify(course)
+                    });
+                    const d = await r.json();
+                    if (d.success) saved++; else failed.push(`${name}: ${d.error || 'error'}`);
+                } catch (e) {
+                    failed.push(`${name}: ${e.message}`);
+                }
+            }
+            await reloadAndReselect();
+            let msg = `Imported ${saved} course${saved !== 1 ? 's' : ''}`;
+            if (skipped) msg += `, skipped ${skipped} existing`;
+            if (failed.length) msg += `\n\nFailed:\n${failed.join('\n')}`;
+            if (bad.length) msg += `\n\nIgnored files:\n${bad.join('\n')}`;
+            alert(msg);
+        }
 
         // Approx race time for the selected wind, e.g. "Wind 3-7kn, 1hr 25min" ('' if none)
         function formatCourseTime(km) {
@@ -1284,6 +1445,7 @@
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('adminToolbar').classList.remove('visible');
                 document.body.classList.remove('admin-mode');
+                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
                 cancelDrawing();
                 cancelMoveMark();
                 closeTransform();
@@ -1301,6 +1463,7 @@
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('adminToolbar').classList.add('visible');
                     document.body.classList.add('admin-mode');
+                    document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
                     // Refresh display to show edit buttons
                     if (courseData) displayCourse(courseData);
                 } else {
@@ -2377,7 +2540,7 @@
                     item.dataset.name = name;
                     const timeStr = formatCourseTime(length);
                     item.innerHTML = `
-                        <div class="course-name">${name}</div>
+                        <div class="course-name">${escapeHtml(name)}</div>
                         <div class="course-meta">${formatCourseLength(length)}</div>
                         ${timeStr ? `<div class="course-meta">${timeStr}</div>` : ''}
                     `;
