@@ -1276,6 +1276,10 @@
             <span>〰️</span>
             <span>Show Tails</span>
         </div>
+        <div class="menu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
+            <span>🌬️</span>
+            <span>Show Live Wind</span>
+        </div>
         <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
             <span>🗺️</span>
             <span>Map Type ▼</span>
@@ -1581,6 +1585,8 @@
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
     <script src="js/course-order.js"></script>
+    <script src="js/wmm.js"></script>
+    <script src="js/wind.js"></script>
     <script src="js/battery_cal.js"></script>
     <script>
         // Initialize map centered on Auckland
@@ -1937,6 +1943,8 @@
 
         // Data paths for this event (positions, logs, etc.)
         const DATA_BASE = `${EVENT_ID}/`;
+        // live wind under the zoom buttons, when the event has a wind.json
+        WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind' });
 
         // API paths for this event
         const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;

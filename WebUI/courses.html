@@ -370,6 +370,15 @@
             max-height: calc(100vh - 110px); overflow-y: auto; box-sizing: border-box;
         }
         .transform-panel.visible { display: block; }
+        .restore-list { margin: 4px 0; }
+        .restore-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #eee; font-size: 12px; }
+        .restore-row .restore-text { flex: 1; min-width: 0; }
+        .restore-row .restore-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .restore-row .restore-meta { color: #666; }
+        .restore-row.previewing { background: #e0f2fe; }
+        .restore-row button { font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid #ccc; background: #f8f8f8; cursor: pointer; }
+        .restore-row button.restore-go { background: #0066cc; color: white; border-color: #0055aa; }
+        .restore-empty { color: #888; font-size: 12px; padding: 4px 0; }
         .transform-panel .tf-error { color: #dc2626; font-weight: 600; }
         @media (max-height: 520px) {
             .transform-panel { top: 10px; max-height: calc(100vh - 20px); }
@@ -636,6 +645,18 @@
     </div>
 
     <!-- Course transform panel (no backdrop so the map preview stays usable) -->
+    <div class="transform-panel" id="restorePanel">
+        <h3>Restore a course</h3>
+        <div class="tf-title">Deleted courses</div>
+        <div id="restoreDeleted" class="restore-list"></div>
+        <div class="tf-title" style="margin-top:10px">Earlier saved versions</div>
+        <div class="order-help">Every save is kept. Preview one, then restore it under a name.</div>
+        <div id="restoreHistory" class="restore-list"></div>
+        <div class="btn-row">
+            <button class="btn-cancel" onclick="closeRestore()">Close</button>
+        </div>
+    </div>
+
     <div class="transform-panel" id="transformPanel">
         <h3>Transform <span id="tfCourseName"></span></h3>
         <div class="tf-row">
@@ -729,6 +750,11 @@
             <div class="menu-submenu-item" data-wind="13-17" onclick="setWindRange('13-17')">13 to 17 knots</div>
             <div class="menu-submenu-item" data-wind="18-25" onclick="setWindRange('18-25')">18 to 25 knots</div>
         </div>
+        <div class="menu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
+            <span>🌬️</span>
+            <span>Live wind</span>
+            <span class="menu-check" id="chkLiveWind"></span>
+        </div>
         <div class="menu-item" onclick="toggleLegDisplay('bearing')">
             <span>🧭</span>
             <span>Leg bearings</span>
@@ -748,6 +774,10 @@
             <span>Import Courses</span>
         </div>
         <input type="file" id="importCoursesFile" accept=".zip,application/zip" style="display:none" onchange="onImportCoursesFile(event)">
+        <div class="menu-item admin-only" onclick="showRestore()" style="display:none">
+            <span>↩️</span>
+            <span>Undo delete / restore…</span>
+        </div>
         <div class="menu-item" onclick="refreshCourses()">
             <span>🔄</span>
             <span>Refresh</span>
@@ -773,6 +803,7 @@
     <script src="js/wmm.js"></script>
     <script src="js/course-order.js"></script>
     <script src="js/zip.js"></script>
+    <script src="js/wind.js"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -784,6 +815,9 @@
 
         // Map setup
         const map = L.map('map', { zoomControl: true });
+        // live wind under the zoom buttons, when the event has a wind.json
+        WindDisplay.init(map, { url: `${EVENT_ID}/wind.json`, storageKey: `showWind_${EVENT_ID}`,
+                                menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind' });
 
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
@@ -1379,6 +1413,7 @@
             closeMarkOrder();
             cancelMoveMark();
             closeEditMark();
+            closeRestore();
             if (name !== selectedCourseName) activeSub = 'A';
             selectedCourseName = name;
             courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
@@ -1907,7 +1942,7 @@
                 const createData = await createResp.json();
                 if (!createData.success) { alert('Error: ' + (createData.error || 'Unknown error')); return; }
                 // Delete old name
-                await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}`, {
+                await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}?rename=1`, {  // not kept in the bin
                     method: 'DELETE',
                     headers: { 'X-Admin-Password': adminPassword }
                 });
@@ -2309,6 +2344,112 @@
             await saveSelectedCourse();
         }
 
+        // --- Restoring deleted courses and earlier versions ---
+
+        let restoreOpen = false;
+
+        async function showRestore() {
+            document.getElementById('menuPanel').classList.remove('visible');
+            if (importBusy()) return;
+            closeTransform();
+            closeMarkOrder();
+            cancelMoveMark();
+            closeEditMark();
+            cancelDrawing();
+            restoreOpen = true;
+            document.getElementById('restorePanel').classList.add('visible');
+            const delEl = document.getElementById('restoreDeleted'), histEl = document.getElementById('restoreHistory');
+            delEl.innerHTML = histEl.innerHTML = '<div class="restore-empty">Loading…</div>';
+            const get = async path => {
+                const r = await fetch(`${EVENT_API}/admin/${path}`, { headers: { 'X-Admin-Password': adminPassword }, cache: 'no-cache' });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            };
+            let deleted, history;
+            try {
+                [deleted, history] = await Promise.all([get('deleted-courses'), get('course-history')]);
+            } catch (e) {
+                delEl.innerHTML = histEl.innerHTML = '';
+                delEl.textContent = `Could not load: ${e.message}`;
+                return;
+            }
+            if (!restoreOpen) return;
+            // name a version by any current or deleted named course it's identical to
+            const known = new Map();
+            for (const [n, c] of Object.entries(allCourses)) known.set(courseSig(c), `same as "${n}"`);
+            for (const d of deleted.deleted || []) if (!known.has(courseSig(d.course))) known.set(courseSig(d.course), `deleted "${d.name}"`);
+            fillRestoreList(delEl, (deleted.deleted || []).map(d => ({
+                title: d.name, meta: `deleted ${fmtWhen(d.deleted)} · ${courseSummary(d.course)}`,
+                course: d.course, name: d.name, binTs: d.deleted })), 'No deleted courses');
+            fillRestoreList(histEl, (history.history || []).map(h => ({
+                title: fmtWhen(h.time), meta: [known.get(courseSig(h.course)), courseSummary(h.course)].filter(x => x).join(' · '),
+                course: h.course, name: '' })), 'No earlier versions');
+        }
+
+        const fmtWhen = ts => new Date(ts * 1000).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+        // e.g. "4 marks, S-1-2-3-S-1-2-3-4-F, 1.03 km" or "2 courses, 6 marks"
+        function courseSummary(c) {
+            const subs = CourseOrder.subCourses(c);
+            const marks = subs.reduce((n, s) => n + ((s.course.marks || []).length), 0);
+            if (subs.length > 1) return `${subs.length} courses, ${marks} marks`;
+            const keys = courseOrderKeys(c);
+            return `${marks} mark${marks !== 1 ? 's' : ''}${keys ? ', ' + keys.join('-') : ''}, ${calculateCourseLength(c).toFixed(2)} km`;
+        }
+
+        function fillRestoreList(el, rows, emptyText) {
+            el.innerHTML = '';
+            if (!rows.length) { el.innerHTML = `<div class="restore-empty">${emptyText}</div>`; return; }
+            for (const r of rows) {
+                const row = document.createElement('div');
+                row.className = 'restore-row';
+                const text = document.createElement('div');
+                text.className = 'restore-text';
+                const t = document.createElement('div'); t.className = 'restore-name'; t.textContent = r.title;
+                const m = document.createElement('div'); m.className = 'restore-meta'; m.textContent = r.meta;
+                text.append(t, m);
+                const pv = document.createElement('button'); pv.textContent = 'Preview';
+                pv.onclick = () => {
+                    document.querySelectorAll('.restore-row.previewing').forEach(x => x.classList.remove('previewing'));
+                    row.classList.add('previewing');
+                    displayCourse(r.course, true, { preview: true });
+                    updateInfoBox(r.name || `Saved ${r.title}`, r.course);
+                };
+                const go = document.createElement('button'); go.textContent = 'Restore'; go.className = 'restore-go';
+                go.onclick = () => restoreCourse(r.course, r.name, r.binTs);
+                row.append(text, pv, go);
+                el.appendChild(row);
+            }
+        }
+
+        function closeRestore() {
+            if (!restoreOpen) return;
+            restoreOpen = false;
+            document.getElementById('restorePanel').classList.remove('visible');
+            if (courseData) { displayCourse(courseData, false); updateInfoBox(selectedCourseName, courseData); }
+            else clearCourseDisplay();
+            editorClosed();
+        }
+
+        // Save a deleted course / earlier version as a named course (not the live course)
+        async function restoreCourse(course, defaultName, binTs) {
+            const name = prompt('Restore as course name:', defaultName || '');
+            if (!name) return;
+            if (allCourses[name] && !confirm(`Course "${name}" already exists. Replace it with this one?`)) return;
+            const c = JSON.parse(JSON.stringify(course));
+            ['saved', 'updated', 'updated_iso', 'name'].forEach(k => delete c[k]);
+            try { CourseOrder.checkCourse(c); } catch (e) { alert(`Can't restore: ${e.message}`); return; }
+            const r = await queueSave(name, c, false);
+            if (!r.saved) { alert(r.error); return; }
+            if (binTs !== undefined) {
+                await fetch(`${EVENT_API}/admin/deleted-courses/${binTs}`,
+                            { method: 'DELETE', headers: { 'X-Admin-Password': adminPassword } }).catch(() => {});
+            }
+            closeRestore();
+            selectedCourseName = name;
+            await reloadAndReselect();
+        }
+
         // --- Course transform (rotate / translate / scale) ---
 
         const EARTH_R = 6371000;
@@ -2700,7 +2841,7 @@
         }
 
         // Transform/Mark Order open, or a draw/move/mark edit in progress
-        const editorBusy = () => transformActive || !!markOrderTarget || drawingMode || !!moveTarget || !!editTarget || importing;
+        const editorBusy = () => transformActive || !!markOrderTarget || drawingMode || !!moveTarget || !!editTarget || importing || restoreOpen;
 
         // Editing actions wait for an import to finish saving
         function importBusy() {
