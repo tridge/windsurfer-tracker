@@ -671,8 +671,10 @@ const CourseOrder = (() => {
         if (p.comment !== undefined && typeof p.comment !== 'string') throw new Error(`invalid ${what} comment`);
         if ((kind === 'mark' || kind === 'S') && p.rounding !== undefined && !ROUNDINGS.includes(p.rounding))
             throw new Error(`invalid ${what} rounding`);
+        if ((kind === 'mark' || kind === 'F') && p.color !== undefined && p.color !== safeColor(p.color, null))
+            throw new Error(`invalid ${what} colour`);
         if (kind === 'mark') {
-            if (p.color !== undefined && p.color !== safeColor(p.color, null)) throw new Error(`invalid ${what} colour`);
+            // marks have no pin
         } else if (p.pin !== undefined && (!isObj(p.pin) || !isNum(p.pin.dist) || !(p.pin.dist > 0 && p.pin.dist <= 10000) ||
                                            (p.pin.side !== 'left' && p.pin.side !== 'right') ||
                                            (p.pin.color !== undefined && p.pin.color !== safeColor(p.pin.color, null)))) {
@@ -754,7 +756,10 @@ const CourseOrder = (() => {
         });
     }
 
-    function finishIcon(label, letter, color) {
+    // fill: optional finish.color; with one the finish is a circle marked F in that
+    // colour (FB etc. with several courses), otherwise the chequered flag
+    function finishIcon(label, letter, color, fill) {
+        if (safeColor(fill, null)) return markIcon(letter ? `F${letter}` : 'F', fill, label);
         const badge = letter ? `<circle cx="10" cy="-10" r="6" fill="${color}" stroke="white" stroke-width="1"/>` +
                                `<text x="10" y="-7" text-anchor="middle" fill="white" font-size="9" font-weight="bold">${letter}</text>` : '';
         const svg = `

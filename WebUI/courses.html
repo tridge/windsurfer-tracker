@@ -1400,7 +1400,7 @@
                         popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish', ${q})">Split</button>`;
                         popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish', ${q})">Del</button>`;
                     }
-                    add(c.finish, createFinishIcon(CourseOrder.commentHtml(c.finish.comment, true), multi ? letter : null, sc.color), popup + '</div>');
+                    add(c.finish, createFinishIcon(CourseOrder.commentHtml(c.finish.comment, true), multi ? letter : null, sc.color, c.finish.color), popup + '</div>');
                 }
                 legs += Math.max(0, courseSequence(c).length - 1);
             }
@@ -2007,7 +2007,10 @@
                 editingMarkIndex = markIndex;
                 document.getElementById('editMarkNumber').textContent = (multiCourse() ? `Course ${letter} ` : '') + (markIndex === 'start' ? 'start' : 'finish');
                 document.getElementById('editMarkComment').value = pt.comment || '';
-                colorRow.style.display = 'none';
+                // the finish can be a coloured "F" mark instead of the chequered flag
+                colorRow.style.display = markIndex === 'finish' ? '' : 'none';
+                setColorDefaultText(markIndex === 'finish' ? 'Flag (chequered)' : 'Default (Orange)');
+                document.getElementById('editMarkColor').value = markIndex === 'finish' ? (pt.color || '') : '';
                 pinRow.style.display = '';
                 // the start can be "rounded" when the course crosses its line mid-race
                 const isStart = markIndex === 'start';
@@ -2028,6 +2031,7 @@
                 editingMarkIndex = markIndex;
                 const mark = cd.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
+                setColorDefaultText('Default (Orange)');
                 document.getElementById('editMarkColor').value = mark.color || '';
                 document.getElementById('editMarkRounding').value = roundingChoice(mark.rounding);
                 document.getElementById('editMarkComment').value = mark.comment || '';
@@ -2038,6 +2042,11 @@
             }
             editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
             document.getElementById('editMarkOverlay').classList.add('visible');
+        }
+
+        // first colour choice: the default for what's being edited
+        function setColorDefaultText(text) {
+            document.querySelector('#editMarkColor option[value=""]').textContent = text;
         }
 
         // dialog choice for a stored rounding (plain 'both' from before the display
@@ -2079,6 +2088,10 @@
                     if (pinColor) pt.pin.color = pinColor;
                 } else {
                     delete pt.pin;
+                }
+                if (editingMarkIndex === 'finish') {
+                    const color = document.getElementById('editMarkColor').value;
+                    if (color) pt.color = color; else delete pt.color;
                 }
                 if (editingMarkIndex === 'start') {
                     const rounding = document.getElementById('editMarkRounding').value;

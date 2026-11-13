@@ -1030,7 +1030,7 @@
                     add(mark, createMarkIcon(name, CourseOrder.safeColor(mark.color, multi ? sc.color : undefined),
                                              CourseOrder.commentHtml(mark.comment)), popup);
                 });
-                if (c.finish) add(c.finish, createFinishIcon(null, multi ? letter : null, sc.color),
+                if (c.finish) add(c.finish, createFinishIcon(null, multi ? letter : null, sc.color, c.finish.color),
                                   `<strong>${multi ? `Course ${letter} finish` : 'Finish'}</strong>`);
 
                 // Course line: routed with rounding and arrows when a mark order is set;

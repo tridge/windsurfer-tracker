@@ -3003,7 +3003,7 @@
                         popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish', ${q})">Split</button>`;
                         popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish', ${q})">Del</button>`;
                     }
-                    add(c.finish, createFinishIcon(CourseOrder.commentHtml(c.finish.comment, true), multi ? letter : null, sc.color), popup + '</div>');
+                    add(c.finish, createFinishIcon(CourseOrder.commentHtml(c.finish.comment, true), multi ? letter : null, sc.color, c.finish.color), popup + '</div>');
                 }
 
                 // Course line: routed with rounding and arrows when a mark order is set;
@@ -3349,12 +3349,16 @@
                 editingMarkIndex = 'finish';
                 document.getElementById('editMarkNumber').textContent = multiCourse() ? `Course ${letter} finish` : 'Finish';
                 document.getElementById('editMarkComment').value = cd.finish.comment || '';
-                colorRow.style.display = 'none';  // Hide color for finish
+                // the finish can be a coloured "F" mark instead of the chequered flag
+                colorRow.style.display = '';
+                document.querySelector('#editMarkColor option[value=""]').textContent = 'Flag (chequered)';
+                document.getElementById('editMarkColor').value = cd.finish.color || '';
             } else {
                 if (!cd.marks || markIndex >= cd.marks.length) return;
                 editingMarkIndex = markIndex;
                 const mark = cd.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
+                document.querySelector('#editMarkColor option[value=""]').textContent = 'Default (Orange)';
                 document.getElementById('editMarkColor').value = mark.color || '';
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';  // Show color for marks
@@ -3395,6 +3399,8 @@
                 } else {
                     delete cd.finish.comment;
                 }
+                const color = document.getElementById('editMarkColor').value;
+                if (color) cd.finish.color = color; else delete cd.finish.color;
             } else {
                 // Regular mark - also handle color
                 if (!cd.marks) return;
