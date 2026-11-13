@@ -90,6 +90,13 @@
         .tracking-controls-btn:hover {
             color: #000;
         }
+        /* the title takes the spare space so the header buttons (division filter,
+           search, gear) sit together on the right whichever are shown */
+        .panel-header h3 { margin-right: auto; }
+        .panel-header .tracking-controls-btn { margin-left: 0; }
+        .tracker-search { padding: 6px 8px; border-bottom: 1px solid #ddd; background: #fafafa; }
+        .tracker-search input { width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 13px;
+                                border: 1px solid #ccc; border-radius: 4px; }
         
         .panel-content {
             overflow-y: auto;
@@ -1124,10 +1131,19 @@
                     title="Division filter" style="display:none;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;"><path d="M3 4h18l-7 9v5.5l-4 2V13L3 4z"/></svg>
             </button>
+            <button class="tracking-controls-btn" id="trackerSearchBtn" style="display:none;"
+                    onclick="event.stopPropagation(); toggleTrackerSearch()"
+                    title="Find a tracker (name, or the number on its label)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-2px;"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21" stroke-linecap="round"/></svg>
+            </button>
             <button class="tracking-controls-btn" id="trackingControlsBtn"
                     onclick="event.stopPropagation(); showTrackingControls()"
                     title="Sort / filter">⚙</button>
             <span class="panel-toggle" id="panelToggle">▼</span>
+        </div>
+        <div class="tracker-search" id="trackerSearch" style="display:none">
+            <input type="search" id="trackerSearchInput" placeholder="Name or label number, e.g. 306088" autocomplete="off"
+                   oninput="onTrackerSearch()" onkeydown="onTrackerSearchKey(event)">
         </div>
         <div class="assist-alerts" id="assistAlerts" style="display:none"></div>
         <div class="panel-content" id="panelContent">
@@ -1583,7 +1599,7 @@
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/course-order.js?v=d517b892"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
-    <script src="js/wind.js?v=43a269e4"></script>
+    <script src="js/wind.js?v=9488dc92"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
     <script>
         // Initialize map centered on Auckland
@@ -1941,8 +1957,18 @@
         // Data paths for this event (positions, logs, etc.)
         const DATA_BASE = `${EVENT_ID}/`;
         // live wind under the zoom buttons, when the event has a wind.json
-        WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind' });
-        // the finish recorder button stacks below them in the same corner
+        // live wind: bottom left, just above the map scale
+        WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind',
+                                position: 'bottomleft' });
+        function placeWindAboveScale() {
+            const scale = document.getElementById('customScale'), wind = WindDisplay.container();
+            if (!scale || !wind) return;
+            const top = scale.getBoundingClientRect().top, mapBottom = map.getContainer().getBoundingClientRect().bottom;
+            wind.style.marginBottom = `${Math.max(10, Math.round(mapBottom - top + 6))}px`;
+        }
+        placeWindAboveScale();
+        window.addEventListener('resize', placeWindAboveScale);
+        // the finish recorder button stacks under the zoom buttons
         new (L.Control.extend({
             onAdd() {
                 const b = document.getElementById('finishBtn');
@@ -2094,6 +2120,8 @@
                 document.getElementById('menuExportCourse').style.display = 'none';
                 document.getElementById('menuImportCourse').style.display = 'none';
                 document.getElementById('finishBtn').style.display = 'none';
+                closeTrackerSearch();
+                document.getElementById('trackerSearchBtn').style.display = 'none';
                 document.getElementById('adminMenuBtn').style.display = 'none';
                 document.getElementById('registrationSection').style.display = 'none';
                 cancelDrawing();
@@ -2119,6 +2147,7 @@
                     document.getElementById('menuExportCourse').style.display = '';
                     document.getElementById('menuImportCourse').style.display = '';
                     document.getElementById('finishBtn').style.display = 'flex';
+                document.getElementById('trackerSearchBtn').style.display = '';
                     document.getElementById('adminMenuBtn').style.display = 'flex';
                     document.getElementById('showAccuracyToggle').checked = showAccuracyCircles;
                     updateCourseInfo();
@@ -4364,8 +4393,8 @@
             // request assistance)
             const assistList = unfiltered.filter(s => s.ast && s.role !== 'buoy');
 
-            // Apply the division filter (assist requesters always shown)
-            const all = unfiltered.filter(s => s.ast || divisionPasses(s));
+            // Apply the division filter (assist requesters always shown), then any admin search
+            const all = unfiltered.filter(s => s.ast || divisionPasses(s)).filter(trackerSearchPasses);
             updateDivisionFilterBtn();
 
             // Separate by role
@@ -4487,6 +4516,53 @@
         }
         
         // Center map on a specific sailor
+        // --- Admin tracker search: by name or the 6-digit number on the tracker's label ---
+
+        let trackerSearchQuery = '';
+
+        // name/id text match, or digits matching the digits of the tracker id (G306088 -> 306088)
+        function trackerSearchPasses(s) {
+            const q = trackerSearchQuery;
+            if (!q) return true;
+            const text = [s.displayid, s.name, s.id].filter(x => x).join(' ').toLowerCase();
+            if (text.includes(q)) return true;
+            const digits = q.replace(/\D/g, '');
+            return digits.length > 0 && digits === q.replace(/\s/g, '') && String(s.id || '').replace(/\D/g, '').includes(digits);
+        }
+
+        function toggleTrackerSearch() {
+            const box = document.getElementById('trackerSearch');
+            if (box.style.display !== 'none') { closeTrackerSearch(); return; }
+            box.style.display = '';
+            // make sure the list is showing
+            if (panelCollapsed) togglePanel();
+            const input = document.getElementById('trackerSearchInput');
+            input.value = trackerSearchQuery;
+            input.focus();
+        }
+
+        function closeTrackerSearch() {
+            document.getElementById('trackerSearch').style.display = 'none';
+            if (trackerSearchQuery) { trackerSearchQuery = ''; refreshTrackerList(); }
+        }
+
+        function refreshTrackerList() {
+            if (currentPositions && currentPositions.sailors) updateSailorList(currentPositions.sailors);
+        }
+
+        function onTrackerSearch() {
+            trackerSearchQuery = document.getElementById('trackerSearchInput').value.trim().toLowerCase();
+            refreshTrackerList();
+        }
+
+        // Enter: go to the first match (popup has Edit); Esc: clear and close
+        function onTrackerSearchKey(e) {
+            if (e.key === 'Escape') { closeTrackerSearch(); return; }
+            if (e.key !== 'Enter') return;
+            const first = document.querySelector('#panelContent .sailor-item');
+            if (first) first.click();
+        }
+
         function centerOnSailor(sailorId) {
             if (currentPositions && currentPositions.sailors && currentPositions.sailors[sailorId]) {
                 const sailor = currentPositions.sailors[sailorId];
@@ -4908,6 +4984,7 @@
             // Ensure admin UI stays visible after returning from finish view
             if (adminMode) {
                 document.getElementById('finishBtn').style.display = 'flex';
+                document.getElementById('trackerSearchBtn').style.display = '';
                 document.getElementById('adminBtn').classList.add('active');
             }
         }

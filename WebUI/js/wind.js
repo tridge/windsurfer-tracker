@@ -4,9 +4,10 @@
 // (the tooltip adds magnetic via wmmDeclination() from wmm.js when loaded).
 // Hidden if the event has no wind.json.
 //
-// WindDisplay.init(map, { url, storageKey, menuItem, menuCheck })
+// WindDisplay.init(map, { url, storageKey, menuItem, menuCheck, position })
 //   menuItem:  id of a menu entry that toggles the display (shown once wind data exists)
 //   menuCheck: optional id of an element that shows ✓ when on
+//   position:  Leaflet control corner (default 'topleft', under the zoom buttons)
 const WindDisplay = (() => {
     const POLL_MS = 60000;
     const STALE_S = 300, OLD_S = 900;
@@ -105,7 +106,7 @@ const WindDisplay = (() => {
                 return el;
             }
         });
-        control = new Ctl({ position: 'topleft' }).addTo(map);
+        control = new Ctl({ position: opts.position || 'topleft' }).addTo(map);
         control.getContainer().style.display = 'none';
         poll();
         setInterval(poll, POLL_MS);
@@ -119,5 +120,5 @@ const WindDisplay = (() => {
         updateMenu();
     }
 
-    return { init, toggle, isShown: () => shown };
+    return { init, toggle, isShown: () => shown, container: () => control && control.getContainer() };
 })();
