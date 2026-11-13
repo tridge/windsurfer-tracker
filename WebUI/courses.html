@@ -713,6 +713,7 @@
 
     <script src="js/map-utils.js"></script>
     <script src="js/wmm.js"></script>
+    <script src="js/course-order.js"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -865,9 +866,6 @@
 
         // Scale bar
         map.on('zoomend', () => updateScale(map));
-        map.on('zoomend', () => {
-            if (displayedCourse && courseOrderKeys(displayedCourse)) renderLegs(displayedCourse);
-        });
         map.on('moveend', () => updateScale(map));
         updateScale(map);
 
@@ -879,7 +877,6 @@
         let courseMarkers = [];
         let courseLines = [];
         let legLabels = [];
-        let displayedCourse = null;     // course whose legs are on the map (redrawn on zoom)
         let allCourses = {};
         let selectedCourseName = null;
         let courseData = null;          // Deep copy of selected course for editing
@@ -943,109 +940,17 @@
             return totalDistance;
         }
 
-        // --- Mark rounding order ---
+        // --- Mark rounding order (shared implementation in js/course-order.js) ---
+        const parseMarkOrder = CourseOrder.parse;
+        const formatMarkOrder = CourseOrder.format;
+        const courseOrderKeys = CourseOrder.keys;
+        const courseSequence = CourseOrder.sequence;
+        const autoRoundingSide = CourseOrder.autoSide;
+        const markRoundingSide = CourseOrder.markSide;
+        const orderInsertMark = CourseOrder.insertMark;
+        const orderDeleteMark = CourseOrder.deleteMark;
 
-        // Parse "S12313F" (or "S 1 2 10 F") into ['S', 1, 2, ..., 'F'].
-        // S/F are added if missing. Returns {seq} or {error}.
-        function parseMarkOrder(str, numMarks) {
-            const s = (str || '').toUpperCase().trim();
-            if (!s) return { seq: null };
-            const tokens = /[\s,\-]/.test(s) ? s.split(/[\s,\-]+/).filter(t => t) : s.split('');
-            const seq = [];
-            for (const t of tokens) {
-                if (t === 'S' || t === 'F') { seq.push(t); continue; }
-                if (!/^\d+$/.test(t)) return { error: `"${t}" is not S, F or a mark number` };
-                const n = parseInt(t, 10);
-                if (n < 1 || n > numMarks) return { error: `Mark ${n} doesn't exist (course has ${numMarks})` };
-                seq.push(n);
-            }
-            if (seq[0] !== 'S') seq.unshift('S');
-            if (seq[seq.length - 1] !== 'F') seq.push('F');
-            for (let i = 0; i < seq.length; i++) {
-                if (seq[i] === 'S' && i !== 0) return { error: 'S must come first' };
-                if (seq[i] === 'F' && i !== seq.length - 1) return { error: 'F must come last' };
-                if (i > 0 && seq[i] === seq[i - 1]) return { error: `Mark ${seq[i]} repeated back to back` };
-            }
-            return { seq };
-        }
-
-        function formatMarkOrder(seq) {
-            return seq.some(k => typeof k === 'number' && k > 9) ? seq.join(' ') : seq.join('');
-        }
-
-        // Custom order of a course as keys, or null if none/invalid
-        function courseOrderKeys(course) {
-            if (!course || !course.order) return null;
-            const r = parseMarkOrder(course.order, course.marks ? course.marks.length : 0);
-            return r.seq || null;
-        }
-
-        // Course visiting sequence: [{key, pt, mark}] where mark is the 0-based mark index or null
-        function courseSequence(course) {
-            const nm = course.marks ? course.marks.length : 0;
-            let keys = courseOrderKeys(course);
-            if (!keys) {
-                keys = [];
-                if (course.start) keys.push('S');
-                for (let i = 1; i <= nm; i++) keys.push(i);
-                if (course.finish) keys.push('F');
-            }
-            return keys.map(k => k === 'S' ? { key: k, pt: course.start, mark: null }
-                              : k === 'F' ? { key: k, pt: course.finish, mark: null }
-                              : { key: k, pt: course.marks[k - 1], mark: k - 1 })
-                       .filter(e => e.pt);
-        }
-
-        // Auto rounding side from the net turn at the marks: left = port
-        function autoRoundingSide(seq) {
-            let turn = 0;
-            for (let i = 1; i + 1 < seq.length; i++) {
-                if (seq[i].mark === null) continue;
-                const a = metresNE(seq[i - 1].pt, seq[i].pt), b = metresNE(seq[i].pt, seq[i + 1].pt);
-                const cross = a.east * b.north - a.north * b.east;
-                const dot = a.east * b.east + a.north * b.north;
-                turn += Math.atan2(cross, dot);
-            }
-            return turn >= 0 ? 'port' : 'starboard';
-        }
-
-        function markRoundingSide(course, markIdx, autoSide) {
-            const r = course.marks && course.marks[markIdx] && course.marks[markIdx].rounding;
-            return r === 'port' || r === 'starboard' ? r : autoSide;
-        }
-
-        // Keep a custom order consistent after inserting a mark at 0-based index
-        // insertIndex between prevKey and nextKey
-        function orderInsertMark(course, insertIndex, prevKey, nextKey) {
-            const keys = courseOrderKeys(course);
-            if (!keys) return;
-            const num = insertIndex + 1;
-            const shifted = keys.map(k => typeof k === 'number' && k >= num ? k + 1 : k);
-            const nk = typeof nextKey === 'number' && nextKey >= num ? nextKey + 1 : nextKey;
-            const out = [];
-            shifted.forEach((k, i) => {
-                out.push(k);
-                if (k === prevKey && shifted[i + 1] === nk) out.push(num);
-            });
-            course.order = formatMarkOrder(out);
-        }
-
-        // Keep a custom order consistent after deleting the 1-based mark num
-        // (call before removing the mark)
-        function orderDeleteMark(course, num) {
-            const keys = courseOrderKeys(course);
-            if (!keys) { delete course.order; return; }
-            const out = [];
-            for (const k of keys) {
-                if (k === num) continue;
-                const k2 = typeof k === 'number' && k > num ? k - 1 : k;
-                if (out.length && out[out.length - 1] === k2) continue;
-                out.push(k2);
-            }
-            course.order = formatMarkOrder(out);
-        }
-
-        // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm\"
+        // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm"
         function formatCourseLength(km, decimals = 1) {
             return `${km.toFixed(decimals)} km / ${(km / 1.852).toFixed(decimals)} nm`;
         }
@@ -1142,7 +1047,6 @@
             courseMarkers.forEach(m => map.removeLayer(m));
             courseMarkers = [];
             clearLegs();
-            displayedCourse = null;
         }
 
         function clearLegs() {
@@ -1151,12 +1055,12 @@
             clearLegLabels();
         }
 
-        // Course legs: plain line in mark order, or a routed line with rounding arcs
-        // and arrows when a custom order is set (pixel offsets, so redrawn on zoom)
+        // Course legs: plain line in mark order, or the routed line with rounding arcs,
+        // arrows and labels when a custom order is set
         function renderLegs(course) {
             clearLegs();
             if (courseOrderKeys(course)) {
-                renderOrderedLegs(course);
+                courseLines.push(CourseOrder.routeLayer(course, { labels: true }).addTo(map));
                 return;
             }
             const points = coursePoints(course).map(p => [p.lat, p.lon]);
@@ -1166,88 +1070,6 @@
                 }).addTo(map));
             }
             showLegLabels(course);
-        }
-
-        const LEG_OFFSET_PX = 18;   // route offset from a mark
-        const LEG_GAP_PX = 14;      // extra offset each time a pair of points is reused
-
-        function renderOrderedLegs(course) {
-            const seq = courseSequence(course);
-            if (seq.length < 2) return;
-            const autoSide = autoRoundingSide(seq);
-            const ref = seq[0].pt.lon;
-            const P = seq.map(e => map.latLngToLayerPoint([e.pt.lat, unwrapLon(e.pt.lon, ref)]));
-            // +1 = offset to the right of travel (mark passed to port), -1 = left
-            const sideSign = i => {
-                const e = seq[i];
-                if (e.mark !== null) return markRoundingSide(course, e.mark, autoSide) === 'port' ? 1 : -1;
-                const nb = seq[i === 0 ? 1 : i - 1];
-                return (nb.mark !== null ? markRoundingSide(course, nb.mark, autoSide) : autoSide) === 'port' ? 1 : -1;
-            };
-            const pairUse = {};
-            const legs = [];
-            for (let i = 0; i + 1 < seq.length; i++) {
-                const a = P[i], b = P[i + 1];
-                const len = a.distanceTo(b);
-                const u = len > 0 ? b.subtract(a).divideBy(len) : L.point(1, 0);
-                const n = L.point(-u.y, u.x);  // right of travel in screen coords
-                const ka = `${seq[i].pt.lat},${seq[i].pt.lon}`, kb = `${seq[i + 1].pt.lat},${seq[i + 1].pt.lon}`;
-                const pk = ka < kb ? ka + '|' + kb : kb + '|' + ka;
-                const k = pairUse[pk] = (pairUse[pk] === undefined ? 0 : pairUse[pk] + 1);
-                const r = LEG_OFFSET_PX + k * LEG_GAP_PX;
-                const sa = sideSign(i), sb = sideSign(i + 1);
-                legs.push({ u, n, r, sa, sb, len,
-                            from: a.add(n.multiplyBy(sa * r)), to: b.add(n.multiplyBy(sb * r)) });
-            }
-
-            // route: legs joined by arcs around each mark in the rounding direction
-            const route = [legs[0].from, legs[0].to];
-            for (let i = 1; i < legs.length; i++) {
-                const c = P[i], pin = legs[i - 1].to, pout = legs[i].from;
-                const rin = legs[i - 1].r, rout = legs[i].r;
-                const a0 = Math.atan2(pin.y - c.y, pin.x - c.x);
-                let d = Math.atan2(pout.y - c.y, pout.x - c.x) - a0;
-                if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
-                else { while (d < 0) d += 2 * Math.PI; }
-                const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
-                for (let j = 1; j < steps; j++) {
-                    const f = j / steps, ang = a0 + d * f, rr = rin + (rout - rin) * f;
-                    route.push(L.point(c.x + rr * Math.cos(ang), c.y + rr * Math.sin(ang)));
-                }
-                route.push(pout, legs[i].to);
-            }
-            courseLines.push(L.polyline(route.map(p => map.layerPointToLatLng(p)), {
-                color: '#ff6600', weight: 3, opacity: 0.85
-            }).addTo(map));
-
-            // arrows and labels beside each leg, on its offset side
-            const decl = courseDeclination(course);
-            const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
-            const LW = 116, LH = 36;
-            legs.forEach((g, i) => {
-                const mid = g.from.add(g.to).divideBy(2);
-                const deg = Math.atan2(g.to.y - g.from.y, g.to.x - g.from.x) * 180 / Math.PI;
-                legLabels.push(L.marker(map.layerPointToLatLng(mid), {
-                    icon: L.divIcon({
-                        className: 'leg-arrow', iconSize: [18, 18], iconAnchor: [9, 9],
-                        html: `<svg width="18" height="18" viewBox="-9 -9 18 18" style="transform:rotate(${deg}deg)">` +
-                              `<path d="M-6,-6 L7,0 L-6,6 L-2,0 Z" fill="#ff6600" stroke="#7c2d12" stroke-width="1"/></svg>`
-                    }),
-                    interactive: false, keyboard: false
-                }).addTo(map));
-                const side = (g.sa + g.sb) >= 0 ? 1 : -1;
-                const away = 12 + Math.abs(g.n.x) * LW / 2 + Math.abs(g.n.y) * LH / 2;
-                const lp = mid.add(g.n.multiplyBy(side * away));
-                const t = bearingDeg(seq[i].pt, seq[i + 1].pt);
-                const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
-                legLabels.push(L.marker(map.layerPointToLatLng(lp), {
-                    icon: L.divIcon({
-                        className: 'leg-label', iconSize: [0, 0],
-                        html: `<div>${seq[i].key}→${seq[i + 1].key}: ${hdg}<br>${formatLegLength(seq[i].pt, seq[i + 1].pt)}</div>`
-                    }),
-                    interactive: false, keyboard: false
-                }).addTo(map));
-            });
         }
 
         function displayCourse(course, fit = true) {
@@ -1346,7 +1168,6 @@
                 points.push([course.finish.lat, course.finish.lon]);
             }
 
-            displayedCourse = course;
             renderLegs(course);
 
             // Auto-zoom to fit course
