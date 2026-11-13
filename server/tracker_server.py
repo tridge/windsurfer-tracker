@@ -107,13 +107,15 @@ def load_json_file(path: Path, default):
         return json.load(f)
 
 
-def save_json_atomic(path: Path, obj) -> None:
-    """Write JSON via a uniquely named temp file and rename."""
+def save_json_atomic(path: Path, obj, mode: int = 0o644) -> None:
+    """Write JSON via a uniquely named temp file and rename. mode: the file's
+    permissions (mkstemp makes 0600; course files are served by the web server)."""
     import tempfile
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(obj, f, indent=2)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -157,7 +159,7 @@ def load_deleted_courses(tracker) -> list[dict]:
 def save_deleted_courses(tracker, deleted: list[dict]) -> None:
     tracker.deleted_courses_file.parent.mkdir(parents=True, exist_ok=True)
     deleted.sort(key=lambda e: e.get('deleted', 0))
-    save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:])
+    save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:], mode=0o600)
 
 
 def bin_course(tracker, name: str, course: dict) -> None:
@@ -4515,9 +4517,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
         if subpath == '/admin/course':
             tracker = get_event_tracker(eid)
-            if tracker and tracker.course_file.exists():
-                rotate_file(tracker.course_file)
-                log(f"[EVENT {eid}] Course deleted (rotated)")
+            if tracker:
+                with course_lock(eid):
+                    rotated = rotate_file(tracker.course_file)
+                if rotated:
+                    log(f"[EVENT {eid}] Course deleted (rotated)")
             self._send_json({"success": True})
 
         elif subpath.startswith('/admin/courses/'):

@@ -193,6 +193,10 @@ def test_deleted_named_course_kept_in_bin(http_client, server):
     # not in the public web tree
     assert not (server.data_dir / "html" / str(eid) / "deleted_courses.json").exists()
     assert (server.data_dir / "private" / str(eid) / "deleted_courses.json").exists()
+    # course files stay readable by a separate web server; the bin doesn't
+    import stat
+    assert stat.S_IMODE((server.data_dir / "html" / str(eid) / "courses.json").stat().st_mode) == 0o644
+    assert stat.S_IMODE((server.data_dir / "private" / str(eid) / "deleted_courses.json").stat().st_mode) == 0o600
 
     # malformed ids are refused, not treated as "match everything"
     for bad in ("nan", "1234.0", "x" * 32):
