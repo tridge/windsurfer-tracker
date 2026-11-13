@@ -373,6 +373,7 @@
             background: rgba(8, 145, 178, 0.92); color: white;
             padding: 2px 6px; border-radius: 4px; white-space: nowrap;
             font-size: 12px; font-weight: 600; pointer-events: none;
+            text-align: center; line-height: 1.3;
             box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
         .transform-panel h3 { margin: 0 0 12px 0; font-size: 16px; }
@@ -1901,6 +1902,13 @@
             legLabels = [];
         }
 
+        // Leg length in metres (km over 1 km) and nautical miles
+        function formatLegLength(a, b) {
+            const km = haversineDistance(a.lat, a.lon, b.lat, b.lon);
+            const dist = km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(2)} km`;
+            return `${dist} / ${(km / 1.852).toFixed(2)} nm`;
+        }
+
         // Label each leg at its midpoint with true and magnetic bearing; returns declination
         function showLegLabels(course) {
             clearLegLabels();
@@ -1914,7 +1922,7 @@
                 const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
                 const icon = L.divIcon({
                     className: 'leg-label',
-                    html: `<div>${fmt(t)}°T / ${fmt(m)}°M</div>`,
+                    html: `<div>${fmt(t)}°T / ${fmt(m)}°M<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
                     iconSize: [0, 0]
                 });
                 const mid = [(pts[i].lat + pts[i + 1].lat) / 2, (pts[i].lon + pts[i + 1].lon) / 2];
