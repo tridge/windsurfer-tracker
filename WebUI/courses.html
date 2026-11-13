@@ -367,6 +367,14 @@
             font-size: 13px; display: none;
         }
         .transform-panel.visible { display: block; }
+        .leg-label { background: none !important; border: none !important; }
+        .leg-label div {
+            position: absolute; transform: translate(-50%, -50%);
+            background: rgba(8, 145, 178, 0.92); color: white;
+            padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+            font-size: 12px; font-weight: 600; pointer-events: none;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+        }
         .transform-panel h3 { margin: 0 0 12px 0; font-size: 16px; }
         .transform-panel .tf-section {
             border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;
@@ -663,6 +671,7 @@
     </div>
 
     <script src="js/map-utils.js"></script>
+    <script src="js/wmm.js"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -857,6 +866,7 @@
         let transformActive = false;
         let transformPicking = false;
         let transformPreview = null;
+        let legLabels = [];
 
         // --- Utility functions (from event.html) ---
 
@@ -1873,15 +1883,44 @@
                 Math.max(1, tfNum('tfScale', 100)));
             displayCourse(transformPreview, false);
             updateInfoBox(selectedCourseName, transformPreview);
+            const decl = showLegLabels(transformPreview);
 
             const lenOld = calculateCourseLength(courseData);
             const lenNew = calculateCourseLength(transformPreview);
             let info = `Length: ${formatCourseLength(lenOld, 2)} → ${formatCourseLength(lenNew, 2)}`;
             const pts = coursePoints(transformPreview);
             if (pts.length >= 2) {
-                info += `<br>First leg bearing: ${Math.round(bearingDeg(pts[0], pts[1]))}°`;
+                info += `<br>First leg bearing: ${Math.round(bearingDeg(pts[0], pts[1]))}°T`;
             }
+            info += `<br>Magnetic declination ${Math.abs(decl).toFixed(1)}°${decl >= 0 ? 'E' : 'W'} (WMM2025)`;
             document.getElementById('tfInfo').innerHTML = info;
+        }
+
+        function clearLegLabels() {
+            legLabels.forEach(l => map.removeLayer(l));
+            legLabels = [];
+        }
+
+        // Label each leg at its midpoint with true and magnetic bearing; returns declination
+        function showLegLabels(course) {
+            clearLegLabels();
+            const pts = coursePoints(course);
+            if (pts.length === 0) return 0;
+            const decl = wmmDeclination(pts.reduce((a, p) => a + p.lat, 0) / pts.length,
+                                        pts.reduce((a, p) => a + p.lon, 0) / pts.length);
+            for (let i = 0; i + 1 < pts.length; i++) {
+                const t = bearingDeg(pts[i], pts[i + 1]);
+                const m = (t - decl + 360) % 360;
+                const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
+                const icon = L.divIcon({
+                    className: 'leg-label',
+                    html: `<div>${fmt(t)}°T / ${fmt(m)}°M</div>`,
+                    iconSize: [0, 0]
+                });
+                const mid = [(pts[i].lat + pts[i + 1].lat) / 2, (pts[i].lon + pts[i + 1].lon) / 2];
+                legLabels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
+            }
+            return decl;
         }
 
         // Pick mode: clicking the map moves the pivot to that point
@@ -1921,6 +1960,7 @@
             if (!transformActive) return;
             transformActive = false;
             transformPreview = null;
+            clearLegLabels();
             tfStopPick();
             document.removeEventListener('keydown', handleTransformKeydown);
             document.getElementById('transformPanel').classList.remove('visible');
