@@ -970,6 +970,11 @@
         let tfDrag = null;              // active pointer drag
         let tfSession = null;           // {name, base}: course being transformed and its snapshot
         let activeSub = 'A';            // course (A, B...) of the file that mark edits/moves apply to
+        let moveTarget = null;          // {name, data, letter}: course a mark move started on
+        let editTarget = null;          // {name, data, letter}: course the Edit dialog was opened on
+        let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
+        // A course file's content without server timestamps, for spotting changes
+        const courseSig = c => c ? JSON.stringify(c, (k, v) => SERVER_COURSE_FIELDS.includes(k) ? undefined : v) : 'none';
         let markOrderTarget = null;     // {name, data}: course the Mark Order dialog was opened on
         let reselectAfterEdit = false;  // a reload skipped re-selecting while a panel was open
         const pendingSaves = new Map(); // name -> {data}: saves not yet confirmed by the server
@@ -1164,17 +1169,9 @@
             const failed = [];
             for (const [name, course] of byName) {
                 if (allCourses[name] && !overwrite) { skipped++; continue; }
-                try {
-                    const r = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
-                        body: JSON.stringify(course)
-                    });
-                    const d = await r.json();
-                    if (d.success) saved++; else failed.push(`${name}: ${d.error || 'error'}`);
-                } catch (e) {
-                    failed.push(`${name}: ${e.message}`);
-                }
+                // queued behind any pending edits so they can't land after the import
+                const err = await queueSave(name, course, false);
+                if (err) failed.push(`${name}: ${err}`); else saved++;
             }
             await reloadAndReselect();
             let msg = `Imported ${saved} course${saved !== 1 ? 's' : ''}`;
@@ -1233,7 +1230,7 @@
                 const faded = focus && s.letter !== focus;
                 CourseOrder.pinLayers(c, { interactive: movingMarkIndex === null, ref }).forEach(l => courseLines.push(l.addTo(map)));
                 if (courseOrderKeys(c)) {
-                    courseLines.push(CourseOrder.routeLayer(c, { labels: labels && !faded, color: s.color,
+                    courseLines.push(CourseOrder.routeLayer(c, { labels: labels && !faded, color: s.color, ref,
                         letter: multi ? s.letter : null, opacity: faded ? 0.35 : 0.85 }).addTo(map));
                     continue;
                 }
@@ -1244,7 +1241,7 @@
                         color: s.color, weight: 3, opacity: faded ? 0.3 : 0.7, dashArray: '10, 5', interactive: false
                     }).addTo(map));
                 }
-                if (labels && !faded) legLabels.push(...makeLegLabels(seqPts));
+                if (labels && !faded) legLabels.push(...makeLegLabels(seqPts, ref));
             }
         }
 
@@ -1352,6 +1349,8 @@
         function selectCourse(name, course, fromUser) {
             closeTransform();
             closeMarkOrder();
+            cancelMoveMark();
+            closeEditMark();
             if (name !== selectedCourseName) activeSub = 'A';
             selectedCourseName = name;
             courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
@@ -1473,47 +1472,40 @@
         // Saves are queued so the server applies them in order, and until confirmed the
         // saved data stands in for the course in reloads (so a reselect shows it).
         async function saveCourse(name, data) {
+            const err = await queueSave(name, data, true);
+            if (err) alert(err);
+            await reloadAndReselect();
+            return !err;
+        }
+
+        // Queue a save of a named course (live=true also makes it the live course).
+        // Resolves to null on success or an error message.
+        function queueSave(name, data, live) {
             const snap = JSON.parse(JSON.stringify(data));
             const entry = { data: snap };
             pendingSaves.set(name, entry);
             allCourses[name] = snap;
-            const run = saveChain.then(() => postCourse(name, snap));
+            const run = saveChain.then(() => postCourse(name, snap, live));
             saveChain = run;
-            const ok = await run;
-            if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
-            await reloadAndReselect();
-            return ok;
+            return run.then(err => {
+                if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
+                return err;
+            });
         }
 
-        async function postCourse(name, data) {
+        async function postCourse(name, data, live) {
+            const post = (url, body) => fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
+                body: JSON.stringify(body)
+            });
             try {
-                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Admin-Password': adminPassword
-                    },
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    // Also update the live course
-                    await fetch(`${EVENT_API}/admin/course`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Admin-Password': adminPassword
-                        },
-                        body: JSON.stringify(data)
-                    });
-                    return true;
-                } else {
-                    alert('Error: ' + (result.error || 'Unknown error'));
-                    return false;
-                }
+                const result = await (await post(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, data)).json();
+                if (!result.success) return 'Error: ' + (result.error || 'Unknown error');
+                if (live) await post(`${EVENT_API}/admin/course`, data);
+                return null;
             } catch (e) {
-                alert('Error saving course: ' + e.message);
-                return false;
+                return 'Error saving course: ' + e.message;
             }
         }
 
@@ -1549,6 +1541,7 @@
                 }
             }
             drawingCourseName = selectedCourseName;
+            drawingBase = courseSig(allCourses[drawingCourseName]);
             drawingMode = true;
             drawingPoints = [];
             drawingMarkers = [];
@@ -1620,6 +1613,7 @@
         }
 
         function cancelDrawing() {
+            const wasDrawing = drawingMode;
             drawingMode = false;
             drawingPoints = [];
             drawingCourseName = null;
@@ -1643,6 +1637,7 @@
             container.removeEventListener('mousemove', onDrawingMouseMove);
             container.style.cursor = '';
             if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            if (wasDrawing) editorClosed();
         }
 
         function onDrawingClick(e) {
@@ -1718,6 +1713,14 @@
             container.style.cursor = '';
             if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 
+            // the course letters refer to the file as it was when drawing started
+            if (courseSig(allCourses[courseName]) !== drawingBase) {
+                cancelDrawing();
+                editorClosed();
+                alert(`Course "${courseName}" was changed while you were drawing; drawing not saved`);
+                return;
+            }
+
             // Build course and save; only the course being drawn is replaced
             const old = allCourses[courseName];
             const oldSub = old ? CourseOrder.subCourse(old, drawingSub) : null;
@@ -1746,6 +1749,7 @@
             clearDrawingLabels();
             if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
             drawingPoints = [];
+            editorClosed();
 
             saveSelectedCourse();
         }
@@ -1784,6 +1788,7 @@
                 return;
             }
             drawingCourseName = name;
+            drawingBase = courseSig(allCourses[name]);
             drawingSub = 'A';
             selectedCourseName = name;
             // Enter drawing mode immediately
@@ -1927,6 +1932,7 @@
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
             }
+            editTarget = { name: selectedCourseName, data: courseData, letter };
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
@@ -1938,11 +1944,20 @@
         function closeEditMark() {
             editingMarkIndex = null;
             document.getElementById('editMarkOverlay').classList.remove('visible');
+            if (editTarget) { editTarget = null; editorClosed(); }
         }
 
         async function saveEditMark() {
+            const t = editTarget;
+            if (editingMarkIndex === null || !t) return;
+            if (targetChanged(t)) {
+                closeEditMark();
+                alert(`Course "${t.name}" changed while the dialog was open; mark not saved`);
+                return;
+            }
+            activeSub = t.letter;
             const cd = editSub();
-            if (editingMarkIndex === null || !cd) return;
+            if (!cd) return;
             const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
 
             if (editingMarkIndex === 'start' || editingMarkIndex === 'finish') {
@@ -2028,6 +2043,7 @@
             if (!editSub()) return;
             map.closePopup();
             movingMarkIndex = index;
+            moveTarget = { name: selectedCourseName, data: courseData, letter };
 
             document.getElementById('map').style.cursor = 'crosshair';
             document.getElementById('moveStatus').classList.add('visible');
@@ -2108,10 +2124,17 @@
 
         async function finishMoveMark(e) {
             const latlng = e.latlng;
-            const cd = editSub();
-            const pt = movingMarkIndex === -1 ? cd.start : movingMarkIndex === 'finish' ? cd.finish : cd.marks[movingMarkIndex];
-            pt.lat = latlng.lat; pt.lon = latlng.lng;
+            const t = moveTarget, index = movingMarkIndex;
             cancelMoveMark();
+            if (targetChanged(t)) {
+                if (t) alert(`Course "${t.name}" changed during the move; mark not moved`);
+                return;
+            }
+            activeSub = t.letter;
+            const cd = editSub();
+            const pt = cd && (index === -1 ? cd.start : index === 'finish' ? cd.finish : cd.marks && cd.marks[index]);
+            if (!pt) return;
+            pt.lat = latlng.lat; pt.lon = latlng.lng;
             await saveSelectedCourse();
         }
 
@@ -2126,6 +2149,7 @@
             movePendingLatLng = null;
             const wasMoving = movingMarkIndex !== null;
             movingMarkIndex = null;
+            if (moveTarget) { moveTarget = null; editorClosed(); }
             if (wasMoving && courseData) {
                 displayCourse(courseData, false);
                 updateInfoBox(selectedCourseName, courseData);
@@ -2237,8 +2261,8 @@
             };
         }
 
-        function transformPivot(course) {
-            const which = document.getElementById('tfPivot').value;
+        // which: 'centre', 'start' or 'finish' (default the Pivot field)
+        function transformPivot(course, which = document.getElementById('tfPivot').value) {
             if (which === 'start' && course.start) return { lat: course.start.lat, lon: course.start.lon };
             if (which === 'finish' && course.finish) return { lat: course.finish.lat, lon: course.finish.lon };
             return courseCentre(course);
@@ -2261,9 +2285,9 @@
         // Scale and rotate (clockwise) about the pivot in a local metric frame,
         // then move the pivot north/east; mark comments/colours are kept.
         // Returns null if the result leaves the valid latitude range.
-        function transformCourse(course, rotDeg, northM, eastM, scalePct) {
+        function transformCourse(course, rotDeg, northM, eastM, scalePct, pivotWhich) {
             const out = JSON.parse(JSON.stringify(course));
-            const pivot = transformPivot(course);
+            const pivot = transformPivot(course, pivotWhich);
             const rad = Math.PI / 180;
             const cos0 = Math.cos(pivot.lat * rad);
             const newLat = pivot.lat + (northM / EARTH_R) / rad;
@@ -2339,10 +2363,11 @@
         }
 
         const tfFields = () => ({ rot: tfNum('tfRotate', 0), north: tfNum('tfNorth', 0), east: tfNum('tfEast', 0),
-                                  scale: Math.max(1, tfNum('tfScale', 100)) });
+                                  scale: Math.max(1, tfNum('tfScale', 100)), pivot: document.getElementById('tfPivot').value });
 
         function tfSetFields(p) {
-            p = p || { rot: 0, north: 0, east: 0, scale: 100 };
+            p = p || { rot: 0, north: 0, east: 0, scale: 100, pivot: 'centre' };
+            document.getElementById('tfPivot').value = p.pivot;
             ['tfRotate', 'tfRotateSlider'].forEach(id => document.getElementById(id).value = p.rot);
             document.getElementById('tfNorth').value = p.north;
             document.getElementById('tfEast').value = p.east;
@@ -2401,10 +2426,10 @@
                 const i = letter.charCodeAt(0) - 65;
                 if (i >= s.count || (p.rot === 0 && p.north === 0 && p.east === 0 && p.scale === 100)) continue;
                 if (i === 0) {
-                    out = transformCourse(out, p.rot, p.north, p.east, p.scale);  // other courses are left as they are
+                    out = transformCourse(out, p.rot, p.north, p.east, p.scale, p.pivot);  // other courses are left as they are
                     if (!out) return null;
                 } else {
-                    const r = transformCourse(out.extraCourses[i - 1], p.rot, p.north, p.east, p.scale);
+                    const r = transformCourse(out.extraCourses[i - 1], p.rot, p.north, p.east, p.scale, p.pivot);
                     if (!r) return null;
                     out.extraCourses[i - 1] = r;
                 }
@@ -2463,9 +2488,9 @@
 
         // Leg labels (one self-redrawing layer, added to the map) for a list of
         // {lat, lon} points; placement avoids overlaps, see js/course-order.js
-        function makeLegLabels(pts) {
+        function makeLegLabels(pts, ref) {
             if (pts.length < 2) return [];
-            return [CourseOrder.legLabelLayer(pts.map(p => ({ lat: p.lat, lon: p.lon }))).addTo(map)];
+            return [CourseOrder.legLabelLayer(pts.map(p => ({ lat: p.lat, lon: p.lon })), { ref }).addTo(map)];
         }
 
         // Pick mode: clicking the map moves the pivot to that point
@@ -2594,6 +2619,13 @@
             editorClosed();
         }
 
+        // Transform/Mark Order open, or a draw/move/mark edit in progress
+        const editorBusy = () => transformActive || !!markOrderTarget || drawingMode || !!moveTarget || !!editTarget;
+
+        // Has the course an edit started on been replaced since? (another course
+        // selected, or the file changed under it by a reload)
+        const targetChanged = t => !t || t.name !== selectedCourseName || t.data !== courseData || !allCourses[t.name];
+
         // A reload that came in while a panel was open re-selects on the next poll
         function editorClosed() {
             if (reselectAfterEdit) { reselectAfterEdit = false; lastCoursesJSON = null; }
@@ -2627,7 +2659,7 @@
         async function loadCourses(isRefresh) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
-            if (isRefresh && (transformActive || markOrderTarget)) return;  // don't clobber an open panel
+            if (isRefresh && editorBusy()) return;  // don't clobber an open panel or edit in progress
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
@@ -2682,8 +2714,8 @@
                     dropdown.appendChild(opt);
                 });
 
-                // an open Transform/Mark Order panel owns the editor: leave the selection alone
-                if (transformActive || markOrderTarget) {
+                // an open panel or an edit in progress owns the editor: leave the selection alone
+                if (editorBusy()) {
                     reselectAfterEdit = true;
                     document.querySelectorAll('.course-item').forEach(el => {
                         el.classList.toggle('selected', el.dataset.name === selectedCourseName);

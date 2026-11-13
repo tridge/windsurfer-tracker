@@ -280,7 +280,7 @@ const CourseOrder = (() => {
         if (seq.length < 2) return;
         const keyName = k => typeof k === 'number' && opts.letter ? opts.letter + k : k;
         const auto = autoSide(seq);
-        const ref = seq[0].pt.lon;
+        const ref = opts.ref !== undefined ? opts.ref : seq[0].pt.lon;  // longitude the page draws around
         const P = seq.map(e => map.latLngToLayerPoint([e.pt.lat, unwrapLon(e.pt.lon, ref)]));
         // +1 = offset to the right of travel (mark passed to port), -1 = left
         const sideSign = i => {
@@ -480,7 +480,7 @@ const CourseOrder = (() => {
     // Labels for straight legs between consecutive points (plain courses, drawing)
     function drawLegLabels(map, pts, opts, add) {
         if (pts.length < 2) return;
-        const ref = pts[0].lon;
+        const ref = opts.ref !== undefined ? opts.ref : pts[0].lon;
         const P = pts.map(p => map.latLngToLayerPoint([p.lat, unwrapLon(p.lon, ref)]));
         const decl = declinationAt(pts);
         const items = [];
