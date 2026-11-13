@@ -973,6 +973,8 @@
         let activeSub = 'A';            // course (A, B...) of the file that mark edits/moves apply to
         let moveTarget = null;          // {name, data, letter}: course a mark move started on
         let editTarget = null;          // {name, data, letter}: course the Edit dialog was opened on
+        let importing = false;
+        let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
         // A course file's content without server timestamps, for spotting changes
         const courseSig = c => c ? JSON.stringify(c, (k, v) => SERVER_COURSE_FIELDS.includes(k) ? undefined : v) : 'none';
@@ -1164,15 +1166,23 @@
                                     `${existing.join(', ')}\n\nOK to overwrite, Cancel to skip ${existing.length > 1 ? 'them' : 'it'}.`);
             }
             closeTransform();
+            closeMarkOrder();
             cancelMoveMark();
+            closeEditMark();
             cancelDrawing();
             let saved = 0, skipped = 0;
             const failed = [];
-            for (const [name, course] of byName) {
-                if (allCourses[name] && !overwrite) { skipped++; continue; }
-                // queued behind any pending edits so they can't land after the import
-                const err = await queueSave(name, course, false);
-                if (err) failed.push(`${name}: ${err}`); else saved++;
+            importing = true;  // no edits until the import is saved and reloaded
+            try {
+                for (const [name, course] of byName) {
+                    if (allCourses[name] && !overwrite) { skipped++; continue; }
+                    // queued behind any pending edits so they can't land after the import
+                    const r = await queueSave(name, course, false);
+                    if (r.saved) saved++; else failed.push(`${name}: ${r.error}`);
+                }
+            } finally {
+                importing = false;
+                lastCoursesJSON = null;
             }
             await reloadAndReselect();
             let msg = `Imported ${saved} course${saved !== 1 ? 's' : ''}`;
@@ -1473,14 +1483,14 @@
         // Saves are queued so the server applies them in order, and until confirmed the
         // saved data stands in for the course in reloads (so a reselect shows it).
         async function saveCourse(name, data) {
-            const err = await queueSave(name, data, true);
-            if (err) alert(err);
+            const r = await queueSave(name, data, true);
+            if (r.error) alert(r.error);
             await reloadAndReselect();
-            return !err;
+            return r.saved;
         }
 
         // Queue a save of a named course (live=true also makes it the live course).
-        // Resolves to null on success or an error message.
+        // Resolves to {saved, error}: saved = the named course was saved; error = message or null.
         function queueSave(name, data, live) {
             const snap = JSON.parse(JSON.stringify(data));
             const entry = { data: snap };
@@ -1488,9 +1498,9 @@
             allCourses[name] = snap;
             const run = saveChain.then(() => postCourse(name, snap, live));
             saveChain = run;
-            return run.then(err => {
+            return run.then(r => {
                 if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
-                return err;
+                return r;
             });
         }
 
@@ -1500,14 +1510,27 @@
                 headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
                 body: JSON.stringify(body)
             });
+            // error text from a failed response, or null if it succeeded
+            const failure = async resp => {
+                let j = null;
+                try { j = await resp.json(); } catch (e) { /* not JSON */ }
+                if (resp.ok && j && j.success) return null;
+                return (j && j.error) || `HTTP ${resp.status}`;
+            };
+            let why;
             try {
-                const result = await (await post(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, data)).json();
-                if (!result.success) return 'Error: ' + (result.error || 'Unknown error');
-                if (live) await post(`${EVENT_API}/admin/course`, data);
-                return null;
+                why = await failure(await post(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, data));
             } catch (e) {
-                return 'Error saving course: ' + e.message;
+                return { saved: false, error: 'Error saving course: ' + e.message };
             }
+            if (why) return { saved: false, error: 'Error: ' + why };
+            if (!live) return { saved: true, error: null };
+            try {
+                why = await failure(await post(`${EVENT_API}/admin/course`, data));
+            } catch (e) {
+                why = e.message;
+            }
+            return { saved: true, error: why ? `Course "${name}" saved, but the live course wasn't updated: ${why}` : null };
         }
 
         async function reloadAndReselect() {
@@ -1521,6 +1544,7 @@
         // --- Drawing functions ---
 
         function startDrawingCourse() {
+            if (importBusy()) return;
             closeTransform();
             if (drawingMode) {
                 cancelDrawing();
@@ -1781,6 +1805,7 @@
         }
 
         async function newCourse() {
+            if (importBusy()) return;
             closeTransform();
             const name = prompt('New course name:');
             if (!name) return;
@@ -1816,6 +1841,7 @@
         }
 
         async function deleteSelectedCourse() {
+            if (importBusy()) return;
             closeTransform();
             if (!selectedCourseName) return;
             if (!confirm(`Permanently delete course "${selectedCourseName}"?\n\nThis cannot be undone.`)) return;
@@ -1826,6 +1852,8 @@
                 });
                 const data = await response.json();
                 if (data.success) {
+                    cancelMoveMark();
+                    closeEditMark();
                     selectedCourseName = null;
                     courseData = null;
                     clearCourseDisplay();
@@ -1838,6 +1866,7 @@
         }
 
         async function renameCourse() {
+            if (importBusy()) return;
             closeTransform();
             if (!selectedCourseName || !courseData) return;
             const newName = prompt(`Rename "${selectedCourseName}" to:`, selectedCourseName);
@@ -1868,6 +1897,7 @@
         }
 
         async function copyCourse() {
+            if (importBusy()) return;
             closeTransform();
             if (!selectedCourseName || !courseData) return;
             const newName = prompt(`Copy "${selectedCourseName}" to new name:`, selectedCourseName + ' copy');
@@ -1901,6 +1931,7 @@
         const multiCourse = () => CourseOrder.courseCount(courseData) > 1;
 
         function showEditMark(markIndex, letter = 'A') {
+            if (importBusy()) return;
             activeSub = letter;
             const cd = editSub();
             if (!cd) return;
@@ -1933,7 +1964,7 @@
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
             }
-            editTarget = { name: selectedCourseName, data: courseData, letter };
+            editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
@@ -1984,6 +2015,7 @@
         }
 
         async function deleteCourseMark(markIndex, letter = 'A') {
+            if (importBusy()) return;
             activeSub = letter;
             const cd = editSub();
             if (!cd) return;
@@ -2024,6 +2056,7 @@
         }
 
         async function splitCourseMark(markIndex, letter = 'A') {
+            if (importBusy()) return;
             activeSub = letter;
             if (!editSub()) return;
             map.closePopup();
@@ -2040,11 +2073,12 @@
         // --- Move mark ---
 
         function startMoveMark(index, letter = 'A') {
+            if (importBusy()) return;
             activeSub = letter;
             if (!editSub()) return;
             map.closePopup();
             movingMarkIndex = index;
-            moveTarget = { name: selectedCourseName, data: courseData, letter };
+            moveTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
 
             document.getElementById('map').style.cursor = 'crosshair';
             document.getElementById('moveStatus').classList.add('visible');
@@ -2167,13 +2201,14 @@
         // --- Mark order dialog ---
 
         function showMarkOrder() {
+            if (importBusy()) return;
             closeTransform();
             if (!selectedCourseName || !courseData) { alert('No course selected'); return; }
             const subs = CourseOrder.subCourses(courseData);
             const withMarks = subs.filter(x => x.course.marks && x.course.marks.length);
             if (!withMarks.length) { alert('This course has no marks to order'); return; }
             const letter = withMarks.some(x => x.letter === activeSub) ? activeSub : withMarks[0].letter;
-            markOrderTarget = { name: selectedCourseName, data: courseData, letter };
+            markOrderTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
             document.getElementById('markOrderCourse').textContent = `"${selectedCourseName}"`;
             const sel = document.getElementById('markOrderSub');
             sel.innerHTML = withMarks.map(x => `<option value="${x.letter}">Course ${x.letter}</option>`).join('');
@@ -2221,7 +2256,7 @@
             const t = markOrderTarget;
             if (r.error || !t) return;
             closeMarkOrder();
-            if (t.name !== selectedCourseName || t.data !== courseData || !allCourses[t.name]) {
+            if (targetChanged(t)) {
                 alert(`Course "${t.name}" changed while the dialog was open; order not saved`);
                 return;
             }
@@ -2322,6 +2357,7 @@
         }
 
         function showTransform() {
+            if (importBusy()) return;
             if (!selectedCourseName || !courseData || coursePoints(courseData).length === 0) {
                 alert('No course selected');
                 return;
@@ -2332,6 +2368,7 @@
             // params: rotate/move/scale per course letter; count: number of courses
             const n = CourseOrder.courseCount(courseData);
             tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)),
+                          sig: courseSig(allCourses[selectedCourseName]),
                           count: n, target: n > 1 && activeSub.charCodeAt(0) - 65 < n ? activeSub : 'A', params: {} };
             transformActive = true;
             document.getElementById('tfCourseName').textContent = `"${tfSession.name}"`;
@@ -2621,11 +2658,18 @@
         }
 
         // Transform/Mark Order open, or a draw/move/mark edit in progress
-        const editorBusy = () => transformActive || !!markOrderTarget || drawingMode || !!moveTarget || !!editTarget;
+        const editorBusy = () => transformActive || !!markOrderTarget || drawingMode || !!moveTarget || !!editTarget || importing;
 
-        // Has the course an edit started on been replaced since? (another course
-        // selected, or the file changed under it by a reload)
-        const targetChanged = t => !t || t.name !== selectedCourseName || t.data !== courseData || !allCourses[t.name];
+        // Editing actions wait for an import to finish saving
+        function importBusy() {
+            if (importing) alert('Please wait for the import to finish');
+            return importing;
+        }
+
+        // Has the course an edit started on been replaced since? (another course selected,
+        // or the file deleted or changed under it, e.g. by another admin, as seen by a reload)
+        const targetChanged = t => !t || t.name !== selectedCourseName || t.data !== courseData ||
+                                   !allCourses[t.name] || courseSig(allCourses[t.name]) !== t.sig;
 
         // A reload that came in while a panel was open re-selects on the next poll
         function editorClosed() {
@@ -2641,6 +2685,11 @@
             if (name !== selectedCourseName || !allCourses[name]) {
                 closeTransform();
                 alert(`Course "${name}" is no longer selected; transform not applied`);
+                return;
+            }
+            if (courseSig(allCourses[name]) !== tfSession.sig) {
+                closeTransform();
+                alert(`Course "${name}" was changed while Transform was open; transform not applied`);
                 return;
             }
             const removed = tfRemovedLetters();
@@ -2661,9 +2710,12 @@
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
             if (isRefresh && editorBusy()) return;  // don't clobber an open panel or edit in progress
+            const myGen = ++loadGen;
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
+                if (myGen < appliedGen) return;  // a later reload already came back; this one is stale
+                appliedGen = myGen;
                 const newCourses = data.courses || {};
                 for (const [n, p] of pendingSaves) newCourses[n] = p.data;
 
@@ -2680,6 +2732,8 @@
                 if (names.length === 0) {
                     closeTransform();
                     closeMarkOrder();
+                    cancelMoveMark();
+                    closeEditMark();
                     listEl.innerHTML = '<div class="no-courses">No courses available</div>';
                     dropdown.innerHTML = '<option value="">No courses available</option>';
                     document.getElementById('courseInfoBox').style.display = 'none';

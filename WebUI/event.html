@@ -2254,7 +2254,12 @@
 
         // which course (A, B...) of the live course file is being drawn
         let drawingSub = 'A';
+        let drawingSig = null;  // courseSig() of the live course when drawing started
         const drawingMulti = () => CourseOrder.courseCount(courseData) > 1;
+
+        // The live course without server timestamps, for spotting changes made
+        // (e.g. by another admin) while a draw, move or mark edit is in progress
+        const courseSig = c => c ? JSON.stringify(c, (k, v) => ['saved', 'updated', 'updated_iso'].includes(k) ? undefined : v) : 'none';
 
         function startDrawingCourse() {
             if (drawingMode) {
@@ -2274,6 +2279,7 @@
             }
 
             drawingMode = true;
+            drawingSig = courseSig(courseData);
             drawingPoints = [];
             drawingMarkers = [];
             lastTapTime = 0;
@@ -2498,6 +2504,15 @@
         
         async function saveCourse() {
             if (drawingPoints.length < 2) return;
+            if (courseSig(courseData) !== drawingSig) {
+                drawingMarkers.forEach(m => map.removeLayer(m));
+                drawingMarkers = [];
+                if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
+                drawingPoints = [];
+                updateCourseInfo();
+                alert('The course was changed while you were drawing; drawing not saved');
+                return;
+            }
             
             const drawn = {
                 start: drawingPoints[0],
@@ -3294,6 +3309,8 @@
         // Mark edit functions
         // Course of the live course file being edited (A is the file itself)
         let activeSub = 'A';
+        let editSig = null;   // courseSig() when the Edit dialog was opened
+        let moveSig = null;   // courseSig() when a mark move started
         const editSub = () => courseData ? CourseOrder.subCourse(courseData, activeSub) : null;
         const multiCourse = () => CourseOrder.courseCount(courseData) > 1;
 
@@ -3325,6 +3342,7 @@
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';  // Show color for marks
             }
+            editSig = courseSig(courseData);
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
@@ -3334,6 +3352,11 @@
         }
 
         async function saveEditMark() {
+            if (editingMarkIndex !== null && courseSig(courseData) !== editSig) {
+                closeEditMark();
+                alert('The course was changed while the dialog was open; mark not saved');
+                return;
+            }
             const cd = editSub();
             if (editingMarkIndex === null || !cd) return;
 
@@ -3510,6 +3533,7 @@
         function startMoveMark(index, letter = 'A') {
             activeSub = letter;
             if (!editSub()) return;
+            moveSig = courseSig(courseData);
 
             // Close any open popup
             map.closePopup();
@@ -3625,6 +3649,11 @@
 
         async function finishMoveMark(e) {
             const latlng = e.latlng;
+            if (courseSig(courseData) !== moveSig) {
+                cancelMoveMark();
+                alert('The course was changed during the move; mark not moved');
+                return;
+            }
             const cd = editSub();
 
             // Update courseData with new position
