@@ -619,6 +619,7 @@
             <input type="text" id="markOrderInput" placeholder="e.g. S12313F" autocomplete="off"
                    oninput="validateMarkOrderInput()" onkeydown="if(event.key==='Enter')saveMarkOrder()">
             <div class="order-help">S = start, F = finish, 1-<span id="markOrderMax"></span> = marks.
+                S can be used again to cross the start line mid-race (S123S1234F).
                 Use spaces between numbers above 9 (S 1 10 2 F). Leave blank for S, 1, 2, ... F.</div>
             <div class="order-error" id="markOrderError"></div>
             <div class="btn-row">

@@ -82,7 +82,9 @@ const CourseOrder = (() => {
     }
 
     // Parse "S12313F" (or "S 1 2 10 F") into ['S', 1, 2, ..., 'F'].
-    // S/F are added if missing. Returns {seq} (null for blank) or {error}.
+    // S/F are added if missing. S may appear again mid-race (crossing the start
+    // line, e.g. slalom "S123S1234F"); F only at the end.
+    // Returns {seq} (null for blank) or {error}.
     function parse(str, numMarks) {
         const s = (str || '').toUpperCase().trim();
         if (!s) return { seq: null };
@@ -98,9 +100,9 @@ const CourseOrder = (() => {
         if (seq[0] !== 'S') seq.unshift('S');
         if (seq[seq.length - 1] !== 'F') seq.push('F');
         for (let i = 0; i < seq.length; i++) {
-            if (seq[i] === 'S' && i !== 0) return { error: 'S must come first' };
             if (seq[i] === 'F' && i !== seq.length - 1) return { error: 'F must come last' };
-            if (i > 0 && seq[i] === seq[i - 1]) return { error: `Mark ${seq[i]} repeated back to back` };
+            if (i > 0 && seq[i] === seq[i - 1])
+                return { error: seq[i] === 'S' ? 'S repeated back to back' : `Mark ${seq[i]} repeated back to back` };
         }
         return { seq };
     }
