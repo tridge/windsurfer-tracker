@@ -974,6 +974,7 @@
         let moveTarget = null;          // {name, data, letter}: course a mark move started on
         let editTarget = null;          // {name, data, letter}: course the Edit dialog was opened on
         let importing = false;
+        let courseDataSig = null;       // courseSig() of the file courseData was loaded or last saved as
         let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
         // A course file's content without server timestamps, for spotting changes
@@ -1130,6 +1131,18 @@
             const file = ev.target.files[0];
             ev.target.value = '';
             if (!file) return;
+            if (importing) { alert('An import is already running'); return; }
+            // no edits (or other imports) until this import is saved and reloaded
+            importing = true;
+            try {
+                await importCoursesZip(file);
+            } finally {
+                importing = false;
+                lastCoursesJSON = null;
+            }
+        }
+
+        async function importCoursesZip(file) {
             let entries;
             try {
                 entries = await readZip(await file.arrayBuffer(), { ...IMPORT_LIMITS, filter: importableEntry });
@@ -1172,19 +1185,13 @@
             cancelDrawing();
             let saved = 0, skipped = 0;
             const failed = [];
-            importing = true;  // no edits until the import is saved and reloaded
-            try {
-                for (const [name, course] of byName) {
-                    if (allCourses[name] && !overwrite) { skipped++; continue; }
-                    // queued behind any pending edits so they can't land after the import
-                    const r = await queueSave(name, course, false);
-                    if (r.saved) saved++; else failed.push(`${name}: ${r.error}`);
-                }
-            } finally {
-                importing = false;
-                lastCoursesJSON = null;
+            for (const [name, course] of byName) {
+                if (allCourses[name] && !overwrite) { skipped++; continue; }
+                // queued behind any pending edits so they can't land after the import
+                const r = await queueSave(name, course, false);
+                if (r.saved) saved++; else failed.push(`${name}: ${r.error}`);
             }
-            await reloadAndReselect();
+            await reloadAndReselect(true);  // installs the imported courses while still locked
             let msg = `Imported ${saved} course${saved !== 1 ? 's' : ''}`;
             if (skipped) msg += `, skipped ${skipped} existing`;
             if (failed.length) msg += `\n\nFailed:\n${failed.join('\n')}`;
@@ -1365,6 +1372,7 @@
             if (name !== selectedCourseName) activeSub = 'A';
             selectedCourseName = name;
             courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
+            courseDataSig = courseSig(course);
             if (fromUser) userInteracted = true;
 
             // Update sidebar selection
@@ -1493,6 +1501,7 @@
         // Resolves to {saved, error}: saved = the named course was saved; error = message or null.
         function queueSave(name, data, live) {
             const snap = JSON.parse(JSON.stringify(data));
+            if (name === selectedCourseName && data === courseData) courseDataSig = courseSig(snap);
             const entry = { data: snap };
             pendingSaves.set(name, entry);
             allCourses[name] = snap;
@@ -1533,11 +1542,12 @@
             return { saved: true, error: why ? `Course "${name}" saved, but the live course wasn't updated: ${why}` : null };
         }
 
-        async function reloadAndReselect() {
+        // force: re-select even though an import holds the editor (the import's own reload)
+        async function reloadAndReselect(force = false) {
             // Reload courses list while preserving selection
             const prevName = selectedCourseName;
             lastCoursesJSON = null;  // Force rebuild
-            await loadCourses(false);
+            await loadCourses(false, force);
             // loadCourses will re-select prevName if it still exists
         }
 
@@ -1964,7 +1974,7 @@
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
             }
-            editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
+            editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
@@ -1985,6 +1995,7 @@
             if (targetChanged(t)) {
                 closeEditMark();
                 alert(`Course "${t.name}" changed while the dialog was open; mark not saved`);
+                showLatest(t);
                 return;
             }
             activeSub = t.letter;
@@ -2078,7 +2089,7 @@
             if (!editSub()) return;
             map.closePopup();
             movingMarkIndex = index;
-            moveTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
+            moveTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
 
             document.getElementById('map').style.cursor = 'crosshair';
             document.getElementById('moveStatus').classList.add('visible');
@@ -2163,6 +2174,7 @@
             cancelMoveMark();
             if (targetChanged(t)) {
                 if (t) alert(`Course "${t.name}" changed during the move; mark not moved`);
+                showLatest(t);
                 return;
             }
             activeSub = t.letter;
@@ -2208,7 +2220,7 @@
             const withMarks = subs.filter(x => x.course.marks && x.course.marks.length);
             if (!withMarks.length) { alert('This course has no marks to order'); return; }
             const letter = withMarks.some(x => x.letter === activeSub) ? activeSub : withMarks[0].letter;
-            markOrderTarget = { name: selectedCourseName, data: courseData, letter, sig: courseSig(allCourses[selectedCourseName]) };
+            markOrderTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
             document.getElementById('markOrderCourse').textContent = `"${selectedCourseName}"`;
             const sel = document.getElementById('markOrderSub');
             sel.innerHTML = withMarks.map(x => `<option value="${x.letter}">Course ${x.letter}</option>`).join('');
@@ -2258,6 +2270,7 @@
             closeMarkOrder();
             if (targetChanged(t)) {
                 alert(`Course "${t.name}" changed while the dialog was open; order not saved`);
+                showLatest(t);
                 return;
             }
             const c = CourseOrder.subCourse(courseData, t.letter);
@@ -2368,7 +2381,7 @@
             // params: rotate/move/scale per course letter; count: number of courses
             const n = CourseOrder.courseCount(courseData);
             tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)),
-                          sig: courseSig(allCourses[selectedCourseName]),
+                          sig: courseDataSig,
                           count: n, target: n > 1 && activeSub.charCodeAt(0) - 65 < n ? activeSub : 'A', params: {} };
             transformActive = true;
             document.getElementById('tfCourseName').textContent = `"${tfSession.name}"`;
@@ -2662,8 +2675,23 @@
 
         // Editing actions wait for an import to finish saving
         function importBusy() {
-            if (importing) alert('Please wait for the import to finish');
-            return importing;
+            if (importing) { alert('Please wait for the import to finish'); return true; }
+            return staleDisplay();
+        }
+
+        // If a reload has brought a newer version of the selected course than the one
+        // on screen (e.g. while an edit was open), show it before allowing more edits
+        function staleDisplay() {
+            const n = selectedCourseName;
+            if (!n || !allCourses[n] || courseSig(allCourses[n]) === courseDataSig || drawingMode) return false;
+            selectCourse(n, allCourses[n], false);
+            alert(`Course "${n}" has been updated; showing the latest version`);
+            return true;
+        }
+
+        // After refusing a stale edit, show the current version of that course
+        function showLatest(t) {
+            if (t && t.name === selectedCourseName && allCourses[t.name]) selectCourse(t.name, allCourses[t.name], false);
         }
 
         // Has the course an edit started on been replaced since? (another course selected,
@@ -2690,6 +2718,7 @@
             if (courseSig(allCourses[name]) !== tfSession.sig) {
                 closeTransform();
                 alert(`Course "${name}" was changed while Transform was open; transform not applied`);
+                showLatest({ name });
                 return;
             }
             const removed = tfRemovedLetters();
@@ -2706,7 +2735,7 @@
             }
         }
 
-        async function loadCourses(isRefresh) {
+        async function loadCourses(isRefresh, force = false) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
             if (isRefresh && editorBusy()) return;  // don't clobber an open panel or edit in progress
@@ -2714,9 +2743,12 @@
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
+                // a failed reload leaves things as they are (it isn't an empty course list)
+                if (!response.ok || !data || typeof data.courses !== 'object' || data.courses === null || Array.isArray(data.courses))
+                    throw new Error((data && data.error) || `HTTP ${response.status}`);
                 if (myGen < appliedGen) return;  // a later reload already came back; this one is stale
                 appliedGen = myGen;
-                const newCourses = data.courses || {};
+                const newCourses = data.courses;
                 for (const [n, p] of pendingSaves) newCourses[n] = p.data;
 
                 // Skip UI rebuild if nothing has changed
@@ -2770,7 +2802,7 @@
                 });
 
                 // an open panel or an edit in progress owns the editor: leave the selection alone
-                if (editorBusy()) {
+                if (editorBusy() && !force) {
                     reselectAfterEdit = true;
                     document.querySelectorAll('.course-item').forEach(el => {
                         el.classList.toggle('selected', el.dataset.name === selectedCourseName);
@@ -2793,7 +2825,7 @@
                 }
             } catch (e) {
                 console.error('Error loading courses:', e);
-                if (!isRefresh) {
+                if (!isRefresh && !Object.keys(allCourses).length) {  // keep a list we already have
                     listEl.innerHTML = '<div class="no-courses">Error loading courses</div>';
                     dropdown.innerHTML = '<option value="">Error loading courses</option>';
                 }

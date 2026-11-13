@@ -567,9 +567,12 @@ const CourseOrder = (() => {
         color = color || '#f97316';
         const strokeColor = darkenColor(color);
         const fs = String(number).length > 2 ? 9 : 11;
-        // dark number on light fills (e.g. yellow), white otherwise
-        const lum = 0.299 * parseInt(color.slice(1, 3), 16) + 0.587 * parseInt(color.slice(3, 5), 16) + 0.114 * parseInt(color.slice(5, 7), 16);
-        const textColor = lum > 170 ? '#1f2937' : 'white';
+        // white number unless it's hard to read on this fill (WCAG contrast < 2.5:1, e.g.
+        // yellow or bright green) and dark text reads better
+        const lin = i => { const c = parseInt(color.slice(i, i + 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+        const lum = 0.2126 * lin(1) + 0.7152 * lin(3) + 0.0722 * lin(5);
+        const white = 1.05 / (lum + 0.05), dark = (lum + 0.05) / (0.0215 + 0.05);  // vs #1f2937
+        const textColor = white < 2.5 && dark > white ? '#1f2937' : 'white';
         const svg = `
             <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="0" cy="0" r="12" fill="${color}" stroke="${strokeColor}" stroke-width="2"/>

@@ -3310,6 +3310,7 @@
         // Course of the live course file being edited (A is the file itself)
         let activeSub = 'A';
         let editSig = null;   // courseSig() when the Edit dialog was opened
+        let editSaving = false;
         let moveSig = null;   // courseSig() when a mark move started
         const editSub = () => courseData ? CourseOrder.subCourse(courseData, activeSub) : null;
         const multiCourse = () => CourseOrder.courseCount(courseData) > 1;
@@ -3352,12 +3353,15 @@
         }
 
         async function saveEditMark() {
+            if (editSaving) return;  // a save is already on its way
             if (editingMarkIndex !== null && courseSig(courseData) !== editSig) {
                 closeEditMark();
                 alert('The course was changed while the dialog was open; mark not saved');
                 return;
             }
-            const cd = editSub();
+            // edit a copy so a failed save leaves the loaded course as it was (and retryable)
+            const candidate = courseData ? JSON.parse(JSON.stringify(courseData)) : null;
+            const cd = candidate ? CourseOrder.subCourse(candidate, activeSub) : null;
             if (editingMarkIndex === null || !cd) return;
 
             const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
@@ -3392,6 +3396,7 @@
             }
 
             // Save course to server
+            editSaving = true;
             try {
                 const response = await fetch(`${EVENT_API}/admin/course`, {
                     method: 'POST',
@@ -3399,7 +3404,7 @@
                         'Content-Type': 'application/json',
                         'X-Admin-Password': adminPassword
                     },
-                    body: JSON.stringify(courseData)
+                    body: JSON.stringify(candidate)
                 });
                 const data = await response.json();
                 if (data.success) {
@@ -3411,6 +3416,8 @@
                 }
             } catch (e) {
                 alert('Error saving mark: ' + e.message);
+            } finally {
+                editSaving = false;
             }
         }
 
@@ -3654,9 +3661,11 @@
                 alert('The course was changed during the move; mark not moved');
                 return;
             }
-            const cd = editSub();
+            // move on a copy so a failed save leaves the loaded course as it was
+            const candidate = JSON.parse(JSON.stringify(courseData));
+            const cd = CourseOrder.subCourse(candidate, activeSub);
 
-            // Update courseData with new position
+            // Update the copy with the new position
             if (movingMarkIndex === -1) {
                 cd.start.lat = latlng.lat;
                 cd.start.lon = latlng.lng;
@@ -3676,7 +3685,7 @@
                         'Content-Type': 'application/json',
                         'X-Admin-Password': adminPassword
                     },
-                    body: JSON.stringify(courseData)
+                    body: JSON.stringify(candidate)
                 });
                 const data = await response.json();
                 if (data.success) {
