@@ -227,13 +227,16 @@ const CourseOrder = (() => {
             const k = pairUse[pk] = (pairUse[pk] === undefined ? 0 : pairUse[pk] + 1);
             const r = OFFSET_PX + k * GAP_PX;
             const sa = sideSign(i), sb = sideSign(i + 1);
-            legs.push({ n, r, sa, sb, from: a.add(n.multiplyBy(sa * r)), to: b.add(n.multiplyBy(sb * r)) });
+            // only roundings are offset; start/finish ends go to the point itself
+            // (the mark, or the middle of its pin line)
+            const ra = seq[i].mark === null ? 0 : r, rb = seq[i + 1].mark === null ? 0 : r;
+            legs.push({ n, ra, rb, sa, sb, from: a.add(n.multiplyBy(sa * ra)), to: b.add(n.multiplyBy(sb * rb)) });
         }
 
         const route = [legs[0].from, legs[0].to];
         for (let i = 1; i < legs.length; i++) {
             const c = P[i], pin = legs[i - 1].to, pout = legs[i].from;
-            const rin = legs[i - 1].r, rout = legs[i].r;
+            const rin = legs[i - 1].rb, rout = legs[i].ra;
             const a0 = Math.atan2(pin.y - c.y, pin.x - c.x);
             let d = Math.atan2(pout.y - c.y, pout.x - c.x) - a0;
             if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
