@@ -6,7 +6,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <title>Courses Preview - Windsurfer Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="css/common.css" />
+    <link rel="stylesheet" href="css/common.css?v=192905ff" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.14.1/dist/Leaflet.GoogleMutant.js"></script>
     <script>
@@ -660,7 +660,7 @@
         <div class="tf-title">Deleted courses</div>
         <div id="restoreDeleted" class="restore-list"></div>
         <div class="tf-title" style="margin-top:10px">Earlier saved versions</div>
-        <div class="order-help">Every save is kept. Preview one, then restore it under a name.</div>
+        <div class="order-help">Each save from the course editor is kept. Preview one, then restore it under a name.</div>
         <div id="restoreHistory" class="restore-list"></div>
         <div class="btn-row">
             <button class="btn-cancel" onclick="closeRestore()">Close</button>
@@ -809,11 +809,11 @@
         </div>
     </div>
 
-    <script src="js/map-utils.js"></script>
-    <script src="js/wmm.js"></script>
-    <script src="js/course-order.js"></script>
-    <script src="js/zip.js"></script>
-    <script src="js/wind.js"></script>
+    <script src="js/map-utils.js?v=4c62e6e7"></script>
+    <script src="js/wmm.js?v=b995cae3"></script>
+    <script src="js/course-order.js?v=d517b892"></script>
+    <script src="js/zip.js?v=3ef60fa5"></script>
+    <script src="js/wind.js?v=43a269e4"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -1551,13 +1551,14 @@
 
         // Queue a save of a named course (live=true also makes it the live course).
         // Resolves to {saved, error}: saved = the named course was saved; error = message or null.
-        function queueSave(name, data, live) {
+        // query: e.g. 'create=1' (refuse an existing name) or 'replace=1' (bin the course replaced)
+        function queueSave(name, data, live, query = '') {
             const snap = JSON.parse(JSON.stringify(data));
             if (name === selectedCourseName && data === courseData) courseDataSig = courseSig(snap);
             const entry = { data: snap };
             pendingSaves.set(name, entry);
             allCourses[name] = snap;
-            const run = saveChain.then(() => postCourse(name, snap, live));
+            const run = saveChain.then(() => postCourse(name, snap, live, query));
             saveChain = run;
             return run.then(r => {
                 if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
@@ -1565,7 +1566,7 @@
             });
         }
 
-        async function postCourse(name, data, live) {
+        async function postCourse(name, data, live, query = '') {
             const post = (url, body) => fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
@@ -1580,7 +1581,7 @@
             };
             let why;
             try {
-                why = await failure(await post(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, data));
+                why = await failure(await post(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}${query ? '?' + query : ''}`, data));
             } catch (e) {
                 return { saved: false, error: 'Error saving course: ' + e.message };
             }
@@ -1931,27 +1932,24 @@
             if (importBusy()) return;
             closeTransform();
             if (!selectedCourseName || !courseData) return;
-            const newName = prompt(`Rename "${selectedCourseName}" to:`, selectedCourseName);
-            if (!newName || newName === selectedCourseName) return;
+            const oldName = selectedCourseName;  // fixed now: the selection may change while we wait
+            const newName = prompt(`Rename "${oldName}" to:`, oldName);
+            if (!newName || newName === oldName) return;
             if (allCourses[newName]) {
                 alert(`Course "${newName}" already exists.`);
                 return;
             }
             try {
-                // Create under new name
-                const createResp = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(newName)}`, {
+                await saveChain;  // pending saves of this course go to the old name first
+                // the server renames atomically, refusing if the new name has appeared
+                const r = await fetch(`${EVENT_API}/admin/courses-rename`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
-                    body: JSON.stringify(courseData)
+                    body: JSON.stringify({ from: oldName, to: newName })
                 });
-                const createData = await createResp.json();
-                if (!createData.success) { alert('Error: ' + (createData.error || 'Unknown error')); return; }
-                // Delete old name
-                await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}?rename=1`, {  // not kept in the bin
-                    method: 'DELETE',
-                    headers: { 'X-Admin-Password': adminPassword }
-                });
-                selectedCourseName = newName;
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || !d.success) { alert('Error: ' + (d.error || `HTTP ${r.status}`)); return; }
+                if (selectedCourseName === oldName) selectedCourseName = newName;
                 await reloadAndReselect();
             } catch (e) {
                 alert('Error renaming course: ' + e.message);
@@ -2386,25 +2384,23 @@
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 return r.json();
             };
-            let deleted, history;
-            try {
-                [deleted, history] = await Promise.all([get('deleted-courses'), get('course-history')]);
-            } catch (e) {
-                delEl.innerHTML = histEl.innerHTML = '';
-                delEl.textContent = `Could not load: ${e.message}`;
-                return;
-            }
+            // loaded separately so one failing still leaves the other usable
+            const [dr, hr] = await Promise.allSettled([get('deleted-courses'), get('course-history')]);
             if (!restoreOpen) return;
+            const deleted = dr.status === 'fulfilled' ? dr.value : { deleted: [] };
+            const history = hr.status === 'fulfilled' ? hr.value : { history: [] };
             // name a version by any current or deleted named course it's identical to
             const known = new Map();
             for (const [n, c] of Object.entries(allCourses)) known.set(courseSig(c), `same as "${n}"`);
             for (const d of deleted.deleted || []) if (!known.has(courseSig(d.course))) known.set(courseSig(d.course), `deleted "${d.name}"`);
             fillRestoreList(delEl, (deleted.deleted || []).map(d => ({
                 title: d.name, meta: `deleted ${fmtWhen(d.deleted)} · ${courseSummary(d.course)}`,
-                course: d.course, name: d.name, binTs: d.deleted })), 'No deleted courses');
+                course: d.course, name: d.name, binId: d.id })),
+                dr.status === 'fulfilled' ? 'No deleted courses' : `Could not load deleted courses: ${dr.reason.message}`);
             fillRestoreList(histEl, (history.history || []).map(h => ({
                 title: fmtWhen(h.time), meta: [known.get(courseSig(h.course)), courseSummary(h.course)].filter(x => x).join(' · '),
-                course: h.course, name: '' })), 'No earlier versions');
+                course: h.course, name: '' })),
+                hr.status === 'fulfilled' ? 'No earlier versions' : `Could not load earlier versions: ${hr.reason.message}`);
         }
 
         const fmtWhen = ts => new Date(ts * 1000).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -2420,7 +2416,13 @@
 
         function fillRestoreList(el, rows, emptyText) {
             el.innerHTML = '';
-            if (!rows.length) { el.innerHTML = `<div class="restore-empty">${emptyText}</div>`; return; }
+            if (!rows.length) {
+                const e = document.createElement('div');
+                e.className = 'restore-empty';
+                e.textContent = emptyText;
+                el.appendChild(e);
+                return;
+            }
             for (const r of rows) {
                 const row = document.createElement('div');
                 row.className = 'restore-row';
@@ -2437,7 +2439,7 @@
                     updateInfoBox(r.name || `Saved ${r.title}`, r.course);
                 };
                 const go = document.createElement('button'); go.textContent = 'Restore'; go.className = 'restore-go';
-                go.onclick = () => restoreCourse(r.course, r.name, r.binTs);
+                go.onclick = () => restoreCourse(r.course, r.name, r.binId);
                 row.append(text, pv, go);
                 el.appendChild(row);
             }
@@ -2453,17 +2455,28 @@
         }
 
         // Save a deleted course / earlier version as a named course (not the live course)
-        async function restoreCourse(course, defaultName, binTs) {
+        // A course being replaced goes to the recycle bin; the server refuses to create
+        // over a course that appeared since we looked (another admin, say).
+        async function restoreCourse(course, defaultName, binId) {
             const name = prompt('Restore as course name:', defaultName || '');
             if (!name) return;
-            if (allCourses[name] && !confirm(`Course "${name}" already exists. Replace it with this one?`)) return;
+            let exists = !!allCourses[name];
+            try {
+                const r = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
+                if (r.ok) exists = name in ((await r.json()).courses || {});
+            } catch (e) { /* use what we have */ }
+            if (exists && !confirm(`Course "${name}" already exists. Replace it with this one? (It goes to the deleted courses list.)`)) return;
             const c = JSON.parse(JSON.stringify(course));
             ['saved', 'updated', 'updated_iso', 'name'].forEach(k => delete c[k]);
             try { CourseOrder.checkCourse(c); } catch (e) { alert(`Can't restore: ${e.message}`); return; }
-            const r = await queueSave(name, c, false);
-            if (!r.saved) { alert(r.error); return; }
-            if (binTs !== undefined) {
-                await fetch(`${EVENT_API}/admin/deleted-courses/${binTs}`,
+            const r = await queueSave(name, c, false, exists ? 'replace=1' : 'create=1');
+            if (!r.saved) {
+                alert(/already exists/.test(r.error || '') ? `Course "${name}" was created meanwhile; restore it under another name, or again to replace it` : r.error);
+                await reloadAndReselect(true);  // drop the optimistic copy of what wasn't saved
+                return;
+            }
+            if (binId) {
+                await fetch(`${EVENT_API}/admin/deleted-courses/${encodeURIComponent(binId)}`,
                             { method: 'DELETE', headers: { 'X-Admin-Password': adminPassword } }).catch(() => {});
             }
             closeRestore();

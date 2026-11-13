@@ -42,7 +42,9 @@ const WindDisplay = (() => {
         const st = d.station || {};
         const decl = typeof wmmDeclination === 'function' && num(st.lat) && num(st.lon) ? wmmDeclination(st.lat, st.lon) : null;
         const bearing = `${fmt3(d.dir_deg)}°T`;
-        const age = num(d.obs_ts) ? Math.max(0, Date.now() / 1000 - d.obs_ts) : 0;
+        // age of the observation; without one, of the fetch (shown as such); else unknown
+        const when = num(d.obs_ts) ? d.obs_ts : num(d.fetched) ? d.fetched : null;
+        const age = when === null ? Infinity : Math.max(0, Date.now() / 1000 - when);
         const compass = typeof d.dir_compass === 'string' ? d.dir_compass.replace(/[^A-Z]/g, '').slice(0, 3) : '';
         // dir_deg is where the wind comes from; the arrow (head down at 0°) points downwind
         el.innerHTML =
@@ -52,7 +54,9 @@ const WindDisplay = (() => {
             `<div class="wind-speed">${d.speed_kn.toFixed(1)} kn</div>` +
             (num(d.gust_kn) ? `<div class="wind-sub">gust ${d.gust_kn.toFixed(1)}</div>` : '') +
             `<div class="wind-sub">${compass} ${bearing}</div>` +
-            (age > STALE_S ? `<div class="wind-age">${Math.round(age / 60)} min old</div>` : '');
+            (when === null ? `<div class="wind-age">time unknown</div>`
+                : !num(d.obs_ts) ? `<div class="wind-age">obs time unknown</div>`
+                : age > STALE_S ? `<div class="wind-age">${Math.round(age / 60)} min old</div>` : '');
         el.classList.toggle('wind-old', age > OLD_S);
         const lines = [];
         if (st.name) lines.push(String(st.name));

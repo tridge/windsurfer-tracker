@@ -6,7 +6,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <title>Windsurfer Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="css/common.css" />
+    <link rel="stylesheet" href="css/common.css?v=192905ff" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.14.1/dist/Leaflet.GoogleMutant.js"></script>
     <script>
@@ -412,12 +412,9 @@
             }
         }
 
-        /* Finish recorder button (admin only) */
+        /* Finish recorder button (admin only): a map control under the zoom buttons
+           (and the live wind, when shown) */
         .finish-btn {
-            position: fixed;
-            top: 140px;
-            left: 10px;
-            z-index: 999;
             background: rgba(255, 255, 255, 0.95);
             border: none;
             border-radius: 8px;
@@ -1581,13 +1578,13 @@
         </div>
     </div>
 
-    <script src="js/utils.js"></script>
-    <script src="js/modal.js"></script>
-    <script src="js/map-utils.js"></script>
-    <script src="js/course-order.js"></script>
-    <script src="js/wmm.js"></script>
-    <script src="js/wind.js"></script>
-    <script src="js/battery_cal.js"></script>
+    <script src="js/utils.js?v=064f359a"></script>
+    <script src="js/modal.js?v=3260ad1a"></script>
+    <script src="js/map-utils.js?v=4c62e6e7"></script>
+    <script src="js/course-order.js?v=d517b892"></script>
+    <script src="js/wmm.js?v=b995cae3"></script>
+    <script src="js/wind.js?v=43a269e4"></script>
+    <script src="js/battery_cal.js?v=a78de02a"></script>
     <script>
         // Initialize map centered on Auckland
         const map = L.map('map').setView([-36.8485, 174.7633], 13);
@@ -1945,6 +1942,14 @@
         const DATA_BASE = `${EVENT_ID}/`;
         // live wind under the zoom buttons, when the event has a wind.json
         WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind' });
+        // the finish recorder button stacks below them in the same corner
+        new (L.Control.extend({
+            onAdd() {
+                const b = document.getElementById('finishBtn');
+                L.DomEvent.disableClickPropagation(b);
+                return b;
+            }
+        }))({ position: 'topleft' }).addTo(map);
 
         // API paths for this event
         const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
