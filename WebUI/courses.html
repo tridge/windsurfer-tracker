@@ -610,6 +610,16 @@
                         <option value="left">Left</option>
                         <option value="right">Right</option>
                     </select>
+                    <label for="editPinColor">Pin colour</label>
+                    <select id="editPinColor">
+                        <option value="">Default (Orange)</option>
+                        <option value="#f97316">Orange</option>
+                        <option value="#ef4444">Red</option>
+                        <option value="#22c55e">Green</option>
+                        <option value="#3b82f6">Blue</option>
+                        <option value="#8b5cf6">Purple</option>
+                        <option value="#facc15">Yellow</option>
+                    </select>
                     <div class="order-help" id="pinHelp"></div>
                 </div>
             </div>
@@ -1434,15 +1444,10 @@
             updateInfoBox(name, course);
         }
 
-        // e.g. "Order: S-1-2-F · left rounding (auto)", '' if no custom order
+        // e.g. "Order: S-1-2-F", '' if no custom order
         function orderSummary(c) {
             const keys = courseOrderKeys(c);
-            if (!keys) return '';
-            const auto = autoRoundingSide(courseSequence(c));
-            const overrides = (c.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard' || CourseOrder.isBoth(m.rounding));
-            const crossing = c.start && c.start.rounding && keys.some((k, i) => k === 'S' && i > 0)
-                ? ` · start crossing: turn ${CourseOrder.sideName(c.start.rounding)}` : '';
-            return `Order: ${keys.join('-')} · ${CourseOrder.sideName(auto)} rounding${overrides ? ' (some overridden)' : ' (auto)'}${crossing}`;
+            return keys ? `Order: ${keys.join('-')}` : '';
         }
 
         function updateInfoBox(name, course) {
@@ -2013,6 +2018,7 @@
                 document.getElementById('editPinEnabled').checked = !!pt.pin;
                 document.getElementById('editPinDist').value = pt.pin ? pt.pin.dist : 50;
                 document.getElementById('editPinSide').value = pt.pin && pt.pin.side === 'right' ? 'right' : 'left';
+                document.getElementById('editPinColor').value = (pt.pin && pt.pin.color) || '';
                 document.getElementById('pinHelp').textContent = markIndex === 'start'
                     ? 'Left/right looking from the start towards the next mark. The first leg starts mid-line.'
                     : 'Left/right looking from the finish towards the previous mark. The last leg ends mid-line.';
@@ -2069,6 +2075,8 @@
                 if (document.getElementById('editPinEnabled').checked) {
                     const dist = parseFloat(document.getElementById('editPinDist').value);
                     pt.pin = { dist: dist > 0 ? dist : 50, side: document.getElementById('editPinSide').value };
+                    const pinColor = document.getElementById('editPinColor').value;
+                    if (pinColor) pt.pin.color = pinColor;
                 } else {
                     delete pt.pin;
                 }

@@ -202,8 +202,9 @@ const CourseOrder = (() => {
                 color: which === 'S' ? '#16a34a' : '#111827', weight: 3, opacity: 0.9,
                 dashArray: '2, 7', lineCap: 'round', interactive: false
             }));
+            const fill = safeColor(pl.mark.pin.color);  // pin.color: optional #rrggbb, default orange
             layers.push(L.circleMarker([pl.pin.lat, unwrapLon(pl.pin.lon, ref)], {
-                radius: 6, color: '#7c2d12', weight: 2, fillColor: '#f97316', fillOpacity: 1,
+                radius: 6, color: darkenColor(fill), weight: 2, fillColor: fill, fillOpacity: 1,
                 interactive: opts.interactive !== false
             }).bindPopup(`<strong>${which === 'S' ? 'Start' : 'Finish'} pin</strong><br>` +
                          `<small>${Math.round(pl.mark.pin.dist)} m ${pl.mark.pin.side === 'right' ? 'right' : 'left'}</small>`));
@@ -673,7 +674,8 @@ const CourseOrder = (() => {
         if (kind === 'mark') {
             if (p.color !== undefined && p.color !== safeColor(p.color, null)) throw new Error(`invalid ${what} colour`);
         } else if (p.pin !== undefined && (!isObj(p.pin) || !isNum(p.pin.dist) || !(p.pin.dist > 0 && p.pin.dist <= 10000) ||
-                                           (p.pin.side !== 'left' && p.pin.side !== 'right'))) {
+                                           (p.pin.side !== 'left' && p.pin.side !== 'right') ||
+                                           (p.pin.color !== undefined && p.pin.color !== safeColor(p.pin.color, null)))) {
             throw new Error(`invalid ${what} pin`);
         }
     }
