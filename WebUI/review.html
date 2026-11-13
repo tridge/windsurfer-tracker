@@ -1019,8 +1019,8 @@
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
-                    const color = mark.color || '#f97316';
-                    const label = mark.comment || null;
+                    const color = CourseOrder.safeColor(mark.color);
+                    const label = CourseOrder.commentHtml(mark.comment);
                     const marker = L.marker([mark.lat, mark.lon], {
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
@@ -1028,7 +1028,7 @@
                     // Build popup with mark info
                     let popupContent = `<strong>Mark ${idx + 1}</strong>`;
                     if (mark.comment) {
-                        popupContent += `<br><em>${mark.comment}</em>`;
+                        popupContent += `<br><em>${CourseOrder.commentHtml(mark.comment)}</em>`;
                     }
                     marker.bindPopup(popupContent);
 

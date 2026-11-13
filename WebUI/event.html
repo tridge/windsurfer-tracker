@@ -2906,13 +2906,13 @@
             
             // Start marker
             if (course.start) {
-                const startLabel = course.start.comment ? course.start.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                const startLabel = CourseOrder.commentHtml(course.start.comment, true);
                 const marker = L.marker([course.start.lat, course.start.lon], {
                     icon: createStartIcon(startLabel)
                 }).addTo(map);
                 let startPopup = '<div style="text-align:center"><strong>Start</strong>';
                 if (course.start.comment) {
-                    const comment = course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                    const comment = CourseOrder.commentHtml(course.start.comment);
                     startPopup += `<br><em>${comment}</em>`;
                 }
                 if (adminMode) {
@@ -2930,8 +2930,8 @@
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
-                    const color = mark.color || '#f97316';
-                    const label = mark.comment ? mark.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                    const color = CourseOrder.safeColor(mark.color);
+                    const label = CourseOrder.commentHtml(mark.comment, true);
                     const marker = L.marker([mark.lat, mark.lon], {
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
@@ -2939,7 +2939,7 @@
                     // Build popup with mark info
                     let popupContent = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
                     if (mark.comment) {
-                        const comment = mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                        const comment = CourseOrder.commentHtml(mark.comment);
                         popupContent += `<br><em>${comment}</em>`;
                     }
                     popupContent += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
@@ -2961,13 +2961,13 @@
             
             // Finish marker
             if (course.finish) {
-                const finishLabel = course.finish.comment ? course.finish.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                const finishLabel = CourseOrder.commentHtml(course.finish.comment, true);
                 const marker = L.marker([course.finish.lat, course.finish.lon], {
                     icon: createFinishIcon(finishLabel)
                 }).addTo(map);
                 let finishPopup = '<div style="text-align:center"><strong>Finish</strong>';
                 if (course.finish.comment) {
-                    const comment = course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>');
+                    const comment = CourseOrder.commentHtml(course.finish.comment);
                     finishPopup += `<br><em>${comment}</em>`;
                 }
                 if (adminMode) {

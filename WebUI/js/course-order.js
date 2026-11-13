@@ -9,6 +9,19 @@ const CourseOrder = (() => {
 
     const unwrapLon = (lon, ref) => lon + 360 * Math.round((ref - lon) / 360);
 
+    const escHtml = s => String(s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // Mark comment as HTML (escaped, newlines as <br>, optionally non-breaking spaces); null if none
+    function commentHtml(text, nbsp) {
+        if (text === undefined || text === null || text === '') return null;
+        let h = escHtml(String(text).replace(/\n+$/, ''));
+        if (nbsp) h = h.replace(/ /g, '&nbsp;');
+        return h.replace(/\n/g, '<br>');
+    }
+
+    const safeColor = (c, dflt = '#f97316') => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : dflt;
+
     function metresNE(a, b) {
         return {
             north: (b.lat - a.lat) * rad * EARTH_R,
@@ -411,7 +424,7 @@ const CourseOrder = (() => {
 
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
-        pinLine, pinLayers,
+        pinLine, pinLayers, escHtml, commentHtml, safeColor,
         setLabelOptions: o => Object.assign(labelOpts, o),
         labelOptions: () => ({ ...labelOpts }),
         routeLayer: (course, opts = {}) => zoomLayer((m, add) => draw(m, course, opts, add)),

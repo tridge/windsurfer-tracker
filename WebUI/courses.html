@@ -1275,16 +1275,16 @@
 
             // Start marker
             if (course.start) {
-                const startLabel = course.start.comment ? course.start.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                const startLabel = CourseOrder.commentHtml(course.start.comment, true);
                 const marker = L.marker(ll(course.start), { interactive,
                     icon: createStartIcon(startLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Start</strong>';
                 if (course.start.comment) {
-                    popup += `<br><em>${course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
+                    popup += `<br><em>${CourseOrder.commentHtml(course.start.comment)}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.start.lat.toFixed(6)}<br>Lon: ${course.start.lon.toFixed(6)}</small>`;
-                if (course.start.pin) popup += `<br><small>Pin: ${Math.round(course.start.pin.dist)} m ${course.start.pin.side}</small>`;
+                if (course.start.pin) popup += `<br><small>Pin: ${Math.round(course.start.pin.dist)} m ${course.start.pin.side === 'right' ? 'right' : 'left'}</small>`;
                 if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
@@ -1303,14 +1303,14 @@
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
-                    const color = mark.color || '#f97316';
-                    const label = mark.comment ? mark.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                    const color = CourseOrder.safeColor(mark.color);
+                    const label = CourseOrder.commentHtml(mark.comment, true);
                     const marker = L.marker(ll(mark), { interactive,
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
                     let popup = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
                     if (mark.comment) {
-                        popup += `<br><em>${mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
+                        popup += `<br><em>${CourseOrder.commentHtml(mark.comment)}</em>`;
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
                     if (orderKeys) {
@@ -1336,16 +1336,16 @@
 
             // Finish marker
             if (course.finish) {
-                const finishLabel = course.finish.comment ? course.finish.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
+                const finishLabel = CourseOrder.commentHtml(course.finish.comment, true);
                 const marker = L.marker(ll(course.finish), { interactive,
                     icon: createFinishIcon(finishLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Finish</strong>';
                 if (course.finish.comment) {
-                    popup += `<br><em>${course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
+                    popup += `<br><em>${CourseOrder.commentHtml(course.finish.comment)}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
-                if (course.finish.pin) popup += `<br><small>Pin: ${Math.round(course.finish.pin.dist)} m ${course.finish.pin.side}</small>`;
+                if (course.finish.pin) popup += `<br><small>Pin: ${Math.round(course.finish.pin.dist)} m ${course.finish.pin.side === 'right' ? 'right' : 'left'}</small>`;
                 popup += legFromPrev(course.finish);
                 if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
