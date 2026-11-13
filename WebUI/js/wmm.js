@@ -28,7 +28,7 @@ const WMM_COEF = [
 ];
 
 // Declination in degrees (east positive) at geodetic lat/lon (deg), altitude km,
-// and decimal year (default now)
+// and decimal year (default now); null outside the model's 5-year validity
 function wmmDeclination(lat, lon, altKm = 0, year = null) {
     if (year === null) {
         const now = new Date();
@@ -37,6 +37,7 @@ function wmmDeclination(lat, lon, altKm = 0, year = null) {
         year = now.getUTCFullYear() + (now.getTime() - y0) / (y1 - y0);
     }
     const dt = year - WMM_EPOCH;
+    if (!(dt >= 0 && dt <= 5)) return null;
     const N = 12, rad = Math.PI / 180;
 
     // geodetic -> geocentric (WGS84)

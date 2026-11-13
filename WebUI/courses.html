@@ -365,8 +365,13 @@
             width: 300px; background: white; border-radius: 12px;
             padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
             font-size: 13px; display: none;
+            max-height: calc(100vh - 110px); overflow-y: auto; box-sizing: border-box;
         }
         .transform-panel.visible { display: block; }
+        .transform-panel .tf-error { color: #dc2626; font-weight: 600; }
+        @media (max-height: 520px) {
+            .transform-panel { top: 10px; max-height: calc(100vh - 20px); }
+        }
         .leg-label { background: none !important; border: none !important; }
         .leg-label div {
             position: absolute; transform: translate(-50%, -50%);
@@ -497,7 +502,7 @@
             }
             .transform-panel {
                 top: auto; bottom: 10px; left: 10px; right: 10px;
-                width: auto; max-height: 55vh; overflow-y: auto;
+                width: auto; max-height: 55vh;
             }
         }
     </style>
@@ -603,7 +608,8 @@
                 <input type="number" id="tfEast" step="10" value="0" oninput="updateTransformPreview()">
             </div>
             <div class="tf-row">
-                <button class="tf-small-btn" id="tfPickBtn" onclick="tfTogglePick()">📍 Click map to place pivot</button>
+                <button class="tf-small-btn" id="tfDragBtn" onclick="tfToggleDrag()">✋ Drag course</button>
+                <button class="tf-small-btn" id="tfPickBtn" onclick="tfTogglePick()">📍 Click to place pivot</button>
             </div>
         </div>
         <div class="tf-section">
@@ -619,7 +625,7 @@
         <div class="btn-row">
             <button class="btn-cancel" onclick="closeTransform()">Cancel</button>
             <button class="btn-reset" onclick="resetTransform()">Reset</button>
-            <button class="btn-save" onclick="applyTransform()">Apply</button>
+            <button class="btn-save" id="tfApplyBtn" onclick="applyTransform()">Apply</button>
         </div>
     </div>
 
@@ -867,6 +873,9 @@
         // Transform state
         let transformActive = false;
         let transformPicking = false;
+        let transformDragging = false;  // drag mode on
+        let tfDrag = null;              // active pointer drag
+        let tfSession = null;           // {name, base}: course being transformed and its snapshot
         let transformPreview = null;
 
         // --- Utility functions (from event.html) ---
@@ -1110,6 +1119,7 @@
         }
 
         function selectCourse(name, course, fromUser) {
+            closeTransform();
             selectedCourseName = name;
             courseData = JSON.parse(JSON.stringify(course));  // Deep copy for editing
             if (fromUser) userInteracted = true;
@@ -1198,17 +1208,21 @@
         // Save courseData back to the selected named course
         async function saveSelectedCourse() {
             if (!selectedCourseName || !courseData) return false;
+            return saveCourse(selectedCourseName, courseData);
+        }
+
+        async function saveCourse(name, data) {
             try {
-                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(selectedCourseName)}`, {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Admin-Password': adminPassword
                     },
-                    body: JSON.stringify(courseData)
+                    body: JSON.stringify(data)
                 });
-                const data = await response.json();
-                if (data.success) {
+                const result = await response.json();
+                if (result.success) {
                     // Also update the live course
                     await fetch(`${EVENT_API}/admin/course`, {
                         method: 'POST',
@@ -1216,12 +1230,12 @@
                             'Content-Type': 'application/json',
                             'X-Admin-Password': adminPassword
                         },
-                        body: JSON.stringify(courseData)
+                        body: JSON.stringify(data)
                     });
                     await reloadAndReselect();
                     return true;
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
+                    alert('Error: ' + (result.error || 'Unknown error'));
                     return false;
                 }
             } catch (e) {
@@ -1241,6 +1255,7 @@
         // --- Drawing functions ---
 
         function startDrawingCourse() {
+            closeTransform();
             if (drawingMode) {
                 cancelDrawing();
                 return;
@@ -1453,6 +1468,7 @@
         }
 
         async function newCourse() {
+            closeTransform();
             const name = prompt('New course name:');
             if (!name) return;
             if (allCourses[name]) {
@@ -1485,6 +1501,7 @@
         }
 
         async function deleteSelectedCourse() {
+            closeTransform();
             if (!selectedCourseName) return;
             if (!confirm(`Permanently delete course "${selectedCourseName}"?\n\nThis cannot be undone.`)) return;
             try {
@@ -1506,6 +1523,7 @@
         }
 
         async function renameCourse() {
+            closeTransform();
             if (!selectedCourseName || !courseData) return;
             const newName = prompt(`Rename "${selectedCourseName}" to:`, selectedCourseName);
             if (!newName || newName === selectedCourseName) return;
@@ -1535,6 +1553,7 @@
         }
 
         async function copyCourse() {
+            closeTransform();
             if (!selectedCourseName || !courseData) return;
             const newName = prompt(`Copy "${selectedCourseName}" to new name:`, selectedCourseName + ' copy');
             if (!newName) return;
@@ -1798,15 +1817,28 @@
             return pts;
         }
 
+        // Longitude helpers so courses spanning ±180° work
+        function unwrapLon(lon, ref) {
+            return lon + 360 * Math.round((ref - lon) / 360);
+        }
+        function normLon(lon) {
+            return ((lon + 540) % 360 + 360) % 360 - 180;
+        }
+
+        function courseCentre(course) {
+            const pts = coursePoints(course);
+            const ref = pts[0].lon;
+            return {
+                lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length,
+                lon: normLon(pts.reduce((a, p) => a + unwrapLon(p.lon, ref), 0) / pts.length)
+            };
+        }
+
         function transformPivot(course) {
             const which = document.getElementById('tfPivot').value;
             if (which === 'start' && course.start) return { lat: course.start.lat, lon: course.start.lon };
             if (which === 'finish' && course.finish) return { lat: course.finish.lat, lon: course.finish.lon };
-            const pts = coursePoints(course);
-            return {
-                lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length,
-                lon: pts.reduce((a, p) => a + p.lon, 0) / pts.length
-            };
+            return courseCentre(course);
         }
 
         function tfNum(id, dflt) {
@@ -1814,27 +1846,40 @@
             return isFinite(v) ? v : dflt;
         }
 
+        // north/east metres from a to b in the local plane at a
+        function metresNE(a, b) {
+            const rad = Math.PI / 180;
+            return {
+                north: (b.lat - a.lat) * rad * EARTH_R,
+                east: (unwrapLon(b.lon, a.lon) - a.lon) * rad * EARTH_R * Math.cos(a.lat * rad)
+            };
+        }
+
         // Scale and rotate (clockwise) about the pivot in a local metric frame,
-        // then move the pivot north/east; mark comments/colours are kept
+        // then move the pivot north/east; mark comments/colours are kept.
+        // Returns null if the result leaves the valid latitude range.
         function transformCourse(course, rotDeg, northM, eastM, scalePct) {
             const out = JSON.parse(JSON.stringify(course));
             const pivot = transformPivot(course);
             const rad = Math.PI / 180;
             const cos0 = Math.cos(pivot.lat * rad);
             const newLat = pivot.lat + (northM / EARTH_R) / rad;
+            if (!(Math.abs(newLat) <= 85)) return null;
             const newLon = pivot.lon + (eastM / (EARTH_R * cos0)) / rad;
             const cos1 = Math.cos(newLat * rad);
             const c = Math.cos(rotDeg * rad), s = Math.sin(rotDeg * rad);
             const k = scalePct / 100;
+            let ok = true;
             coursePoints(out).forEach(p => {
-                const x = (p.lon - pivot.lon) * rad * EARTH_R * cos0;
+                const x = (unwrapLon(p.lon, pivot.lon) - pivot.lon) * rad * EARTH_R * cos0;
                 const y = (p.lat - pivot.lat) * rad * EARTH_R;
                 const x2 = k * (x * c + y * s);
                 const y2 = k * (-x * s + y * c);
                 p.lat = newLat + (y2 / EARTH_R) / rad;
-                p.lon = newLon + (x2 / (EARTH_R * cos1)) / rad;
+                p.lon = normLon(newLon + (x2 / (EARTH_R * cos1)) / rad);
+                if (!isFinite(p.lat) || !isFinite(p.lon) || Math.abs(p.lat) > 85) ok = false;
             });
-            return out;
+            return ok ? out : null;
         }
 
         function bearingDeg(a, b) {
@@ -1853,8 +1898,9 @@
             cancelDrawing();
             cancelMoveMark();
             map.closePopup();
+            tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)) };
             transformActive = true;
-            document.getElementById('tfCourseName').textContent = `"${selectedCourseName}"`;
+            document.getElementById('tfCourseName').textContent = `"${tfSession.name}"`;
             resetTransform();
             document.getElementById('transformPanel').classList.add('visible');
             document.addEventListener('keydown', handleTransformKeydown);
@@ -1864,6 +1910,7 @@
             ['tfRotate', 'tfRotateSlider', 'tfNorth', 'tfEast'].forEach(id => document.getElementById(id).value = 0);
             ['tfScale', 'tfScaleSlider'].forEach(id => document.getElementById(id).value = 100);
             tfStopPick();
+            tfStopDrag();
             updateTransformPreview();
         }
 
@@ -1881,23 +1928,32 @@
         }
 
         function updateTransformPreview() {
-            if (!transformActive || !courseData) return;
-            transformPreview = transformCourse(courseData,
+            if (!transformActive || !tfSession) return;
+            const base = tfSession.base;
+            transformPreview = transformCourse(base,
                 tfNum('tfRotate', 0), tfNum('tfNorth', 0), tfNum('tfEast', 0),
                 Math.max(1, tfNum('tfScale', 100)));
+            const infoEl = document.getElementById('tfInfo');
+            document.getElementById('tfApplyBtn').disabled = !transformPreview;
+            if (!transformPreview) {
+                infoEl.innerHTML = '<span class="tf-error">Out of range: reduce the offset or scale</span>';
+                return;
+            }
             displayCourse(transformPreview, false);
-            updateInfoBox(selectedCourseName, transformPreview);
+            updateInfoBox(tfSession.name, transformPreview);
             const decl = courseDeclination(transformPreview);
 
-            const lenOld = calculateCourseLength(courseData);
+            const lenOld = calculateCourseLength(base);
             const lenNew = calculateCourseLength(transformPreview);
             let info = `Length: ${formatCourseLength(lenOld, 2)} → ${formatCourseLength(lenNew, 2)}`;
             const pts = coursePoints(transformPreview);
             if (pts.length >= 2) {
                 info += `<br>First leg bearing: ${Math.round(bearingDeg(pts[0], pts[1]))}°T`;
             }
-            info += `<br>Magnetic declination ${Math.abs(decl).toFixed(1)}°${decl >= 0 ? 'E' : 'W'} (WMM2025)`;
-            document.getElementById('tfInfo').innerHTML = info;
+            info += decl === null
+                ? '<br><span class="tf-error">Magnetic model out of date (WMM2025 valid 2025-2030)</span>'
+                : `<br>Magnetic declination ${Math.abs(decl).toFixed(1)}°${decl >= 0 ? 'E' : 'W'} (WMM2025)`;
+            infoEl.innerHTML = info;
         }
 
         function clearLegLabels() {
@@ -1912,12 +1968,11 @@
             return `${dist} / ${(km / 1.852).toFixed(2)} nm`;
         }
 
-        // Declination at the course centre
+        // Declination at the course centre, null if the model doesn't cover today
         function courseDeclination(course) {
-            const pts = coursePoints(course);
-            if (pts.length === 0) return 0;
-            return wmmDeclination(pts.reduce((a, p) => a + p.lat, 0) / pts.length,
-                                  pts.reduce((a, p) => a + p.lon, 0) / pts.length);
+            if (coursePoints(course).length === 0) return null;
+            const c = courseCentre(course);
+            return wmmDeclination(c.lat, c.lon);
         }
 
         // Label each leg at its midpoint with true/magnetic bearing and length
@@ -1928,14 +1983,15 @@
             const decl = courseDeclination(course);
             for (let i = 0; i + 1 < pts.length; i++) {
                 const t = bearingDeg(pts[i], pts[i + 1]);
-                const m = (t - decl + 360) % 360;
                 const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
+                const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
                 const icon = L.divIcon({
                     className: 'leg-label',
-                    html: `<div>${fmt(t)}°T / ${fmt(m)}°M<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
+                    html: `<div>${hdg}<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
                     iconSize: [0, 0]
                 });
-                const mid = [(pts[i].lat + pts[i + 1].lat) / 2, (pts[i].lon + pts[i + 1].lon) / 2];
+                const mid = [(pts[i].lat + pts[i + 1].lat) / 2,
+                             normLon((pts[i].lon + unwrapLon(pts[i + 1].lon, pts[i].lon)) / 2)];
                 legLabels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
             }
         }
@@ -1943,6 +1999,7 @@
         // Pick mode: clicking the map moves the pivot to that point
         function tfTogglePick() {
             if (transformPicking) { tfStopPick(); return; }
+            tfStopDrag();
             transformPicking = true;
             document.getElementById('tfPickBtn').classList.add('active');
             document.getElementById('map').style.cursor = 'crosshair';
@@ -1950,6 +2007,7 @@
         }
 
         function tfStopPick() {
+            if (!transformPicking) return;
             transformPicking = false;
             document.getElementById('tfPickBtn').classList.remove('active');
             document.getElementById('map').style.cursor = '';
@@ -1957,19 +2015,80 @@
         }
 
         function tfPickClick(e) {
-            const pivot = transformPivot(courseData);
-            const rad = Math.PI / 180;
-            const north = (e.latlng.lat - pivot.lat) * rad * EARTH_R;
-            const east = (e.latlng.lng - pivot.lon) * rad * EARTH_R * Math.cos(pivot.lat * rad);
-            document.getElementById('tfNorth').value = Math.round(north);
-            document.getElementById('tfEast').value = Math.round(east);
+            if (!tfSession) return;
+            const d = metresNE(transformPivot(tfSession.base), { lat: e.latlng.lat, lon: e.latlng.lng });
+            document.getElementById('tfNorth').value = Math.round(d.north);
+            document.getElementById('tfEast').value = Math.round(d.east);
             tfStopPick();
+            updateTransformPreview();
+        }
+
+        // Drag mode: press and drag anywhere on the map to move the course
+        function tfToggleDrag() {
+            if (transformDragging) { tfStopDrag(); return; }
+            tfStopPick();
+            transformDragging = true;
+            document.getElementById('tfDragBtn').classList.add('active');
+            const el = map.getContainer();
+            map.dragging.disable();
+            el.style.cursor = 'move';
+            el.style.touchAction = 'none';
+            el.addEventListener('pointerdown', tfDragDown);
+            el.addEventListener('pointermove', tfDragMove);
+            el.addEventListener('pointerup', tfDragUp);
+            el.addEventListener('pointercancel', tfDragUp);
+        }
+
+        function tfStopDrag() {
+            if (!transformDragging) return;
+            transformDragging = false;
+            tfDrag = null;
+            document.getElementById('tfDragBtn').classList.remove('active');
+            const el = map.getContainer();
+            map.dragging.enable();
+            el.style.cursor = '';
+            el.style.touchAction = '';
+            el.removeEventListener('pointerdown', tfDragDown);
+            el.removeEventListener('pointermove', tfDragMove);
+            el.removeEventListener('pointerup', tfDragUp);
+            el.removeEventListener('pointercancel', tfDragUp);
+        }
+
+        function tfDragDown(e) {
+            if (tfDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+            if (e.target.closest('.leaflet-control')) return;
+            const ll = map.mouseEventToLatLng(e);
+            tfDrag = { id: e.pointerId, start: { lat: ll.lat, lon: ll.lng },
+                       north: tfNum('tfNorth', 0), east: tfNum('tfEast', 0), raf: 0 };
+            map.getContainer().setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+
+        function tfDragMove(e) {
+            if (!tfDrag || e.pointerId !== tfDrag.id) return;
+            const ll = map.mouseEventToLatLng(e);
+            const d = metresNE(tfDrag.start, { lat: ll.lat, lon: ll.lng });
+            document.getElementById('tfNorth').value = Math.round(tfDrag.north + d.north);
+            document.getElementById('tfEast').value = Math.round(tfDrag.east + d.east);
+            if (!tfDrag.raf) {
+                tfDrag.raf = requestAnimationFrame(() => {
+                    if (tfDrag) tfDrag.raf = 0;
+                    updateTransformPreview();
+                });
+            }
+        }
+
+        function tfDragUp(e) {
+            if (!tfDrag || e.pointerId !== tfDrag.id) return;
+            tfDrag = null;
             updateTransformPreview();
         }
 
         function handleTransformKeydown(e) {
             if (e.key === 'Escape') {
-                if (transformPicking) tfStopPick(); else closeTransform();
+                if (transformPicking) tfStopPick();
+                else if (transformDragging) tfStopDrag();
+                else closeTransform();
             }
         }
 
@@ -1977,7 +2096,9 @@
             if (!transformActive) return;
             transformActive = false;
             transformPreview = null;
+            tfSession = null;
             tfStopPick();
+            tfStopDrag();
             document.removeEventListener('keydown', handleTransformKeydown);
             document.getElementById('transformPanel').classList.remove('visible');
             if (courseData) {
@@ -1986,16 +2107,18 @@
             }
         }
 
+        // Saves the preview under the course the session started on; courseData is
+        // only replaced by the post-save reload, so a failed save changes nothing
         async function applyTransform() {
-            if (!transformActive || !transformPreview) return;
-            const result = transformPreview;
-            closeTransform();
-            const before = courseData;
-            courseData = result;
-            if (!await saveSelectedCourse()) {
-                courseData = before;
-                displayCourse(courseData, false);
+            if (!transformActive || !transformPreview || !tfSession) return;
+            const name = tfSession.name, result = transformPreview;
+            if (name !== selectedCourseName || !allCourses[name]) {
+                closeTransform();
+                alert(`Course "${name}" is no longer selected; transform not applied`);
+                return;
             }
+            closeTransform();
+            await saveCourse(name, result);
         }
 
         async function loadCourses(isRefresh) {
@@ -2005,6 +2128,7 @@
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
+                if (isRefresh && transformActive) return;  // panel opened while fetching
                 const newCourses = data.courses || {};
 
                 // Skip UI rebuild if nothing has changed
