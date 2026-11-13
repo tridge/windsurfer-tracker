@@ -22,6 +22,45 @@ const CourseOrder = (() => {
 
     const safeColor = (c, dflt = '#f97316') => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : dflt;
 
+    // --- multiple courses (A, B, C...) in one course file ---
+    // Course A is the file itself; B, C... are course.extraCourses[0], [1]...
+    // each with its own start/marks/finish/order.
+    const MAX_COURSES = 6;
+    const COURSE_COLORS = ['#ff6600', '#2563eb', '#9333ea', '#059669', '#db2777', '#ca8a04'];
+    const letterOf = i => String.fromCharCode(65 + i);
+
+    // [{letter, index, course, color}] for every course in the file
+    function subCourses(course) {
+        if (!course) return [];
+        const extra = Array.isArray(course.extraCourses) ? course.extraCourses : [];
+        return [course, ...extra].map((c, i) => ({ letter: letterOf(i), index: i, course: c, color: COURSE_COLORS[i % COURSE_COLORS.length] }));
+    }
+
+    function subCourse(course, letter) {
+        const e = subCourses(course).find(x => x.letter === letter);
+        return e ? e.course : null;
+    }
+
+    const courseCount = course => subCourses(course).length;
+
+    // Copy of one course without the file-level fields (other courses, server timestamps)
+    function plainCourse(c) {
+        const out = JSON.parse(JSON.stringify(c || {}));
+        ['extraCourses', 'saved', 'updated', 'updated_iso'].forEach(k => delete out[k]);
+        return out;
+    }
+
+    // File with course `letter` removed; later courses move up a letter
+    function removeCourse(course, letter) {
+        const subs = subCourses(course).filter(x => x.letter !== letter).map(x => plainCourse(x.course));
+        const out = subs[0] || {};
+        if (subs.length > 1) out.extraCourses = subs.slice(1);
+        return out;
+    }
+
+    // Mark name: "3", or "B3" when the file has more than one course
+    const markName = (letter, num, multi) => multi ? `${letter}${num}` : String(num);
+
     function metresNE(a, b) {
         return {
             north: (b.lat - a.lat) * rad * EARTH_R,
@@ -239,6 +278,7 @@ const CourseOrder = (() => {
     function draw(map, course, opts, add) {
         const seq = sequence(course);
         if (seq.length < 2) return;
+        const keyName = k => typeof k === 'number' && opts.letter ? opts.letter + k : k;
         const auto = autoSide(seq);
         const ref = seq[0].pt.lon;
         const P = seq.map(e => map.latLngToLayerPoint([e.pt.lat, unwrapLon(e.pt.lon, ref)]));
@@ -303,7 +343,7 @@ const CourseOrder = (() => {
             route.push(pout, legs[i].to);
         }
         add(L.polyline(route.map(p => map.layerPointToLatLng(p)), {
-            color: opts.color || '#ff6600', weight: 3, opacity: 0.85, interactive: false
+            color: opts.color || '#ff6600', weight: 3, opacity: opts.opacity || 0.85, interactive: false
         }));
 
         const arrows = [];
@@ -324,7 +364,7 @@ const CourseOrder = (() => {
         const decl = declinationAt(seq.map(e => e.pt));
         const items = legs.map((g, i) => ({
             a: g.from, b: g.to, n: g.n, pref: (g.sa + g.sb) >= 0 ? 1 : -1,
-            html: legLabelHtml(seq[i].pt, seq[i + 1].pt, decl, `${seq[i].key}→${seq[i + 1].key}: `)
+            html: legLabelHtml(seq[i].pt, seq[i + 1].pt, decl, `${keyName(seq[i].key)}→${keyName(seq[i + 1].key)}: `)
         }));
         const obstacles = P.map(p => box(p, 30, 30)).concat(arrows.map(p => box(p, 18, 18)));
         const shown = items.filter(it => it.html);
@@ -454,6 +494,120 @@ const CourseOrder = (() => {
         placeLabels(map, shown, P.map(p => box(p, 30, 30))).forEach((c, i) => add(labelMarker(map, c, shown[i].html)));
     }
 
+    // --- checking a course read from a file; throws with the reason ---
+
+    const isNum = v => typeof v === 'number' && Number.isFinite(v);
+    const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+    // Check an imported start/finish ('S'/'F') or mark; throws with the reason
+    function checkImportedPoint(p, what, kind) {
+        if (!isObj(p) || !isNum(p.lat) || !isNum(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180)
+            throw new Error(`missing or invalid ${what} position`);
+        if (p.comment !== undefined && typeof p.comment !== 'string') throw new Error(`invalid ${what} comment`);
+        if (kind === 'mark') {
+            if (p.color !== undefined && p.color !== safeColor(p.color, null)) throw new Error(`invalid ${what} colour`);
+            if (p.rounding !== undefined && p.rounding !== 'port' && p.rounding !== 'starboard')
+                throw new Error(`invalid ${what} rounding`);
+        } else if (p.pin !== undefined && (!isObj(p.pin) || !isNum(p.pin.dist) || !(p.pin.dist > 0 && p.pin.dist <= 10000) ||
+                                           (p.pin.side !== 'left' && p.pin.side !== 'right'))) {
+            throw new Error(`invalid ${what} pin`);
+        }
+    }
+
+    // Check one course (A, or one of extraCourses) of a course file
+    function checkImportedSub(j, prefix) {
+        if (!isObj(j)) throw new Error(`${prefix}not a course`);
+        checkImportedPoint(j.start, prefix + 'start', 'S');
+        checkImportedPoint(j.finish, prefix + 'finish', 'F');
+        if (j.marks !== undefined) {
+            if (!Array.isArray(j.marks)) throw new Error(`invalid ${prefix}marks`);
+            j.marks.forEach((m, i) => checkImportedPoint(m, `${prefix}mark ${i + 1}`, 'mark'));
+        }
+        if (j.order !== undefined && typeof j.order !== 'string') throw new Error(`invalid ${prefix}order`);
+    }
+
+    function checkCourse(j) {
+        checkImportedSub(j, '');
+        if (j.extraCourses !== undefined) {
+            if (!Array.isArray(j.extraCourses) || j.extraCourses.length > MAX_COURSES - 1)
+                throw new Error('invalid extra courses');
+            j.extraCourses.forEach((x, i) => checkImportedSub(x, `course ${letterOf(i + 1)} `));
+        }
+    }
+
+    // --- course marker icons (Leaflet divIcons) ---
+
+    function darkenColor(hex) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        const darken = (v) => Math.max(0, Math.floor(v * 0.7)).toString(16).padStart(2, '0');
+        return `#${darken(r)}${darken(g)}${darken(b)}`;
+    }
+
+    // letter: course letter shown on the icon when the file has several courses
+    function startIcon(label, letter) {
+        const text = letter ? `S<tspan font-size="9" dy="1">${letter}</tspan>` : 'S';
+        const svg = `
+            <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="0" cy="0" r="12" fill="#22c55e" stroke="#166534" stroke-width="2"/>
+                <text x="0" y="5" text-anchor="middle" fill="white" font-size="12" font-weight="bold">${text}</text>
+            </svg>
+        `;
+        const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
+        return L.divIcon({
+            html: `<div style="position:relative">${svg}${labelHtml}</div>`,
+            className: 'course-marker',
+            iconSize: [32, 32 + (label ? 20 : 0)],
+            iconAnchor: [16, 16]
+        });
+    }
+
+    function markIcon(number, color, label) {
+        color = color || '#f97316';
+        const strokeColor = darkenColor(color);
+        const fs = String(number).length > 2 ? 9 : 11;
+        const svg = `
+            <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="0" cy="0" r="12" fill="${color}" stroke="${strokeColor}" stroke-width="2"/>
+                <text x="0" y="${fs === 11 ? 5 : 4}" text-anchor="middle" fill="white" font-size="${fs}" font-weight="bold">${number}</text>
+            </svg>
+        `;
+        const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
+        return L.divIcon({
+            html: `<div style="position:relative">${svg}${labelHtml}</div>`,
+            className: 'course-marker',
+            iconSize: [32, 32 + (label ? 20 : 0)],
+            iconAnchor: [16, 16]
+        });
+    }
+
+    function finishIcon(label, letter, color) {
+        const badge = letter ? `<circle cx="10" cy="-10" r="6" fill="${color}" stroke="white" stroke-width="1"/>` +
+                               `<text x="10" y="-7" text-anchor="middle" fill="white" font-size="9" font-weight="bold">${letter}</text>` : '';
+        const svg = `
+            <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
+                <rect x="-12" y="-12" width="24" height="24" fill="white" stroke="#333" stroke-width="2" rx="3"/>
+                <rect x="-12" y="-12" width="6" height="6" fill="#333"/>
+                <rect x="0" y="-12" width="6" height="6" fill="#333"/>
+                <rect x="-6" y="-6" width="6" height="6" fill="#333"/>
+                <rect x="6" y="-6" width="6" height="6" fill="#333"/>
+                <rect x="-12" y="0" width="6" height="6" fill="#333"/>
+                <rect x="0" y="0" width="6" height="6" fill="#333"/>
+                <rect x="-6" y="6" width="6" height="6" fill="#333"/>
+                <rect x="6" y="6" width="6" height="6" fill="#333"/>
+                ${badge}
+            </svg>
+        `;
+        const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
+        return L.divIcon({
+            html: `<div style="position:relative">${svg}${labelHtml}</div>`,
+            className: 'course-marker',
+            iconSize: [32, 32 + (label ? 20 : 0)],
+            iconAnchor: [16, 16]
+        });
+    }
+
     // Layer that redraws itself on zoom (offsets and label placement are in pixels).
     // Built on first use so pages without Leaflet can still use the helpers.
     let ZoomLayer = null;
@@ -483,6 +637,8 @@ const CourseOrder = (() => {
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
         pinLine, pinLayers, splitLeg, escHtml, commentHtml, safeColor,
+        darkenColor, startIcon, markIcon, finishIcon, checkCourse,
+        MAX_COURSES, COURSE_COLORS, letterOf, subCourses, subCourse, courseCount, plainCourse, removeCourse, markName,
         setLabelOptions: o => Object.assign(labelOpts, o),
         labelOptions: () => ({ ...labelOpts }),
         routeLayer: (course, opts = {}) => zoomLayer((m, add) => draw(m, course, opts, add)),

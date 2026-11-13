@@ -488,6 +488,8 @@
         <a id="backLink" onclick="goBack()" href="event.html">&#8592; Live</a>
         <div class="event-name" id="eventName"></div>
         <select class="race-select" id="raceSelect" onchange="onRaceChanged()"></select>
+        <select class="race-select course-select" id="finishCourseSelect" onchange="onFinishCourseChanged()"
+                title="Which course's finish line to use" style="display:none"></select>
         <button class="btn btn-new" onclick="showNewRaceDialog()">+ New</button>
         <div class="race-timer" id="raceTimer">--:--</div>
     </div>
@@ -589,6 +591,7 @@ let sailors = {};           // id -> {lat,lon,spd,hdg,ts,bat,sig,chg,role,displa
 let userOverrides = {};     // id -> {name, role, info}
 let courseData = null;
 let finishLine = null;      // {p1:{lat,lon}, p2:{lat,lon}} or null
+let finishCourse = localStorage.getItem(`finishCourse_${EVENT_ID}`) || 'A';  // course (A, B...) whose finish is used
 let rowOrder = [];          // sailor IDs in display order - NEVER changes except on explicit sort
 let newSailorsQueue = [];   // sailor IDs that appeared since last sort
 let timerInterval = null;
@@ -699,18 +702,36 @@ async function loadCourse() {
         const r = await fetch(`${EVENT_API}/course`);
         if (!r.ok) return;
         courseData = await r.json();
+        updateFinishCourseSelect();
         computeFinishLine();
     } catch(e) {}
 }
 
+// With several courses (A, B...) pick whose finish line to use
+function updateFinishCourseSelect() {
+    const subs = CourseOrder.subCourses(courseData);
+    if (!subs.some(x => x.letter === finishCourse)) finishCourse = 'A';
+    const sel = document.getElementById('finishCourseSelect');
+    sel.innerHTML = subs.map(x => `<option value="${x.letter}">Course ${x.letter}</option>`).join('');
+    sel.value = finishCourse;
+    sel.style.display = subs.length > 1 ? '' : 'none';
+}
+
+function onFinishCourseChanged() {
+    finishCourse = document.getElementById('finishCourseSelect').value;
+    localStorage.setItem(`finishCourse_${EVENT_ID}`, finishCourse);
+    computeFinishLine();
+}
+
 function computeFinishLine() {
-    if (!courseData || !courseData.finish) {
+    const course = CourseOrder.subCourse(courseData, finishCourse) || courseData;
+    if (!course || !course.finish) {
         finishLine = null;
         return;
     }
-    const fin = courseData.finish;
+    const fin = course.finish;
     // a finish with a pin is the line from the finish mark to the pin
-    const pl = CourseOrder.pinLine(courseData, 'F');
+    const pl = CourseOrder.pinLine(course, 'F');
     if (pl) {
         finishLine = { p1: { lat: pl.mark.lat, lon: pl.mark.lon }, p2: { lat: pl.pin.lat, lon: pl.pin.lon } };
         document.getElementById('btnSort').disabled = false;
@@ -719,7 +740,7 @@ function computeFinishLine() {
     // Get last leg direction — walk back along the rounding order (or mark order)
     // to the last point not at the finish
     let fromPt = null;
-    const seq = CourseOrder.sequence(courseData);
+    const seq = CourseOrder.sequence(course);
     for (let i = seq.length - 2; i >= 0; i--) {
         const m = seq[i].pt;
         if (m.lat !== fin.lat || m.lon !== fin.lon) {

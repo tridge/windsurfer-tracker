@@ -2251,12 +2251,27 @@
             } catch (e) { /* ignore */ }
         }
 
+        // which course (A, B...) of the live course file is being drawn
+        let drawingSub = 'A';
+        const drawingMulti = () => CourseOrder.courseCount(courseData) > 1;
+
         function startDrawingCourse() {
             if (drawingMode) {
                 cancelDrawing();
                 return;
             }
-            
+            const letters = CourseOrder.subCourses(courseData).map(x => x.letter);
+            drawingSub = 'A';
+            if (letters.length > 1) {
+                const ans = prompt(`Which course are you drawing? (${letters.join(', ')})`, 'A');
+                if (ans === null) return;
+                drawingSub = ans.trim().toUpperCase();
+                if (!letters.includes(drawingSub)) {
+                    alert(`No course "${ans.trim()}": use ${letters.join(', ')}`);
+                    return;
+                }
+            }
+
             drawingMode = true;
             drawingPoints = [];
             drawingMarkers = [];
@@ -2399,12 +2414,10 @@
             drawingPoints.push(point);
 
             // Determine marker type
-            let icon;
-            if (drawingPoints.length === 1) {
-                icon = createStartIcon();
-            } else {
-                icon = createMarkIcon(drawingPoints.length - 1);
-            }
+            const multi = drawingMulti();
+            const color = CourseOrder.COURSE_COLORS[drawingSub.charCodeAt(0) - 65];
+            const icon = drawingPoints.length === 1 ? createStartIcon(null, multi ? drawingSub : null)
+                : createMarkIcon(CourseOrder.markName(drawingSub, drawingPoints.length - 1, multi), multi ? color : undefined);
             
             const marker = L.marker([point.lat, point.lon], { icon, draggable: true }).addTo(map);
             marker.on('drag', () => updateDrawingLine());
@@ -2439,7 +2452,8 @@
 
             // Replace last marker with finish icon
             const lastMarker = drawingMarkers[drawingMarkers.length - 1];
-            lastMarker.setIcon(createFinishIcon());
+            lastMarker.setIcon(createFinishIcon(null, drawingMulti() ? drawingSub : null,
+                                                CourseOrder.COURSE_COLORS[drawingSub.charCodeAt(0) - 65]));
 
             // Done drawing
             drawingMode = false;
@@ -2474,7 +2488,7 @@
                 drawingLine.setLatLngs(latlngs);
             } else if (latlngs.length >= 2) {
                 drawingLine = L.polyline(latlngs, {
-                    color: '#ff6600',
+                    color: CourseOrder.COURSE_COLORS[drawingSub.charCodeAt(0) - 65],
                     weight: 3,
                     dashArray: '10, 10'
                 }).addTo(map);
@@ -2484,12 +2498,22 @@
         async function saveCourse() {
             if (drawingPoints.length < 2) return;
             
-            const course = {
+            const drawn = {
                 start: drawingPoints[0],
                 marks: drawingPoints.slice(1, -1),
                 finish: drawingPoints[drawingPoints.length - 1]
             };
-            
+            // with several courses only the one drawn is replaced
+            let course = drawn;
+            if (drawingMulti()) {
+                if (drawingSub === 'A') {
+                    course = { ...drawn, extraCourses: JSON.parse(JSON.stringify(courseData.extraCourses)) };
+                } else {
+                    course = JSON.parse(JSON.stringify(courseData));
+                    course.extraCourses[drawingSub.charCodeAt(0) - 66] = drawn;
+                }
+            }
+
             try {
                 const response = await fetch(`${EVENT_API}/admin/course`, {
                     method: 'POST',
@@ -2548,11 +2572,8 @@
                 return;
             }
             // Create a clean copy without server timestamps
-            const exportData = {
-                start: courseData.start,
-                marks: courseData.marks || [],
-                finish: courseData.finish
-            };
+            const exportData = JSON.parse(JSON.stringify(courseData));
+            ['saved', 'updated', 'updated_iso'].forEach(k => delete exportData[k]);
             const defaultName = `course-${EVENT_ID}.json`;
             const filename = prompt('Save course as:', defaultName);
             if (!filename) return;
@@ -2575,9 +2596,10 @@
                 const text = await file.text();
                 const imported = JSON.parse(text);
 
-                // Validate structure
-                if (!imported.start || !imported.finish) {
-                    alert('Invalid course file: must have start and finish');
+                try {
+                    CourseOrder.checkCourse(imported);
+                } catch (err) {
+                    alert('Invalid course file: ' + err.message);
                     return;
                 }
 
@@ -2610,7 +2632,9 @@
                 info.textContent = `Drawing: ${drawingPoints.length} points (long-press to save)`;
             } else if (courseData && courseData.start) {
                 const markCount = courseData.marks ? courseData.marks.length : 0;
-                info.textContent = `Course set: Start + ${markCount} marks + Finish`;
+                const n = CourseOrder.courseCount(courseData);
+                info.textContent = n > 1 ? `${n} courses set (${CourseOrder.subCourses(courseData).map(x => x.letter).join(', ')})`
+                                         : `Course set: Start + ${markCount} marks + Finish`;
             } else {
                 info.textContent = 'No course set';
             }
@@ -2696,8 +2720,11 @@
         function updateCourseLengthDisplay() {
             const el = document.getElementById('courseLengthDisplay');
             if (courseData && courseData.start) {
+                const subs = CourseOrder.subCourses(courseData);
                 const length = calculateCourseLength(courseData);
-                el.textContent = `Course: ${length.toFixed(1)} km / ${(length / 1.852).toFixed(1)} nm`;
+                el.textContent = subs.length > 1
+                    ? 'Courses: ' + subs.map(x => `${x.letter} ${calculateCourseLength(x.course).toFixed(1)}`).join(', ') + ' km'
+                    : `Course: ${length.toFixed(1)} km / ${(length / 1.852).toFixed(1)} nm`;
             } else {
                 el.textContent = 'Course: No course';
             }
@@ -2892,180 +2919,88 @@
             courseLines = [];
         }
         
+        const darkenColor = CourseOrder.darkenColor;
+        const createStartIcon = CourseOrder.startIcon;
+        const createMarkIcon = CourseOrder.markIcon;
+        const createFinishIcon = CourseOrder.finishIcon;
+
         function displayCourse(course) {
             clearCourseDisplay();
+            const multi = CourseOrder.courseCount(course) > 1;
 
-            const points = [];
-            // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
-            let prevPoint = null;
-            const legFromPrev = (pt) => {
-                if (!prevPoint) return '';
-                const km = haversineDistance(prevPoint.lat, prevPoint.lon, pt.lat, pt.lon);
-                return `<br><small>From previous: ${km.toFixed(2)} km / ${(km / 1.852).toFixed(2)} nm</small>`;
-            };
-            
-            // Start marker
-            if (course.start) {
-                const startLabel = CourseOrder.commentHtml(course.start.comment, true);
-                const marker = L.marker([course.start.lat, course.start.lon], {
-                    icon: createStartIcon(startLabel)
-                }).addTo(map);
-                let startPopup = '<div style="text-align:center"><strong>Start</strong>';
-                if (course.start.comment) {
-                    const comment = CourseOrder.commentHtml(course.start.comment);
-                    startPopup += `<br><em>${comment}</em>`;
-                }
-                if (adminMode) {
-                    startPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
-                    startPopup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
-                    startPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start')">Del</button>`;
-                }
-                startPopup += '</div>';
-                marker.bindPopup(startPopup);
-                courseMarkers.push(marker);
-                points.push([course.start.lat, course.start.lon]);
-                prevPoint = course.start;
-            }
-
-            // Mark markers
-            if (course.marks) {
-                course.marks.forEach((mark, idx) => {
-                    const color = CourseOrder.safeColor(mark.color);
-                    const label = CourseOrder.commentHtml(mark.comment, true);
-                    const marker = L.marker([mark.lat, mark.lon], {
-                        icon: createMarkIcon(idx + 1, color, label)
-                    }).addTo(map);
-
-                    // Build popup with mark info
-                    let popupContent = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
-                    if (mark.comment) {
-                        const comment = CourseOrder.commentHtml(mark.comment);
-                        popupContent += `<br><em>${comment}</em>`;
-                    }
-                    popupContent += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
-                    if (adminMode) {
-                        popupContent += legFromPrev(mark);
-                        popupContent += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
-                        popupContent += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
-                        popupContent += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
-                        popupContent += `<button class="popup-delete-btn" onclick="deleteCourseMark(${idx})">Del</button>`;
-                    }
-                    popupContent += '</div>';
-                    marker.bindPopup(popupContent);
-
+            for (const sc of CourseOrder.subCourses(course)) {
+                const c = sc.course, letter = sc.letter, q = `'${letter}'`;
+                // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
+                let prevPoint = null;
+                const legFromPrev = (pt) => {
+                    if (!prevPoint) return '';
+                    const km = haversineDistance(prevPoint.lat, prevPoint.lon, pt.lat, pt.lon);
+                    return `<br><small>From previous: ${km.toFixed(2)} km / ${(km / 1.852).toFixed(2)} nm</small>`;
+                };
+                const add = (pt, icon, popup) => {
+                    const marker = L.marker([pt.lat, pt.lon], { icon }).addTo(map);
+                    marker.bindPopup(popup);
                     courseMarkers.push(marker);
-                    points.push([mark.lat, mark.lon]);
-                    prevPoint = mark;
-                });
-            }
-            
-            // Finish marker
-            if (course.finish) {
-                const finishLabel = CourseOrder.commentHtml(course.finish.comment, true);
-                const marker = L.marker([course.finish.lat, course.finish.lon], {
-                    icon: createFinishIcon(finishLabel)
-                }).addTo(map);
-                let finishPopup = '<div style="text-align:center"><strong>Finish</strong>';
-                if (course.finish.comment) {
-                    const comment = CourseOrder.commentHtml(course.finish.comment);
-                    finishPopup += `<br><em>${comment}</em>`;
-                }
-                if (adminMode) {
-                    finishPopup += legFromPrev(course.finish);
-                    finishPopup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
-                    finishPopup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
-                    finishPopup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
-                    finishPopup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish')">Del</button>`;
-                }
-                finishPopup += '</div>';
-                marker.bindPopup(finishPopup);
-                courseMarkers.push(marker);
-                points.push([course.finish.lat, course.finish.lon]);
-            }
-            
-            // Course line: routed with rounding and arrows when a mark order is set;
-            // start/finish with a pin drawn as a line, legs from its middle
-            CourseOrder.pinLayers(course).forEach(l => courseLines.push(l.addTo(map)));
-            const legPoints = CourseOrder.sequence(course).map(e => [e.pt.lat, e.pt.lon]);
-            if (CourseOrder.keys(course)) {
-                courseLines.push(CourseOrder.routeLayer(course).addTo(map));
-            } else if (legPoints.length >= 2) {
-                const line = L.polyline(legPoints, {
-                    color: '#ff6600',
-                    weight: 3,
-                    opacity: 0.7,
-                    dashArray: '10, 5'
-                }).addTo(map);
-                courseLines.push(line);
-            }
-        }
-        
-        // Course marker icons
-        function createStartIcon(label = null) {
-            const svg = `
-                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="0" cy="0" r="12" fill="#22c55e" stroke="#166534" stroke-width="2"/>
-                    <text x="0" y="5" text-anchor="middle" fill="white" font-size="12" font-weight="bold">S</text>
-                </svg>
-            `;
-            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
-            return L.divIcon({
-                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
-                className: 'course-marker',
-                iconSize: [32, 32 + (label ? 20 : 0)],
-                iconAnchor: [16, 16]
-            });
-        }
-        
-        // Darken a hex color by reducing RGB values ~30%
-        function darkenColor(hex) {
-            const r = parseInt(hex.slice(1, 3), 16);
-            const g = parseInt(hex.slice(3, 5), 16);
-            const b = parseInt(hex.slice(5, 7), 16);
-            const darken = (v) => Math.max(0, Math.floor(v * 0.7)).toString(16).padStart(2, '0');
-            return `#${darken(r)}${darken(g)}${darken(b)}`;
-        }
+                    prevPoint = pt;
+                };
 
-        function createMarkIcon(number, color = '#f97316', label = null) {
-            const strokeColor = darkenColor(color);
-            const svg = `
-                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="0" cy="0" r="12" fill="${color}" stroke="${strokeColor}" stroke-width="2"/>
-                    <text x="0" y="5" text-anchor="middle" fill="white" font-size="11" font-weight="bold">${number}</text>
-                </svg>
-            `;
-            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
-            return L.divIcon({
-                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
-                className: 'course-marker',
-                iconSize: [32, 32 + (label ? 20 : 0)],
-                iconAnchor: [16, 16]
-            });
+                if (c.start) {
+                    let popup = `<div style="text-align:center"><strong>${multi ? `Course ${letter} start` : 'Start'}</strong>`;
+                    if (c.start.comment) popup += `<br><em>${CourseOrder.commentHtml(c.start.comment)}</em>`;
+                    if (adminMode) {
+                        popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start', ${q})">Edit</button>`;
+                        popup += `<button class="popup-move-btn" onclick="startMoveMark(-1, ${q})">Move</button>`;
+                        popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start', ${q})">Del</button>`;
+                    }
+                    add(c.start, createStartIcon(CourseOrder.commentHtml(c.start.comment, true), multi ? letter : null), popup + '</div>');
+                }
+
+                (c.marks || []).forEach((mark, idx) => {
+                    const name = CourseOrder.markName(letter, idx + 1, multi);
+                    const color = CourseOrder.safeColor(mark.color, multi ? sc.color : undefined);
+                    let popup = `<div style="text-align:center"><strong>Mark ${name}</strong>`;
+                    if (mark.comment) popup += `<br><em>${CourseOrder.commentHtml(mark.comment)}</em>`;
+                    popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
+                    if (adminMode) {
+                        popup += legFromPrev(mark);
+                        popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx}, ${q})">Edit</button>`;
+                        popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx}, ${q})">Move</button>`;
+                        popup += `<button class="popup-split-btn" onclick="splitCourseMark(${idx}, ${q})">Split</button>`;
+                        popup += `<button class="popup-delete-btn" onclick="deleteCourseMark(${idx}, ${q})">Del</button>`;
+                    }
+                    add(mark, createMarkIcon(name, color, CourseOrder.commentHtml(mark.comment, true)), popup + '</div>');
+                });
+
+                if (c.finish) {
+                    let popup = `<div style="text-align:center"><strong>${multi ? `Course ${letter} finish` : 'Finish'}</strong>`;
+                    if (c.finish.comment) popup += `<br><em>${CourseOrder.commentHtml(c.finish.comment)}</em>`;
+                    if (adminMode) {
+                        popup += legFromPrev(c.finish);
+                        popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish', ${q})">Edit</button>`;
+                        popup += `<button class="popup-move-btn" onclick="startMoveMark('finish', ${q})">Move</button>`;
+                        popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish', ${q})">Split</button>`;
+                        popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('finish', ${q})">Del</button>`;
+                    }
+                    add(c.finish, createFinishIcon(CourseOrder.commentHtml(c.finish.comment, true), multi ? letter : null, sc.color), popup + '</div>');
+                }
+
+                // Course line: routed with rounding and arrows when a mark order is set;
+                // start/finish with a pin drawn as a line, legs from its middle
+                CourseOrder.pinLayers(c).forEach(l => courseLines.push(l.addTo(map)));
+                const legPoints = CourseOrder.sequence(c).map(e => [e.pt.lat, e.pt.lon]);
+                if (CourseOrder.keys(c)) {
+                    courseLines.push(CourseOrder.routeLayer(c, { color: sc.color, letter: multi ? letter : null }).addTo(map));
+                } else if (legPoints.length >= 2) {
+                    courseLines.push(L.polyline(legPoints, {
+                        color: sc.color, weight: 3, opacity: 0.7, dashArray: '10, 5'
+                    }).addTo(map));
+                }
+            }
         }
         
-        function createFinishIcon(label = null) {
-            const svg = `
-                <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Checkered flag pattern -->
-                    <rect x="-12" y="-12" width="24" height="24" fill="white" stroke="#333" stroke-width="2" rx="3"/>
-                    <rect x="-12" y="-12" width="6" height="6" fill="#333"/>
-                    <rect x="0" y="-12" width="6" height="6" fill="#333"/>
-                    <rect x="-6" y="-6" width="6" height="6" fill="#333"/>
-                    <rect x="6" y="-6" width="6" height="6" fill="#333"/>
-                    <rect x="-12" y="0" width="6" height="6" fill="#333"/>
-                    <rect x="0" y="0" width="6" height="6" fill="#333"/>
-                    <rect x="-6" y="6" width="6" height="6" fill="#333"/>
-                    <rect x="6" y="6" width="6" height="6" fill="#333"/>
-                </svg>
-            `;
-            const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
-            return L.divIcon({
-                html: `<div style="position:relative">${svg}${labelHtml}</div>`,
-                className: 'course-marker',
-                iconSize: [32, 32 + (label ? 20 : 0)],
-                iconAnchor: [16, 16]
-            });
-        }
+        
+
+        
         
         // User edit state
         let userOverrides = {};
@@ -3356,28 +3291,35 @@
         }
 
         // Mark edit functions
-        function showEditMark(markIndex) {
-            if (!courseData) return;
+        // Course of the live course file being edited (A is the file itself)
+        let activeSub = 'A';
+        const editSub = () => courseData ? CourseOrder.subCourse(courseData, activeSub) : null;
+        const multiCourse = () => CourseOrder.courseCount(courseData) > 1;
+
+        function showEditMark(markIndex, letter = 'A') {
+            activeSub = letter;
+            const cd = editSub();
+            if (!cd) return;
 
             const colorRow = document.getElementById('colorRow');
 
             if (markIndex === 'start') {
-                if (!courseData.start) return;
+                if (!cd.start) return;
                 editingMarkIndex = 'start';
-                document.getElementById('editMarkNumber').textContent = 'Start';
-                document.getElementById('editMarkComment').value = courseData.start.comment || '';
+                document.getElementById('editMarkNumber').textContent = multiCourse() ? `Course ${letter} start` : 'Start';
+                document.getElementById('editMarkComment').value = cd.start.comment || '';
                 colorRow.style.display = 'none';  // Hide color for start
             } else if (markIndex === 'finish') {
-                if (!courseData.finish) return;
+                if (!cd.finish) return;
                 editingMarkIndex = 'finish';
-                document.getElementById('editMarkNumber').textContent = 'Finish';
-                document.getElementById('editMarkComment').value = courseData.finish.comment || '';
+                document.getElementById('editMarkNumber').textContent = multiCourse() ? `Course ${letter} finish` : 'Finish';
+                document.getElementById('editMarkComment').value = cd.finish.comment || '';
                 colorRow.style.display = 'none';  // Hide color for finish
             } else {
-                if (!courseData.marks || markIndex >= courseData.marks.length) return;
+                if (!cd.marks || markIndex >= cd.marks.length) return;
                 editingMarkIndex = markIndex;
-                const mark = courseData.marks[markIndex];
-                document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
+                const mark = cd.marks[markIndex];
+                document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
                 document.getElementById('editMarkColor').value = mark.color || '';
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';  // Show color for marks
@@ -3391,36 +3333,37 @@
         }
 
         async function saveEditMark() {
-            if (editingMarkIndex === null || !courseData) return;
+            const cd = editSub();
+            if (editingMarkIndex === null || !cd) return;
 
             const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
 
             // Update the appropriate item in courseData
             if (editingMarkIndex === 'start') {
                 if (comment) {
-                    courseData.start.comment = comment;
+                    cd.start.comment = comment;
                 } else {
-                    delete courseData.start.comment;
+                    delete cd.start.comment;
                 }
             } else if (editingMarkIndex === 'finish') {
                 if (comment) {
-                    courseData.finish.comment = comment;
+                    cd.finish.comment = comment;
                 } else {
-                    delete courseData.finish.comment;
+                    delete cd.finish.comment;
                 }
             } else {
                 // Regular mark - also handle color
-                if (!courseData.marks) return;
+                if (!cd.marks) return;
                 const color = document.getElementById('editMarkColor').value;
                 if (color) {
-                    courseData.marks[editingMarkIndex].color = color;
+                    cd.marks[editingMarkIndex].color = color;
                 } else {
-                    delete courseData.marks[editingMarkIndex].color;
+                    delete cd.marks[editingMarkIndex].color;
                 }
                 if (comment) {
-                    courseData.marks[editingMarkIndex].comment = comment;
+                    cd.marks[editingMarkIndex].comment = comment;
                 } else {
-                    delete courseData.marks[editingMarkIndex].comment;
+                    delete cd.marks[editingMarkIndex].comment;
                 }
             }
 
@@ -3447,50 +3390,60 @@
             }
         }
 
-        async function deleteCourseMark(markIndex) {
-            if (!courseData) return;
+        async function deleteCourseMark(markIndex, letter = 'A') {
+            activeSub = letter;
+            const cd = editSub();
+            if (!cd) return;
 
             // Close any open popup
             map.closePopup();
 
             // Count total points (start + marks + finish)
-            const markCount = courseData.marks ? courseData.marks.length : 0;
-            const totalPoints = (courseData.start ? 1 : 0) + markCount + (courseData.finish ? 1 : 0);
+            const markCount = cd.marks ? cd.marks.length : 0;
+            const totalPoints = (cd.start ? 1 : 0) + markCount + (cd.finish ? 1 : 0);
 
             // Need at least 2 points to have a valid course
-            if (totalPoints <= 2) {
+            if (totalPoints <= 2 && !multiCourse()) {
                 if (confirm('Deleting this mark will remove the entire course. Continue?')) {
                     await deleteCourse();
                 }
                 return;
             }
 
-            if (markIndex === 'start' || markIndex === 'finish') {
-                delete courseData.order;  // a mark is promoted; old numbering no longer applies
+            if (totalPoints <= 2) {
+                const later = CourseOrder.subCourses(courseData).filter(x => x.letter > letter).map(x => x.letter);
+                if (!confirm(`Deleting this mark will remove course ${letter}` +
+                             (later.length ? ` (${later.join(', ')} move up a letter)` : '') + '. Continue?')) return;
+                courseData = CourseOrder.removeCourse(courseData, letter);
+                activeSub = 'A';
+            } else if (markIndex === 'start' || markIndex === 'finish') {
+                delete cd.order;  // a mark is promoted; old numbering no longer applies
             } else {
-                CourseOrder.deleteMark(courseData, markIndex + 1);
+                CourseOrder.deleteMark(cd, markIndex + 1);
             }
-            if (markIndex === 'start') {
+            if (totalPoints <= 2) {
+                // course removed above
+            } else if (markIndex === 'start') {
                 // Delete start - first mark becomes new start
                 if (markCount > 0) {
-                    courseData.start = courseData.marks.shift();
+                    cd.start = cd.marks.shift();
                 } else {
                     // No marks, finish becomes start (but this shouldn't happen with totalPoints > 2)
-                    courseData.start = courseData.finish;
-                    courseData.finish = null;
+                    cd.start = cd.finish;
+                    cd.finish = null;
                 }
             } else if (markIndex === 'finish') {
                 // Delete finish - last mark becomes new finish
                 if (markCount > 0) {
-                    courseData.finish = courseData.marks.pop();
+                    cd.finish = cd.marks.pop();
                 } else {
                     // No marks, start stays, no finish (but this shouldn't happen with totalPoints > 2)
-                    courseData.finish = null;
+                    cd.finish = null;
                 }
             } else {
                 // Delete a regular mark
-                if (!courseData.marks) return;
-                courseData.marks.splice(markIndex, 1);
+                if (!cd.marks) return;
+                cd.marks.splice(markIndex, 1);
             }
 
             // Save to server
@@ -3514,8 +3467,10 @@
             }
         }
 
-        async function splitCourseMark(markIndex) {
-            if (!courseData) return;
+        async function splitCourseMark(markIndex, letter = 'A') {
+            activeSub = letter;
+            const cd = editSub();
+            if (!cd) return;
 
             // Close any open popup
             map.closePopup();
@@ -3527,7 +3482,7 @@
             }
 
             // new mark in the middle of the leg sailed into this one
-            if (!CourseOrder.splitLeg(courseData, markIndex)) return;
+            if (!CourseOrder.splitLeg(cd, markIndex)) return;
 
             // Save to server
             try {
@@ -3551,8 +3506,9 @@
         }
 
         // Move course point functions
-        function startMoveMark(index) {
-            if (!courseData) return;
+        function startMoveMark(index, letter = 'A') {
+            activeSub = letter;
+            if (!editSub()) return;
 
             // Close any open popup
             map.closePopup();
@@ -3576,44 +3532,45 @@
             // Returns {prev: [lat,lon] or null, next: [lat,lon] or null}
             // index: -1=start, 0..n-1=marks, 'finish'=finish
             const result = { prev: null, next: null };
-            if (!courseData) return result;
+            const cd = editSub();
+            if (!cd) return result;
 
-            const marksCount = courseData.marks ? courseData.marks.length : 0;
+            const marksCount = cd.marks ? cd.marks.length : 0;
 
             if (index === -1) {
                 // Moving start - next is first mark or finish
                 if (marksCount > 0) {
-                    result.next = [courseData.marks[0].lat, courseData.marks[0].lon];
-                } else if (courseData.finish) {
-                    result.next = [courseData.finish.lat, courseData.finish.lon];
+                    result.next = [cd.marks[0].lat, cd.marks[0].lon];
+                } else if (cd.finish) {
+                    result.next = [cd.finish.lat, cd.finish.lon];
                 }
             } else if (index === 'finish') {
                 // Moving finish - prev is last mark or start
                 if (marksCount > 0) {
-                    result.prev = [courseData.marks[marksCount - 1].lat, courseData.marks[marksCount - 1].lon];
-                } else if (courseData.start) {
-                    result.prev = [courseData.start.lat, courseData.start.lon];
+                    result.prev = [cd.marks[marksCount - 1].lat, cd.marks[marksCount - 1].lon];
+                } else if (cd.start) {
+                    result.prev = [cd.start.lat, cd.start.lon];
                 }
             } else {
                 // Moving a mark
                 if (index === 0) {
                     // First mark - prev is start
-                    if (courseData.start) {
-                        result.prev = [courseData.start.lat, courseData.start.lon];
+                    if (cd.start) {
+                        result.prev = [cd.start.lat, cd.start.lon];
                     }
                 } else {
                     // Prev is previous mark
-                    result.prev = [courseData.marks[index - 1].lat, courseData.marks[index - 1].lon];
+                    result.prev = [cd.marks[index - 1].lat, cd.marks[index - 1].lon];
                 }
 
                 if (index === marksCount - 1) {
                     // Last mark - next is finish
-                    if (courseData.finish) {
-                        result.next = [courseData.finish.lat, courseData.finish.lon];
+                    if (cd.finish) {
+                        result.next = [cd.finish.lat, cd.finish.lon];
                     }
                 } else {
                     // Next is next mark
-                    result.next = [courseData.marks[index + 1].lat, courseData.marks[index + 1].lon];
+                    result.next = [cd.marks[index + 1].lat, cd.marks[index + 1].lon];
                 }
             }
 
@@ -3667,17 +3624,18 @@
 
         async function finishMoveMark(e) {
             const latlng = e.latlng;
+            const cd = editSub();
 
             // Update courseData with new position
             if (movingMarkIndex === -1) {
-                courseData.start.lat = latlng.lat;
-                courseData.start.lon = latlng.lng;
+                cd.start.lat = latlng.lat;
+                cd.start.lon = latlng.lng;
             } else if (movingMarkIndex === 'finish') {
-                courseData.finish.lat = latlng.lat;
-                courseData.finish.lon = latlng.lng;
+                cd.finish.lat = latlng.lat;
+                cd.finish.lon = latlng.lng;
             } else {
-                courseData.marks[movingMarkIndex].lat = latlng.lat;
-                courseData.marks[movingMarkIndex].lon = latlng.lng;
+                cd.marks[movingMarkIndex].lat = latlng.lat;
+                cd.marks[movingMarkIndex].lon = latlng.lng;
             }
 
             // Save to server
