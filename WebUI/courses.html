@@ -358,6 +358,48 @@
         .admin-toolbar .btn-delete-course:hover { background: #b91c1c; }
         .admin-toolbar .btn-new { background: #059669; color: white; }
         .admin-toolbar .btn-new:hover { background: #047857; }
+        .admin-toolbar .btn-transform { background: #0891b2; color: white; }
+        .admin-toolbar .btn-transform:hover { background: #0e7490; }
+        .transform-panel {
+            position: fixed; top: 90px; left: 300px; z-index: 10000;
+            width: 300px; background: white; border-radius: 12px;
+            padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+            font-size: 13px; display: none;
+        }
+        .transform-panel.visible { display: block; }
+        .transform-panel h3 { margin: 0 0 12px 0; font-size: 16px; }
+        .transform-panel .tf-section {
+            border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;
+        }
+        .transform-panel .tf-title { font-weight: 600; margin-bottom: 6px; }
+        .transform-panel .tf-row {
+            display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+        }
+        .transform-panel .tf-row label { width: 70px; color: #666; font-size: 12px; }
+        .transform-panel input[type=range] { flex: 1; }
+        .transform-panel input[type=number] {
+            width: 70px; padding: 4px 6px; border: 1px solid #ddd;
+            border-radius: 4px; font-size: 13px;
+        }
+        .transform-panel select {
+            flex: 1; padding: 4px 6px; border: 1px solid #ddd;
+            border-radius: 4px; font-size: 13px;
+        }
+        .transform-panel .tf-small-btn {
+            padding: 4px 8px; border: 1px solid #ccc; background: #f5f5f5;
+            border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .transform-panel .tf-small-btn:hover { background: #e8e8e8; }
+        .transform-panel .tf-small-btn.active { background: #f59e0b; border-color: #d97706; }
+        .transform-panel .tf-info { color: #555; font-size: 12px; margin-top: 8px; }
+        .transform-panel .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+        .transform-panel .btn-row button {
+            flex: 1; padding: 9px; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 14px;
+        }
+        .transform-panel .btn-cancel { background: #eee; color: #333; }
+        .transform-panel .btn-reset { background: #fde68a; color: #333; }
+        .transform-panel .btn-save { background: #0066cc; color: white; }
         .move-status {
             position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);
             z-index: 9999; background: #f59e0b; color: #333;
@@ -444,6 +486,10 @@
                 right: auto;
                 flex-wrap: wrap;
             }
+            .transform-panel {
+                top: auto; bottom: 10px; left: 10px; right: 10px;
+                width: auto; max-height: 55vh; overflow-y: auto;
+            }
         }
     </style>
 </head>
@@ -483,6 +529,7 @@
         <button class="btn-draw" id="btnDrawCourse" onclick="startDrawingCourse()">✏️ Draw</button>
         <button class="btn-rename" onclick="renameCourse()">✎ Rename</button>
         <button class="btn-copy" onclick="copyCourse()">⧉ Copy</button>
+        <button class="btn-transform" onclick="showTransform()">⟲ Transform</button>
         <button class="btn-delete-course" onclick="deleteSelectedCourse()">🗑 Delete</button>
     </div>
 
@@ -509,6 +556,61 @@
                 <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
                 <button class="btn-save" onclick="saveEditMark()">Save</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Course transform panel (no backdrop so the map preview stays usable) -->
+    <div class="transform-panel" id="transformPanel">
+        <h3>Transform <span id="tfCourseName"></span></h3>
+        <div class="tf-row">
+            <label for="tfPivot">Pivot</label>
+            <select id="tfPivot" onchange="updateTransformPreview()">
+                <option value="centre">Course centre</option>
+                <option value="start">Start</option>
+                <option value="finish">Finish</option>
+            </select>
+        </div>
+        <div class="tf-section">
+            <div class="tf-title">Rotate (clockwise °)</div>
+            <div class="tf-row">
+                <input type="range" id="tfRotateSlider" min="-180" max="180" step="1" value="0"
+                       oninput="tfSync('tfRotate', this.value)">
+                <input type="number" id="tfRotate" min="-180" max="180" step="1" value="0"
+                       oninput="tfSync('tfRotateSlider', this.value)">
+            </div>
+            <div class="tf-row">
+                <button class="tf-small-btn" onclick="tfNudge('tfRotate', -5)">−5°</button>
+                <button class="tf-small-btn" onclick="tfNudge('tfRotate', -1)">−1°</button>
+                <button class="tf-small-btn" onclick="tfNudge('tfRotate', 1)">+1°</button>
+                <button class="tf-small-btn" onclick="tfNudge('tfRotate', 5)">+5°</button>
+            </div>
+        </div>
+        <div class="tf-section">
+            <div class="tf-title">Translate (metres)</div>
+            <div class="tf-row">
+                <label for="tfNorth">North</label>
+                <input type="number" id="tfNorth" step="10" value="0" oninput="updateTransformPreview()">
+                <label for="tfEast" style="width:auto">East</label>
+                <input type="number" id="tfEast" step="10" value="0" oninput="updateTransformPreview()">
+            </div>
+            <div class="tf-row">
+                <button class="tf-small-btn" id="tfPickBtn" onclick="tfTogglePick()">📍 Click map to place pivot</button>
+            </div>
+        </div>
+        <div class="tf-section">
+            <div class="tf-title">Grow / shrink (%)</div>
+            <div class="tf-row">
+                <input type="range" id="tfScaleSlider" min="25" max="300" step="1" value="100"
+                       oninput="tfSync('tfScale', this.value)">
+                <input type="number" id="tfScale" min="5" max="1000" step="1" value="100"
+                       oninput="tfSync('tfScaleSlider', this.value)">
+            </div>
+        </div>
+        <div class="tf-info" id="tfInfo"></div>
+        <div class="btn-row">
+            <button class="btn-cancel" onclick="closeTransform()">Cancel</button>
+            <button class="btn-reset" onclick="resetTransform()">Reset</button>
+            <button class="btn-save" onclick="applyTransform()">Apply</button>
         </div>
     </div>
 
@@ -751,6 +853,11 @@
         // Mark editing state
         let editingMarkIndex = null;
 
+        // Transform state
+        let transformActive = false;
+        let transformPicking = false;
+        let transformPreview = null;
+
         // --- Utility functions (from event.html) ---
 
         function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -881,8 +988,9 @@
             courseLines = [];
         }
 
-        function displayCourse(course) {
+        function displayCourse(course, fit = true) {
             clearCourseDisplay();
+            const editable = adminMode && !transformActive;
             const points = [];
             // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
             let prevPoint = null;
@@ -903,7 +1011,7 @@
                     popup += `<br><em>${course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.start.lat.toFixed(6)}<br>Lon: ${course.start.lon.toFixed(6)}</small>`;
-                if (adminMode) {
+                if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
                     popup += `<button class="popup-delete-btn" onclick="deleteCourseMark('start')">Del</button>`;
@@ -929,7 +1037,7 @@
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
                     popup += legFromPrev(mark);
-                    if (adminMode) {
+                    if (editable) {
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx})">Move</button>`;
                         popup += `<button class="popup-split-btn" onclick="splitCourseMark(${idx})">Split</button>`;
@@ -955,7 +1063,7 @@
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
                 popup += legFromPrev(course.finish);
-                if (adminMode) {
+                if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark('finish')">Move</button>`;
                     popup += `<button class="popup-split-btn" onclick="splitCourseMark('finish')">Split</button>`;
@@ -979,7 +1087,7 @@
             }
 
             // Auto-zoom to fit course
-            if (points.length > 0) {
+            if (fit && points.length > 0) {
                 mapPositioned = true;
                 programmaticMove = true;
                 map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
@@ -1003,7 +1111,10 @@
             // Display on map
             displayCourse(course);
 
-            // Update info box
+            updateInfoBox(name, course);
+        }
+
+        function updateInfoBox(name, course) {
             const numMarks = (course.marks ? course.marks.length : 0);
             const length = calculateCourseLength(course);
             document.getElementById('infoName').textContent = name;
@@ -1046,6 +1157,7 @@
                 document.getElementById('adminToolbar').classList.remove('visible');
                 cancelDrawing();
                 cancelMoveMark();
+                closeTransform();
                 // Refresh display to remove edit buttons
                 if (courseData) displayCourse(courseData);
             } else {
@@ -1660,9 +1772,180 @@
             if (e.key === 'Escape' && movingMarkIndex !== null) cancelMoveMark();
         }
 
+        // --- Course transform (rotate / translate / scale) ---
+
+        const EARTH_R = 6371000;
+
+        function coursePoints(course) {
+            const pts = [];
+            if (course.start) pts.push(course.start);
+            if (course.marks) pts.push(...course.marks);
+            if (course.finish) pts.push(course.finish);
+            return pts;
+        }
+
+        function transformPivot(course) {
+            const which = document.getElementById('tfPivot').value;
+            if (which === 'start' && course.start) return { lat: course.start.lat, lon: course.start.lon };
+            if (which === 'finish' && course.finish) return { lat: course.finish.lat, lon: course.finish.lon };
+            const pts = coursePoints(course);
+            return {
+                lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length,
+                lon: pts.reduce((a, p) => a + p.lon, 0) / pts.length
+            };
+        }
+
+        function tfNum(id, dflt) {
+            const v = parseFloat(document.getElementById(id).value);
+            return isFinite(v) ? v : dflt;
+        }
+
+        // Scale and rotate (clockwise) about the pivot in a local metric frame,
+        // then move the pivot north/east; mark comments/colours are kept
+        function transformCourse(course, rotDeg, northM, eastM, scalePct) {
+            const out = JSON.parse(JSON.stringify(course));
+            const pivot = transformPivot(course);
+            const rad = Math.PI / 180;
+            const cos0 = Math.cos(pivot.lat * rad);
+            const newLat = pivot.lat + (northM / EARTH_R) / rad;
+            const newLon = pivot.lon + (eastM / (EARTH_R * cos0)) / rad;
+            const cos1 = Math.cos(newLat * rad);
+            const c = Math.cos(rotDeg * rad), s = Math.sin(rotDeg * rad);
+            const k = scalePct / 100;
+            coursePoints(out).forEach(p => {
+                const x = (p.lon - pivot.lon) * rad * EARTH_R * cos0;
+                const y = (p.lat - pivot.lat) * rad * EARTH_R;
+                const x2 = k * (x * c + y * s);
+                const y2 = k * (-x * s + y * c);
+                p.lat = newLat + (y2 / EARTH_R) / rad;
+                p.lon = newLon + (x2 / (EARTH_R * cos1)) / rad;
+            });
+            return out;
+        }
+
+        function bearingDeg(a, b) {
+            const rad = Math.PI / 180;
+            const y = Math.sin((b.lon - a.lon) * rad) * Math.cos(b.lat * rad);
+            const x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad) -
+                      Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lon - a.lon) * rad);
+            return (Math.atan2(y, x) / rad + 360) % 360;
+        }
+
+        function showTransform() {
+            if (!selectedCourseName || !courseData || coursePoints(courseData).length === 0) {
+                alert('No course selected');
+                return;
+            }
+            cancelDrawing();
+            cancelMoveMark();
+            map.closePopup();
+            transformActive = true;
+            document.getElementById('tfCourseName').textContent = `"${selectedCourseName}"`;
+            resetTransform();
+            document.getElementById('transformPanel').classList.add('visible');
+            document.addEventListener('keydown', handleTransformKeydown);
+        }
+
+        function resetTransform() {
+            ['tfRotate', 'tfRotateSlider', 'tfNorth', 'tfEast'].forEach(id => document.getElementById(id).value = 0);
+            ['tfScale', 'tfScaleSlider'].forEach(id => document.getElementById(id).value = 100);
+            tfStopPick();
+            updateTransformPreview();
+        }
+
+        function tfSync(otherId, value) {
+            document.getElementById(otherId).value = value;
+            updateTransformPreview();
+        }
+
+        function tfNudge(id, delta) {
+            let v = tfNum(id, 0) + delta;
+            if (id === 'tfRotate') v = ((v + 540) % 360) - 180;  // keep within -180..180
+            document.getElementById(id).value = v;
+            document.getElementById(id + 'Slider').value = v;
+            updateTransformPreview();
+        }
+
+        function updateTransformPreview() {
+            if (!transformActive || !courseData) return;
+            transformPreview = transformCourse(courseData,
+                tfNum('tfRotate', 0), tfNum('tfNorth', 0), tfNum('tfEast', 0),
+                Math.max(1, tfNum('tfScale', 100)));
+            displayCourse(transformPreview, false);
+            updateInfoBox(selectedCourseName, transformPreview);
+
+            const lenOld = calculateCourseLength(courseData);
+            const lenNew = calculateCourseLength(transformPreview);
+            let info = `Length: ${formatCourseLength(lenOld, 2)} → ${formatCourseLength(lenNew, 2)}`;
+            const pts = coursePoints(transformPreview);
+            if (pts.length >= 2) {
+                info += `<br>First leg bearing: ${Math.round(bearingDeg(pts[0], pts[1]))}°`;
+            }
+            document.getElementById('tfInfo').innerHTML = info;
+        }
+
+        // Pick mode: clicking the map moves the pivot to that point
+        function tfTogglePick() {
+            if (transformPicking) { tfStopPick(); return; }
+            transformPicking = true;
+            document.getElementById('tfPickBtn').classList.add('active');
+            document.getElementById('map').style.cursor = 'crosshair';
+            map.on('click', tfPickClick);
+        }
+
+        function tfStopPick() {
+            transformPicking = false;
+            document.getElementById('tfPickBtn').classList.remove('active');
+            document.getElementById('map').style.cursor = '';
+            map.off('click', tfPickClick);
+        }
+
+        function tfPickClick(e) {
+            const pivot = transformPivot(courseData);
+            const rad = Math.PI / 180;
+            const north = (e.latlng.lat - pivot.lat) * rad * EARTH_R;
+            const east = (e.latlng.lng - pivot.lon) * rad * EARTH_R * Math.cos(pivot.lat * rad);
+            document.getElementById('tfNorth').value = Math.round(north);
+            document.getElementById('tfEast').value = Math.round(east);
+            tfStopPick();
+            updateTransformPreview();
+        }
+
+        function handleTransformKeydown(e) {
+            if (e.key === 'Escape') {
+                if (transformPicking) tfStopPick(); else closeTransform();
+            }
+        }
+
+        function closeTransform() {
+            if (!transformActive) return;
+            transformActive = false;
+            transformPreview = null;
+            tfStopPick();
+            document.removeEventListener('keydown', handleTransformKeydown);
+            document.getElementById('transformPanel').classList.remove('visible');
+            if (courseData) {
+                displayCourse(courseData, false);
+                updateInfoBox(selectedCourseName, courseData);
+            }
+        }
+
+        async function applyTransform() {
+            if (!transformActive || !transformPreview) return;
+            const result = transformPreview;
+            closeTransform();
+            const before = courseData;
+            courseData = result;
+            if (!await saveSelectedCourse()) {
+                courseData = before;
+                displayCourse(courseData, false);
+            }
+        }
+
         async function loadCourses(isRefresh) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
+            if (isRefresh && transformActive) return;  // don't clobber the transform preview
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
