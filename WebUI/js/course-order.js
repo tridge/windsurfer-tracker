@@ -567,10 +567,13 @@ const CourseOrder = (() => {
         color = color || '#f97316';
         const strokeColor = darkenColor(color);
         const fs = String(number).length > 2 ? 9 : 11;
+        // dark number on light fills (e.g. yellow), white otherwise
+        const lum = 0.299 * parseInt(color.slice(1, 3), 16) + 0.587 * parseInt(color.slice(3, 5), 16) + 0.114 * parseInt(color.slice(5, 7), 16);
+        const textColor = lum > 170 ? '#1f2937' : 'white';
         const svg = `
             <svg width="32" height="32" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="0" cy="0" r="12" fill="${color}" stroke="${strokeColor}" stroke-width="2"/>
-                <text x="0" y="${fs === 11 ? 5 : 4}" text-anchor="middle" fill="white" font-size="${fs}" font-weight="bold">${number}</text>
+                <text x="0" y="${fs === 11 ? 5 : 4}" text-anchor="middle" fill="${textColor}" font-size="${fs}" font-weight="bold">${number}</text>
             </svg>
         `;
         const labelHtml = label ? `<div class="marker-label">${label}</div>` : '';
