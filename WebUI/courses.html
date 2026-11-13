@@ -535,7 +535,7 @@
     </div>
 
     <div class="drawing-mode-indicator" id="drawingIndicator">
-        🎯 Tap map: Start → Marks → Finish (long-press to save)
+        🎯 Tap map: Start → Marks → Finish (long-press to save)<span id="drawingTotal"></span>
     </div>
 
     <div class="admin-toolbar" id="adminToolbar">
@@ -856,6 +856,7 @@
         let drawingPoints = [];
         let drawingMarkers = [];
         let drawingLine = null;
+        let drawingLegLabels = [];
         let lastTapTime = 0;
         let lastTapLatLng = null;
         let longPressTimer = null;
@@ -1345,6 +1346,7 @@
 
             drawingMarkers.forEach(m => map.removeLayer(m));
             drawingMarkers = [];
+            clearDrawingLabels();
             if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
 
             map.off('click', onDrawingClick);
@@ -1448,14 +1450,27 @@
             // Clean up drawing artifacts
             drawingMarkers.forEach(m => map.removeLayer(m));
             drawingMarkers = [];
+            clearDrawingLabels();
             if (drawingLine) { map.removeLayer(drawingLine); drawingLine = null; }
             drawingPoints = [];
 
             saveSelectedCourse();
         }
 
+        function clearDrawingLabels() {
+            drawingLegLabels.forEach(l => map.removeLayer(l));
+            drawingLegLabels = [];
+            document.getElementById('drawingTotal').textContent = '';
+        }
+
         function updateDrawingLine() {
             const latlngs = drawingMarkers.map(m => m.getLatLng());
+            const pts = latlngs.map(ll => ({ lat: ll.lat, lon: ll.lng }));
+            drawingLegLabels.forEach(l => map.removeLayer(l));
+            drawingLegLabels = makeLegLabels(pts);
+            let km = 0;
+            for (let i = 0; i + 1 < pts.length; i++) km += haversineDistance(pts[i].lat, pts[i].lon, pts[i + 1].lat, pts[i + 1].lon);
+            document.getElementById('drawingTotal').textContent = pts.length >= 2 ? ` · Total ${formatCourseLength(km, 2)}` : '';
             if (drawingLine) {
                 drawingLine.setLatLngs(latlngs);
             } else if (latlngs.length >= 2) {
@@ -1978,9 +1993,14 @@
         // Label each leg at its midpoint with true/magnetic bearing and length
         function showLegLabels(course) {
             clearLegLabels();
-            const pts = coursePoints(course);
-            if (pts.length < 2) return;
-            const decl = courseDeclination(course);
+            legLabels = makeLegLabels(coursePoints(course));
+        }
+
+        // Leg label markers (added to the map) for a list of {lat, lon} points
+        function makeLegLabels(pts) {
+            const labels = [];
+            if (pts.length < 2) return labels;
+            const decl = courseDeclination({ marks: pts });
             for (let i = 0; i + 1 < pts.length; i++) {
                 const t = bearingDeg(pts[i], pts[i + 1]);
                 const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
@@ -1992,8 +2012,9 @@
                 });
                 const mid = [(pts[i].lat + pts[i + 1].lat) / 2,
                              normLon((pts[i].lon + unwrapLon(pts[i + 1].lon, pts[i].lon)) / 2)];
-                legLabels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
+                labels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
             }
+            return labels;
         }
 
         // Pick mode: clicking the map moves the pivot to that point
