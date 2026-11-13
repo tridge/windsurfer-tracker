@@ -287,3 +287,20 @@ def test_course_history_lists_earlier_versions(http_client):
     lats = [h["course"]["start"]["lat"] for h in body["history"]]
     assert lats == [-36.3, -36.2, -36.1]
     assert body["history"][0]["file"] == "course.json"
+
+
+def test_public_bin_merged_into_private(http_client, server):
+    """A bin left in the public event dir by an older version is merged into the
+    private one (nothing dropped) and removed from the public dir."""
+    eid = create_event(http_client, name="Course Bin Merge", admin_password="merge1")
+    headers = {"X-Admin-Password": "merge1"}
+    course = {"start": {"lat": -36.1, "lon": 174.76}, "finish": {"lat": -36.1, "lon": 174.77}}
+    http_client.post(f"/api/event/{eid}/admin/courses/Private", data=course, headers=headers)
+    http_client.delete(f"/api/event/{eid}/admin/courses/Private", headers=headers)
+    public = server.data_dir / "html" / str(eid) / "deleted_courses.json"
+    public.write_text(json.dumps([{"name": "Legacy", "deleted": 1000.0, "course": course}]))
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert status == 200
+    assert sorted(e["name"] for e in body["deleted"]) == ["Legacy", "Private"]
+    assert all(len(e["id"]) == 32 for e in body["deleted"])
+    assert not public.exists()

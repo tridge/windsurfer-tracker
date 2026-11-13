@@ -137,17 +137,30 @@ def course_lock(eid: int) -> threading.Lock:
         return _course_locks.setdefault(eid, threading.Lock())
 
 
+def migrate_public_bin(tracker) -> None:
+    """Move a recycle bin left in the event's (public) data dir by an earlier
+    version into the private bin, merging with any private one (entries kept by
+    id/content, none dropped). The public file is removed only once the merged
+    bin is saved. Call with course_lock held."""
+    old = tracker.data_dir / "deleted_courses.json"
+    if not old.exists():
+        return
+    legacy = load_json_file(old, [])      # a bad file raises: left in place, not lost
+    current = load_json_file(tracker.deleted_courses_file, [])
+    if not isinstance(legacy, list) or not isinstance(current, list):
+        raise ValueError("recycle bin is not a list")
+    seen = {json.dumps(e, sort_keys=True) for e in current}
+    merged = current + [e for e in legacy if json.dumps(e, sort_keys=True) not in seen]
+    save_deleted_courses(tracker, merged, keep_all=True)
+    old.unlink()
+    log(f"[EVENT {tracker.eid}] Recycle bin moved out of the public data dir ({len(legacy)} entries)")
+
+
 def load_deleted_courses(tracker) -> list[dict]:
     """The event's recycle bin, newest last; entries {id, name, deleted, course}.
-    Kept outside the public web tree; a bin left in the event's (public) data dir
-    by an earlier version is moved there. Call with course_lock held."""
+    Kept outside the public web tree. Call with course_lock held."""
     import uuid
-    old = tracker.data_dir / "deleted_courses.json"
-    if old.exists() and not tracker.deleted_courses_file.exists():
-        tracker.deleted_courses_file.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(old, tracker.deleted_courses_file)
-    elif old.exists():
-        old.unlink()
+    migrate_public_bin(tracker)
     deleted = load_json_file(tracker.deleted_courses_file, [])
     if any(not e.get('id') for e in deleted):
         for e in deleted:
@@ -156,10 +169,11 @@ def load_deleted_courses(tracker) -> list[dict]:
     return deleted
 
 
-def save_deleted_courses(tracker, deleted: list[dict]) -> None:
+def save_deleted_courses(tracker, deleted: list[dict], keep_all: bool = False) -> None:
+    """Save the bin (newest DELETED_COURSES_KEEP entries unless keep_all)."""
     tracker.deleted_courses_file.parent.mkdir(parents=True, exist_ok=True)
     deleted.sort(key=lambda e: e.get('deleted', 0))
-    save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:], mode=0o600)
+    save_json_atomic(tracker.deleted_courses_file, deleted if keep_all else deleted[-DELETED_COURSES_KEEP:], mode=0o600)
 
 
 def bin_course(tracker, name: str, course: dict) -> None:
@@ -1655,12 +1669,19 @@ class EventTracker:
         self.course_file = data_dir / "course.json"
         self.users_file = data_dir / "users.json"
         self.courses_file = data_dir / "courses.json"
-        # recycle bin for named courses: outside the public web tree (<static>/../private/<eid>/)
-        self.deleted_courses_file = data_dir.parent.parent / "private" / data_dir.name / "deleted_courses.json"
+        # recycle bin for named courses: outside the public web tree, <static>/../private/<eid>/
+        # (resolved first, so a relative static dir such as "." still lands outside it)
+        self.deleted_courses_file = data_dir.resolve().parent.parent / "private" / str(eid) / "deleted_courses.json"
         self.log_dir = data_dir / "logs"
 
         # Ensure directories exist
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        # a recycle bin left public by an earlier version moves out of the web tree now
+        try:
+            with course_lock(eid):
+                migrate_public_bin(self)
+        except Exception as e:
+            log(f"[EVENT {eid}] Could not move the recycle bin out of the public data dir: {e}")
 
         # Create daily logger with event timezone
         event_tz = event_config.get('timezone', 'Australia/Sydney')
