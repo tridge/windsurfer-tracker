@@ -1,5 +1,7 @@
 // Course mark rounding order (course.order, e.g. "S12313F") and per-mark
-// port/starboard rounding (mark.rounding), shared by the course pages.
+// rounding (mark.rounding: 'port' = left, 'starboard' = right, 'both' = either
+// direction; start.rounding for crossing the start line mid-race), shared by the
+// course pages.
 // routeLayer() needs Leaflet; uses wmmDeclination() from wmm.js for labels if loaded.
 const CourseOrder = (() => {
     const EARTH_R = 6371000;
@@ -214,10 +216,14 @@ const CourseOrder = (() => {
         return turn >= 0 ? 'port' : 'starboard';
     }
 
+    // 'port', 'starboard' or 'both' for a mark (auto if not set)
     function markSide(course, markIdx, auto) {
         const r = course.marks && course.marks[markIdx] && course.marks[markIdx].rounding;
-        return r === 'port' || r === 'starboard' ? r : auto;
+        return r === 'port' || r === 'starboard' || r === 'both' ? r : auto;
     }
+
+    // Rounding as shown to people: left / right / both
+    const sideName = r => ({ port: 'left', starboard: 'right', both: 'both' }[r] || r);
 
     // Keep a custom order consistent after inserting a mark at 0-based index
     // insertIndex between prevKey and nextKey (old numbering)
@@ -284,12 +290,28 @@ const CourseOrder = (() => {
         const auto = autoSide(seq);
         const ref = opts.ref !== undefined ? opts.ref : seq[0].pt.lon;  // longitude the page draws around
         const P = seq.map(e => map.latLngToLayerPoint([e.pt.lat, unwrapLon(e.pt.lon, ref)]));
-        // +1 = offset to the right of travel (mark passed to port), -1 = left
+        const last = seq.length - 1;
+        // turning points: every mark visit, and the start when the course crosses its line mid-race
+        const isTurn = i => i > 0 && i < last && (seq[i].mark !== null || seq[i].key === 'S');
+        const roundingAt = i => (seq[i].mark !== null ? course.marks[seq[i].mark] : course.start || {}).rounding;
+        // turn at point i on screen (>0 = clockwise, i.e. to starboard)
+        const turnAt = i => {
+            const a = P[i].subtract(P[i - 1]), b = P[i + 1].subtract(P[i]);
+            return Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y);
+        };
+        // +1 = offset to the right of travel (mark passed to port), -1 = left.
+        // 'both', and a mid-race start crossing with no rounding set, turn the natural way.
+        const sideAt = i => {
+            const r = roundingAt(i);
+            if (r === 'port') return 1;
+            if (r === 'starboard') return -1;
+            if (r === 'both' || seq[i].mark === null) return turnAt(i) > 0 ? -1 : 1;
+            return auto === 'port' ? 1 : -1;
+        };
         const sideSign = i => {
-            const e = seq[i];
-            if (e.mark !== null) return markSide(course, e.mark, auto) === 'port' ? 1 : -1;
-            const nb = seq[i === 0 ? 1 : i - 1];
-            return (nb.mark !== null ? markSide(course, nb.mark, auto) : auto) === 'port' ? 1 : -1;
+            if (isTurn(i)) return sideAt(i);
+            const j = i === 0 ? 1 : i - 1;
+            return j <= last && isTurn(j) ? sideAt(j) : auto === 'port' ? 1 : -1;
         };
         const pairUse = {};
         const legs = [];
@@ -303,13 +325,14 @@ const CourseOrder = (() => {
             const k = pairUse[pk] = (pairUse[pk] === undefined ? 0 : pairUse[pk] + 1);
             const r = OFFSET_PX + k * GAP_PX;
             const sa = sideSign(i), sb = sideSign(i + 1);
-            // only roundings are offset; start/finish ends go to the point itself
-            // (the mark, or the middle of its pin line)
-            const ra = seq[i].mark === null ? 0 : r, rb = seq[i + 1].mark === null ? 0 : r;
+            // only turning points are offset; the start/finish ends go to the point
+            // itself (the mark, or the middle of its pin line)
+            const ra = isTurn(i) ? r : 0, rb = isTurn(i + 1) ? r : 0;
             legs.push({ n, ra, rb, sa, sb, from: a.add(n.multiplyBy(sa * ra)), to: b.add(n.multiplyBy(sb * rb)) });
         }
 
         const route = [legs[0].from, legs[0].to];
+        const forks = [];  // 'both' turning points: {c, a0, r, d} of the way drawn
         for (let i = 1; i < legs.length; i++) {
             const c = P[i], pin = legs[i - 1].to, pout = legs[i].from;
             const rin = legs[i - 1].rb, rout = legs[i].ra;
@@ -337,6 +360,7 @@ const CourseOrder = (() => {
                 continue;
             } else if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
             else { while (d < 0) d += 2 * Math.PI; }
+            if (roundingAt(i) === 'both') forks.push({ c, a0, r: rin, d });
             const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
             for (let j = 1; j < steps; j++) {
                 const f = j / steps, ang = a0 + d * f, rr = rin + (rout - rin) * f;
@@ -347,6 +371,29 @@ const CourseOrder = (() => {
         add(L.polyline(route.map(p => map.layerPointToLatLng(p)), {
             color: opts.color || '#ff6600', weight: 3, opacity: opts.opacity || 0.85, interactive: false
         }));
+
+        // either-direction roundings: a dashed part-arc the other way round, with an arrowhead
+        forks.forEach(f => {
+            const alt = -Math.sign(f.d || 1) * Math.max(Math.PI / 3, (2 * Math.PI - Math.abs(f.d)) * 0.45);
+            const steps = Math.max(2, Math.ceil(Math.abs(alt) / 0.15));
+            const pts = [];
+            for (let j = 0; j <= steps; j++) {
+                const ang = f.a0 + alt * j / steps;
+                pts.push(map.layerPointToLatLng(L.point(f.c.x + f.r * Math.cos(ang), f.c.y + f.r * Math.sin(ang))));
+            }
+            add(L.polyline(pts, { color: opts.color || '#ff6600', weight: 2.5, opacity: opts.opacity || 0.85,
+                                  dashArray: '4, 5', interactive: false }));
+            const end = f.a0 + alt, sg = Math.sign(alt);
+            const deg = Math.atan2(Math.cos(end) * sg, -Math.sin(end) * sg) * 180 / Math.PI;
+            add(L.marker(pts[pts.length - 1], {
+                icon: L.divIcon({
+                    className: 'leg-arrow', iconSize: [14, 14], iconAnchor: [7, 7],
+                    html: `<svg width="14" height="14" viewBox="-9 -9 18 18" style="transform:rotate(${deg}deg)">` +
+                          `<path d="M-6,-6 L7,0 L-6,6 L-2,0 Z" fill="${opts.color || '#ff6600'}" stroke="#7c2d12" stroke-width="1"/></svg>`
+                }),
+                interactive: false, keyboard: false
+            }));
+        });
 
         const arrows = [];
         legs.forEach(g => {
@@ -506,10 +553,10 @@ const CourseOrder = (() => {
         if (!isObj(p) || !isNum(p.lat) || !isNum(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180)
             throw new Error(`missing or invalid ${what} position`);
         if (p.comment !== undefined && typeof p.comment !== 'string') throw new Error(`invalid ${what} comment`);
+        if ((kind === 'mark' || kind === 'S') && p.rounding !== undefined && !['port', 'starboard', 'both'].includes(p.rounding))
+            throw new Error(`invalid ${what} rounding`);
         if (kind === 'mark') {
             if (p.color !== undefined && p.color !== safeColor(p.color, null)) throw new Error(`invalid ${what} colour`);
-            if (p.rounding !== undefined && p.rounding !== 'port' && p.rounding !== 'starboard')
-                throw new Error(`invalid ${what} rounding`);
         } else if (p.pin !== undefined && (!isObj(p.pin) || !isNum(p.pin.dist) || !(p.pin.dist > 0 && p.pin.dist <= 10000) ||
                                            (p.pin.side !== 'left' && p.pin.side !== 'right'))) {
             throw new Error(`invalid ${what} pin`);
@@ -643,7 +690,7 @@ const CourseOrder = (() => {
     const zoomLayer = fn => new (ZoomLayer || (ZoomLayer = makeZoomLayer()))(fn);
 
     return {
-        parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
+        parse, format, keys, sequence, lengthKm, autoSide, markSide, sideName, insertMark, deleteMark,
         pinLine, pinLayers, splitLeg, escHtml, commentHtml, safeColor,
         darkenColor, startIcon, markIcon, finishIcon, checkCourse,
         MAX_COURSES, COURSE_COLORS, letterOf, subCourses, subCourse, courseCount, plainCourse, removeCourse, markName,

@@ -576,12 +576,17 @@
                     <option value="#8b5cf6">Purple</option>
                     <option value="#facc15">Yellow</option>
                 </select>
-                <label for="editMarkRounding">Rounding</label>
+            </div>
+            <div id="roundingRow">
+                <label for="editMarkRounding" id="editMarkRoundingLabel">Rounding</label>
                 <select id="editMarkRounding">
                     <option value="">Auto (from course layout)</option>
-                    <option value="port">Port (mark to port)</option>
-                    <option value="starboard">Starboard (mark to starboard)</option>
+                    <option value="port">Left (mark to port)</option>
+                    <option value="starboard">Right (mark to starboard)</option>
+                    <option value="both">Both (either direction)</option>
                 </select>
+                <div class="order-help" id="roundingHelp" style="display:none">
+                    Used where the mark order crosses the start line mid-race (S123S1234F).</div>
             </div>
             <div id="pinRow" style="display:none">
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#333;margin-bottom:8px">
@@ -1303,6 +1308,11 @@
                     if (c.start.comment) popup += `<br><em>${CourseOrder.commentHtml(c.start.comment)}</em>`;
                     popup += `<br><small>Lat: ${c.start.lat.toFixed(6)}<br>Lon: ${c.start.lon.toFixed(6)}</small>`;
                     popup += pinText(c.start);
+                    const crossings = (courseOrderKeys(c) || []).filter((k, i) => k === 'S' && i > 0).length;
+                    if (crossings) {
+                        popup += `<br><small>Crossed mid-race ${crossings}×, then turn ` +
+                                 `${c.start.rounding ? CourseOrder.sideName(c.start.rounding) : 'either way (auto)'}</small>`;
+                    }
                     if (editable) {
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start', ${q})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark(-1, ${q})">Move</button>`;
@@ -1322,7 +1332,7 @@
                     if (orderKeys) {
                         const side = markRoundingSide(c, idx, orderAuto);
                         const visits = orderKeys.filter(k => k === idx + 1).length;
-                        popup += `<br><small>Rounding: ${side}${mark.rounding ? '' : ' (auto)'}` +
+                        popup += `<br><small>Rounding: ${CourseOrder.sideName(side)}${mark.rounding ? '' : ' (auto)'}` +
                                  `${visits ? `, ${visits} visit${visits > 1 ? 's' : ''}` : ', not visited'}</small>`;
                     }
                     popup += legFromPrev(mark);
@@ -1390,13 +1400,13 @@
             updateInfoBox(name, course);
         }
 
-        // e.g. "Order: S-1-2-F · port rounding (auto)", '' if no custom order
+        // e.g. "Order: S-1-2-F · left rounding (auto)", '' if no custom order
         function orderSummary(c) {
             const keys = courseOrderKeys(c);
             if (!keys) return '';
             const auto = autoRoundingSide(courseSequence(c));
-            const overrides = (c.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard');
-            return `Order: ${keys.join('-')} · ${auto} rounding${overrides ? ' (some overridden)' : ' (auto)'}`;
+            const overrides = (c.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard' || m.rounding === 'both');
+            return `Order: ${keys.join('-')} · ${CourseOrder.sideName(auto)} rounding${overrides ? ' (some overridden)' : ' (auto)'}`;
         }
 
         function updateInfoBox(name, course) {
@@ -1958,6 +1968,12 @@
                 document.getElementById('editMarkComment').value = pt.comment || '';
                 colorRow.style.display = 'none';
                 pinRow.style.display = '';
+                // the start can be "rounded" when the course crosses its line mid-race
+                const isStart = markIndex === 'start';
+                document.getElementById('roundingRow').style.display = isStart ? '' : 'none';
+                document.getElementById('roundingHelp').style.display = isStart ? '' : 'none';
+                document.getElementById('editMarkRoundingLabel').textContent = 'Turn after crossing mid-race';
+                document.getElementById('editMarkRounding').value = isStart ? (pt.rounding || '') : '';
                 document.getElementById('editPinEnabled').checked = !!pt.pin;
                 document.getElementById('editPinDist').value = pt.pin ? pt.pin.dist : 50;
                 document.getElementById('editPinSide').value = pt.pin && pt.pin.side === 'right' ? 'right' : 'left';
@@ -1974,6 +1990,9 @@
                 document.getElementById('editMarkRounding').value = mark.rounding || '';
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
+                document.getElementById('roundingRow').style.display = '';
+                document.getElementById('roundingHelp').style.display = 'none';
+                document.getElementById('editMarkRoundingLabel').textContent = 'Rounding';
             }
             editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
             document.getElementById('editMarkOverlay').classList.add('visible');
@@ -2012,6 +2031,10 @@
                     pt.pin = { dist: dist > 0 ? dist : 50, side: document.getElementById('editPinSide').value };
                 } else {
                     delete pt.pin;
+                }
+                if (editingMarkIndex === 'start') {
+                    const rounding = document.getElementById('editMarkRounding').value;
+                    if (rounding) pt.rounding = rounding; else delete pt.rounding;
                 }
             } else {
                 if (!cd.marks) return;
