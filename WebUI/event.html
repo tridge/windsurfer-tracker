@@ -2983,11 +2983,14 @@
                 points.push([course.finish.lat, course.finish.lon]);
             }
             
-            // Course line: routed with rounding and arrows when a mark order is set
+            // Course line: routed with rounding and arrows when a mark order is set;
+            // start/finish with a pin drawn as a line, legs from its middle
+            CourseOrder.pinLayers(course).forEach(l => courseLines.push(l.addTo(map)));
+            const legPoints = CourseOrder.sequence(course).map(e => [e.pt.lat, e.pt.lon]);
             if (CourseOrder.keys(course)) {
                 courseLines.push(CourseOrder.routeLayer(course).addTo(map));
-            } else if (points.length >= 2) {
-                const line = L.polyline(points, {
+            } else if (legPoints.length >= 2) {
+                const line = L.polyline(legPoints, {
                     color: '#ff6600',
                     weight: 3,
                     opacity: 0.7,

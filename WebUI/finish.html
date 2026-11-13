@@ -709,6 +709,13 @@ function computeFinishLine() {
         return;
     }
     const fin = courseData.finish;
+    // a finish with a pin is the line from the finish mark to the pin
+    const pl = CourseOrder.pinLine(courseData, 'F');
+    if (pl) {
+        finishLine = { p1: { lat: pl.mark.lat, lon: pl.mark.lon }, p2: { lat: pl.pin.lat, lon: pl.pin.lon } };
+        document.getElementById('btnSort').disabled = false;
+        return;
+    }
     // Get last leg direction — walk back along the rounding order (or mark order)
     // to the last point not at the finish
     let fromPt = null;
