@@ -1579,6 +1579,7 @@
     <script src="js/utils.js"></script>
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
+    <script src="js/course-order.js"></script>
     <script src="js/battery_cal.js"></script>
     <script>
         // Initialize map centered on Auckland
@@ -2686,23 +2687,9 @@
         }
 
         // Calculate total course length in km
+        // Course length in km, following the mark rounding order if set
         function calculateCourseLength(course) {
-            if (!course || !course.start || !course.finish) return 0;
-
-            const points = [course.start];
-            if (course.marks) {
-                points.push(...course.marks);
-            }
-            points.push(course.finish);
-
-            let totalDistance = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                totalDistance += haversineDistance(
-                    points[i].lat, points[i].lon,
-                    points[i+1].lat, points[i+1].lon
-                );
-            }
-            return totalDistance;
+            return CourseOrder.lengthKm(course);
         }
 
         // Update the course length display in the legend
@@ -2996,8 +2983,10 @@
                 points.push([course.finish.lat, course.finish.lon]);
             }
             
-            // Course line
-            if (points.length >= 2) {
+            // Course line: routed with rounding and arrows when a mark order is set
+            if (CourseOrder.keys(course)) {
+                courseLines.push(CourseOrder.routeLayer(course).addTo(map));
+            } else if (points.length >= 2) {
                 const line = L.polyline(points, {
                     color: '#ff6600',
                     weight: 3,
@@ -3473,6 +3462,11 @@
                 return;
             }
 
+            if (markIndex === 'start' || markIndex === 'finish') {
+                delete courseData.order;  // a mark is promoted; old numbering no longer applies
+            } else {
+                CourseOrder.deleteMark(courseData, markIndex + 1);
+            }
             if (markIndex === 'start') {
                 // Delete start - first mark becomes new start
                 if (markCount > 0) {
@@ -3570,6 +3564,8 @@
 
             // Insert new mark
             if (!courseData.marks) courseData.marks = [];
+            CourseOrder.insertMark(courseData, insertIndex, insertIndex === 0 ? 'S' : insertIndex,
+                                   markIndex === 'finish' ? 'F' : insertIndex + 1);
             courseData.marks.splice(insertIndex, 0, newMark);
 
             // Save to server

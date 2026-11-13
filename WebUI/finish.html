@@ -572,6 +572,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="js/battery_cal.js"></script>
+<script src="js/course-order.js"></script>
 <script>
 // ── URL params & API paths ──────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
@@ -708,19 +709,16 @@ function computeFinishLine() {
         return;
     }
     const fin = courseData.finish;
-    // Get last leg direction — walk backwards through marks to find one not at the finish
+    // Get last leg direction — walk back along the rounding order (or mark order)
+    // to the last point not at the finish
     let fromPt = null;
-    if (courseData.marks && courseData.marks.length > 0) {
-        for (let i = courseData.marks.length - 1; i >= 0; i--) {
-            const m = courseData.marks[i];
-            if (m.lat !== fin.lat || m.lon !== fin.lon) {
-                fromPt = { lat: m.lat, lon: m.lon };
-                break;
-            }
+    const seq = CourseOrder.sequence(courseData);
+    for (let i = seq.length - 2; i >= 0; i--) {
+        const m = seq[i].pt;
+        if (m.lat !== fin.lat || m.lon !== fin.lon) {
+            fromPt = { lat: m.lat, lon: m.lon };
+            break;
         }
-    }
-    if (!fromPt && courseData.start) {
-        fromPt = { lat: courseData.start.lat, lon: courseData.start.lon };
     }
     if (!fromPt) {
         finishLine = null;

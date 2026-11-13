@@ -403,6 +403,7 @@
     <script src="js/utils.js"></script>
     <script src="js/modal.js"></script>
     <script src="js/map-utils.js"></script>
+    <script src="js/course-order.js"></script>
     <script src="js/export.js"></script>
     <script src="js/battery_cal.js"></script>
     <script src="js/flatpickr/flatpickr.min.js"></script>
@@ -1045,8 +1046,10 @@
                 points.push([course.finish.lat, course.finish.lon]);
             }
 
-            // Course line
-            if (points.length >= 2) {
+            // Course line: routed with rounding and arrows when a mark order is set
+            if (CourseOrder.keys(course)) {
+                courseLines.push(CourseOrder.routeLayer(course).addTo(map));
+            } else if (points.length >= 2) {
                 const line = L.polyline(points, {
                     color: '#ff6600',
                     weight: 3,
