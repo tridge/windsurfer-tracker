@@ -108,21 +108,82 @@ def load_json_file(path: Path, default):
 
 
 def save_json_atomic(path: Path, obj) -> None:
-    """Write JSON via a temp file and rename."""
-    tmp_file = path.with_suffix('.tmp')
-    with open(tmp_file, 'w') as f:
-        json.dump(obj, f, indent=2)
-    tmp_file.rename(path)
+    """Write JSON via a uniquely named temp file and rename."""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(obj, f, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# One lock per event round every read-modify-write of its course files
+# (courses.json, the recycle bin, course.json rotation), so concurrent admin
+# requests can't overwrite each other's changes.
+_course_locks: dict[int, threading.Lock] = {}
+_course_locks_guard = threading.Lock()
+
+
+def course_lock(eid: int) -> threading.Lock:
+    with _course_locks_guard:
+        return _course_locks.setdefault(eid, threading.Lock())
+
+
+def load_deleted_courses(tracker) -> list[dict]:
+    """The event's recycle bin, newest last; entries {id, name, deleted, course}.
+    Kept outside the public web tree; a bin left in the event's (public) data dir
+    by an earlier version is moved there. Call with course_lock held."""
+    import uuid
+    old = tracker.data_dir / "deleted_courses.json"
+    if old.exists() and not tracker.deleted_courses_file.exists():
+        tracker.deleted_courses_file.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(old, tracker.deleted_courses_file)
+    elif old.exists():
+        old.unlink()
+    deleted = load_json_file(tracker.deleted_courses_file, [])
+    if any(not e.get('id') for e in deleted):
+        for e in deleted:
+            e.setdefault('id', uuid.uuid4().hex)
+        save_deleted_courses(tracker, deleted)
+    return deleted
+
+
+def save_deleted_courses(tracker, deleted: list[dict]) -> None:
+    tracker.deleted_courses_file.parent.mkdir(parents=True, exist_ok=True)
+    deleted.sort(key=lambda e: e.get('deleted', 0))
+    save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:])
+
+
+def bin_course(tracker, name: str, course: dict) -> None:
+    """Add a named course to the recycle bin. Call with course_lock held."""
+    import uuid
+    deleted = load_deleted_courses(tracker)
+    deleted.append({"id": uuid.uuid4().hex, "name": name, "deleted": time.time(), "course": course})
+    save_deleted_courses(tracker, deleted)
 
 
 def course_history(event_dir: Path) -> list[dict]:
     """Live course versions: course.json and its rotations course.json.N, newest
-    first, as {file, time, course}. Every save of a named course also saves the
-    live course, so this holds earlier versions of deleted named courses too."""
-    out = []
+    first, as {file, time, course}. Saving a course in the course editor also saves
+    the live course, so this holds earlier versions of courses edited there,
+    including deleted ones. Only the newest COURSE_HISTORY_MAX files are read."""
+    files = []
     for p in [event_dir / "course.json"] + list(event_dir.glob("course.json.[0-9]*")):
         if p.name != "course.json" and not p.name[len("course.json."):].isdigit():
             continue
+        try:
+            files.append((p.stat().st_mtime, p))
+        except OSError:
+            continue
+    files.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    for mtime, p in files[:COURSE_HISTORY_MAX]:
         try:
             with open(p, 'r') as f:
                 course = json.load(f)
@@ -131,11 +192,9 @@ def course_history(event_dir: Path) -> list[dict]:
         if not isinstance(course, dict) or not course.get('start'):
             continue
         ts = course.get('updated')
-        if not isinstance(ts, (int, float)):
-            ts = p.stat().st_mtime
-        out.append({"file": p.name, "time": ts, "course": course})
+        out.append({"file": p.name, "time": ts if isinstance(ts, (int, float)) else mtime, "course": course})
     out.sort(key=lambda e: e["time"], reverse=True)
-    return out[:COURSE_HISTORY_MAX]
+    return out
 
 
 def _unique_archive_path(parent: Path, base_name: str, date_str: str) -> Path:
@@ -1594,7 +1653,8 @@ class EventTracker:
         self.course_file = data_dir / "course.json"
         self.users_file = data_dir / "users.json"
         self.courses_file = data_dir / "courses.json"
-        self.deleted_courses_file = data_dir / "deleted_courses.json"  # recycle bin for named courses
+        # recycle bin for named courses: outside the public web tree (<static>/../private/<eid>/)
+        self.deleted_courses_file = data_dir.parent.parent / "private" / data_dir.name / "deleted_courses.json"
         self.log_dir = data_dir / "logs"
 
         # Ensure directories exist
@@ -3017,7 +3077,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
             tracker = get_event_tracker(eid)
             try:
-                deleted = load_json_file(tracker.deleted_courses_file, []) if tracker else []
+                if tracker:
+                    with course_lock(eid):
+                        deleted = load_deleted_courses(tracker)
+                else:
+                    deleted = []
                 self._send_json({"deleted": sorted(deleted, key=lambda e: e.get('deleted', 0), reverse=True)})
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
@@ -3365,13 +3429,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
                 tracker = get_event_tracker(eid)
                 if tracker:
-                    # Rotate existing course before saving new one
-                    if tracker.course_file.exists():
-                        rotate_file(tracker.course_file)
-                    tmp_file = tracker.course_file.with_suffix('.tmp')
-                    with open(tmp_file, 'w') as f:
-                        json.dump(course, f, indent=2)
-                    tmp_file.rename(tracker.course_file)
+                    with course_lock(eid):
+                        # Rotate existing course before saving new one
+                        if tracker.course_file.exists():
+                            rotate_file(tracker.course_file)
+                        save_json_atomic(tracker.course_file, course)
                     log(f"[EVENT {eid}] Course saved: {len(course.get('marks', []))} marks")
                     self._send_json({"success": True})
                 else:
@@ -3395,22 +3457,57 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 course = json.loads(body)
                 course['saved'] = time.time()
 
+                # ?create=1: only if no course has this name (409 otherwise);
+                # ?replace=1: the course it replaces goes to the recycle bin
+                q = parse_qs(urlparse(self.path).query)
+                create = q.get('create', [''])[0] == '1'
+                replace = q.get('replace', [''])[0] == '1'
                 tracker = get_event_tracker(eid)
                 if tracker:
-                    # Load existing courses
-                    courses = {}
-                    if tracker.courses_file.exists():
-                        with open(tracker.courses_file, 'r') as f:
-                            courses = json.load(f)
-                    courses[course_name] = course
-                    tmp_file = tracker.courses_file.with_suffix('.tmp')
-                    with open(tmp_file, 'w') as f:
-                        json.dump(courses, f, indent=2)
-                    tmp_file.rename(tracker.courses_file)
+                    with course_lock(eid):
+                        courses = load_json_file(tracker.courses_file, {})
+                        if create and course_name in courses:
+                            self._send_json({"error": f"Course '{course_name}' already exists", "exists": True}, 409)
+                            return
+                        if replace and course_name in courses:
+                            bin_course(tracker, course_name, courses[course_name])
+                        courses[course_name] = course
+                        save_json_atomic(tracker.courses_file, courses)
                     log(f"[EVENT {eid}] Named course saved: '{course_name}'")
                     self._send_json({"success": True})
                 else:
                     self._send_json({"error": "Could not get event tracker"}, 500)
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif subpath == '/admin/courses-rename':
+            # Rename a named course: {"from": old, "to": new}; 404 if old is gone,
+            # 409 if new exists. Atomic, so nothing goes in the recycle bin.
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                req = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                old, new = req.get('from'), req.get('to')
+                if not isinstance(old, str) or not isinstance(new, str) or not old or not new:
+                    self._send_json({"error": "from and to names required"}, 400)
+                    return
+                tracker = get_event_tracker(eid)
+                if not tracker:
+                    self._send_json({"error": "Could not get event tracker"}, 500)
+                    return
+                with course_lock(eid):
+                    courses = load_json_file(tracker.courses_file, {})
+                    if old not in courses:
+                        self._send_json({"error": f"Course '{old}' not found"}, 404)
+                        return
+                    if new in courses:
+                        self._send_json({"error": f"Course '{new}' already exists", "exists": True}, 409)
+                        return
+                    courses[new] = courses.pop(old)
+                    save_json_atomic(tracker.courses_file, courses)
+                log(f"[EVENT {eid}] Named course renamed: '{old}' -> '{new}'")
+                self._send_json({"success": True})
             except json.JSONDecodeError:
                 self._send_json({"error": "Invalid JSON"}, 400)
             except Exception as e:
@@ -4429,22 +4526,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             if not course_name:
                 self._send_json({"error": "Course name required"}, 400)
                 return
-            # ?rename=1: the course lives on under a new name, so not kept in the bin
-            renamed = parse_qs(urlparse(self.path).query).get('rename', [''])[0] == '1'
             tracker = get_event_tracker(eid)
             if tracker and tracker.courses_file.exists():
                 try:
-                    with open(tracker.courses_file, 'r') as f:
-                        courses = json.load(f)
-                    if course_name in courses:
-                        if not renamed:
-                            deleted = load_json_file(tracker.deleted_courses_file, [])
-                            deleted.append({"name": course_name, "deleted": time.time(), "course": courses[course_name]})
-                            deleted.sort(key=lambda e: e.get('deleted', 0))
-                            save_json_atomic(tracker.deleted_courses_file, deleted[-DELETED_COURSES_KEEP:])
-                        del courses[course_name]
-                        save_json_atomic(tracker.courses_file, courses)
-                        log(f"[EVENT {eid}] Named course {'renamed away' if renamed else 'deleted'}: '{course_name}'")
+                    with course_lock(eid):
+                        courses = load_json_file(tracker.courses_file, {})
+                        if course_name in courses:
+                            bin_course(tracker, course_name, courses[course_name])
+                            del courses[course_name]
+                            save_json_atomic(tracker.courses_file, courses)
+                            log(f"[EVENT {eid}] Named course deleted: '{course_name}'")
                     self._send_json({"success": True})
                 except Exception as e:
                     self._send_json({"error": str(e)}, 500)
@@ -4452,19 +4543,22 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": True})
 
         elif subpath.startswith('/admin/deleted-courses/'):
-            # Remove an entry from the recycle bin (e.g. once restored): /admin/deleted-courses/<deleted ts>
-            try:
-                ts = float(subpath[len('/admin/deleted-courses/'):])
-            except ValueError:
-                self._send_json({"error": "Bad entry"}, 400)
+            # Remove one entry from the recycle bin (e.g. once restored): /admin/deleted-courses/<id>
+            entry_id = subpath[len('/admin/deleted-courses/'):]
+            if not re.fullmatch(r'[0-9a-f]{32}', entry_id):
+                self._send_json({"error": "Bad entry id"}, 400)
                 return
             tracker = get_event_tracker(eid)
             try:
-                deleted = load_json_file(tracker.deleted_courses_file, []) if tracker else []
-                kept = [e for e in deleted if abs(e.get('deleted', 0) - ts) > 1e-3]
-                if len(kept) != len(deleted):
-                    save_json_atomic(tracker.deleted_courses_file, kept)
-                self._send_json({"success": True, "removed": len(deleted) - len(kept)})
+                removed = 0
+                if tracker:
+                    with course_lock(eid):
+                        deleted = load_deleted_courses(tracker)
+                        kept = [e for e in deleted if e.get('id') != entry_id]
+                        removed = len(deleted) - len(kept)
+                        if removed:
+                            save_deleted_courses(tracker, kept)
+                self._send_json({"success": True, "removed": removed})
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 

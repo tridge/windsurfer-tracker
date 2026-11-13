@@ -172,32 +172,94 @@ def test_course_invalid_json(http_client):
     assert status == 400
 
 
-def test_deleted_named_course_kept_in_bin(http_client):
-    """Deleting a named course keeps it in the recycle bin; a rename doesn't."""
+def test_deleted_named_course_kept_in_bin(http_client, server):
+    """Deleting a named course keeps it in a private recycle bin; removing an entry
+    by id removes just that one."""
     eid = create_event(http_client, name="Course Bin", admin_password="bin1")
     headers = {"X-Admin-Password": "bin1"}
     course = {"start": {"lat": -36.85, "lon": 174.76}, "marks": [{"lat": -36.84, "lon": 174.76}],
               "finish": {"lat": -36.84, "lon": 174.77}, "order": "S1F"}
-    http_client.post(f"/api/event/{eid}/admin/courses/Slalom", data=course, headers=headers)
-    http_client.post(f"/api/event/{eid}/admin/courses/Old", data=course, headers=headers)
-
-    status, _ = http_client.delete(f"/api/event/{eid}/admin/courses/Slalom", headers=headers)
-    assert status == 200
-    status, _ = http_client.delete(f"/api/event/{eid}/admin/courses/Old?rename=1", headers=headers)
-    assert status == 200
+    for name in ("Slalom", "Other"):
+        http_client.post(f"/api/event/{eid}/admin/courses/{name}", data=course, headers=headers)
+        status, _ = http_client.delete(f"/api/event/{eid}/admin/courses/{name}", headers=headers)
+        assert status == 200
 
     status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
     assert status == 200
-    names = [e["name"] for e in body["deleted"]]
-    assert names == ["Slalom"]
-    entry = body["deleted"][0]
-    assert entry["course"]["order"] == "S1F" and entry["deleted"] > 0
+    assert [e["name"] for e in body["deleted"]] == ["Other", "Slalom"]
+    entry = body["deleted"][1]
+    assert entry["course"]["order"] == "S1F" and len(entry["id"]) == 32
 
-    # removing the entry (after restoring it) empties the bin
-    status, body = http_client.delete(f"/api/event/{eid}/admin/deleted-courses/{entry['deleted']}", headers=headers)
+    # not in the public web tree
+    assert not (server.data_dir / "html" / str(eid) / "deleted_courses.json").exists()
+    assert (server.data_dir / "private" / str(eid) / "deleted_courses.json").exists()
+
+    # malformed ids are refused, not treated as "match everything"
+    for bad in ("nan", "1234.0", "x" * 32):
+        status, _ = http_client.delete(f"/api/event/{eid}/admin/deleted-courses/{bad}", headers=headers)
+        assert status == 400
+    status, body = http_client.delete(f"/api/event/{eid}/admin/deleted-courses/{entry['id']}", headers=headers)
     assert status == 200 and body["removed"] == 1
     status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert [e["name"] for e in body["deleted"]] == ["Other"]
+
+
+def test_rename_named_course(http_client):
+    """Rename is atomic: 404 if the old name is gone, 409 if the new one exists,
+    and it doesn't put anything in the recycle bin."""
+    eid = create_event(http_client, name="Course Rename", admin_password="ren1")
+    headers = {"X-Admin-Password": "ren1"}
+    course = {"start": {"lat": -36.85, "lon": 174.76}, "finish": {"lat": -36.84, "lon": 174.77}}
+    for name in ("One", "Two"):
+        http_client.post(f"/api/event/{eid}/admin/courses/{name}", data=course, headers=headers)
+    url = f"/api/event/{eid}/admin/courses-rename"
+    status, _ = http_client.post(url, data={"from": "One", "to": "Two"}, headers=headers)
+    assert status == 409
+    status, _ = http_client.post(url, data={"from": "Gone", "to": "New"}, headers=headers)
+    assert status == 404
+    status, body = http_client.post(url, data={"from": "One", "to": "New"}, headers=headers)
+    assert status == 200 and body["success"]
+    status, body = http_client.get(f"/api/event/{eid}/courses")
+    assert sorted(body["courses"]) == ["New", "Two"]
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
     assert body["deleted"] == []
+
+
+def test_named_course_create_and_replace(http_client):
+    """?create=1 refuses an existing name; ?replace=1 puts the replaced course in the bin."""
+    eid = create_event(http_client, name="Course Create", admin_password="cre1")
+    headers = {"X-Admin-Password": "cre1"}
+    a = {"start": {"lat": -36.1, "lon": 174.76}, "finish": {"lat": -36.1, "lon": 174.77}}
+    b = {"start": {"lat": -36.2, "lon": 174.76}, "finish": {"lat": -36.2, "lon": 174.77}}
+    status, _ = http_client.post(f"/api/event/{eid}/admin/courses/X?create=1", data=a, headers=headers)
+    assert status == 200
+    status, body = http_client.post(f"/api/event/{eid}/admin/courses/X?create=1", data=b, headers=headers)
+    assert status == 409 and body.get("exists")
+    status, body = http_client.get(f"/api/event/{eid}/courses")
+    assert body["courses"]["X"]["start"]["lat"] == -36.1
+    status, _ = http_client.post(f"/api/event/{eid}/admin/courses/X?replace=1", data=b, headers=headers)
+    assert status == 200
+    status, body = http_client.get(f"/api/event/{eid}/courses")
+    assert body["courses"]["X"]["start"]["lat"] == -36.2
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert [(e["name"], e["course"]["start"]["lat"]) for e in body["deleted"]] == [("X", -36.1)]
+
+
+def test_concurrent_deletes_keep_every_course(http_client):
+    """Many simultaneous deletes: every course ends up in the bin, none resurrected."""
+    import concurrent.futures
+    eid = create_event(http_client, name="Course Race", admin_password="race1")
+    headers = {"X-Admin-Password": "race1"}
+    course = {"start": {"lat": -36.1, "lon": 174.76}, "finish": {"lat": -36.1, "lon": 174.77}}
+    names = [f"C{i}" for i in range(12)]
+    for n in names:
+        http_client.post(f"/api/event/{eid}/admin/courses/{n}", data=course, headers=headers)
+    with concurrent.futures.ThreadPoolExecutor(12) as ex:
+        list(ex.map(lambda n: http_client.delete(f"/api/event/{eid}/admin/courses/{n}", headers=headers), names))
+    status, body = http_client.get(f"/api/event/{eid}/courses")
+    assert body["courses"] == {}
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert sorted(e["name"] for e in body["deleted"]) == sorted(names)
 
 
 def test_deleted_courses_requires_auth(http_client):
