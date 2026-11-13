@@ -301,7 +301,30 @@ const CourseOrder = (() => {
         };
         // +1 = offset to the right of travel (mark passed to port), -1 = left.
         // 'both', and a mid-race start crossing with no rounding set, turn the natural way.
+        // Crossing the start line mid-race with a pin: the sailor goes between the start
+        // mark and the pin, then rounds one end. Left = round the end on the left (to port),
+        // Right = the end on the right (to starboard); Both/auto take the natural turn.
+        // The crossing is drawn as a rounding of that end; alt = the other end, for Both.
+        const gate = {};
+        const spl = pinLine(course, 'S');
+        if (spl) {
+            const ends = [spl.mark, spl.pin].map(p => map.latLngToLayerPoint([p.lat, unwrapLon(p.lon, ref)]));
+            for (let i = 1; i < last; i++) {
+                if (seq[i].key !== 'S') continue;
+                const din = P[i].subtract(P[i - 1]), len = Math.hypot(din.x, din.y);
+                if (!(len > 0)) continue;
+                const n = L.point(-din.y / len, din.x / len);  // right of travel
+                const v = ends[1].subtract(P[i]);
+                const right = v.x * n.x + v.y * n.y > 0 ? ends[1] : ends[0];
+                const left = right === ends[1] ? ends[0] : ends[1];
+                const r = roundingAt(i);
+                const side = r === 'port' ? 1 : r === 'starboard' ? -1 : turnAt(i) > 0 ? -1 : 1;
+                gate[i] = { side, alt: side > 0 ? right : left, n };
+                P[i] = side > 0 ? left : right;  // S is never adjacent to another S, so later turnAt() is unaffected
+            }
+        }
         const sideAt = i => {
+            if (gate[i]) return gate[i].side;
             const r = roundingAt(i);
             if (r === 'port') return 1;
             if (r === 'starboard') return -1;
@@ -360,7 +383,17 @@ const CourseOrder = (() => {
                 continue;
             } else if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
             else { while (d < 0) d += 2 * Math.PI; }
-            if (roundingAt(i) === 'both') forks.push({ c, a0, r: rin, d });
+            if (roundingAt(i) === 'both') {
+                if (gate[i]) {
+                    // the other way: round the other end of the line the other way
+                    const g = gate[i], s2 = -g.side;
+                    const p0 = g.alt.add(g.n.multiplyBy(s2 * rin));
+                    forks.push({ c: g.alt, a0: Math.atan2(p0.y - g.alt.y, p0.x - g.alt.x), r: rin, dir: s2 > 0 ? -1 : 1, sweep: 3.5 });
+                } else {
+                    forks.push({ c, a0, r: rin, dir: -Math.sign(d || 1),
+                                 sweep: Math.min(4.7, Math.max(2.6, (2 * Math.PI - Math.abs(d)) * 0.6)) });
+                }
+            }
             const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
             for (let j = 1; j < steps; j++) {
                 const f = j / steps, ang = a0 + d * f, rr = rin + (rout - rin) * f;
@@ -373,22 +406,23 @@ const CourseOrder = (() => {
         }));
 
         // either-direction roundings: a dashed part-arc the other way round, with an arrowhead
+        // drawn a little outside the route's offset so it stands clear of it
         forks.forEach(f => {
-            const alt = -Math.sign(f.d || 1) * Math.max(Math.PI / 3, (2 * Math.PI - Math.abs(f.d)) * 0.45);
-            const steps = Math.max(2, Math.ceil(Math.abs(alt) / 0.15));
+            const alt = f.dir * f.sweep, R = f.r + 18;
+            const steps = Math.max(2, Math.ceil(Math.abs(alt) / 0.12));
             const pts = [];
             for (let j = 0; j <= steps; j++) {
-                const ang = f.a0 + alt * j / steps;
-                pts.push(map.layerPointToLatLng(L.point(f.c.x + f.r * Math.cos(ang), f.c.y + f.r * Math.sin(ang))));
+                const ang = f.a0 + alt * j / steps, rr = f.r + (R - f.r) * Math.min(1, 3 * j / steps);
+                pts.push(map.layerPointToLatLng(L.point(f.c.x + rr * Math.cos(ang), f.c.y + rr * Math.sin(ang))));
             }
-            add(L.polyline(pts, { color: opts.color || '#ff6600', weight: 2.5, opacity: opts.opacity || 0.85,
-                                  dashArray: '4, 5', interactive: false }));
+            add(L.polyline(pts, { color: opts.color || '#ff6600', weight: 4, opacity: opts.opacity || 0.9,
+                                  dashArray: '9, 7', interactive: false }));
             const end = f.a0 + alt, sg = Math.sign(alt);
             const deg = Math.atan2(Math.cos(end) * sg, -Math.sin(end) * sg) * 180 / Math.PI;
             add(L.marker(pts[pts.length - 1], {
                 icon: L.divIcon({
-                    className: 'leg-arrow', iconSize: [14, 14], iconAnchor: [7, 7],
-                    html: `<svg width="14" height="14" viewBox="-9 -9 18 18" style="transform:rotate(${deg}deg)">` +
+                    className: 'leg-arrow', iconSize: [24, 24], iconAnchor: [12, 12],
+                    html: `<svg width="24" height="24" viewBox="-9 -9 18 18" style="transform:rotate(${deg}deg)">` +
                           `<path d="M-6,-6 L7,0 L-6,6 L-2,0 Z" fill="${opts.color || '#ff6600'}" stroke="#7c2d12" stroke-width="1"/></svg>`
                 }),
                 interactive: false, keyboard: false
