@@ -132,14 +132,15 @@ const CourseOrder = (() => {
         return seq;
     }
 
-    // Dotted start/finish lines and pin markers for a course (not yet added to a map)
+    // Dotted start/finish lines and pin markers for a course (not yet added to a map).
+    // opts.ref: longitude the rest of the course is drawn around (default each line's own mark)
     function pinLayers(course, opts = {}) {
         const layers = [];
         for (const which of ['S', 'F']) {
             const pl = pinLine(course, which);
             if (!pl) continue;
-            const ref = pl.mark.lon;
-            layers.push(L.polyline([[pl.mark.lat, pl.mark.lon], [pl.pin.lat, unwrapLon(pl.pin.lon, ref)]], {
+            const ref = opts.ref !== undefined ? opts.ref : pl.mark.lon;
+            layers.push(L.polyline([[pl.mark.lat, unwrapLon(pl.mark.lon, ref)], [pl.pin.lat, unwrapLon(pl.pin.lon, ref)]], {
                 color: which === 'S' ? '#16a34a' : '#111827', weight: 3, opacity: 0.9,
                 dashArray: '2, 7', lineCap: 'round', interactive: false
             }));
@@ -356,12 +357,31 @@ const CourseOrder = (() => {
         return sz;
     }
 
+    // Boxes bucketed on a coarse screen grid so overlap tests only look nearby
+    function boxGrid(cell = 80) {
+        const cells = new Map();
+        const each = (b, fn) => {
+            for (let gx = Math.floor(b.x0 / cell); gx <= Math.floor(b.x1 / cell); gx++)
+                for (let gy = Math.floor(b.y0 / cell); gy <= Math.floor(b.y1 / cell); gy++) fn(gx + ',' + gy);
+        };
+        return {
+            add(b) { each(b, k => { const a = cells.get(k); if (a) a.push(b); else cells.set(k, [b]); }); },
+            cost(r) {
+                const seen = new Set();
+                let c = 0;
+                each(r, k => (cells.get(k) || []).forEach(q => { if (!seen.has(q)) { seen.add(q); c += overlapArea(r, q); } }));
+                return c;
+            }
+        };
+    }
+
     // Greedy placement: each label (shorter legs first) takes the first candidate
     // spot beside its leg that clears placed labels and obstacles; candidates slide
     // along the leg, then try the other side, then further out. Returns centres.
     function placeLabels(map, items, obstacles) {
         const PAD = 3;
-        const placed = obstacles.slice();
+        const placed = boxGrid();
+        obstacles.forEach(b => placed.add(b));
         const out = new Array(items.length);
         const order = items.map((it, i) => i).sort((i, j) =>
             items[i].a.distanceTo(items[i].b) - items[j].a.distanceTo(items[j].b));
@@ -378,16 +398,14 @@ const CourseOrder = (() => {
                     for (const t of ts) {
                         const c = it.a.add(it.b.subtract(it.a).multiplyBy(t))
                                       .add(it.n.multiplyBy(side * (clear + extra * step)));
-                        const r = box(c, w + 2 * PAD, h + 2 * PAD);
-                        let cost = 0;
-                        for (const q of placed) cost += overlapArea(r, q);
+                        const cost = placed.cost(box(c, w + 2 * PAD, h + 2 * PAD));
                         if (cost === 0) { best = c; break search; }
                         if (cost < bestCost) { bestCost = cost; best = c; }
                     }
                 }
             }
             out[i] = best;
-            placed.push(box(best, w, h));
+            placed.add(box(best, w, h));
         }
         return out;
     }

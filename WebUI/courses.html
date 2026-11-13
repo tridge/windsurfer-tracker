@@ -1271,12 +1271,13 @@
         }
 
         // Course legs: plain line in mark order, or the routed line with rounding arcs,
-        // arrows and labels when a custom order is set
-        function renderLegs(course) {
+        // arrows and labels when a custom order is set. labels=false skips leg labels.
+        function renderLegs(course, labels = true) {
             clearLegs();
-            CourseOrder.pinLayers(course, { interactive: movingMarkIndex === null }).forEach(l => courseLines.push(l.addTo(map)));
+            const pts = coursePoints(course);
+            CourseOrder.pinLayers(course, { interactive: movingMarkIndex === null, ref: pts.length ? pts[0].lon : 0 }).forEach(l => courseLines.push(l.addTo(map)));
             if (courseOrderKeys(course)) {
-                courseLines.push(CourseOrder.routeLayer(course, { labels: true }).addTo(map));
+                courseLines.push(CourseOrder.routeLayer(course, { labels }).addTo(map));
                 return;
             }
             const seqPts = courseSequence(course).map(e => e.pt);
@@ -1287,8 +1288,11 @@
                     color: '#ff6600', weight: 3, opacity: 0.7, dashArray: '10, 5', interactive: false
                 }).addTo(map));
             }
-            showLegLabels(course);
+            if (labels) showLegLabels(course); else clearLegLabels();
         }
+
+        // big courses skip leg labels while a mark is dragged; they're laid out on drop
+        const PREVIEW_LABEL_MAX_LEGS = 40;
 
         // opts.preview: non-interactive markers (live move preview)
         function displayCourse(course, fit = true, opts = {}) {
@@ -1393,7 +1397,7 @@
                 points.push(ll(course.finish));
             }
 
-            renderLegs(course);
+            renderLegs(course, !opts.preview || courseSequence(course).length <= PREVIEW_LABEL_MAX_LEGS + 1);
 
             // Auto-zoom to fit course
             if (fit && points.length > 0) {
@@ -2274,6 +2278,9 @@
                 p.lon = normLon(newLon + (x2 / (EARTH_R * cos1)) / rad);
                 if (!isFinite(p.lat) || !isFinite(p.lon) || Math.abs(p.lat) > 85) ok = false;
             });
+            for (const p of [out.start, out.finish]) {
+                if (p && p.pin && p.pin.dist > 0) p.pin.dist = Math.round(p.pin.dist * k * 10) / 10;
+            }
             return ok ? out : null;
         }
 
