@@ -808,6 +808,7 @@
 
         function refreshCourses() {
             document.getElementById('menuPanel').classList.remove('visible');
+            closeTransform();
             lastCoursesJSON = null;  // Force rebuild
             loadCourses(false);
         }
@@ -911,7 +912,9 @@
         let transformPicking = false;
         let transformDragging = false;  // drag mode on
         let tfDrag = null;              // active pointer drag
-        let tfSession = null;           // {name, base}: course being transformed and its snapshot
+        let tfSession = null;           // {name, base, loadSeq}: course being transformed and its snapshot
+        let loadSeqCounter = 0;         // number of course reloads started
+        let tfPointers = new Set();     // pointers down in drag mode
         let transformPreview = null;
 
         // --- Utility functions (from event.html) ---
@@ -1063,7 +1066,8 @@
                 courseLines.push(CourseOrder.routeLayer(course, { labels: true }).addTo(map));
                 return;
             }
-            const points = coursePoints(course).map(p => [p.lat, p.lon]);
+            const ref = coursePoints(course).length ? coursePoints(course)[0].lon : 0;
+            const points = coursePoints(course).map(p => [p.lat, unwrapLon(p.lon, ref)]);
             if (points.length >= 2) {
                 courseLines.push(L.polyline(points, {
                     color: '#ff6600', weight: 3, opacity: 0.7, dashArray: '10, 5'
@@ -1074,6 +1078,9 @@
 
         function displayCourse(course, fit = true) {
             clearCourseDisplay();
+            // one longitude copy for the whole course so it draws compactly across ±180°
+            const ref = coursePoints(course).length ? coursePoints(course)[0].lon : 0;
+            const ll = p => [p.lat, unwrapLon(p.lon, ref)];
             const editable = adminMode && !transformActive;
             const points = [];
             // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
@@ -1087,7 +1094,7 @@
             // Start marker
             if (course.start) {
                 const startLabel = course.start.comment ? course.start.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                const marker = L.marker([course.start.lat, course.start.lon], {
+                const marker = L.marker(ll(course.start), {
                     icon: createStartIcon(startLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Start</strong>';
@@ -1103,7 +1110,7 @@
                 popup += '</div>';
                 marker.bindPopup(popup);
                 courseMarkers.push(marker);
-                points.push([course.start.lat, course.start.lon]);
+                points.push(ll(course.start));
                 prevPoint = course.start;
             }
 
@@ -1115,7 +1122,7 @@
                 course.marks.forEach((mark, idx) => {
                     const color = mark.color || '#f97316';
                     const label = mark.comment ? mark.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                    const marker = L.marker([mark.lat, mark.lon], {
+                    const marker = L.marker(ll(mark), {
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
                     let popup = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
@@ -1139,7 +1146,7 @@
                     popup += '</div>';
                     marker.bindPopup(popup);
                     courseMarkers.push(marker);
-                    points.push([mark.lat, mark.lon]);
+                    points.push(ll(mark));
                     prevPoint = mark;
                 });
             }
@@ -1147,7 +1154,7 @@
             // Finish marker
             if (course.finish) {
                 const finishLabel = course.finish.comment ? course.finish.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                const marker = L.marker([course.finish.lat, course.finish.lon], {
+                const marker = L.marker(ll(course.finish), {
                     icon: createFinishIcon(finishLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Finish</strong>';
@@ -1165,7 +1172,7 @@
                 popup += '</div>';
                 marker.bindPopup(popup);
                 courseMarkers.push(marker);
-                points.push([course.finish.lat, course.finish.lon]);
+                points.push(ll(course.finish));
             }
 
             renderLegs(course);
@@ -2039,7 +2046,8 @@
             cancelDrawing();
             cancelMoveMark();
             map.closePopup();
-            tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)) };
+            tfSession = { name: selectedCourseName, base: JSON.parse(JSON.stringify(courseData)),
+                          loadSeq: loadSeqCounter };
             transformActive = true;
             document.getElementById('tfCourseName').textContent = `"${tfSession.name}"`;
             resetTransform();
@@ -2131,13 +2139,18 @@
                 const t = bearingDeg(pts[i], pts[i + 1]);
                 const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
                 const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
+                // beside the leg, to the right of travel, so reciprocal legs don't overlap
+                const nx = Math.cos(t * Math.PI / 180), ny = Math.sin(t * Math.PI / 180);
+                const away = 8 + Math.abs(nx) * 58 + Math.abs(ny) * 18;
                 const icon = L.divIcon({
                     className: 'leg-label',
-                    html: `<div>${hdg}<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
+                    html: `<div style="transform:translate(calc(-50% + ${(nx * away).toFixed(1)}px), calc(-50% + ${(ny * away).toFixed(1)}px))">` +
+                          `${hdg}<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
                     iconSize: [0, 0]
                 });
+                const ref = pts[0].lon;
                 const mid = [(pts[i].lat + pts[i + 1].lat) / 2,
-                             normLon((pts[i].lon + unwrapLon(pts[i + 1].lon, pts[i].lon)) / 2)];
+                             (unwrapLon(pts[i].lon, ref) + unwrapLon(pts[i + 1].lon, ref)) / 2];
                 labels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
             }
             return labels;
@@ -2190,6 +2203,7 @@
             if (!transformDragging) return;
             transformDragging = false;
             tfDrag = null;
+            tfPointers.clear();
             document.getElementById('tfDragBtn').classList.remove('active');
             const el = map.getContainer();
             map.dragging.enable();
@@ -2202,6 +2216,18 @@
         }
 
         function tfDragDown(e) {
+            if (e.isPrimary) tfPointers.clear();  // a new gesture: earlier pointers are gone
+            tfPointers.add(e.pointerId);
+            if (tfPointers.size > 1) {
+                // second finger: a pinch, not a drag; put the offset back
+                if (tfDrag) {
+                    document.getElementById('tfNorth').value = tfDrag.north;
+                    document.getElementById('tfEast').value = tfDrag.east;
+                    tfDrag = null;
+                    updateTransformPreview();
+                }
+                return;
+            }
             if (tfDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
             if (e.target.closest('.leaflet-control')) return;
             const ll = map.mouseEventToLatLng(e);
@@ -2226,6 +2252,7 @@
         }
 
         function tfDragUp(e) {
+            tfPointers.delete(e.pointerId);
             if (!tfDrag || e.pointerId !== tfDrag.id) return;
             tfDrag = null;
             updateTransformPreview();
@@ -2254,28 +2281,38 @@
             }
         }
 
-        // Saves the preview under the course the session started on; courseData is
-        // only replaced by the post-save reload, so a failed save changes nothing
+        // Saves the preview under the course the session started on. The result becomes
+        // the editable course straight away so edits made during the save build on it;
+        // a failed save restores the original only if nothing has replaced it since.
         async function applyTransform() {
             if (!transformActive || !transformPreview || !tfSession) return;
-            const name = tfSession.name, result = transformPreview;
+            const name = tfSession.name, base = tfSession.base;
             if (name !== selectedCourseName || !allCourses[name]) {
                 closeTransform();
                 alert(`Course "${name}" is no longer selected; transform not applied`);
                 return;
             }
-            closeTransform();
-            await saveCourse(name, result);
+            const applied = JSON.parse(JSON.stringify(transformPreview));
+            courseData = applied;
+            closeTransform();  // redraws courseData, i.e. the transformed course
+            const ok = await saveCourse(name, applied);
+            if (!ok && selectedCourseName === name && courseData === applied) {
+                courseData = base;
+                displayCourse(courseData, false);
+                updateInfoBox(name, courseData);
+            }
         }
 
         async function loadCourses(isRefresh) {
             const listEl = document.getElementById('courseList');
             const dropdown = document.getElementById('courseDropdown');
             if (isRefresh && transformActive) return;  // don't clobber the transform preview
+            const mySeq = ++loadSeqCounter;
             try {
                 const response = await fetch(`${EVENT_API}/courses`, { cache: 'no-cache' });
                 const data = await response.json();
-                if (isRefresh && transformActive) return;  // panel opened while fetching
+                // a panel opened while fetching owns the editor; this reload is stale
+                if (transformActive && (isRefresh || tfSession.loadSeq >= mySeq)) return;
                 const newCourses = data.courses || {};
 
                 // Skip UI rebuild if nothing has changed
