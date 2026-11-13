@@ -583,7 +583,8 @@
                     <option value="">Auto (from course layout)</option>
                     <option value="port">Left (mark to port)</option>
                     <option value="starboard">Right (mark to starboard)</option>
-                    <option value="both">Both (either direction)</option>
+                    <option value="both-port">Both (display left)</option>
+                    <option value="both-starboard">Both (display right)</option>
                 </select>
                 <div class="order-help" id="roundingHelp" style="display:none">
                     Used where the mark order crosses the start line mid-race (S123S1234F).</div>
@@ -1265,7 +1266,11 @@
                         color: s.color, weight: 3, opacity: faded ? 0.3 : 0.7, dashArray: '10, 5', interactive: false
                     }).addTo(map));
                 }
-                if (labels && !faded) legLabels.push(...makeLegLabels(seqPts, ref));
+                if (labels && !faded) {
+                    // the mark icons and pin ends (with a pin, a leg ends mid-line, not at the mark)
+                    const avoid = coursePoints(c).concat(['S', 'F'].map(w => CourseOrder.pinLine(c, w)).filter(x => x).map(x => x.pin));
+                    legLabels.push(...makeLegLabels(seqPts, ref, avoid));
+                }
             }
         }
 
@@ -1287,19 +1292,13 @@
             for (const sc of CourseOrder.subCourses(course)) {
                 const c = sc.course, letter = sc.letter, q = `'${letter}'`;
                 const opacity = opts.focus && letter !== opts.focus ? 0.45 : 1;
-                // Distance from the previous course point, e.g. "0.85 km / 0.46 nm"
-                let prevPoint = null;
-                const legFromPrev = (pt) => {
-                    if (!prevPoint) return '';
-                    const km = haversineDistance(prevPoint.lat, prevPoint.lon, pt.lat, pt.lon);
-                    return `<br><small>From previous: ${km.toFixed(2)} km / ${(km / 1.852).toFixed(2)} nm</small>`;
-                };
+                // legs sailed into a point, following the order
+                const legsIn = key => CourseOrder.incomingLegsHtml(c, key, letter, multi);
                 const add = (pt, icon, popup) => {
                     const marker = L.marker(ll(pt), { interactive, icon, opacity }).addTo(map);
                     marker.bindPopup(popup);
                     courseMarkers.push(marker);
                     points.push(ll(pt));
-                    prevPoint = pt;
                 };
                 const pinText = pt => pt.pin ? `<br><small>Pin: ${Math.round(pt.pin.dist)} m ${pt.pin.side === 'right' ? 'right' : 'left'}</small>` : '';
 
@@ -1335,7 +1334,7 @@
                         popup += `<br><small>Rounding: ${CourseOrder.sideName(side)}${mark.rounding ? '' : ' (auto)'}` +
                                  `${visits ? `, ${visits} visit${visits > 1 ? 's' : ''}` : ', not visited'}</small>`;
                     }
-                    popup += legFromPrev(mark);
+                    popup += legsIn(idx + 1);
                     if (editable) {
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx}, ${q})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark(${idx}, ${q})">Move</button>`;
@@ -1350,7 +1349,7 @@
                     if (c.finish.comment) popup += `<br><em>${CourseOrder.commentHtml(c.finish.comment)}</em>`;
                     popup += `<br><small>Lat: ${c.finish.lat.toFixed(6)}<br>Lon: ${c.finish.lon.toFixed(6)}</small>`;
                     popup += pinText(c.finish);
-                    popup += legFromPrev(c.finish);
+                    popup += legsIn('F');
                     if (editable) {
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish', ${q})">Edit</button>`;
                         popup += `<button class="popup-move-btn" onclick="startMoveMark('finish', ${q})">Move</button>`;
@@ -1405,8 +1404,10 @@
             const keys = courseOrderKeys(c);
             if (!keys) return '';
             const auto = autoRoundingSide(courseSequence(c));
-            const overrides = (c.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard' || m.rounding === 'both');
-            return `Order: ${keys.join('-')} · ${CourseOrder.sideName(auto)} rounding${overrides ? ' (some overridden)' : ' (auto)'}`;
+            const overrides = (c.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard' || CourseOrder.isBoth(m.rounding));
+            const crossing = c.start && c.start.rounding && keys.some((k, i) => k === 'S' && i > 0)
+                ? ` · start crossing: turn ${CourseOrder.sideName(c.start.rounding)}` : '';
+            return `Order: ${keys.join('-')} · ${CourseOrder.sideName(auto)} rounding${overrides ? ' (some overridden)' : ' (auto)'}${crossing}`;
         }
 
         function updateInfoBox(name, course) {
@@ -1973,7 +1974,7 @@
                 document.getElementById('roundingRow').style.display = isStart ? '' : 'none';
                 document.getElementById('roundingHelp').style.display = isStart ? '' : 'none';
                 document.getElementById('editMarkRoundingLabel').textContent = 'Turn after crossing mid-race';
-                document.getElementById('editMarkRounding').value = isStart ? (pt.rounding || '') : '';
+                document.getElementById('editMarkRounding').value = isStart ? roundingChoice(pt.rounding) : '';
                 document.getElementById('editPinEnabled').checked = !!pt.pin;
                 document.getElementById('editPinDist').value = pt.pin ? pt.pin.dist : 50;
                 document.getElementById('editPinSide').value = pt.pin && pt.pin.side === 'right' ? 'right' : 'left';
@@ -1987,7 +1988,7 @@
                 const mark = cd.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
                 document.getElementById('editMarkColor').value = mark.color || '';
-                document.getElementById('editMarkRounding').value = mark.rounding || '';
+                document.getElementById('editMarkRounding').value = roundingChoice(mark.rounding);
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
                 document.getElementById('roundingRow').style.display = '';
@@ -1997,6 +1998,10 @@
             editTarget = { name: selectedCourseName, data: courseData, letter, sig: courseDataSig };
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
+
+        // dialog choice for a stored rounding (plain 'both' from before the display
+        // choice existed opens as "display left")
+        const roundingChoice = r => r === 'both' ? 'both-port' : r || '';
 
         function updatePinRow() {
             document.getElementById('pinFields').style.display =
@@ -2161,9 +2166,8 @@
             const R1 = 34;
             near.forEach(i => {
                 if (i < 1 || i >= seq.length - 1) return;
-                const B = map.latLngToLayerPoint([seq[i].pt.lat, seq[i].pt.lon]);
-                const A = map.latLngToLayerPoint([seq[i - 1].pt.lat, seq[i - 1].pt.lon]);
-                const C = map.latLngToLayerPoint([seq[i + 1].pt.lat, seq[i + 1].pt.lon]);
+                const ref = displayRef(course), proj = p => map.latLngToLayerPoint([p.lat, unwrapLon(p.lon, ref)]);
+                const B = proj(seq[i].pt), A = proj(seq[i - 1].pt), C = proj(seq[i + 1].pt);
                 // angle between the two legs from metric vectors, drawn on screen
                 const a = metresNE(seq[i].pt, seq[i - 1].pt), c = metresNE(seq[i].pt, seq[i + 1].pt);
                 const la = Math.hypot(a.north, a.east), lc = Math.hypot(c.north, c.east);
@@ -2563,9 +2567,10 @@
 
         // Leg labels (one self-redrawing layer, added to the map) for a list of
         // {lat, lon} points; placement avoids overlaps, see js/course-order.js
-        function makeLegLabels(pts, ref) {
+        // avoid: other icons ({lat, lon}) to keep labels clear of
+        function makeLegLabels(pts, ref, avoid) {
             if (pts.length < 2) return [];
-            return [CourseOrder.legLabelLayer(pts.map(p => ({ lat: p.lat, lon: p.lon })), { ref }).addTo(map)];
+            return [CourseOrder.legLabelLayer(pts.map(p => ({ lat: p.lat, lon: p.lon })), { ref, avoid }).addTo(map)];
         }
 
         // Pick mode: clicking the map moves the pivot to that point

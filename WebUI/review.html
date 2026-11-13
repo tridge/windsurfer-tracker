@@ -1010,10 +1010,14 @@
             if (!showCourse) return;
             const multi = CourseOrder.courseCount(course) > 1;
 
+            // one longitude copy for every course in the file, so it draws compactly across ±180°
+            const firstPt = CourseOrder.subCourses(course).map(x => x.course.start || (x.course.marks || [])[0] || x.course.finish).find(x => x);
+            const ref = firstPt ? firstPt.lon : 0;
+            const ll = p => [p.lat, p.lon + 360 * Math.round((ref - p.lon) / 360)];
             for (const sc of CourseOrder.subCourses(course)) {
                 const c = sc.course, letter = sc.letter;
                 const add = (pt, icon, popup) => {
-                    const marker = L.marker([pt.lat, pt.lon], { icon }).addTo(map);
+                    const marker = L.marker(ll(pt), { icon }).addTo(map);
                     marker.bindPopup(popup);
                     courseMarkers.push(marker);
                 };
@@ -1031,10 +1035,10 @@
 
                 // Course line: routed with rounding and arrows when a mark order is set;
                 // start/finish with a pin drawn as a line, legs from its middle
-                CourseOrder.pinLayers(c).forEach(l => courseLines.push(l.addTo(map)));
-                const legPoints = CourseOrder.sequence(c).map(e => [e.pt.lat, e.pt.lon]);
+                CourseOrder.pinLayers(c, { ref }).forEach(l => courseLines.push(l.addTo(map)));
+                const legPoints = CourseOrder.sequence(c).map(e => ll(e.pt));
                 if (CourseOrder.keys(c)) {
-                    courseLines.push(CourseOrder.routeLayer(c, { color: sc.color, letter: multi ? letter : null }).addTo(map));
+                    courseLines.push(CourseOrder.routeLayer(c, { color: sc.color, letter: multi ? letter : null, ref }).addTo(map));
                 } else if (legPoints.length >= 2) {
                     courseLines.push(L.polyline(legPoints, {
                         color: sc.color, weight: 3, opacity: 0.7, dashArray: '10, 5'

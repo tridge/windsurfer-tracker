@@ -723,6 +723,9 @@ function onFinishCourseChanged() {
     computeFinishLine();
 }
 
+// lon moved by whole turns to lie within 180° of ref
+const unwrapLon = (lon, ref) => lon + 360 * Math.round((ref - lon) / 360);
+
 function computeFinishLine() {
     const course = CourseOrder.subCourse(courseData, finishCourse) || courseData;
     if (!course || !course.finish) {
@@ -733,7 +736,7 @@ function computeFinishLine() {
     // a finish with a pin is the line from the finish mark to the pin
     const pl = CourseOrder.pinLine(course, 'F');
     if (pl) {
-        finishLine = { p1: { lat: pl.mark.lat, lon: pl.mark.lon }, p2: { lat: pl.pin.lat, lon: pl.pin.lon } };
+        finishLine = { p1: { lat: pl.mark.lat, lon: pl.mark.lon }, p2: { lat: pl.pin.lat, lon: unwrapLon(pl.pin.lon, pl.mark.lon) } };
         document.getElementById('btnSort').disabled = false;
         return;
     }
@@ -744,7 +747,7 @@ function computeFinishLine() {
     for (let i = seq.length - 2; i >= 0; i--) {
         const m = seq[i].pt;
         if (m.lat !== fin.lat || m.lon !== fin.lon) {
-            fromPt = { lat: m.lat, lon: m.lon };
+            fromPt = { lat: m.lat, lon: unwrapLon(m.lon, fin.lon) };  // same side of ±180° as the finish
             break;
         }
     }
@@ -753,31 +756,19 @@ function computeFinishLine() {
         return;
     }
 
-    // Direction from last distinct mark to finish
-    const dlat = fin.lat - fromPt.lat;
-    const dlon = fin.lon - fromPt.lon;
-    const dist = Math.sqrt(dlat * dlat + dlon * dlon);
+    // Direction from last distinct mark to finish, in metres
+    const cosLat = Math.cos(fin.lat * Math.PI / 180);
+    const mPerDegLat = 111111, mPerDegLon = 111111 * cosLat;
+    const dn = (fin.lat - fromPt.lat) * mPerDegLat;
+    const de = (fin.lon - fromPt.lon) * mPerDegLon;
+    const dist = Math.hypot(dn, de);
     if (dist === 0) { finishLine = null; return; }
 
-    // Perpendicular direction (rotate 90 degrees)
-    const plat = -dlon;
-    const plon = dlat;
-
-    // 50m in each direction (in degrees)
-    const cosLat = Math.cos(fin.lat * Math.PI / 180);
-    const mPerDegLat = 111111;
-    const mPerDegLon = 111111 * cosLat;
-    const extLat = 50 / mPerDegLat;
-    const extLon = 50 / mPerDegLon;
-
-    // Normalize perpendicular
-    const pDist = Math.sqrt(plat * plat + plon * plon);
-    const nLat = plat / pDist;
-    const nLon = plon / pDist;
-
+    // 50 m each way, square to the last leg
+    const pn = -de / dist * 50, pe = dn / dist * 50;
     finishLine = {
-        p1: { lat: fin.lat + nLat * extLat, lon: fin.lon + nLon * extLon },
-        p2: { lat: fin.lat - nLat * extLat, lon: fin.lon - nLon * extLon }
+        p1: { lat: fin.lat + pn / mPerDegLat, lon: fin.lon + pe / mPerDegLon },
+        p2: { lat: fin.lat - pn / mPerDegLat, lon: fin.lon - pe / mPerDegLon }
     };
     document.getElementById('btnSort').disabled = false;
 }
@@ -901,27 +892,15 @@ function distToFinish(id) {
     if (s.manual) return Infinity;
     if (s.proj_lat === 0 && s.proj_lon === 0) return Infinity;
 
-    // Distance from projected position to closest point on finish line segment
-    const px = s.proj_lon;
-    const py = s.proj_lat;
-    const x1 = finishLine.p1.lon;
-    const y1 = finishLine.p1.lat;
-    const x2 = finishLine.p2.lon;
-    const y2 = finishLine.p2.lat;
-
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    let t = lenSq > 0 ? ((px - x1) * dx + (py - y1) * dy) / lenSq : 0;
+    // Distance from projected position to the closest point on the finish line
+    // segment, in metres in a local frame at p1 (longitudes unwrapped across ±180°)
+    const p1 = finishLine.p1, mLat = 111111, mLon = 111111 * Math.cos(p1.lat * Math.PI / 180);
+    const xy = (lat, lon) => ({ x: (unwrapLon(lon, p1.lon) - p1.lon) * mLon, y: (lat - p1.lat) * mLat });
+    const p = xy(s.proj_lat, s.proj_lon), b = xy(finishLine.p2.lat, finishLine.p2.lon);
+    const lenSq = b.x * b.x + b.y * b.y;
+    let t = lenSq > 0 ? (p.x * b.x + p.y * b.y) / lenSq : 0;
     t = Math.max(0, Math.min(1, t));
-    const cx = x1 + t * dx;
-    const cy = y1 + t * dy;
-
-    // Approximate distance in meters
-    const cosLat = Math.cos(s.proj_lat * Math.PI / 180);
-    const dLat = (s.proj_lat - cy) * 111111;
-    const dLon = (s.proj_lon - cx) * 111111 * cosLat;
-    return Math.sqrt(dLat * dLat + dLon * dLon);
+    return Math.hypot(p.x - t * b.x, p.y - t * b.y);
 }
 
 function sortByDistance() {
