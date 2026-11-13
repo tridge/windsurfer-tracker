@@ -338,10 +338,12 @@
         .popup-split-btn:hover { background: #6d28d9; }
         .admin-toolbar {
             position: absolute;
-            top: 10px; right: 180px; z-index: 1000;
+            top: 10px; right: 10px; z-index: 1000;
             display: none; gap: 6px;
+            flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 70px);
         }
         .admin-toolbar.visible { display: flex; }
+        body.admin-mode .course-info-box { top: 56px; }
         .admin-toolbar button {
             padding: 6px 12px; border: none; border-radius: 6px;
             cursor: pointer; font-size: 13px; font-weight: 600;
@@ -373,6 +375,11 @@
             .transform-panel { top: 10px; max-height: calc(100vh - 20px); }
         }
         .leg-label { background: none !important; border: none !important; }
+        .leg-arrow { background: none !important; border: none !important; pointer-events: none; }
+        .admin-toolbar .btn-order { background: #d97706; color: white; }
+        .admin-toolbar .btn-order:hover { background: #b45309; }
+        .order-help { font-size: 12px; color: #666; margin: -6px 0 10px 0; line-height: 1.4; }
+        .order-error { font-size: 12px; color: #dc2626; font-weight: 600; min-height: 16px; }
         .leg-label div {
             position: absolute; transform: translate(-50%, -50%);
             background: rgba(8, 145, 178, 0.92); color: white;
@@ -499,6 +506,8 @@
                 left: 10px;
                 right: auto;
                 flex-wrap: wrap;
+                justify-content: flex-start;
+                max-width: calc(100% - 20px);
             }
             .transform-panel {
                 top: auto; bottom: 10px; left: 10px; right: 10px;
@@ -532,6 +541,7 @@
         <div class="info-detail" id="infoMarks"></div>
         <div class="info-detail" id="infoLength"></div>
         <div class="info-detail" id="infoTime" style="display:none"></div>
+        <div class="info-detail" id="infoOrder" style="display:none"></div>
     </div>
 
     <div class="drawing-mode-indicator" id="drawingIndicator">
@@ -544,6 +554,7 @@
         <button class="btn-rename" onclick="renameCourse()">✎ Rename</button>
         <button class="btn-copy" onclick="copyCourse()">⧉ Copy</button>
         <button class="btn-transform" onclick="showTransform()">⟲ Transform</button>
+        <button class="btn-order" onclick="showMarkOrder()">↻ Mark Order</button>
         <button class="btn-delete-course" onclick="deleteSelectedCourse()">🗑 Delete</button>
     </div>
 
@@ -563,12 +574,35 @@
                     <option value="#3b82f6">Blue</option>
                     <option value="#8b5cf6">Purple</option>
                 </select>
+                <label for="editMarkRounding">Rounding</label>
+                <select id="editMarkRounding">
+                    <option value="">Auto (from course layout)</option>
+                    <option value="port">Port (mark to port)</option>
+                    <option value="starboard">Starboard (mark to starboard)</option>
+                </select>
             </div>
             <label for="editMarkComment">Comment</label>
             <textarea id="editMarkComment" placeholder="e.g., Port rounding" rows="2" style="width:100%;resize:vertical;"></textarea>
             <div class="btn-row">
                 <button class="btn-cancel" onclick="closeEditMark()">Cancel</button>
                 <button class="btn-save" onclick="saveEditMark()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mark order overlay -->
+    <div class="edit-user-overlay" id="markOrderOverlay" onclick="if(event.target===this)closeMarkOrder()">
+        <div class="edit-user-dialog">
+            <h3>Mark order <span id="markOrderCourse"></span></h3>
+            <label for="markOrderInput">Rounding order</label>
+            <input type="text" id="markOrderInput" placeholder="e.g. S12313F" autocomplete="off"
+                   oninput="validateMarkOrderInput()" onkeydown="if(event.key==='Enter')saveMarkOrder()">
+            <div class="order-help">S = start, F = finish, 1-<span id="markOrderMax"></span> = marks.
+                Use spaces between numbers above 9 (S 1 10 2 F). Leave blank for S, 1, 2, ... F.</div>
+            <div class="order-error" id="markOrderError"></div>
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="closeMarkOrder()">Cancel</button>
+                <button class="btn-save" id="markOrderSave" onclick="saveMarkOrder()">Save</button>
             </div>
         </div>
     </div>
@@ -831,6 +865,9 @@
 
         // Scale bar
         map.on('zoomend', () => updateScale(map));
+        map.on('zoomend', () => {
+            if (displayedCourse && courseOrderKeys(displayedCourse)) renderLegs(displayedCourse);
+        });
         map.on('moveend', () => updateScale(map));
         updateScale(map);
 
@@ -842,6 +879,7 @@
         let courseMarkers = [];
         let courseLines = [];
         let legLabels = [];
+        let displayedCourse = null;     // course whose legs are on the map (redrawn on zoom)
         let allCourses = {};
         let selectedCourseName = null;
         let courseData = null;          // Deep copy of selected course for editing
@@ -894,11 +932,7 @@
 
         function calculateCourseLength(course) {
             if (!course || !course.start || !course.finish) return 0;
-            const points = [course.start];
-            if (course.marks) {
-                points.push(...course.marks);
-            }
-            points.push(course.finish);
+            const points = courseSequence(course).map(e => e.pt);
             let totalDistance = 0;
             for (let i = 0; i < points.length - 1; i++) {
                 totalDistance += haversineDistance(
@@ -909,7 +943,109 @@
             return totalDistance;
         }
 
-        // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm"
+        // --- Mark rounding order ---
+
+        // Parse "S12313F" (or "S 1 2 10 F") into ['S', 1, 2, ..., 'F'].
+        // S/F are added if missing. Returns {seq} or {error}.
+        function parseMarkOrder(str, numMarks) {
+            const s = (str || '').toUpperCase().trim();
+            if (!s) return { seq: null };
+            const tokens = /[\s,\-]/.test(s) ? s.split(/[\s,\-]+/).filter(t => t) : s.split('');
+            const seq = [];
+            for (const t of tokens) {
+                if (t === 'S' || t === 'F') { seq.push(t); continue; }
+                if (!/^\d+$/.test(t)) return { error: `"${t}" is not S, F or a mark number` };
+                const n = parseInt(t, 10);
+                if (n < 1 || n > numMarks) return { error: `Mark ${n} doesn't exist (course has ${numMarks})` };
+                seq.push(n);
+            }
+            if (seq[0] !== 'S') seq.unshift('S');
+            if (seq[seq.length - 1] !== 'F') seq.push('F');
+            for (let i = 0; i < seq.length; i++) {
+                if (seq[i] === 'S' && i !== 0) return { error: 'S must come first' };
+                if (seq[i] === 'F' && i !== seq.length - 1) return { error: 'F must come last' };
+                if (i > 0 && seq[i] === seq[i - 1]) return { error: `Mark ${seq[i]} repeated back to back` };
+            }
+            return { seq };
+        }
+
+        function formatMarkOrder(seq) {
+            return seq.some(k => typeof k === 'number' && k > 9) ? seq.join(' ') : seq.join('');
+        }
+
+        // Custom order of a course as keys, or null if none/invalid
+        function courseOrderKeys(course) {
+            if (!course || !course.order) return null;
+            const r = parseMarkOrder(course.order, course.marks ? course.marks.length : 0);
+            return r.seq || null;
+        }
+
+        // Course visiting sequence: [{key, pt, mark}] where mark is the 0-based mark index or null
+        function courseSequence(course) {
+            const nm = course.marks ? course.marks.length : 0;
+            let keys = courseOrderKeys(course);
+            if (!keys) {
+                keys = [];
+                if (course.start) keys.push('S');
+                for (let i = 1; i <= nm; i++) keys.push(i);
+                if (course.finish) keys.push('F');
+            }
+            return keys.map(k => k === 'S' ? { key: k, pt: course.start, mark: null }
+                              : k === 'F' ? { key: k, pt: course.finish, mark: null }
+                              : { key: k, pt: course.marks[k - 1], mark: k - 1 })
+                       .filter(e => e.pt);
+        }
+
+        // Auto rounding side from the net turn at the marks: left = port
+        function autoRoundingSide(seq) {
+            let turn = 0;
+            for (let i = 1; i + 1 < seq.length; i++) {
+                if (seq[i].mark === null) continue;
+                const a = metresNE(seq[i - 1].pt, seq[i].pt), b = metresNE(seq[i].pt, seq[i + 1].pt);
+                const cross = a.east * b.north - a.north * b.east;
+                const dot = a.east * b.east + a.north * b.north;
+                turn += Math.atan2(cross, dot);
+            }
+            return turn >= 0 ? 'port' : 'starboard';
+        }
+
+        function markRoundingSide(course, markIdx, autoSide) {
+            const r = course.marks && course.marks[markIdx] && course.marks[markIdx].rounding;
+            return r === 'port' || r === 'starboard' ? r : autoSide;
+        }
+
+        // Keep a custom order consistent after inserting a mark at 0-based index
+        // insertIndex between prevKey and nextKey
+        function orderInsertMark(course, insertIndex, prevKey, nextKey) {
+            const keys = courseOrderKeys(course);
+            if (!keys) return;
+            const num = insertIndex + 1;
+            const shifted = keys.map(k => typeof k === 'number' && k >= num ? k + 1 : k);
+            const nk = typeof nextKey === 'number' && nextKey >= num ? nextKey + 1 : nextKey;
+            const out = [];
+            shifted.forEach((k, i) => {
+                out.push(k);
+                if (k === prevKey && shifted[i + 1] === nk) out.push(num);
+            });
+            course.order = formatMarkOrder(out);
+        }
+
+        // Keep a custom order consistent after deleting the 1-based mark num
+        // (call before removing the mark)
+        function orderDeleteMark(course, num) {
+            const keys = courseOrderKeys(course);
+            if (!keys) { delete course.order; return; }
+            const out = [];
+            for (const k of keys) {
+                if (k === num) continue;
+                const k2 = typeof k === 'number' && k > num ? k - 1 : k;
+                if (out.length && out[out.length - 1] === k2) continue;
+                out.push(k2);
+            }
+            course.order = formatMarkOrder(out);
+        }
+
+        // Course length in km and nautical miles, e.g. "5.2 km / 2.8 nm\"
         function formatCourseLength(km, decimals = 1) {
             return `${km.toFixed(decimals)} km / ${(km / 1.852).toFixed(decimals)} nm`;
         }
@@ -1005,9 +1141,113 @@
         function clearCourseDisplay() {
             courseMarkers.forEach(m => map.removeLayer(m));
             courseMarkers = [];
+            clearLegs();
+            displayedCourse = null;
+        }
+
+        function clearLegs() {
             courseLines.forEach(l => map.removeLayer(l));
             courseLines = [];
             clearLegLabels();
+        }
+
+        // Course legs: plain line in mark order, or a routed line with rounding arcs
+        // and arrows when a custom order is set (pixel offsets, so redrawn on zoom)
+        function renderLegs(course) {
+            clearLegs();
+            if (courseOrderKeys(course)) {
+                renderOrderedLegs(course);
+                return;
+            }
+            const points = coursePoints(course).map(p => [p.lat, p.lon]);
+            if (points.length >= 2) {
+                courseLines.push(L.polyline(points, {
+                    color: '#ff6600', weight: 3, opacity: 0.7, dashArray: '10, 5'
+                }).addTo(map));
+            }
+            showLegLabels(course);
+        }
+
+        const LEG_OFFSET_PX = 18;   // route offset from a mark
+        const LEG_GAP_PX = 14;      // extra offset each time a pair of points is reused
+
+        function renderOrderedLegs(course) {
+            const seq = courseSequence(course);
+            if (seq.length < 2) return;
+            const autoSide = autoRoundingSide(seq);
+            const ref = seq[0].pt.lon;
+            const P = seq.map(e => map.latLngToLayerPoint([e.pt.lat, unwrapLon(e.pt.lon, ref)]));
+            // +1 = offset to the right of travel (mark passed to port), -1 = left
+            const sideSign = i => {
+                const e = seq[i];
+                if (e.mark !== null) return markRoundingSide(course, e.mark, autoSide) === 'port' ? 1 : -1;
+                const nb = seq[i === 0 ? 1 : i - 1];
+                return (nb.mark !== null ? markRoundingSide(course, nb.mark, autoSide) : autoSide) === 'port' ? 1 : -1;
+            };
+            const pairUse = {};
+            const legs = [];
+            for (let i = 0; i + 1 < seq.length; i++) {
+                const a = P[i], b = P[i + 1];
+                const len = a.distanceTo(b);
+                const u = len > 0 ? b.subtract(a).divideBy(len) : L.point(1, 0);
+                const n = L.point(-u.y, u.x);  // right of travel in screen coords
+                const ka = `${seq[i].pt.lat},${seq[i].pt.lon}`, kb = `${seq[i + 1].pt.lat},${seq[i + 1].pt.lon}`;
+                const pk = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+                const k = pairUse[pk] = (pairUse[pk] === undefined ? 0 : pairUse[pk] + 1);
+                const r = LEG_OFFSET_PX + k * LEG_GAP_PX;
+                const sa = sideSign(i), sb = sideSign(i + 1);
+                legs.push({ u, n, r, sa, sb, len,
+                            from: a.add(n.multiplyBy(sa * r)), to: b.add(n.multiplyBy(sb * r)) });
+            }
+
+            // route: legs joined by arcs around each mark in the rounding direction
+            const route = [legs[0].from, legs[0].to];
+            for (let i = 1; i < legs.length; i++) {
+                const c = P[i], pin = legs[i - 1].to, pout = legs[i].from;
+                const rin = legs[i - 1].r, rout = legs[i].r;
+                const a0 = Math.atan2(pin.y - c.y, pin.x - c.x);
+                let d = Math.atan2(pout.y - c.y, pout.x - c.x) - a0;
+                if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
+                else { while (d < 0) d += 2 * Math.PI; }
+                const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
+                for (let j = 1; j < steps; j++) {
+                    const f = j / steps, ang = a0 + d * f, rr = rin + (rout - rin) * f;
+                    route.push(L.point(c.x + rr * Math.cos(ang), c.y + rr * Math.sin(ang)));
+                }
+                route.push(pout, legs[i].to);
+            }
+            courseLines.push(L.polyline(route.map(p => map.layerPointToLatLng(p)), {
+                color: '#ff6600', weight: 3, opacity: 0.85
+            }).addTo(map));
+
+            // arrows and labels beside each leg, on its offset side
+            const decl = courseDeclination(course);
+            const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
+            const LW = 116, LH = 36;
+            legs.forEach((g, i) => {
+                const mid = g.from.add(g.to).divideBy(2);
+                const deg = Math.atan2(g.to.y - g.from.y, g.to.x - g.from.x) * 180 / Math.PI;
+                legLabels.push(L.marker(map.layerPointToLatLng(mid), {
+                    icon: L.divIcon({
+                        className: 'leg-arrow', iconSize: [18, 18], iconAnchor: [9, 9],
+                        html: `<svg width="18" height="18" viewBox="-9 -9 18 18" style="transform:rotate(${deg}deg)">` +
+                              `<path d="M-6,-6 L7,0 L-6,6 L-2,0 Z" fill="#ff6600" stroke="#7c2d12" stroke-width="1"/></svg>`
+                    }),
+                    interactive: false, keyboard: false
+                }).addTo(map));
+                const side = (g.sa + g.sb) >= 0 ? 1 : -1;
+                const away = 12 + Math.abs(g.n.x) * LW / 2 + Math.abs(g.n.y) * LH / 2;
+                const lp = mid.add(g.n.multiplyBy(side * away));
+                const t = bearingDeg(seq[i].pt, seq[i + 1].pt);
+                const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
+                legLabels.push(L.marker(map.layerPointToLatLng(lp), {
+                    icon: L.divIcon({
+                        className: 'leg-label', iconSize: [0, 0],
+                        html: `<div>${seq[i].key}→${seq[i + 1].key}: ${hdg}<br>${formatLegLength(seq[i].pt, seq[i + 1].pt)}</div>`
+                    }),
+                    interactive: false, keyboard: false
+                }).addTo(map));
+            });
         }
 
         function displayCourse(course, fit = true) {
@@ -1045,6 +1285,9 @@
                 prevPoint = course.start;
             }
 
+            const orderKeys = courseOrderKeys(course);
+            const orderAuto = orderKeys ? autoRoundingSide(courseSequence(course)) : null;
+
             // Mark markers
             if (course.marks) {
                 course.marks.forEach((mark, idx) => {
@@ -1058,6 +1301,12 @@
                         popup += `<br><em>${mark.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                     }
                     popup += `<br><small>Lat: ${mark.lat.toFixed(6)}<br>Lon: ${mark.lon.toFixed(6)}</small>`;
+                    if (orderKeys) {
+                        const side = markRoundingSide(course, idx, orderAuto);
+                        const visits = orderKeys.filter(k => k === idx + 1).length;
+                        popup += `<br><small>Rounding: ${side}${mark.rounding ? '' : ' (auto)'}` +
+                                 `${visits ? `, ${visits} visit${visits > 1 ? 's' : ''}` : ', not visited'}</small>`;
+                    }
                     popup += legFromPrev(mark);
                     if (editable) {
                         popup += `<br><button class="popup-edit-btn" onclick="showEditMark(${idx})">Edit</button>`;
@@ -1097,24 +1346,16 @@
                 points.push([course.finish.lat, course.finish.lon]);
             }
 
-            // Course line
-            if (points.length >= 2) {
-                const line = L.polyline(points, {
-                    color: '#ff6600',
-                    weight: 3,
-                    opacity: 0.7,
-                    dashArray: '10, 5'
-                }).addTo(map);
-                courseLines.push(line);
-            }
-
-            showLegLabels(course);
+            displayedCourse = course;
+            renderLegs(course);
 
             // Auto-zoom to fit course
             if (fit && points.length > 0) {
                 mapPositioned = true;
                 programmaticMove = true;
-                map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+                map.fitBounds(L.latLngBounds(points), {
+                    paddingTopLeft: [40, adminMode ? 110 : 40], paddingBottomRight: [40, 40]
+                });
                 setTimeout(() => { programmaticMove = false; }, 300);
             }
         }
@@ -1149,6 +1390,17 @@
             const infoTime = document.getElementById('infoTime');
             infoTime.textContent = timeStr;
             infoTime.style.display = timeStr ? '' : 'none';
+            const infoOrder = document.getElementById('infoOrder');
+            const keys = courseOrderKeys(course);
+            if (keys) {
+                const seq = courseSequence(course);
+                const auto = autoRoundingSide(seq);
+                const overrides = (course.marks || []).some(m => m.rounding === 'port' || m.rounding === 'starboard');
+                infoOrder.textContent = `Order: ${keys.join('-')} · ${auto} rounding${overrides ? ' (some overridden)' : ' (auto)'}`;
+                infoOrder.style.display = '';
+            } else {
+                infoOrder.style.display = 'none';
+            }
             document.getElementById('courseInfoBox').style.display = 'block';
         }
 
@@ -1180,6 +1432,7 @@
                 adminMode = false;
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('adminToolbar').classList.remove('visible');
+                document.body.classList.remove('admin-mode');
                 cancelDrawing();
                 cancelMoveMark();
                 closeTransform();
@@ -1196,6 +1449,7 @@
                     localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('adminToolbar').classList.add('visible');
+                    document.body.classList.add('admin-mode');
                     // Refresh display to show edit buttons
                     if (courseData) displayCourse(courseData);
                 } else {
@@ -1439,11 +1693,15 @@
             if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 
             // Build course and save
+            const old = allCourses[courseName];
             courseData = {
                 start: drawingPoints[0],
                 marks: drawingPoints.slice(1, -1),
                 finish: drawingPoints[drawingPoints.length - 1]
             };
+            if (old && old.order && courseOrderKeys({ ...old, marks: courseData.marks })) {
+                courseData.order = old.order;
+            }
             selectedCourseName = courseName;
             drawingCourseName = null;
 
@@ -1618,6 +1876,7 @@
                 const mark = courseData.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${markIndex + 1}`;
                 document.getElementById('editMarkColor').value = mark.color || '';
+                document.getElementById('editMarkRounding').value = mark.rounding || '';
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
             }
@@ -1641,6 +1900,8 @@
                 if (!courseData.marks) return;
                 const color = document.getElementById('editMarkColor').value;
                 if (color) { courseData.marks[editingMarkIndex].color = color; } else { delete courseData.marks[editingMarkIndex].color; }
+                const rounding = document.getElementById('editMarkRounding').value;
+                if (rounding) { courseData.marks[editingMarkIndex].rounding = rounding; } else { delete courseData.marks[editingMarkIndex].rounding; }
                 if (comment) { courseData.marks[editingMarkIndex].comment = comment; } else { delete courseData.marks[editingMarkIndex].comment; }
             }
 
@@ -1663,13 +1924,16 @@
             }
 
             if (markIndex === 'start') {
+                delete courseData.order;  // a mark becomes the start; old numbering no longer applies
                 if (markCount > 0) { courseData.start = courseData.marks.shift(); }
                 else { courseData.start = courseData.finish; courseData.finish = null; }
             } else if (markIndex === 'finish') {
+                delete courseData.order;
                 if (markCount > 0) { courseData.finish = courseData.marks.pop(); }
                 else { courseData.finish = null; }
             } else {
                 if (!courseData.marks) return;
+                orderDeleteMark(courseData, markIndex + 1);
                 courseData.marks.splice(markIndex, 1);
             }
 
@@ -1715,6 +1979,9 @@
                 lon: (currentLon + prevLon) / 2
             };
             if (!courseData.marks) courseData.marks = [];
+            const prevKey = insertIndex === 0 ? 'S' : insertIndex;
+            const nextKey = markIndex === 'finish' ? 'F' : insertIndex + 1;
+            orderInsertMark(courseData, insertIndex, prevKey, nextKey);
             courseData.marks.splice(insertIndex, 0, newMark);
 
             await saveSelectedCourse();
@@ -1818,6 +2085,44 @@
 
         function handleMoveKeydown(e) {
             if (e.key === 'Escape' && movingMarkIndex !== null) cancelMoveMark();
+        }
+
+        // --- Mark order dialog ---
+
+        function showMarkOrder() {
+            closeTransform();
+            if (!selectedCourseName || !courseData) { alert('No course selected'); return; }
+            const nm = courseData.marks ? courseData.marks.length : 0;
+            if (nm === 0) { alert('This course has no marks to order'); return; }
+            document.getElementById('markOrderCourse').textContent = `"${selectedCourseName}"`;
+            document.getElementById('markOrderMax').textContent = nm;
+            document.getElementById('markOrderInput').value = courseData.order || '';
+            validateMarkOrderInput();
+            document.getElementById('markOrderOverlay').classList.add('visible');
+            document.getElementById('markOrderInput').focus();
+        }
+
+        function closeMarkOrder() {
+            document.getElementById('markOrderOverlay').classList.remove('visible');
+        }
+
+        function validateMarkOrderInput() {
+            const nm = courseData && courseData.marks ? courseData.marks.length : 0;
+            const r = parseMarkOrder(document.getElementById('markOrderInput').value, nm);
+            const err = document.getElementById('markOrderError');
+            err.textContent = r.error || (r.seq ? `${r.seq.join(' → ')}` : 'Default order');
+            err.style.color = r.error ? '' : '#059669';
+            document.getElementById('markOrderSave').disabled = !!r.error;
+            return r;
+        }
+
+        async function saveMarkOrder() {
+            const r = validateMarkOrderInput();
+            if (r.error || !courseData) return;
+            if (r.seq) courseData.order = formatMarkOrder(r.seq);
+            else delete courseData.order;
+            closeMarkOrder();
+            await saveSelectedCourse();
         }
 
         // --- Course transform (rotate / translate / scale) ---
@@ -1961,7 +2266,7 @@
             const lenOld = calculateCourseLength(base);
             const lenNew = calculateCourseLength(transformPreview);
             let info = `Length: ${formatCourseLength(lenOld, 2)} → ${formatCourseLength(lenNew, 2)}`;
-            const pts = coursePoints(transformPreview);
+            const pts = courseSequence(transformPreview).map(e => e.pt);
             if (pts.length >= 2) {
                 info += `<br>First leg bearing: ${Math.round(bearingDeg(pts[0], pts[1]))}°T`;
             }
