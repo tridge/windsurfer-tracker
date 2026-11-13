@@ -454,3 +454,22 @@ it still satisfies the `B53` rule and says what the build actually is.
   from review — the first write-up of this test conflated the two.) The raw converted id still
   matters for *initial* onboarding, which is what the `gt06_parse_login` leading-zero fix
   addresses.
+
+---
+
+## 2026-11-14 — Parkdale (event 11): vendor and standalone units to `WSTR-STD1_706fefd`
+
+`FW_HASH=706fefd soak_tests/gt06-20261108/ota.py` (the first run also pointed
+`firmware_latest_B53.bin` at 706fefd). Image `W07_MG133_WSTR_B53_706fefd.bin` from `/W07_FW/`.
+
+| Unit | Before | Result |
+|---|---|---|
+| G407273 (M6) | `WSTR-STD1_252801f` | 706fefd, back online in 85 s |
+| G334023, G348635, G371116 | `NT19D_..._V667` (vendor) | 706fefd, all `auth`, ~4 min from YCSJ |
+| G370977 (NT19D V667), G312334 (W07 V6.68) | vendor | **interrupted**: both dropped off ~1 min after YCSJ (downloading) and the units were then switched off by the operators; status unknown until powered on — vendor = resend, 706fefd = done, silent = check over USB |
+
+M1–M5 were already on 706fefd. Not yet sent (switched off, or offline for days): G334189, G347082,
+G378830, G378848 (W07 V6.68), G623050, G312359 (W07 V6.68), G370498, G388862, G594715.
+
+Lesson: tell operators before an OTA batch so units aren't powered down mid-update; send in small
+batches to units that are on and staying on.
