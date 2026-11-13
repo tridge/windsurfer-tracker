@@ -194,6 +194,7 @@ def main():
     except Exception as e:
         print(f"parkdale_wind: {e}", file=sys.stderr)
         return 1
+    w["url"] = args.url  # the station's full weather page, linked from the wind display
 
     if args.output:
         atomic_write(args.output, w)

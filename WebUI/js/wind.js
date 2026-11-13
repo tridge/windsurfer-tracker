@@ -10,7 +10,7 @@
 const WindDisplay = (() => {
     const POLL_MS = 60000;
     const STALE_S = 300, OLD_S = 900;
-    let control = null, el = null, opts = {}, data = null, shown = true;
+    let control = null, el = null, opts = {}, data = null, shown = true, link = null;
 
     const css = `
         .wind-box { background: rgba(255,255,255,0.92); border-radius: 6px; box-shadow: 0 1px 5px rgba(0,0,0,0.4);
@@ -60,6 +60,10 @@ const WindDisplay = (() => {
         if (num(d.dir_avg10m_deg)) lines.push(`10 min average ${fmt3(d.dir_avg10m_deg)}°T` + (decl === null ? '' : ` / ${fmt3(d.dir_avg10m_deg - decl)}°M`));
         if (num(d.max_daily_speed_kn)) lines.push(`Today's max ${d.max_daily_speed_kn.toFixed(1)} kn, gust ${num(d.max_daily_gust_kn) ? d.max_daily_gust_kn.toFixed(1) : '-'}`);
         if (typeof d.obs_local === 'string') lines.push(`Observed ${d.obs_local.replace('T', ' ').slice(0, 16)}`);
+        // url: the station's full weather page, opened by clicking (http(s) only)
+        link = typeof d.url === 'string' && /^https?:\/\//i.test(d.url) ? d.url : null;
+        if (link) lines.push('Click for the full weather page');
+        el.style.cursor = link ? 'pointer' : '';
         el.title = lines.join('\n');
     }
 
@@ -93,6 +97,7 @@ const WindDisplay = (() => {
             onAdd() {
                 el = L.DomUtil.create('div', 'wind-box leaflet-control');
                 L.DomEvent.disableClickPropagation(el);
+                el.addEventListener('click', () => { if (link) window.open(link, '_blank', 'noopener'); });
                 return el;
             }
         });
