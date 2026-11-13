@@ -2169,13 +2169,6 @@
             legLabels = [];
         }
 
-        // Leg length in metres (km over 1 km) and nautical miles
-        function formatLegLength(a, b) {
-            const km = haversineDistance(a.lat, a.lon, b.lat, b.lon);
-            const dist = km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(2)} km`;
-            return `${dist} / ${(km / 1.852).toFixed(2)} nm`;
-        }
-
         // Declination at the course centre, null if the model doesn't cover today
         function courseDeclination(course) {
             if (coursePoints(course).length === 0) return null;
@@ -2189,30 +2182,11 @@
             legLabels = makeLegLabels(courseSequence(course).map(e => e.pt));
         }
 
-        // Leg label markers (added to the map) for a list of {lat, lon} points
+        // Leg labels (one self-redrawing layer, added to the map) for a list of
+        // {lat, lon} points; placement avoids overlaps, see js/course-order.js
         function makeLegLabels(pts) {
-            const labels = [];
-            if (pts.length < 2) return labels;
-            const decl = courseDeclination({ marks: pts });
-            for (let i = 0; i + 1 < pts.length; i++) {
-                const t = bearingDeg(pts[i], pts[i + 1]);
-                const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
-                const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
-                // beside the leg, to the right of travel, so reciprocal legs don't overlap
-                const nx = Math.cos(t * Math.PI / 180), ny = Math.sin(t * Math.PI / 180);
-                const away = 8 + Math.abs(nx) * 58 + Math.abs(ny) * 18;
-                const icon = L.divIcon({
-                    className: 'leg-label',
-                    html: `<div style="transform:translate(calc(-50% + ${(nx * away).toFixed(1)}px), calc(-50% + ${(ny * away).toFixed(1)}px))">` +
-                          `${hdg}<br>${formatLegLength(pts[i], pts[i + 1])}</div>`,
-                    iconSize: [0, 0]
-                });
-                const ref = pts[0].lon;
-                const mid = [(pts[i].lat + pts[i + 1].lat) / 2,
-                             (unwrapLon(pts[i].lon, ref) + unwrapLon(pts[i + 1].lon, ref)) / 2];
-                labels.push(L.marker(mid, { icon, interactive: false, keyboard: false }).addTo(map));
-            }
-            return labels;
+            if (pts.length < 2) return [];
+            return [CourseOrder.legLabelLayer(pts.map(p => ({ lat: p.lat, lon: p.lon }))).addTo(map)];
         }
 
         // Pick mode: clicking the map moves the pivot to that point

@@ -252,17 +252,11 @@ const CourseOrder = (() => {
             color: opts.color || '#ff6600', weight: 3, opacity: 0.85, interactive: false
         }));
 
-        let decl = null;
-        if (opts.labels && typeof wmmDeclination === 'function') {
-            const c = seq.reduce((acc, e) => ({ lat: acc.lat + e.pt.lat / seq.length,
-                                               lon: acc.lon + unwrapLon(e.pt.lon, ref) / seq.length }), { lat: 0, lon: 0 });
-            decl = wmmDeclination(c.lat, c.lon);
-        }
-        const fmt = v => String(Math.round(v) % 360).padStart(3, '0');
-        const LW = 116, LH = 36;
-        legs.forEach((g, i) => {
+        const arrows = [];
+        legs.forEach(g => {
             const mid = g.from.add(g.to).divideBy(2);
             const deg = Math.atan2(g.to.y - g.from.y, g.to.x - g.from.x) * 180 / Math.PI;
+            arrows.push(mid);
             add(L.marker(map.layerPointToLatLng(mid), {
                 icon: L.divIcon({
                     className: 'leg-arrow', iconSize: [18, 18], iconAnchor: [9, 9],
@@ -271,29 +265,120 @@ const CourseOrder = (() => {
                 }),
                 interactive: false, keyboard: false
             }));
-            if (!opts.labels) return;
-            const side = (g.sa + g.sb) >= 0 ? 1 : -1;
-            const away = 12 + Math.abs(g.n.x) * LW / 2 + Math.abs(g.n.y) * LH / 2;
-            const t = bearingDeg(seq[i].pt, seq[i + 1].pt);
-            const hdg = decl === null ? `${fmt(t)}°T` : `${fmt(t)}°T / ${fmt((t - decl + 360) % 360)}°M`;
-            add(L.marker(map.layerPointToLatLng(mid.add(g.n.multiplyBy(side * away))), {
-                icon: L.divIcon({
-                    className: 'leg-label', iconSize: [0, 0],
-                    html: `<div>${seq[i].key}→${seq[i + 1].key}: ${hdg}<br>${legLengthText(seq[i].pt, seq[i + 1].pt)}</div>`
-                }),
-                interactive: false, keyboard: false
-            }));
+        });
+        if (!opts.labels) return;
+        const decl = declinationAt(seq.map(e => e.pt));
+        const items = legs.map((g, i) => ({
+            a: g.from, b: g.to, n: g.n, pref: (g.sa + g.sb) >= 0 ? 1 : -1,
+            html: legLabelHtml(seq[i].pt, seq[i + 1].pt, decl, `${seq[i].key}→${seq[i + 1].key}: `)
+        }));
+        const obstacles = P.map(p => box(p, 30, 30)).concat(arrows.map(p => box(p, 18, 18)));
+        placeLabels(map, items, obstacles).forEach((c, i) => add(labelMarker(map, c, items[i].html)));
+    }
+
+    // --- leg labels with overlap avoidance (screen space, so redrawn on zoom) ---
+
+    const fmt3 = v => String(Math.round(v) % 360).padStart(3, '0');
+
+    function declinationAt(pts) {
+        if (typeof wmmDeclination !== 'function' || !pts.length) return null;
+        const ref = pts[0].lon;
+        return wmmDeclination(pts.reduce((a, p) => a + p.lat, 0) / pts.length,
+                              pts.reduce((a, p) => a + unwrapLon(p.lon, ref), 0) / pts.length);
+    }
+
+    function legLabelHtml(a, b, decl, prefix = '') {
+        const t = bearingDeg(a, b);
+        const hdg = decl === null ? `${fmt3(t)}°T` : `${fmt3(t)}°T / ${fmt3((t - decl + 360) % 360)}°M`;
+        return `<div>${prefix}${hdg}<br>${legLengthText(a, b)}</div>`;
+    }
+
+    const box = (c, w, h) => ({ x0: c.x - w / 2, y0: c.y - h / 2, x1: c.x + w / 2, y1: c.y + h / 2 });
+    const overlapArea = (p, q) => Math.max(0, Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0)) *
+                                  Math.max(0, Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0));
+
+    // rendered size of a label, measured once per distinct text
+    const sizeCache = new Map();
+    function labelSize(map, html) {
+        if (sizeCache.has(html)) return sizeCache.get(html);
+        const host = document.createElement('div');
+        host.className = 'leg-label';
+        host.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden';
+        host.innerHTML = html;
+        map.getContainer().appendChild(host);
+        const el = host.firstElementChild;
+        const sz = { w: el.offsetWidth || 120, h: el.offsetHeight || 36 };
+        host.remove();
+        sizeCache.set(html, sz);
+        return sz;
+    }
+
+    // Greedy placement: each label (shorter legs first) takes the first candidate
+    // spot beside its leg that clears placed labels and obstacles; candidates slide
+    // along the leg, then try the other side, then further out. Returns centres.
+    function placeLabels(map, items, obstacles) {
+        const PAD = 3;
+        const placed = obstacles.slice();
+        const out = new Array(items.length);
+        const order = items.map((it, i) => i).sort((i, j) =>
+            items[i].a.distanceTo(items[i].b) - items[j].a.distanceTo(items[j].b));
+        const ts = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8];
+        for (const i of order) {
+            const it = items[i];
+            const { w, h } = labelSize(map, it.html);
+            const clear = 8 + Math.abs(it.n.x) * w / 2 + Math.abs(it.n.y) * h / 2;
+            const step = Math.abs(it.n.x) * w + Math.abs(it.n.y) * h + 4;
+            let best = null, bestCost = Infinity;
+            search:
+            for (const extra of [0, 1, 2]) {
+                for (const side of [it.pref, -it.pref]) {
+                    for (const t of ts) {
+                        const c = it.a.add(it.b.subtract(it.a).multiplyBy(t))
+                                      .add(it.n.multiplyBy(side * (clear + extra * step)));
+                        const r = box(c, w + 2 * PAD, h + 2 * PAD);
+                        let cost = 0;
+                        for (const q of placed) cost += overlapArea(r, q);
+                        if (cost === 0) { best = c; break search; }
+                        if (cost < bestCost) { bestCost = cost; best = c; }
+                    }
+                }
+            }
+            out[i] = best;
+            placed.push(box(best, w, h));
+        }
+        return out;
+    }
+
+    function labelMarker(map, c, html) {
+        return L.marker(map.layerPointToLatLng(c), {
+            icon: L.divIcon({ className: 'leg-label', iconSize: [0, 0], html }),
+            interactive: false, keyboard: false
         });
     }
 
-    // Layer drawing the ordered route; redraws itself on zoom (offsets are in pixels).
+    // Labels for straight legs between consecutive points (plain courses, drawing)
+    function drawLegLabels(map, pts, opts, add) {
+        if (pts.length < 2) return;
+        const ref = pts[0].lon;
+        const P = pts.map(p => map.latLngToLayerPoint([p.lat, unwrapLon(p.lon, ref)]));
+        const decl = declinationAt(pts);
+        const items = [];
+        for (let i = 0; i + 1 < pts.length; i++) {
+            const len = P[i].distanceTo(P[i + 1]);
+            const u = len > 0 ? P[i + 1].subtract(P[i]).divideBy(len) : L.point(1, 0);
+            items.push({ a: P[i], b: P[i + 1], n: L.point(-u.y, u.x), pref: 1,
+                         html: legLabelHtml(pts[i], pts[i + 1], decl) });
+        }
+        placeLabels(map, items, P.map(p => box(p, 30, 30))).forEach((c, i) => add(labelMarker(map, c, items[i].html)));
+    }
+
+    // Layer that redraws itself on zoom (offsets and label placement are in pixels).
     // Built on first use so pages without Leaflet can still use the helpers.
-    let RouteLayer = null;
-    const makeRouteLayer = () => L.LayerGroup.extend({
-        initialize(course, opts) {
+    let ZoomLayer = null;
+    const makeZoomLayer = () => L.LayerGroup.extend({
+        initialize(drawFn) {
             L.LayerGroup.prototype.initialize.call(this);
-            this._course = course;
-            this._opts = opts || {};
+            this._drawFn = drawFn;
         },
         onAdd(map) {
             L.LayerGroup.prototype.onAdd.call(this, map);
@@ -307,13 +392,16 @@ const CourseOrder = (() => {
         _redraw() {
             if (!this._map) return;
             this.clearLayers();
-            draw(this._map, this._course, this._opts, l => this.addLayer(l));
+            this._drawFn(this._map, l => this.addLayer(l));
         }
     });
+
+    const zoomLayer = fn => new (ZoomLayer || (ZoomLayer = makeZoomLayer()))(fn);
 
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
         pinLine, pinLayers,
-        routeLayer: (course, opts) => new (RouteLayer || (RouteLayer = makeRouteLayer()))(course, opts)
+        routeLayer: (course, opts = {}) => zoomLayer((m, add) => draw(m, course, opts, add)),
+        legLabelLayer: (pts, opts = {}) => zoomLayer((m, add) => drawLegLabels(m, pts, opts, add))
     };
 })();
