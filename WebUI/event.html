@@ -1597,7 +1597,7 @@
     <script src="js/utils.js?v=064f359a"></script>
     <script src="js/modal.js?v=3260ad1a"></script>
     <script src="js/map-utils.js?v=4c62e6e7"></script>
-    <script src="js/course-order.js?v=d517b892"></script>
+    <script src="js/course-order.js?v=2ff464d3"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
     <script src="js/wind.js?v=9488dc92"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
@@ -2834,7 +2834,9 @@
             const name = prompt('Course name:');
             if (!name) return;
             try {
-                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                // create only; an existing course of that name is replaced only if confirmed,
+                // and then kept in the deleted courses list
+                const post = query => fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}?${query}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2842,6 +2844,11 @@
                     },
                     body: JSON.stringify(courseData)
                 });
+                let response = await post('create=1');
+                if (response.status === 409) {
+                    if (!confirm(`A course named "${name}" already exists. Replace it? (The old one is kept in the deleted courses list.)`)) return;
+                    response = await post('replace=1');
+                }
                 const data = await response.json();
                 if (data.success) {
                     await loadSavedCourses();
@@ -2908,7 +2915,7 @@
             }
             if (!confirm(`Overwrite saved course "${name}" with the current course?`)) return;
             try {
-                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}`, {
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(name)}?replace=1`, {  // old version to the bin
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3386,14 +3393,14 @@
                 // the finish can be a coloured "F" mark instead of the chequered flag
                 colorRow.style.display = '';
                 document.querySelector('#editMarkColor option[value=""]').textContent = 'Flag (chequered)';
-                document.getElementById('editMarkColor').value = cd.finish.color || '';
+                CourseOrder.setColorChoice(document.getElementById('editMarkColor'), cd.finish.color);
             } else {
                 if (!cd.marks || markIndex >= cd.marks.length) return;
                 editingMarkIndex = markIndex;
                 const mark = cd.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
                 document.querySelector('#editMarkColor option[value=""]').textContent = 'Default (Orange)';
-                document.getElementById('editMarkColor').value = mark.color || '';
+                CourseOrder.setColorChoice(document.getElementById('editMarkColor'), mark.color);
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';  // Show color for marks
             }

@@ -811,7 +811,7 @@
 
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
-    <script src="js/course-order.js?v=d517b892"></script>
+    <script src="js/course-order.js?v=2ff464d3"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/wind.js?v=9488dc92"></script>
     <script>
@@ -1025,6 +1025,7 @@
         let moveTarget = null;          // {name, data, letter}: course a mark move started on
         let editTarget = null;          // {name, data, letter}: course the Edit dialog was opened on
         let importing = false;
+        let renaming = false;           // a rename is in progress: no edits until it's done
         let courseDataSig = null;       // courseSig() of the file courseData was loaded or last saved as
         let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
@@ -1239,7 +1240,8 @@
             for (const [name, course] of byName) {
                 if (allCourses[name] && !overwrite) { skipped++; continue; }
                 // queued behind any pending edits so they can't land after the import
-                const r = await queueSave(name, course, false);
+                // new names are create-only; confirmed overwrites keep the old version in the bin
+                const r = await queueSave(name, course, false, allCourses[name] ? 'replace=1' : 'create=1');
                 if (r.saved) saved++; else failed.push(`${name}: ${r.error}`);
             }
             await reloadAndReselect(true);  // installs the imported courses while still locked
@@ -1939,6 +1941,7 @@
                 alert(`Course "${newName}" already exists.`);
                 return;
             }
+            renaming = true;  // no new edits (which would save under the old name) until done
             try {
                 await saveChain;  // pending saves of this course go to the old name first
                 // the server renames atomically, refusing if the new name has appeared
@@ -1953,6 +1956,8 @@
                 await reloadAndReselect();
             } catch (e) {
                 alert('Error renaming course: ' + e.message);
+            } finally {
+                renaming = false;
             }
         }
 
@@ -1967,7 +1972,8 @@
                 return;
             }
             try {
-                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(newName)}`, {
+                // create only: refused if the name has appeared since (another admin)
+                const response = await fetch(`${EVENT_API}/admin/courses/${encodeURIComponent(newName)}?create=1`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPassword },
                     body: JSON.stringify(courseData)
@@ -2008,7 +2014,7 @@
                 // the finish can be a coloured "F" mark instead of the chequered flag
                 colorRow.style.display = markIndex === 'finish' ? '' : 'none';
                 setColorDefaultText(markIndex === 'finish' ? 'Flag (chequered)' : 'Default (Orange)');
-                document.getElementById('editMarkColor').value = markIndex === 'finish' ? (pt.color || '') : '';
+                CourseOrder.setColorChoice(document.getElementById('editMarkColor'), markIndex === 'finish' ? pt.color : '');
                 pinRow.style.display = '';
                 // the start can be "rounded" when the course crosses its line mid-race
                 const isStart = markIndex === 'start';
@@ -2019,7 +2025,7 @@
                 document.getElementById('editPinEnabled').checked = !!pt.pin;
                 document.getElementById('editPinDist').value = pt.pin ? pt.pin.dist : 50;
                 document.getElementById('editPinSide').value = pt.pin && pt.pin.side === 'right' ? 'right' : 'left';
-                document.getElementById('editPinColor').value = (pt.pin && pt.pin.color) || '';
+                CourseOrder.setColorChoice(document.getElementById('editPinColor'), pt.pin && pt.pin.color);
                 document.getElementById('pinHelp').textContent = markIndex === 'start'
                     ? 'Left/right looking from the start towards the next mark. The first leg starts mid-line.'
                     : 'Left/right looking from the finish towards the previous mark. The last leg ends mid-line.';
@@ -2030,7 +2036,7 @@
                 const mark = cd.marks[markIndex];
                 document.getElementById('editMarkNumber').textContent = `Mark ${CourseOrder.markName(letter, markIndex + 1, multiCourse())}`;
                 setColorDefaultText('Default (Orange)');
-                document.getElementById('editMarkColor').value = mark.color || '';
+                CourseOrder.setColorChoice(document.getElementById('editMarkColor'), mark.color);
                 document.getElementById('editMarkRounding').value = roundingChoice(mark.rounding);
                 document.getElementById('editMarkComment').value = mark.comment || '';
                 colorRow.style.display = '';
@@ -2880,6 +2886,7 @@
         // Editing actions wait for an import to finish saving
         function importBusy() {
             if (importing) { alert('Please wait for the import to finish'); return true; }
+            if (renaming) { alert('Please wait for the rename to finish'); return true; }
             return staleDisplay();
         }
 

@@ -703,6 +703,23 @@ const CourseOrder = (() => {
         }
     }
 
+    // Show a stored colour in a colour <select>. A valid colour that isn't one of its
+    // choices (e.g. from an import) gets a "Custom" choice, so saving the dialog keeps it.
+    function setColorChoice(select, value) {
+        select.querySelectorAll('option[data-custom]').forEach(o => o.remove());
+        const v = safeColor(value, null);
+        if (!v) { select.value = ''; return; }
+        let opt = [...select.options].find(o => o.value.toLowerCase() === v.toLowerCase());
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = `Custom (${v})`;
+            opt.dataset.custom = '1';
+            select.appendChild(opt);
+        }
+        select.value = opt.value;
+    }
+
     // --- course marker icons (Leaflet divIcons) ---
 
     function darkenColor(hex) {
@@ -814,7 +831,7 @@ const CourseOrder = (() => {
     return {
         parse, format, keys, sequence, lengthKm, incomingLegs, incomingLegsHtml, autoSide, markSide, sideName, isBoth, insertMark, deleteMark,
         pinLine, pinLayers, splitLeg, escHtml, commentHtml, safeColor,
-        darkenColor, startIcon, markIcon, finishIcon, checkCourse,
+        darkenColor, startIcon, markIcon, finishIcon, checkCourse, setColorChoice,
         MAX_COURSES, COURSE_COLORS, letterOf, subCourses, subCourse, courseCount, plainCourse, removeCourse, markName,
         setLabelOptions: o => Object.assign(labelOpts, o),
         labelOptions: () => ({ ...labelOpts }),
