@@ -1072,14 +1072,34 @@
             document.getElementById('importCoursesFile').click();
         }
 
-        const validPoint = p => p && typeof p === 'object' && isFinite(p.lat) && isFinite(p.lon) &&
-                                Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+        const isNum = v => typeof v === 'number' && Number.isFinite(v);
+        const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+        // Check an imported start/finish ('S'/'F') or mark; throws with the reason
+        function checkImportedPoint(p, what, kind) {
+            if (!isObj(p) || !isNum(p.lat) || !isNum(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180)
+                throw new Error(`missing or invalid ${what} position`);
+            if (p.comment !== undefined && typeof p.comment !== 'string') throw new Error(`invalid ${what} comment`);
+            if (kind === 'mark') {
+                if (p.color !== undefined && p.color !== CourseOrder.safeColor(p.color, null)) throw new Error(`invalid ${what} colour`);
+                if (p.rounding !== undefined && p.rounding !== 'port' && p.rounding !== 'starboard')
+                    throw new Error(`invalid ${what} rounding`);
+            } else if (p.pin !== undefined && (!isObj(p.pin) || !isNum(p.pin.dist) || !(p.pin.dist > 0 && p.pin.dist <= 10000) ||
+                                               (p.pin.side !== 'left' && p.pin.side !== 'right'))) {
+                throw new Error(`invalid ${what} pin`);
+            }
+        }
 
         // Course from an imported file, or throws with the reason
         function importedCourse(j) {
-            if (!j || typeof j !== 'object') throw new Error('not a course');
-            if (!validPoint(j.start) || !validPoint(j.finish)) throw new Error('missing or invalid start/finish');
-            if (j.marks !== undefined && (!Array.isArray(j.marks) || !j.marks.every(validPoint))) throw new Error('invalid marks');
+            if (!isObj(j)) throw new Error('not a course');
+            checkImportedPoint(j.start, 'start', 'S');
+            checkImportedPoint(j.finish, 'finish', 'F');
+            if (j.marks !== undefined) {
+                if (!Array.isArray(j.marks)) throw new Error('invalid marks');
+                j.marks.forEach((m, i) => checkImportedPoint(m, `mark ${i + 1}`, 'mark'));
+            }
+            if (j.order !== undefined && typeof j.order !== 'string') throw new Error('invalid order');
             const c = JSON.parse(JSON.stringify(j));
             delete c.name;
             SERVER_COURSE_FIELDS.forEach(k => delete c[k]);
@@ -1087,28 +1107,40 @@
             return c;
         }
 
+        const IMPORT_LIMITS = { maxEntries: 2000, maxEntrySize: 1 << 20, maxTotal: 20 << 20 };
+        const importableEntry = n => {
+            const base = n.split('/').pop();
+            return base.toLowerCase().endsWith('.json') && !n.startsWith('__MACOSX/') && !base.startsWith('._');
+        };
+
         async function onImportCoursesFile(ev) {
             const file = ev.target.files[0];
             ev.target.value = '';
             if (!file) return;
             let entries;
             try {
-                entries = await readZip(await file.arrayBuffer());
+                entries = await readZip(await file.arrayBuffer(), { ...IMPORT_LIMITS, filter: importableEntry });
             } catch (e) {
                 alert(`Could not read ${file.name}: ${e.message}`);
                 return;
             }
-            const byName = new Map(), bad = [];
+            // names are used exactly as exported; a name given twice is refused outright
+            const byName = new Map(), bad = [], dups = new Set();
             for (const e of entries) {
                 const base = e.name.split('/').pop();
-                if (!base.toLowerCase().endsWith('.json') || e.name.startsWith('__MACOSX/') || base.startsWith('._')) continue;
                 try {
-                    const j = JSON.parse(new TextDecoder().decode(e.data));
-                    const name = typeof j.name === 'string' && j.name.trim() ? j.name.trim() : base.slice(0, -5);
+                    const j = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(e.data));
+                    const name = isObj(j) && typeof j.name === 'string' && j.name.trim() ? j.name : base.slice(0, -5);
+                    if (byName.has(name)) dups.add(name);
                     byName.set(name, importedCourse(j));
                 } catch (err) {
                     bad.push(`${base}: ${err.message}`);
                 }
+            }
+            if (dups.size) {
+                alert('Not imported: the zip has more than one course named\n' +
+                      [...dups].map(n => `"${n}"`).join('\n'));
+                return;
             }
             if (!byName.size) {
                 alert('No valid courses found in the zip' + (bad.length ? ':\n' + bad.join('\n') : ''));

@@ -1,6 +1,6 @@
 /**
  * Zip archive helpers for Windsurfer Tracker WebUI: createZip (stored entries)
- * and readZip (stored or deflated entries)
+ * and readZip (stored or deflated entries, size/CRC checked)
  */
 
 
@@ -103,43 +103,82 @@ function createZip(files) {
     return out;
 }
 
+// Inflate raw deflate data, failing once the output passes max bytes
+async function zipInflate(raw, max) {
+    const reader = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+    const chunks = [];
+    let n = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        n += value.length;
+        if (n > max) { reader.cancel().catch(() => {}); throw new Error('size mismatch'); }
+        chunks.push(value);
+    }
+    const out = new Uint8Array(n);
+    let pos = 0;
+    for (const c of chunks) { out.set(c, pos); pos += c.length; }
+    return out;
+}
+
 /**
- * Read a zip archive (stored or deflated entries; deflate needs DecompressionStream)
+ * Read a zip archive (stored or deflated entries; deflate needs DecompressionStream).
+ * Sizes and CRCs are checked; ZIP64, multi-disk and encrypted archives are rejected.
  * @param {ArrayBuffer|Uint8Array} buf - zip file bytes
+ * @param {object} [opts] - filter(name): only these entries are extracted;
+ *        maxEntries, maxEntrySize, maxTotal (bytes, uncompressed)
  * @returns {Promise<Array<{name: string, data: Uint8Array}>>} file entries (directories skipped)
  */
-async function readZip(buf) {
+async function readZip(buf, opts = {}) {
+    const { filter = null, maxEntries = 10000, maxEntrySize = 10 << 20, maxTotal = 50 << 20 } = opts;
     const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const bad = msg => { throw new Error(msg); };
     let eocd = -1;
     for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) {
         if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
     }
-    if (eocd < 0) throw new Error('not a zip file');
+    if (eocd < 0) bad('not a zip file');
     const count = dv.getUint16(eocd + 10, true);
-    let p = dv.getUint32(eocd + 16, true);
+    const cdSize = dv.getUint32(eocd + 12, true), cdStart = dv.getUint32(eocd + 16, true);
+    if (count === 0xFFFF || cdSize === 0xFFFFFFFF || cdStart === 0xFFFFFFFF ||
+        (eocd >= 20 && dv.getUint32(eocd - 20, true) === 0x07064b50)) bad('ZIP64 archives are not supported');
+    if (dv.getUint16(eocd + 4, true) || dv.getUint16(eocd + 6, true) || dv.getUint16(eocd + 8, true) !== count)
+        bad('multi-disk archives are not supported');
+    if (count > maxEntries) bad(`too many files (${count})`);
+    const cdEnd = cdStart + cdSize;
+    if (cdEnd > eocd) bad('bad zip central directory');
     const dec = new TextDecoder();
     const out = [];
+    let total = 0;
+    let p = cdStart;
     for (let k = 0; k < count; k++) {
-        if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('bad zip central directory');
-        const method = dv.getUint16(p + 10, true);
-        const csize = dv.getUint32(p + 20, true);
+        if (p + 46 > cdEnd || dv.getUint32(p, true) !== 0x02014b50) bad('bad zip central directory');
+        const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true);
+        const crc = dv.getUint32(p + 16, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
         const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
         const lho = dv.getUint32(p + 42, true);
+        if (p + 46 + nlen + xlen + clen > cdEnd) bad('bad zip central directory');
         const name = dec.decode(bytes.subarray(p + 46, p + 46 + nlen));
         p += 46 + nlen + xlen + clen;
-        if (name.endsWith('/')) continue;
+        if (name.endsWith('/') || (filter && !filter(name))) continue;
+        if (csize === 0xFFFFFFFF || usize === 0xFFFFFFFF || lho === 0xFFFFFFFF) bad('ZIP64 archives are not supported');
+        if (flags & 1) bad(`${name}: encrypted`);
+        if (usize > maxEntrySize) bad(`${name}: too large`);
+        if ((total += usize) > maxTotal) bad('files too large in total');
+        if (lho + 30 > cdStart || dv.getUint32(lho, true) !== 0x04034b50) bad(`${name}: bad local header`);
         const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+        if (start + csize > cdStart) bad(`${name}: truncated`);
         const raw = bytes.subarray(start, start + csize);
         let data;
         if (method === 0) {
             data = raw.slice();
         } else if (method === 8) {
-            const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-            data = new Uint8Array(await new Response(stream).arrayBuffer());
+            data = await zipInflate(raw, usize).catch(() => bad(`${name}: corrupt data`));
         } else {
-            throw new Error(`${name}: unsupported zip compression (${method})`);
+            bad(`${name}: unsupported zip compression (${method})`);
         }
+        if (data.length !== usize || crc32(data) !== crc) bad(`${name}: corrupt data (size/CRC mismatch)`);
         out.push({ name, data });
     }
     return out;
