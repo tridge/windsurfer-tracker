@@ -273,7 +273,27 @@ const CourseOrder = (() => {
             const rin = legs[i - 1].rb, rout = legs[i].ra;
             const a0 = Math.atan2(pin.y - c.y, pin.x - c.x);
             let d = Math.atan2(pout.y - c.y, pout.x - c.x) - a0;
-            if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
+            // turn between the legs, screen coords (>0 = clockwise = to starboard)
+            const ui = L.point(legs[i - 1].n.y, -legs[i - 1].n.x), uo = L.point(legs[i].n.y, -legs[i].n.x);
+            const turn = Math.atan2(ui.x * uo.y - ui.y * uo.x, ui.x * uo.x + ui.y * uo.y);
+            if (sideSign(i) * turn > 0 && Math.abs(turn) < Math.PI / 2) {
+                // gentle turn away from the rounding side: the mark is passed on the
+                // right side without going round it. Join the two offset lines where
+                // they cross near the mark, else taper between them.
+                const lin = legs[i - 1].from.distanceTo(pin), lout = pout.distanceTo(legs[i].to);
+                const cr = ui.x * uo.y - ui.y * uo.x, w = pout.subtract(pin);
+                const s = Math.abs(cr) > 1e-9 ? (w.x * uo.y - w.y * uo.x) / cr : NaN;
+                const t = Math.abs(cr) > 1e-9 ? (w.x * ui.y - w.y * ui.x) / cr : NaN;
+                if (s <= 0 && s >= -lin / 2 && t >= 0 && t <= lout / 2) {
+                    route[route.length - 1] = pin.add(ui.multiplyBy(s));
+                } else {
+                    const taper = Math.min(40, lin / 3, lout / 3);
+                    route[route.length - 1] = pin.subtract(ui.multiplyBy(taper));
+                    route.push(pout.add(uo.multiplyBy(taper)));
+                }
+                route.push(legs[i].to);
+                continue;
+            } else if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
             else { while (d < 0) d += 2 * Math.PI; }
             const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
             for (let j = 1; j < steps; j++) {
