@@ -63,8 +63,8 @@ const CourseOrder = (() => {
         return parse(course.order, course.marks ? course.marks.length : 0).seq || null;
     }
 
-    // Visiting sequence: [{key, pt, mark}] where mark is the 0-based mark index or null
-    function sequence(course) {
+    // Visiting sequence on the raw mark positions (no pin lines applied)
+    function rawSequence(course) {
         const nm = course.marks ? course.marks.length : 0;
         let ks = keys(course);
         if (!ks) {
@@ -77,6 +77,66 @@ const CourseOrder = (() => {
                          : k === 'F' ? { key: k, pt: course.finish, mark: null }
                          : { key: k, pt: course.marks[k - 1], mark: k - 1 })
                  .filter(e => e.pt);
+    }
+
+    // Start/finish line with a pin: course.start.pin / course.finish.pin = {dist (m), side}.
+    // The pin lies square to the first leg (start) or last leg (finish); left/right is
+    // looking from the start towards the next mark, or from the finish towards the
+    // previous mark. Returns {mark, pin, mid} or null.
+    function pinLine(course, which) {
+        const pt = which === 'S' ? course.start : course.finish;
+        if (!pt || !pt.pin || !(pt.pin.dist > 0)) return null;
+        const seq = rawSequence(course);
+        const i = seq.findIndex(e => e.key === which);
+        if (i < 0) return null;
+        // nearest point along the course that isn't on top of this one
+        let nb = null;
+        for (let j = which === 'S' ? i + 1 : i - 1; j >= 0 && j < seq.length; j += which === 'S' ? 1 : -1) {
+            const d = metresNE(pt, seq[j].pt);
+            if (Math.hypot(d.north, d.east) > 0.5) { nb = d; break; }
+        }
+        if (!nb) return null;
+        const len = Math.hypot(nb.north, nb.east);
+        const fn = nb.north / len, fe = nb.east / len;           // facing the neighbour
+        const sgn = pt.pin.side === 'right' ? 1 : -1;            // right of facing (n,e) is (-e,n)
+        const dn = sgn * -fe * pt.pin.dist, de = sgn * fn * pt.pin.dist;
+        const pin = {
+            lat: pt.lat + (dn / EARTH_R) / rad,
+            lon: pt.lon + (de / (EARTH_R * Math.cos(pt.lat * rad))) / rad
+        };
+        return { mark: pt, pin, mid: { lat: (pt.lat + pin.lat) / 2, lon: (pt.lon + unwrapLon(pin.lon, pt.lon)) / 2 } };
+    }
+
+    // Visiting sequence: [{key, pt, mark}] where mark is the 0-based mark index or null.
+    // A start/finish with a pin is represented by the middle of its line.
+    function sequence(course) {
+        const seq = rawSequence(course);
+        for (const which of ['S', 'F']) {
+            const pl = pinLine(course, which);
+            if (!pl) continue;
+            seq.forEach(e => { if (e.key === which) e.pt = pl.mid; });
+        }
+        return seq;
+    }
+
+    // Dotted start/finish lines and pin markers for a course (not yet added to a map)
+    function pinLayers(course, opts = {}) {
+        const layers = [];
+        for (const which of ['S', 'F']) {
+            const pl = pinLine(course, which);
+            if (!pl) continue;
+            const ref = pl.mark.lon;
+            layers.push(L.polyline([[pl.mark.lat, pl.mark.lon], [pl.pin.lat, unwrapLon(pl.pin.lon, ref)]], {
+                color: which === 'S' ? '#16a34a' : '#111827', weight: 3, opacity: 0.9,
+                dashArray: '2, 7', lineCap: 'round', interactive: false
+            }));
+            layers.push(L.circleMarker([pl.pin.lat, unwrapLon(pl.pin.lon, ref)], {
+                radius: 6, color: '#7c2d12', weight: 2, fillColor: '#f97316', fillOpacity: 1,
+                interactive: opts.interactive !== false
+            }).bindPopup(`<strong>${which === 'S' ? 'Start' : 'Finish'} pin</strong><br>` +
+                         `<small>${Math.round(pl.mark.pin.dist)} m ${pl.mark.pin.side === 'right' ? 'right' : 'left'}</small>`));
+        }
+        return layers;
     }
 
     // Course length in km following the order
@@ -250,6 +310,7 @@ const CourseOrder = (() => {
 
     return {
         parse, format, keys, sequence, lengthKm, autoSide, markSide, insertMark, deleteMark,
+        pinLine, pinLayers,
         routeLayer: (course, opts) => new (RouteLayer || (RouteLayer = makeRouteLayer()))(course, opts)
     };
 })();

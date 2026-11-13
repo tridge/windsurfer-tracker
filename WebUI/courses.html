@@ -581,6 +581,21 @@
                     <option value="starboard">Starboard (mark to starboard)</option>
                 </select>
             </div>
+            <div id="pinRow" style="display:none">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#333;margin-bottom:8px">
+                    <input type="checkbox" id="editPinEnabled" style="width:auto;margin:0" onchange="updatePinRow()"> Pin end (line)
+                </label>
+                <div id="pinFields">
+                    <label for="editPinDist">Pin distance (m)</label>
+                    <input type="number" id="editPinDist" min="1" step="5" value="50">
+                    <label for="editPinSide">Pin side</label>
+                    <select id="editPinSide">
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                    </select>
+                    <div class="order-help" id="pinHelp"></div>
+                </div>
+            </div>
             <label for="editMarkComment">Comment</label>
             <textarea id="editMarkComment" placeholder="e.g., Port rounding" rows="2" style="width:100%;resize:vertical;"></textarea>
             <div class="btn-row">
@@ -903,6 +918,8 @@
         let movingMarkIndex = null;
         let movingPreviewMarker = null;
         let movingPreviewLines = [];
+        let movePendingLatLng = null;
+        let moveRaf = 0;
 
         // Mark editing state
         let editingMarkIndex = null;
@@ -1062,22 +1079,26 @@
         // arrows and labels when a custom order is set
         function renderLegs(course) {
             clearLegs();
+            CourseOrder.pinLayers(course, { interactive: movingMarkIndex === null }).forEach(l => courseLines.push(l.addTo(map)));
             if (courseOrderKeys(course)) {
                 courseLines.push(CourseOrder.routeLayer(course, { labels: true }).addTo(map));
                 return;
             }
-            const ref = coursePoints(course).length ? coursePoints(course)[0].lon : 0;
-            const points = coursePoints(course).map(p => [p.lat, unwrapLon(p.lon, ref)]);
+            const seqPts = courseSequence(course).map(e => e.pt);
+            const ref = seqPts.length ? seqPts[0].lon : 0;
+            const points = seqPts.map(p => [p.lat, unwrapLon(p.lon, ref)]);
             if (points.length >= 2) {
                 courseLines.push(L.polyline(points, {
-                    color: '#ff6600', weight: 3, opacity: 0.7, dashArray: '10, 5'
+                    color: '#ff6600', weight: 3, opacity: 0.7, dashArray: '10, 5', interactive: false
                 }).addTo(map));
             }
             showLegLabels(course);
         }
 
-        function displayCourse(course, fit = true) {
+        // opts.preview: non-interactive markers (live move preview)
+        function displayCourse(course, fit = true, opts = {}) {
             clearCourseDisplay();
+            const interactive = !opts.preview;
             // one longitude copy for the whole course so it draws compactly across ±180°
             const ref = coursePoints(course).length ? coursePoints(course)[0].lon : 0;
             const ll = p => [p.lat, unwrapLon(p.lon, ref)];
@@ -1094,7 +1115,7 @@
             // Start marker
             if (course.start) {
                 const startLabel = course.start.comment ? course.start.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                const marker = L.marker(ll(course.start), {
+                const marker = L.marker(ll(course.start), { interactive,
                     icon: createStartIcon(startLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Start</strong>';
@@ -1102,6 +1123,7 @@
                     popup += `<br><em>${course.start.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.start.lat.toFixed(6)}<br>Lon: ${course.start.lon.toFixed(6)}</small>`;
+                if (course.start.pin) popup += `<br><small>Pin: ${Math.round(course.start.pin.dist)} m ${course.start.pin.side}</small>`;
                 if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('start')">Edit</button>`;
                     popup += `<button class="popup-move-btn" onclick="startMoveMark(-1)">Move</button>`;
@@ -1122,7 +1144,7 @@
                 course.marks.forEach((mark, idx) => {
                     const color = mark.color || '#f97316';
                     const label = mark.comment ? mark.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                    const marker = L.marker(ll(mark), {
+                    const marker = L.marker(ll(mark), { interactive,
                         icon: createMarkIcon(idx + 1, color, label)
                     }).addTo(map);
                     let popup = `<div style="text-align:center"><strong>Mark ${idx + 1}</strong>`;
@@ -1154,7 +1176,7 @@
             // Finish marker
             if (course.finish) {
                 const finishLabel = course.finish.comment ? course.finish.comment.replace(/\n+$/, '').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>') : null;
-                const marker = L.marker(ll(course.finish), {
+                const marker = L.marker(ll(course.finish), { interactive,
                     icon: createFinishIcon(finishLabel)
                 }).addTo(map);
                 let popup = '<div style="text-align:center"><strong>Finish</strong>';
@@ -1162,6 +1184,7 @@
                     popup += `<br><em>${course.finish.comment.replace(/\n+$/, '').replace(/\n/g, '<br>')}</em>`;
                 }
                 popup += `<br><small>Lat: ${course.finish.lat.toFixed(6)}<br>Lon: ${course.finish.lon.toFixed(6)}</small>`;
+                if (course.finish.pin) popup += `<br><small>Pin: ${Math.round(course.finish.pin.dist)} m ${course.finish.pin.side}</small>`;
                 popup += legFromPrev(course.finish);
                 if (editable) {
                     popup += `<br><button class="popup-edit-btn" onclick="showEditMark('finish')">Edit</button>`;
@@ -1686,18 +1709,23 @@
             if (!courseData) return;
             const colorRow = document.getElementById('colorRow');
 
-            if (markIndex === 'start') {
-                if (!courseData.start) return;
-                editingMarkIndex = 'start';
-                document.getElementById('editMarkNumber').textContent = 'Start';
-                document.getElementById('editMarkComment').value = courseData.start.comment || '';
+            const pinRow = document.getElementById('pinRow');
+            pinRow.style.display = 'none';
+            if (markIndex === 'start' || markIndex === 'finish') {
+                const pt = courseData[markIndex];
+                if (!pt) return;
+                editingMarkIndex = markIndex;
+                document.getElementById('editMarkNumber').textContent = markIndex === 'start' ? 'Start' : 'Finish';
+                document.getElementById('editMarkComment').value = pt.comment || '';
                 colorRow.style.display = 'none';
-            } else if (markIndex === 'finish') {
-                if (!courseData.finish) return;
-                editingMarkIndex = 'finish';
-                document.getElementById('editMarkNumber').textContent = 'Finish';
-                document.getElementById('editMarkComment').value = courseData.finish.comment || '';
-                colorRow.style.display = 'none';
+                pinRow.style.display = '';
+                document.getElementById('editPinEnabled').checked = !!pt.pin;
+                document.getElementById('editPinDist').value = pt.pin ? pt.pin.dist : 50;
+                document.getElementById('editPinSide').value = pt.pin && pt.pin.side === 'right' ? 'right' : 'left';
+                document.getElementById('pinHelp').textContent = markIndex === 'start'
+                    ? 'Left/right looking from the start towards the next mark. The first leg starts mid-line.'
+                    : 'Left/right looking from the finish towards the previous mark. The last leg ends mid-line.';
+                updatePinRow();
             } else {
                 if (!courseData.marks || markIndex >= courseData.marks.length) return;
                 editingMarkIndex = markIndex;
@@ -1711,6 +1739,11 @@
             document.getElementById('editMarkOverlay').classList.add('visible');
         }
 
+        function updatePinRow() {
+            document.getElementById('pinFields').style.display =
+                document.getElementById('editPinEnabled').checked ? '' : 'none';
+        }
+
         function closeEditMark() {
             editingMarkIndex = null;
             document.getElementById('editMarkOverlay').classList.remove('visible');
@@ -1720,10 +1753,15 @@
             if (editingMarkIndex === null || !courseData) return;
             const comment = document.getElementById('editMarkComment').value.replace(/^\s+/, '').replace(/\s+$/, '');
 
-            if (editingMarkIndex === 'start') {
-                if (comment) { courseData.start.comment = comment; } else { delete courseData.start.comment; }
-            } else if (editingMarkIndex === 'finish') {
-                if (comment) { courseData.finish.comment = comment; } else { delete courseData.finish.comment; }
+            if (editingMarkIndex === 'start' || editingMarkIndex === 'finish') {
+                const pt = courseData[editingMarkIndex];
+                if (comment) { pt.comment = comment; } else { delete pt.comment; }
+                if (document.getElementById('editPinEnabled').checked) {
+                    const dist = parseFloat(document.getElementById('editPinDist').value);
+                    pt.pin = { dist: dist > 0 ? dist : 50, side: document.getElementById('editPinSide').value };
+                } else {
+                    delete pt.pin;
+                }
             } else {
                 if (!courseData.marks) return;
                 const color = document.getElementById('editMarkColor').value;
@@ -1830,57 +1868,72 @@
             document.addEventListener('keydown', handleMoveKeydown);
         }
 
-        function getAdjacentCoursePoints(index) {
-            const result = { prev: null, next: null };
-            if (!courseData) return result;
-            const marksCount = courseData.marks ? courseData.marks.length : 0;
-
-            if (index === -1) {
-                if (marksCount > 0) result.next = [courseData.marks[0].lat, courseData.marks[0].lon];
-                else if (courseData.finish) result.next = [courseData.finish.lat, courseData.finish.lon];
-            } else if (index === 'finish') {
-                if (marksCount > 0) result.prev = [courseData.marks[marksCount - 1].lat, courseData.marks[marksCount - 1].lon];
-                else if (courseData.start) result.prev = [courseData.start.lat, courseData.start.lon];
-            } else {
-                if (index === 0) {
-                    if (courseData.start) result.prev = [courseData.start.lat, courseData.start.lon];
-                } else {
-                    result.prev = [courseData.marks[index - 1].lat, courseData.marks[index - 1].lon];
-                }
-                if (index === marksCount - 1) {
-                    if (courseData.finish) result.next = [courseData.finish.lat, courseData.finish.lon];
-                } else {
-                    result.next = [courseData.marks[index + 1].lat, courseData.marks[index + 1].lon];
-                }
-            }
-            return result;
+        // Course copy with the moving mark at latlng
+        function coursePreviewWithMove(latlng) {
+            const c = JSON.parse(JSON.stringify(courseData));
+            const pt = movingMarkIndex === -1 ? c.start : movingMarkIndex === 'finish' ? c.finish : c.marks[movingMarkIndex];
+            pt.lat = latlng.lat; pt.lon = latlng.lng;
+            return c;
         }
 
+        // Live preview: whole course redrawn with the mark at the cursor (legs, labels,
+        // route), plus turn-angle arcs at every corner whose angle changes
         function updateMovePreview(e) {
-            const latlng = e.latlng;
-            if (!movingPreviewMarker) {
-                movingPreviewMarker = L.circleMarker(latlng, {
-                    radius: 10, color: '#0066cc', fillColor: '#0066cc',
-                    fillOpacity: 0.5, weight: 2
-                }).addTo(map);
-            } else {
-                movingPreviewMarker.setLatLng(latlng);
-            }
+            movePendingLatLng = e.latlng;
+            if (moveRaf) return;
+            moveRaf = requestAnimationFrame(() => {
+                moveRaf = 0;
+                if (movingMarkIndex === null || !movePendingLatLng) return;
+                const c = coursePreviewWithMove(movePendingLatLng);
+                displayCourse(c, false, { preview: true });
+                updateInfoBox(selectedCourseName, c);
+                drawMoveAngles(c);
+            });
+        }
 
-            const adjacent = getAdjacentCoursePoints(movingMarkIndex);
-            movingPreviewLines.forEach(line => map.removeLayer(line));
+        function clearMoveAngles() {
+            movingPreviewLines.forEach(l => map.removeLayer(l));
             movingPreviewLines = [];
+        }
 
-            if (adjacent.prev) {
-                movingPreviewLines.push(L.polyline([adjacent.prev, [latlng.lat, latlng.lng]], {
-                    color: '#0066cc', weight: 2, opacity: 0.7, dashArray: '5, 5'
+        function drawMoveAngles(course) {
+            clearMoveAngles();
+            const key = movingMarkIndex === -1 ? 'S' : movingMarkIndex === 'finish' ? 'F' : movingMarkIndex + 1;
+            const seq = courseSequence(course);
+            const near = new Set();
+            seq.forEach((e, i) => { if (e.key === key) { near.add(i - 1); near.add(i); near.add(i + 1); } });
+            const R1 = 34;
+            near.forEach(i => {
+                if (i < 1 || i >= seq.length - 1) return;
+                const B = map.latLngToLayerPoint([seq[i].pt.lat, seq[i].pt.lon]);
+                const A = map.latLngToLayerPoint([seq[i - 1].pt.lat, seq[i - 1].pt.lon]);
+                const C = map.latLngToLayerPoint([seq[i + 1].pt.lat, seq[i + 1].pt.lon]);
+                // angle between the two legs from metric vectors, drawn on screen
+                const a = metresNE(seq[i].pt, seq[i - 1].pt), c = metresNE(seq[i].pt, seq[i + 1].pt);
+                const la = Math.hypot(a.north, a.east), lc = Math.hypot(c.north, c.east);
+                if (la < 0.5 || lc < 0.5) return;
+                const deg = Math.acos(Math.max(-1, Math.min(1, (a.north * c.north + a.east * c.east) / (la * lc)))) * 180 / Math.PI;
+                const a1 = Math.atan2(A.y - B.y, A.x - B.x);
+                let d = Math.atan2(C.y - B.y, C.x - B.x) - a1;
+                while (d > Math.PI) d -= 2 * Math.PI;
+                while (d < -Math.PI) d += 2 * Math.PI;
+                const pts = [];
+                const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.1));
+                for (let k = 0; k <= steps; k++) {
+                    const ang = a1 + d * k / steps;
+                    pts.push(map.layerPointToLatLng(L.point(B.x + R1 * Math.cos(ang), B.y + R1 * Math.sin(ang))));
+                }
+                const isMoving = seq[i].key === key;
+                const col = isMoving ? '#2563eb' : '#64748b';
+                movingPreviewLines.push(L.polyline(pts, { color: col, weight: 3, opacity: 0.9, interactive: false }).addTo(map));
+                const mid = a1 + d / 2;
+                const lp = map.layerPointToLatLng(L.point(B.x + (R1 + 22) * Math.cos(mid), B.y + (R1 + 22) * Math.sin(mid)));
+                movingPreviewLines.push(L.marker(lp, {
+                    interactive: false, keyboard: false, zIndexOffset: 2000,
+                    icon: L.divIcon({ className: 'leg-label', iconSize: [0, 0],
+                        html: `<div style="background:${col}">${Math.round(deg)}°</div>` })
                 }).addTo(map));
-            }
-            if (adjacent.next) {
-                movingPreviewLines.push(L.polyline([[latlng.lat, latlng.lng], adjacent.next], {
-                    color: '#0066cc', weight: 2, opacity: 0.7, dashArray: '5, 5'
-                }).addTo(map));
-            }
+            });
         }
 
         async function finishMoveMark(e) {
@@ -1903,9 +1956,15 @@
             document.removeEventListener('keydown', handleMoveKeydown);
 
             if (movingPreviewMarker) { map.removeLayer(movingPreviewMarker); movingPreviewMarker = null; }
-            movingPreviewLines.forEach(line => map.removeLayer(line));
-            movingPreviewLines = [];
+            clearMoveAngles();
+            if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+            movePendingLatLng = null;
+            const wasMoving = movingMarkIndex !== null;
             movingMarkIndex = null;
+            if (wasMoving && courseData) {
+                displayCourse(courseData, false);
+                updateInfoBox(selectedCourseName, courseData);
+            }
 
             document.getElementById('map').style.cursor = '';
             document.getElementById('moveStatus').classList.remove('visible');
@@ -2127,7 +2186,7 @@
         // Label each leg at its midpoint with true/magnetic bearing and length
         function showLegLabels(course) {
             clearLegLabels();
-            legLabels = makeLegLabels(coursePoints(course));
+            legLabels = makeLegLabels(courseSequence(course).map(e => e.pt));
         }
 
         // Leg label markers (added to the map) for a list of {lat, lon} points
