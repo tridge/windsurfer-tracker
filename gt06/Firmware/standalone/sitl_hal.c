@@ -48,6 +48,21 @@ static int  g_no_reexec;                          /* --no-reexec: sys_reset exit
 static int  g_persist_cwprm;                       /* SITL_PERSIST_CWPRM: back cwprm with a real file so a
                                                     * SZCS#TERIID/SERVIP write survives a reboot (as on HW) */
 
+/* SITL_TIME_SCALE=N: every HAL wait is divided by N and NMEA UTC runs N x fast; firmware logic unchanged.
+ * SITL_TIME_ANCHOR (real epoch) is where sim UTC == real UTC, shared with the harness and re-execs. */
+static double g_tscale = 1.0;
+static double g_tanchor;
+static long long scale_ns(long long ns) { return g_tscale == 1.0 ? ns : (long long)(ns / g_tscale); }
+static void sim_utc(struct timespec *ts)
+{
+    clock_gettime(CLOCK_REALTIME, ts);
+    if (g_tscale == 1.0) return;
+    double real = ts->tv_sec + ts->tv_nsec * 1e-9;
+    double sim = g_tanchor + (real - g_tanchor) * g_tscale;
+    ts->tv_sec = (time_t)sim;
+    ts->tv_nsec = (long)((sim - (double)ts->tv_sec) * 1e9);
+}
+
 static void parse_server(const char *s)           /* "host[:port]" */
 {
     char tmp[sizeof g_srv_host]; snprintf(tmp, sizeof tmp, "%s", s);
@@ -234,7 +249,8 @@ static int sitl_select(int maxfdp1, void *rd, void *wr, void *ex, void *timeout)
     struct timeval tv, *ptv = 0;
     if (timeout) {
         int *t = timeout;                      /* {int32 tv_sec, int32 tv_usec} */
-        tv.tv_sec = t[0]; tv.tv_usec = t[1];
+        long long us = scale_ns(((long long)t[0] * 1000000LL + t[1]) * 1000LL) / 1000LL;
+        tv.tv_sec = (time_t)(us / 1000000LL); tv.tv_usec = (suseconds_t)(us % 1000000LL);
         ptv = &tv;
     }
     if (nready) { tv.tv_sec = 0; tv.tv_usec = 0; ptv = &tv; }   /* something already reportable */
@@ -314,8 +330,9 @@ static int sitl_urc_attach(unsigned qid, int arg) { (void)qid; (void)arg; return
 static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ticks)
 {
     int timeout_ms = timeout_ticks > 0 ? timeout_ticks * 5 : timeout_ticks;
+    long long wait_ns = timeout_ms > 0 ? scale_ns((long long)timeout_ms * 1000000LL) : 0;
     if (qid != 1) {
-        if (timeout_ms > 0) usleep((useconds_t)timeout_ms * 1000);
+        if (wait_ns > 0) usleep((useconds_t)(wait_ns / 1000));
         return 1;
     }
     unsigned *out = msgout;
@@ -325,8 +342,8 @@ static int sitl_msgq_recv(unsigned qid, void *msgout, int timeout_ticks)
             while (urc_tail == urc_head) pthread_cond_wait(&urc_cnd, &urc_mtx);
         } else {
             struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += timeout_ms / 1000;
-            ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+            ts.tv_sec += (time_t)(wait_ns / 1000000000LL);
+            ts.tv_nsec += (long)(wait_ns % 1000000000LL);
             if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
             while (urc_tail == urc_head)
                 if (pthread_cond_timedwait(&urc_cnd, &urc_mtx, &ts) != 0) break;
@@ -434,7 +451,7 @@ static void *nmea_thread(void *arg)
     /* a slowly-moving track near Canberra so tracking produces changing LOCs */
     double lat = -35.33145, lon = 149.13182;
     for (;;) {
-        usleep(g_nmea_period_us);                /* 1 Hz by default, like the real GNSS */
+        usleep((useconds_t)(scale_ns((long long)g_nmea_period_us * 1000LL) / 1000LL));   /* 1 Hz default */
         if (!g_gps_on) continue;
         { const char *sf = getenv("SITL_GNSS_SILENT_FLAG");  /* receiver on but emitting nothing */
           if (sf && access(sf, F_OK) == 0) continue; }
@@ -448,7 +465,7 @@ static void *nmea_thread(void *arg)
         char body[200], line[220];
         /* real UTC time/date so the LOC datetime (used for blind-buffer replay) is genuine wall-clock —
          * a backfilled fix then lands at its true past time, not the reconnect instant. */
-        struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+        struct timespec ts; sim_utc(&ts);
         time_t stamp = ts.tv_sec + g_nmea_time_offset_s;
         struct tm tmv; gmtime_r(&stamp, &tmv);
         int hh = tmv.tm_hour, mm = tmv.tm_min, ss = tmv.tm_sec;
@@ -952,13 +969,13 @@ static void *timer_thread(void *arg)
     (void)arg;
     /* absolute deadlines: a periodic RTOS timer does not drift by the callback's run time */
     struct timespec next; clock_gettime(CLOCK_MONOTONIC, &next);
-    unsigned long step = g_tmr_initial * 5000000ul;
+    long long step = scale_ns((long long)g_tmr_initial * 5000000LL);
     for (;;) {
-        next.tv_nsec += (long)(step % 1000000000ul); next.tv_sec += (time_t)(step / 1000000000ul);
+        next.tv_nsec += (long)(step % 1000000000LL); next.tv_sec += (time_t)(step / 1000000000LL);
         if (next.tv_nsec >= 1000000000L) { next.tv_nsec -= 1000000000L; next.tv_sec++; }
         while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, 0) != 0) { }
         g_tmr_cb(g_tmr_arg);
-        step = g_tmr_period * 5000000ul;
+        step = scale_ns((long long)g_tmr_period * 5000000LL);
     }
     return 0;
 }
@@ -1064,6 +1081,7 @@ static void usage(const char *prog)
         "                SITL_NMEA_HZ=N sets the GNSS fix rate (default 1),\n"
         "                SITL_NMEA_TIME_OFFSET_S=N shifts the stamped UTC (midnight tests),\n"
         "                SITL_BATT_MV=N sets the supervisor battery reading.\n"
+        "Clock: SITL_TIME_SCALE=N runs sim time N x real (1..100); SITL_TIME_ANCHOR=epoch pins sim UTC.\n"
         "Signals: SIGUSR1 toggles coverage loss (connect/send fail fast);\n"
         "         SIGUSR2 toggles radio-off (sends fail, connects hang pending — blackhole);\n"
         "         SIGHUP  toggles carrier denial (camped PLMN rejects the SIM; item-16 ladder);\n"
@@ -1101,6 +1119,12 @@ int main(int argc, char **argv)
         if (hz > 0 && hz <= 20) g_nmea_period_us = (unsigned)(1000000 / hz);
     }
     if ((e = getenv("SITL_USB_LISTEN"))) g_usb_listen_port = atoi(e);
+    if ((e = getenv("SITL_TIME_SCALE"))) {
+        double s = atof(e);
+        if (s >= 1.0 && s <= 100.0) g_tscale = s;
+    }
+    { struct timespec now; clock_gettime(CLOCK_REALTIME, &now);
+      g_tanchor = (e = getenv("SITL_TIME_ANCHOR")) ? atof(e) : (double)now.tv_sec; }
     const char *fwd_arg = getenv("SITL_FWD");           /* preset FWDSERVER/FWDPORT (seeded after cwprm) */
 
     static const struct option lo[] = {
@@ -1151,6 +1175,7 @@ int main(int argc, char **argv)
     if (g_usb_listen_port > 0) { pthread_t ut; pthread_create(&ut, 0, usb_listen_thread, 0); }
 
     fprintf(stderr, "[SITL] standalone firmware -> %s:%d  teriid=%s\n", g_srv_host, g_srv_port, g_teriid);
+    if (g_tscale != 1.0) fprintf(stderr, "[SITL] time scale x%g\n", g_tscale);
     standalone_main(0);
     return 0;
 }

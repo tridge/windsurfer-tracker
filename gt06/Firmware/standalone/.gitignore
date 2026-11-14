@@ -21,3 +21,4 @@ sitl_*.flag
 sitl_wstrplmn.*
 snap*-asan
 __pycache__/
+.sitl-run/

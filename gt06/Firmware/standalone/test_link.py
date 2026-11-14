@@ -8,9 +8,9 @@ import socket
 import struct
 import time
 
-from sitl_util import HERE, Server, start, finish
+from sitl_util import RUN_DIR, Server, start, finish
 
-STUCK = os.path.join(HERE, "sitl_tx_stuck.flag")
+STUCK = os.path.join(RUN_DIR, "sitl_tx_stuck.flag")
 
 
 def fix_times(seen):
@@ -157,7 +157,7 @@ def test_bad_commands_are_not_acted_on():
     print("bad CRC / RESETjunk / malformed TIMER+HBT rejected, valid TIMER accepted PASS")
 
 
-JUMP = os.path.join(HERE, "sitl_nmea_jump.flag")
+JUMP = os.path.join(RUN_DIR, "sitl_nmea_jump.flag")
 
 
 def test_blind_replay_across_a_day_gap():

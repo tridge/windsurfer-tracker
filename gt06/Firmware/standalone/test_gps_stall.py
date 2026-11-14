@@ -4,9 +4,9 @@
 import os
 import time
 
-from sitl_util import HERE, Server, start, finish, reset_state
+from sitl_util import RUN_DIR, Server, start, finish, reset_state
 
-SILENT = os.path.join(HERE, "sitl_gnss_silent.flag")
+SILENT = os.path.join(RUN_DIR, "sitl_gnss_silent.flag")
 
 
 def test_silent_receiver_is_power_cycled_then_rebooted():

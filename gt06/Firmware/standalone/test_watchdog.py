@@ -4,9 +4,9 @@
 import os
 import time
 
-from sitl_util import HERE, Server, start, finish, reset_state
+from sitl_util import RUN_DIR, Server, start, finish, reset_state
 
-FLAG = os.path.join(HERE, "sitl_hang_send.flag")
+FLAG = os.path.join(RUN_DIR, "sitl_hang_send.flag")
 
 
 def bootstat(srv):

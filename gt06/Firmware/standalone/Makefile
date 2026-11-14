@@ -124,60 +124,80 @@ sitl-all: sitl sitl-asan sitl-ubsan  ## build all SITL variants
 # Tests run against the AddressSanitizer build by default: the batched-LOC work shipped a stack
 # buffer overflow that the plain build ran straight through, and only ASan caught it.
 SITL_TEST_BIN ?= ./sitl-asan
+# Each suite runs in its own fresh directory, so SITL state files (wdstat, wdtrace, cwprm, plmn, FOTA
+# staging, flag files) never collide and the suites can run in parallel (`make test` does, see below).
+TEST_RUN_ROOT ?= $(CURDIR)/.sitl-run
+# SITL_TIME_SCALE=N runs the SITL clock (and the harness's view of it) N x real time. 1 = real time.
+SITL_TIME_SCALE ?= 1
+TEST_JOBS ?= 16
+define run_suite
+	@rm -rf $(TEST_RUN_ROOT)/$@ && mkdir -p $(TEST_RUN_ROOT)/$@
+	cd $(TEST_RUN_ROOT)/$@ && SITL_RUN_DIR=$(TEST_RUN_ROOT)/$@ TMPDIR=$(TEST_RUN_ROOT)/$@ \
+		SITL_TIME_SCALE=$(SITL_TIME_SCALE) SITL_BIN=$(abspath $(SITL_TEST_BIN)) python3 $(CURDIR)/$(1)
+	@rm -rf $(TEST_RUN_ROOT)/$@
+endef
 test-gps-retry: sitl-asan            ## exercise truthful GPS STATUS + 10-second power-on retry
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_retry.py
+	$(call run_suite,test_gps_retry.py)
 
 test-loc-batch: sitl-asan            ## exercise the batched LOC message (protocol 0xF1)
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_loc_batch.py
+	$(call run_suite,test_loc_batch.py)
 
 test-fota-image: sitl-asan standalone_fw.bin  ## one image must satisfy vendor AND our own FOTA
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_image.py
+	$(call run_suite,test_fota_image.py)
 
 test-battery-mv: sitl-asan           ## supervisor battery mV, including a unit on charge
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_battery_mv.py
+	$(call run_suite,test_battery_mv.py)
 
 test-gpsstat: sitl-asan              ## CXCS#GPSSTAT tells a dead receiver from an unlocked one
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_gpsstat.py
+	$(call run_suite,test_gpsstat.py)
 
 test-sapifind: sitl-asan             ## CXCS#SAPIFIND identifies the resolver's hash scheme
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_sapifind.py
+	$(call run_suite,test_sapifind.py)
 
 test-usb-debug: usb-debug-sitl       ## binary WDBG framing, reads, resolver lookup, scratch call
-	python3 test_usb_debug.py
+	$(call run_suite,test_usb_debug.py)
 
 test-lte-sleep: sitl-asan            ## direct CPSI telemetry + GPS-safe disconnected alarm sleep
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_lte_sleep.py
+	$(call run_suite,test_lte_sleep.py)
 
 test-plmn-policy: sitl-asan          ## persistent carrier restrictions and offline recovery
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_plmn_policy.py
+	$(call run_suite,test_plmn_policy.py)
 
 test-gnss-avg: sitl-asan           ## default 5 Hz averaged to 1 Hz, rate kept across GPS power cycles, GNSSRATE/GNSSCMD
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_gnss_avg.py
+	$(call run_suite,test_gnss_avg.py)
 
 test-track-recovery: sitl-asan     ## tracking: early, repeated no-data radio cycles
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_track_recovery.py
+	$(call run_suite,test_track_recovery.py)
 
 test-watchdog: sitl-asan            ## real reliability.c: hung send + boot hang reset, reset reasons
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_watchdog.py
+	$(call run_suite,test_watchdog.py)
 
 test-link: sitl-asan                 ## dead-link detection, in-flight replay, SOS until ACK, bad commands
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_link.py
+	$(call run_suite,test_link.py)
 
 test-gps-stall: sitl-asan            ## silent GNSS: power-cycle, one reboot, recovery
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_gps_stall.py
+	$(call run_suite,test_gps_stall.py)
 
 test-offline: sitl-asan              ## idle offline: connect backoff, sleep, no-data reboot
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_offline.py
+	$(call run_suite,test_offline.py)
 
 test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never commit a bad image
-	SITL_BIN=$(SITL_TEST_BIN) python3 test_fota_fail.py
+	$(call run_suite,test_fota_fail.py)
 
-test: test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg  ## all SITL regression tests
+TEST_SUITES := test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg
+
+# all SITL regression tests, TEST_JOBS suites at a time (output grouped per suite).
+# make test TEST_JOBS=1 runs them serially; make test-<name> runs one.
+test: sitl-asan usb-debug-sitl standalone_fw.bin  ## all SITL regression tests (parallel)
+	$(MAKE) --no-print-directory -j$(TEST_JOBS) --output-sync=target $(TEST_SUITES)
+
+test-fast:                           ## all SITL tests, parallel, sim clock 10x real time (~1 min)
+	$(MAKE) --no-print-directory test SITL_TIME_SCALE=10
 
 clean:
 	rm -f stub_standalone.elf standalone.raw standalone_fw.bin customer_app_standalone.bin standalone_fota.bin \
 	      sitl sitl-asan sitl-ubsan usb_debug.elf usb_debug.raw usb_debug_fw.bin \
 	      customer_app_usb_debug.bin customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin usb-debug-sitl
+	rm -rf $(TEST_RUN_ROOT)
 
-.PHONY: all flashimg fotaimg usb-debug sitl-all test-gps-retry test-loc-batch test-fota-image \
-	test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-watchdog test-link test-gps-stall test-offline test-fota-fail test clean
+.PHONY: all flashimg fotaimg usb-debug sitl-all test test-fast $(TEST_SUITES) clean

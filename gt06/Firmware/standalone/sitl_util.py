@@ -11,6 +11,37 @@ SITL = os.path.abspath(os.environ.get("SITL_BIN") or os.path.join(HERE, "sitl"))
 RUN_DIR = os.environ.get("SITL_RUN_DIR") or HERE   # where SITL keeps its state files
 
 
+# ---- simulated clock -------------------------------------------------------------------------------
+# SITL_TIME_SCALE=N makes the SITL run N x faster than real time (sitl_hal.c divides every HAL wait by N).
+# The tests are written in SIM seconds, so this module rescales the harness's own clock to match:
+# time.monotonic/time.time/time.gmtime advance N x, and time.sleep / socket timeouts take sim seconds.
+# SITL_TIME_ANCHOR is exported so every SITL child (and its re-execs) maps real->sim UTC identically.
+# subprocess/threading bind the original clock at import, so process-exit timeouts stay real.
+TIME_SCALE = float(os.environ.get("SITL_TIME_SCALE") or 1)
+
+
+def _install_time_scale(scale):
+    real_mono, real_time, real_sleep, real_gmtime = time.monotonic, time.time, time.sleep, time.gmtime
+    real_localtime = time.localtime
+    anchor = float(os.environ.get("SITL_TIME_ANCHOR") or real_time())
+    os.environ["SITL_TIME_ANCHOR"] = repr(anchor)
+    m0 = real_mono()
+    time.monotonic = lambda: m0 + (real_mono() - m0) * scale
+    time.time = lambda: anchor + (real_time() - anchor) * scale
+    time.sleep = lambda s: real_sleep(max(0.0, s) / scale)
+    time.gmtime = lambda secs=None: real_gmtime(time.time() if secs is None else secs)
+    time.localtime = lambda secs=None: real_localtime(time.time() if secs is None else secs)
+    real_settimeout = socket.socket.settimeout
+
+    def settimeout(self, value):
+        real_settimeout(self, None if value is None else value / scale)
+    socket.socket.settimeout = settimeout
+
+
+if TIME_SCALE != 1:
+    _install_time_scale(TIME_SCALE)
+
+
 def crc_itu(data):
     crc = 0xFFFF
     for b in data:
