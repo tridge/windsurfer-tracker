@@ -1803,7 +1803,8 @@ static unsigned g_fix_ts;                        /* wd_uptime() of the last vali
 /* ---- item 14: status LEDs. Two app LEDs via the resident GPIO sAPI (RE re_leds.md): gpio ids 7 & 0x78,
  * gpio_set_level(id,1|0). Behaviour (user spec 2026-07-23):
  *   idle                                    -> both off, BLUE flashes briefly every 2 s (shows it's on;
- *                                              ~5 s while offline, as the idle loop then runs slower)
+ *                                              ~5 s while offline, as the idle loop then runs slower);
+ *                                              YELLOW instead of blue when the battery is low (<= ~25%)
  *   tracking + GPS lock + radio(data) OK    -> both solid on
  *   tracking but failing (stale/no fix OR not connected) -> BLUE solid, YELLOW flashing
  *   SOS active                              -> both flashing
@@ -1814,7 +1815,11 @@ static unsigned g_fix_ts;                        /* wd_uptime() of the last vali
 #define LED_FIX_STALE_SEC 6                      /* a valid fix older than this = GPS lock considered lost */
 #define LED_IDLE_FLASH_SEC 2                     /* idle: one short blue flash this often */
 #define LED_IDLE_FLASH_MS 60
+/* Low battery for the idle flash: ~25% on the server's idle OCV curve; back to blue at ~30% (hysteresis) */
+#define LED_LOW_BATT_MV 3610
+#define LED_LOW_BATT_CLEAR_MV 3640
 static unsigned g_led_flash_ts;
+static unsigned char g_led_low_batt;
 static volatile unsigned char g_led_swap;        /* 0: A=blue,B=yellow ; 1: swapped (SZCS#LEDSWAP) */
 
 static void leds_init(void)                      /* call once after the resolver table is filled */
@@ -1843,9 +1848,13 @@ static void leds_update(int track, int connected, int sos, unsigned now)
     if (sos)         { blue = blink; yellow = blink; }
     else if (!track) {
         blue = 0; yellow = 0;
+        unsigned mv = g_batt_mv;                  /* 0 = no reading yet: treat as fine */
+        if (mv && mv <= LED_LOW_BATT_MV) g_led_low_batt = 1;
+        else if (!mv || mv >= LED_LOW_BATT_CLEAR_MV) g_led_low_batt = 0;
         if ((now - g_led_flash_ts) >= LED_IDLE_FLASH_SEC) {   /* brief blink, then off again below */
             g_led_flash_ts = now;
-            led_write(g_led_swap ? LED_ID_B : LED_ID_A, 1);
+            int yel = g_led_low_batt;
+            led_write((g_led_swap ^ yel) ? LED_ID_B : LED_ID_A, 1);
             wd_sleep(LED_IDLE_FLASH_MS);
         }
     }

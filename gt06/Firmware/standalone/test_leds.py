@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SITL: status LEDs. Idle: blue flashes briefly every 2 s, yellow off. Tracking: blue solid.
-Back to idle: the flashes resume."""
+Back to idle: the flashes resume. Low battery (<= ~25%): the idle flash is yellow instead."""
 
 import re
 import time
@@ -71,5 +71,26 @@ def main():
           f"tracking; {len(back)} flashes after going idle again PASS")
 
 
+def low_battery():
+    srv = Server()
+    proc = start(srv, "888800000000902", env_extra={"SITL_BATT_MV": "3550"})
+    try:
+        srv.accept_login()
+        srv.pump(3)
+        t0 = real_ms()
+        srv.pump(9)
+        t1 = real_ms()
+    finally:
+        srv.close()
+        _, stderr = finish(proc)
+    ev = [(int(i), int(lv), int(t)) for i, lv, t in
+          re.findall(rb"\[SITL\] LED id=(\d+) level=(\d) t=(\d+)", stderr)]
+    yel = [t for i, lv, t in ev if i == YELLOW and lv == 1 and t0 <= t < t1]
+    blue = [t for i, lv, t in ev if i == BLUE and lv == 1 and t0 <= t < t1]
+    assert 3 <= len(yel) <= 6 and not blue, f"3.55 V idle: {len(yel)} yellow, {len(blue)} blue flashes in 9 s"
+    print(f"LEDs: low battery (3.55 V) idle -> {len(yel)} yellow flashes/9 s, no blue PASS")
+
+
 if __name__ == "__main__":
     main()
+    low_battery()
