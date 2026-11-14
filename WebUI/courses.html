@@ -441,6 +441,22 @@
         .move-status.visible { display: block; }
         .menu-item.active { background: #e3f2fd; color: #1976d2; }
         body.hide-info-box .course-info-box { display: none !important; }
+        /* Race information: (i) button under the zoom buttons, opening a panel in its place */
+        .raceinfo-btn { width: 30px; height: 30px; background: white; border: none; border-radius: 4px; cursor: pointer;
+                        font: bold 17px/30px Georgia, serif; color: #1d4ed8; padding: 0; }
+        .raceinfo-btn:hover { background: #f4f4f4; }
+        .raceinfo-panel { background: white; color: black; border-radius: 6px; padding: 8px 10px 10px;
+                          width: max-content; max-width: min(360px, calc(100vw - 30px)); min-width: 150px;
+                          font: 14px/1.4 system-ui, sans-serif; box-sizing: border-box; }
+        .raceinfo-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+        .raceinfo-head b { margin-right: auto; font-size: 14px; }
+        .raceinfo-head button { border: 1px solid #ccc; background: #f7f7f7; color: black; border-radius: 4px;
+                                cursor: pointer; font-size: 13px; padding: 2px 7px; }
+        .raceinfo-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow-y: auto; }
+        .raceinfo-text.empty { color: #666; font-style: italic; }
+        .raceinfo-panel textarea { width: min(340px, calc(100vw - 50px)); min-height: 140px; box-sizing: border-box;
+                                   font: 14px/1.4 system-ui, sans-serif; color: black; }
+        .raceinfo-edit-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
         .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .custom-scale {
@@ -822,7 +838,7 @@
 
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
-    <script src="js/course-order.js?v=2ff464d3"></script>
+    <script src="js/course-order.js?v=9da7ee55"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/wind.js?v=e3592b4f"></script>
     <script>
@@ -838,6 +854,46 @@
 
         // Map setup
         const map = L.map('map', { zoomControl: true });
+        // Race information (i) under the zoom buttons; the panel opens in its place
+        const raceInfoCtl = new (L.Control.extend({
+            onAdd() {
+                const el = L.DomUtil.create('div', 'leaflet-control leaflet-bar raceinfo-ctl');
+                el.innerHTML = `<button class="raceinfo-btn" id="raceInfoBtn" title="Race information"
+                                        aria-label="Race information" onclick="openRaceInfo()">i</button>
+                    <div class="raceinfo-panel" id="raceInfoPanel" style="display:none">
+                        <div class="raceinfo-head"><b>Race Information</b>
+                            <button id="raceInfoEditBtn" onclick="editRaceInfo()" title="Edit">✏️ Edit</button>
+                            <button onclick="closeRaceInfo()" title="Close (Esc)" aria-label="Close">✕</button></div>
+                        <div class="raceinfo-text" id="raceInfoText"></div>
+                        <div id="raceInfoEditor" style="display:none">
+                            <textarea id="raceInfoInput"
+                                      placeholder="e.g. Race officer: …&#10;Support boat: …&#10;VHF channel: …"></textarea>
+                            <div class="raceinfo-edit-btns"><button onclick="cancelRaceInfoEdit()">Cancel</button>
+                                <button onclick="saveRaceInfo()"><b>Save</b></button></div>
+                        </div>
+                    </div>`;
+                L.DomEvent.disableClickPropagation(el);
+                L.DomEvent.disableScrollPropagation(el);
+                return el;
+            }
+        }))({ position: 'topleft' }).addTo(map);
+
+        // On a phone the admin toolbar wraps over the top-left corner: keep the zoom buttons and
+        // race information below it whenever the two would overlap
+        function placeTopLeftControls() {
+            const corner = map.getContainer().querySelector('.leaflet-top.leaflet-left');
+            const bar = document.getElementById('adminToolbar');
+            if (!corner || !bar) return;
+            corner.style.top = '';
+            if (getComputedStyle(bar).display === 'none' || !bar.classList.contains('visible')) return;
+            const b = bar.getBoundingClientRect(), c = corner.getBoundingClientRect(),
+                  m = map.getContainer().getBoundingClientRect();
+            if (b.width && b.left < c.right && b.right > c.left && b.bottom > c.top)
+                corner.style.top = `${Math.round(b.bottom - m.top + 4)}px`;
+        }
+        window.addEventListener('resize', placeTopLeftControls);
+        if (window.ResizeObserver) new ResizeObserver(placeTopLeftControls).observe(document.getElementById('adminToolbar'));
+
         // live wind bottom left, just above the map scale, when the event has a wind.json
         WindDisplay.init(map, { url: `${EVENT_ID}/wind.json`, storageKey: `showWind_${EVENT_ID}`,
                                 menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind', aboveScale: 'customScale', avoid: ['courseInfoBox'],
@@ -1479,6 +1535,9 @@
             displayCourse(course);
 
             updateInfoBox(name, course);
+            // an edit in progress belongs to the course it started on: leave it if another is selected
+            if (raceInfoTarget && raceInfoTarget.name !== name) raceInfoTarget = null;
+            refreshRaceInfo();
         }
 
         // e.g. "Order: S-1-2-F", '' if no custom order
@@ -1548,6 +1607,9 @@
                 cancelDrawing();
                 cancelMoveMark();
                 closeTransform();
+                raceInfoTarget = null;
+                placeTopLeftControls();
+                refreshRaceInfo();
                 // Refresh display to remove edit buttons
                 if (courseData) displayCourse(courseData);
             } else {
@@ -1566,6 +1628,8 @@
                     document.getElementById('adminToolbar').classList.add('visible');
                     document.body.classList.add('admin-mode');
                     document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+                    placeTopLeftControls();
+                    refreshRaceInfo();
                     // Refresh display to show edit buttons
                     if (courseData) displayCourse(courseData);
                 } else {
@@ -1978,6 +2042,7 @@
                     courseData = null;
                     clearCourseDisplay();
                     document.getElementById('courseInfoBox').style.display = 'none';
+                    refreshRaceInfo();
                     await reloadAndReselect();
                 }
             } catch (e) {
@@ -2693,6 +2758,82 @@
             updateTransformPreview();
         }
 
+        // --- Race information: freeform text saved with the course file (course.info) ---
+        let raceInfoOpen = false, raceInfoTarget = null;   // target: course name + its text when the edit began
+
+        function refreshRaceInfo() {
+            const btn = document.getElementById('raceInfoBtn');
+            if (!btn) return;
+            const info = selectedCourseName && courseData && typeof courseData.info === 'string' ? courseData.info : '';
+            const canEdit = adminMode && !!selectedCourseName && !!courseData;
+            if (!info && !canEdit && raceInfoOpen) closeRaceInfo();
+            btn.style.display = raceInfoOpen || !(info || canEdit) ? 'none' : '';
+            document.getElementById('raceInfoPanel').style.display = raceInfoOpen ? '' : 'none';
+            if (!raceInfoOpen) return;
+            const editing = !!raceInfoTarget;
+            const t = document.getElementById('raceInfoText');
+            t.textContent = info || 'No race information yet';
+            t.classList.toggle('empty', !info);
+            t.style.display = editing ? 'none' : '';
+            document.getElementById('raceInfoEditor').style.display = editing ? '' : 'none';
+            document.getElementById('raceInfoEditBtn').style.display = canEdit && !editing ? '' : 'none';
+        }
+
+        function openRaceInfo() {
+            raceInfoOpen = true;
+            refreshRaceInfo();
+        }
+
+        function closeRaceInfo() {
+            raceInfoOpen = false;
+            raceInfoTarget = null;
+            refreshRaceInfo();
+        }
+
+        function editRaceInfo() {
+            if (!adminMode || !selectedCourseName || !courseData || importBusy()) return;
+            raceInfoTarget = { name: selectedCourseName, info: courseData.info };
+            const inp = document.getElementById('raceInfoInput');
+            inp.maxLength = CourseOrder.MAX_INFO;
+            inp.value = typeof courseData.info === 'string' ? courseData.info : '';
+            refreshRaceInfo();
+            inp.focus();
+        }
+
+        function cancelRaceInfoEdit() {
+            raceInfoTarget = null;
+            refreshRaceInfo();
+        }
+
+        async function saveRaceInfo() {
+            const t = raceInfoTarget;
+            if (!t) return;
+            const text = document.getElementById('raceInfoInput').value.replace(/\s+$/, '').slice(0, CourseOrder.MAX_INFO);
+            raceInfoTarget = null;
+            // The text is independent of the marks: a newer version of the same course (e.g. another
+            // admin moved a mark) just gets it added. Only someone else's change to the text wins.
+            if (t.name !== selectedCourseName || !courseData) {
+                alert(`Course "${t.name}" is no longer selected; race information not saved`);
+                refreshRaceInfo();
+                return;
+            }
+            if (courseData.info !== t.info) {
+                alert(`Someone else changed the race information for "${t.name}" while you were editing; ` +
+                      'yours was not saved');
+                refreshRaceInfo();
+                return;
+            }
+            if (text) courseData.info = text; else delete courseData.info;
+            refreshRaceInfo();
+            await saveSelectedCourse();
+            refreshRaceInfo();
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || !raceInfoOpen) return;
+            if (raceInfoTarget) cancelRaceInfoEdit(); else closeRaceInfo();
+        });
+
         function resetTransform() {
             ['tfRotate', 'tfRotateSlider', 'tfNorth', 'tfEast'].forEach(id => document.getElementById(id).value = 0);
             ['tfScale', 'tfScaleSlider'].forEach(id => document.getElementById(id).value = 100);
@@ -3076,6 +3217,7 @@
                     document.getElementById('courseInfoBox').style.display = 'none';
                     clearCourseDisplay();
                     selectedCourseName = null;
+                    refreshRaceInfo();
                     return;
                 }
 

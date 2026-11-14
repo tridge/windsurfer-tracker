@@ -28,6 +28,7 @@ const CourseOrder = (() => {
     // Course A is the file itself; B, C... are course.extraCourses[0], [1]...
     // each with its own start/marks/finish/order.
     const MAX_COURSES = 6;
+    const MAX_INFO = 4000;           // race information text (chars)
     const COURSE_COLORS = ['#ff6600', '#2563eb', '#9333ea', '#059669', '#db2777', '#ca8a04'];
     const letterOf = i => String.fromCharCode(65 + i);
 
@@ -696,6 +697,8 @@ const CourseOrder = (() => {
 
     function checkCourse(j) {
         checkImportedSub(j, '');
+        if (j.info !== undefined && (typeof j.info !== 'string' || j.info.length > MAX_INFO))
+            throw new Error('invalid race information');
         if (j.extraCourses !== undefined) {
             if (!Array.isArray(j.extraCourses) || j.extraCourses.length > MAX_COURSES - 1)
                 throw new Error('invalid extra courses');
@@ -831,7 +834,7 @@ const CourseOrder = (() => {
     return {
         parse, format, keys, sequence, lengthKm, incomingLegs, incomingLegsHtml, autoSide, markSide, sideName, isBoth, insertMark, deleteMark,
         pinLine, pinLayers, splitLeg, escHtml, commentHtml, safeColor,
-        darkenColor, startIcon, markIcon, finishIcon, checkCourse, setColorChoice,
+        darkenColor, startIcon, markIcon, finishIcon, checkCourse, setColorChoice, MAX_INFO,
         MAX_COURSES, COURSE_COLORS, letterOf, subCourses, subCourse, courseCount, plainCourse, removeCourse, markName,
         setLabelOptions: o => Object.assign(labelOpts, o),
         labelOptions: () => ({ ...labelOpts }),
