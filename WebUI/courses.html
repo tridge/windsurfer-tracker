@@ -440,6 +440,7 @@
         }
         .move-status.visible { display: block; }
         .menu-item.active { background: #e3f2fd; color: #1976d2; }
+        body.hide-info-box .course-info-box { display: none !important; }
         .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .custom-scale {
@@ -760,20 +761,27 @@
             <div class="menu-submenu-item" data-wind="13-17" onclick="setWindRange('13-17')">13 to 17 knots</div>
             <div class="menu-submenu-item" data-wind="18-25" onclick="setWindRange('18-25')">18 to 25 knots</div>
         </div>
-        <div class="menu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
-            <span>🌬️</span>
-            <span>Live wind</span>
-            <span class="menu-check" id="chkLiveWind"></span>
+        <div class="menu-item" onclick="toggleFeaturesSubmenu()">
+            <span>🎛️</span>
+            <span>Features ▼</span>
         </div>
-        <div class="menu-item" onclick="toggleLegDisplay('bearing')">
-            <span>🧭</span>
-            <span>Leg bearings</span>
-            <span class="menu-check" id="chkLegBearing">✓</span>
-        </div>
-        <div class="menu-item" onclick="toggleLegDisplay('distance')">
-            <span>📏</span>
-            <span>Leg distances</span>
-            <span class="menu-check" id="chkLegDistance">✓</span>
+        <div class="menu-submenu" id="featuresSubmenu">
+            <div class="menu-submenu-item" onclick="toggleInfoBox()">
+                <span>ℹ️ Course info box</span>
+                <span class="menu-check" id="chkInfoBox">✓</span>
+            </div>
+            <div class="menu-submenu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
+                <span>🌬️ Live wind</span>
+                <span class="menu-check" id="chkLiveWind"></span>
+            </div>
+            <div class="menu-submenu-item" onclick="toggleLegDisplay('bearing')">
+                <span>🧭 Leg bearings</span>
+                <span class="menu-check" id="chkLegBearing">✓</span>
+            </div>
+            <div class="menu-submenu-item" onclick="toggleLegDisplay('distance')">
+                <span>📏 Leg distances</span>
+                <span class="menu-check" id="chkLegDistance">✓</span>
+            </div>
         </div>
         <div class="menu-item admin-only" onclick="exportCourses()" style="display:none">
             <span>📤</span>
@@ -888,6 +896,22 @@
         function toggleWindSubmenu() {
             document.getElementById('windSubmenu').classList.toggle('visible');
         }
+
+        function toggleFeaturesSubmenu() {
+            document.getElementById('featuresSubmenu').classList.toggle('visible');
+        }
+
+        // Course info box on/off (remembered); hidden by a body class so its content keeps updating
+        function applyInfoBox(on) {
+            document.body.classList.toggle('hide-info-box', !on);
+            document.getElementById('chkInfoBox').textContent = on ? '✓' : '';
+        }
+        function toggleInfoBox() {
+            const on = document.body.classList.contains('hide-info-box');
+            localStorage.setItem('courseInfoBox', on ? '1' : '0');
+            applyInfoBox(on);
+        }
+        applyInfoBox(localStorage.getItem('courseInfoBox') !== '0');
 
         function setWindRange(key) {
             selectedWind = key || null;
