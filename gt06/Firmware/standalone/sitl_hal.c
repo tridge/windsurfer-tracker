@@ -479,6 +479,8 @@ static void *nmea_thread(void *arg)
                  hh, mm, ss, dsf, lad, lam, lod, lom,
                  jon ? (odd ? 7.0 : 5.0) : 6.0, jon ? (odd ? 55.0 : 35.0) : 45.0, dd, mo, yy);
         snprintf(line, sizeof line, "%s*%02X\r\n", body, nmea_cksum(body));
+        { const char *nf = getenv("SITL_NMEA_NORMC_FLAG");  /* receiver drops RMC, GGA/GSA continue */
+          if (nf && access(nf, F_OK) == 0) continue; }
         /* HW fidelity: real URC chunks split sentences mid-field. Deliver the RMC in TWO chunks (cut
          * inside the longitude); every 20th sentence insert a +CSQ reply between the halves AND
          * swallow the first bytes of the tail — the modem loses those bytes with the AT interleave

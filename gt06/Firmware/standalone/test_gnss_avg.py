@@ -3,13 +3,18 @@
 (vector-mean velocity). The receiver forgets the rate at power-off (SITL_NMEA_CFGNAV models that), so
 the rate must be reasserted after every power-on. SZCS#GNSSAVG=0 ships the raw fixes, GNSSRATE=1000
 goes back to 1 Hz, SZCS#GNSSCMD reaches the modem as a checksummed AT+CGNSSCMD, GPSSTAT reports
-r10 (NMEA rate), avg and gr (target interval)."""
+r10 (NMEA rate), avg and gr (target interval). Also: no fix from before an idle period is shipped
+after it, r10 drops to 0 (and the rate is resent) when only RMC stops, and a receiver that ignores
+CFGNAV gets 3 tries 30 s apart, then backs off."""
 
 import math
 import os
 import re
 import socket
 import subprocess
+import tempfile
+import time
+from datetime import datetime, timezone
 
 from test_loc_batch import SITL, BATCH_PROTO, frames, parse_batch, drain, finish_sitl, gt06_cmd
 
@@ -24,14 +29,63 @@ SER = [100]
 
 
 def wait_rate(conn, lo, hi, limit):
-    """Poll GPSSTAT every 3 s until lo <= r10 <= hi; returns (seconds, last GPSSTAT reply)."""
+    """Poll GPSSTAT every 3 s until lo <= r10 <= hi; returns (seconds, last reply, everything received)."""
+    allb = bytearray()
     for k in range(limit // 3):
         SER[0] += 1
         conn.sendall(gt06_cmd("CXCS#GPSSTAT", SER[0]))
         st = drain(conn, 3)
+        allb += st
         if re.search(rb"r10\d+", st) and lo <= r10(st)[0] <= hi:
-            return 3 * (k + 1), st
-    return None, st
+            return 3 * (k + 1), st, allb
+    return None, st, allb
+
+
+def fix_times(buf):
+    """UTC epoch of every fix in the 0xF1 batches in buf."""
+    out = []
+    for p, pl in frames(buf):
+        if p != BATCH_PROTO:
+            continue
+        h, el = parse_batch(pl)
+        yy, mo, dd, hh, mi, ss = h["base_dt"]
+        base = datetime(2000 + yy, mo, dd, hh, mi, ss, tzinfo=timezone.utc).timestamp()
+        out += [base + e["dt_ds"] / 10 for e in el]
+    return out
+
+
+def cfgnav_sends(stderr, ms=200):
+    return len(re.findall(rf'AT\+CGNSSCMD="\$CFGNAV,{ms},{ms},3\*'.encode(), stderr))
+
+
+def backoff():
+    """Receiver ignores CFGNAV: 3 tries 30 s apart, then nothing for 10 min."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    proc = subprocess.Popen(
+        [SITL, "--server", f"127.0.0.1:{port}", "--teriid", "888800000000802", "--no-reexec"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ))
+    conn = None
+    try:
+        listener.settimeout(8)
+        conn, _ = listener.accept()
+        drain(conn, 2)
+        conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        drain(conn, 50)
+        _, mid, _ = wait_rate(conn, 999, 999, 3)
+        drain(conn, 60)
+    finally:
+        if conn:
+            conn.close()
+        listener.close()
+        _, stderr = finish_sitl(proc)
+    n = cfgnav_sends(stderr)
+    assert n == 3, f"{n} CFGNAV sends in ~115 s to a receiver stuck at 1 Hz, expected 3 then back-off"
+    assert 8 <= r10(mid)[0] <= 12, mid
+    print(f"gnss backoff: {n} CFGNAV tries then quiet, r10 {r10(mid)[0]} PASS")
 
 
 def main():
@@ -40,7 +94,9 @@ def main():
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     port = listener.getsockname()[1]
-    env = dict(os.environ, SITL_NMEA_CFGNAV="1", SITL_NMEA_JITTER="1")   # receiver starts at 1 Hz
+    normc = os.path.join(tempfile.mkdtemp(prefix="sitl-gnss-"), "normc")
+    env = dict(os.environ, SITL_NMEA_CFGNAV="1", SITL_NMEA_JITTER="1",   # receiver starts at 1 Hz
+               SITL_NMEA_NORMC_FLAG=normc)
     proc = subprocess.Popen(
         [SITL, "--server", f"127.0.0.1:{port}", "--teriid", "888800000000801", "--no-reexec"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -50,7 +106,7 @@ def main():
         conn, _ = listener.accept()
         drain(conn, 2)
         conn.sendall(gt06_cmd("TIMER,1,1#", 1))
-        t1, st1 = wait_rate(conn, 40, 60, 36)     # rate set once NMEA flows, r10 window settles
+        t1, st1, _ = wait_rate(conn, 40, 60, 36)  # rate set once NMEA flows, r10 window settles
         got = drain(conn, 12)
         batches = [parse_batch(pl)[1] for p, pl in frames(got) if p == BATCH_PROTO]
         elems = [e for b in batches for e in b]
@@ -65,13 +121,21 @@ def main():
 
         # idle powers the receiver off (back to 1 Hz); tracking again must restore 5 Hz
         conn.sendall(gt06_cmd("TIMER,600,1800#", 5))
-        drain(conn, 4)
+        drain(conn, 10)
+        restart = time.time()
         conn.sendall(gt06_cmd("TIMER,1,1#", 6))
-        t2, st2 = wait_rate(conn, 40, 60, 36)
+        t2, st2, after = wait_rate(conn, 40, 60, 36)
+
+        # RMC stops while GGA/GSA continue: r10 must fall to 0 and the rate be resent
+        open(normc, "w").close()
+        drain(conn, 40)
+        _, st_normc, _ = wait_rate(conn, 0, 0, 3)
+        os.unlink(normc)
+        drain(conn, 3)
 
         conn.sendall(gt06_cmd("SZCS#GNSSRATE=1000", 8))
         st3 = drain(conn, 2)
-        t3, st = wait_rate(conn, 8, 12, 36)
+        t3, st, _ = wait_rate(conn, 8, 12, 36)
         st3 += st
         conn.sendall(gt06_cmd("SZCS#GNSSRATE=50", 10))
         conn.sendall(gt06_cmd("SZCS#GNSSCMD=BAD*", 11))
@@ -101,11 +165,16 @@ def main():
 
     rate2, _, _ = r10(st2)
     assert t2, f"5 Hz not restored after a GPS power cycle: {st2}"
+    ft = fix_times(after)
+    assert ft and min(ft) >= restart - 3, \
+        f"fix from {restart - min(ft):.1f} s before tracking restarted was shipped after it"
+    assert r10(st_normc)[0] == 0, f"r10 stale while RMC stopped: {st_normc}"
     log = stderr.decode(errors="replace")
     sets = [m.start() for m in re.finditer(r'AT\+CGNSSCMD="\$CFGNAV,200,200,3\*', log)]
     off = log.find("[SITL] GNSS power off", sets[0] if sets else 0)
     assert len(sets) >= 2 and off != -1 and sets[-1] > off, "rate not reasserted after power-on"
-    assert len(sets) <= 4, f"{len(sets)} CFGNAV sends, expected one per power-on (+1 retry at most)"
+    # one per power-on (+1 retry at most), plus 1-2 while RMC was stopped
+    assert 3 <= len(sets) <= 6, f"{len(sets)} CFGNAV sends, expected a resend while RMC was stopped"
 
     rate3, _, gr3 = r10(st3)
     assert t3 and gr3 == 1000 and b"SETOK:GNSSRATE=1000" in st3, st3
@@ -120,3 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    backoff()

@@ -850,8 +850,10 @@ static void avg_out(rmc_t *o)
 static int avg_add(const rmc_t *rc, rmc_t *o)
 {
     int ready = 0;
-    if (g_avg_n && (g_avg_first.dt[5] != rc->dt[5] || g_avg_first.dt[4] != rc->dt[4] ||
-                    g_avg_first.south != rc->south || g_avg_first.west != rc->west || g_avg_n >= 10)) {
+    int same = 1;                               /* same full UTC second (date too, not just mm:ss) */
+    for (int i = 0; i < 6; i++) if (g_avg_first.dt[i] != rc->dt[i]) same = 0;
+    if (g_avg_n && (!same || g_avg_first.south != rc->south || g_avg_first.west != rc->west ||
+                    g_avg_n >= 10)) {
         avg_out(o); ready = 1;
     }
     if (!g_avg_n) {
@@ -1263,6 +1265,7 @@ static int apply_gps(int track)
         return 0;
     }
     g_gps_req = track ? GPS_POWER_ON : GPS_POWER_OFF;
+    g_avg_n = 0;                                   /* a pending average must not outlive the session */
     /* Prefer the getter, even though it may still report the pre-transition state here. The periodic
      * refresh observes completion. Preserve the old rc==0 inference only as a compatibility fallback. */
     if (!gps_status_refresh(wd_uptime(), 1)) {
@@ -4370,7 +4373,12 @@ void standalone_main(u32 loader_resolver)
         if (!track) {
             g_rate_tries = 0;                      /* restart the rate window: no stale r10 at power-on */
             g_rmc_10 = 0; g_rmc_win_base = g_rmc_seen; g_rmc_win_ts = now;
-        } else if (g_gnss_rate_ms < 1000 && g_nmea_ts && (now - g_nmea_ts) < 3) {
+            g_avg_n = 0;                           /* and never carry a pending average into tracking */
+        } else if ((now - g_rmc_win_ts) >= 10) {   /* close the window on time, so no RMC reads as 0 */
+            g_rmc_10 = g_rmc_seen - g_rmc_win_base;
+            g_rmc_win_base = g_rmc_seen; g_rmc_win_ts = now;
+        }
+        if (track && g_gnss_rate_ms < 1000 && g_nmea_ts && (now - g_nmea_ts) < 3) {
             if (g_rmc_10 * g_gnss_rate_ms >= 6000) g_rate_tries = 0;
             else if (!g_rate_ts || (now - g_rate_ts) >= (g_rate_tries < 3 ? 30u : 600u)) {
                 gnss_set_rate(); g_rate_ts = now; g_rate_tries++;
@@ -4548,11 +4556,7 @@ void standalone_main(u32 loader_resolver)
                     parse_gsa(g_line);             /* cache 2D/3D fix type from any GSA line */
                     rmc_t rc;
                     if (parse_rmc(g_line, &rc)) {
-                        g_rmc_seen++;
-                        if ((now - g_rmc_win_ts) >= 10) {
-                            g_rmc_10 = g_rmc_seen - g_rmc_win_base;
-                            g_rmc_win_base = g_rmc_seen; g_rmc_win_ts = now;
-                        }
+                        g_rmc_seen++;               /* r10 window is closed in the main loop */
                         if (rc.valid) g_rmc_valid++;
                         if (rc.valid && !fix_plausible(&rc, now))
                             rc.valid = 0;          /* impossible jump (checksum-colliding splice) -> drop */
