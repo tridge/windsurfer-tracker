@@ -39,6 +39,9 @@
             height: 100vh;
         }
         
+        /* no automatic text enlargement (iOS landscape): sizes here are already chosen for phones */
+        html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
         .info-panel {
             position: fixed;
             top: 10px;
@@ -403,6 +406,13 @@
             text-align: center;
             border: 2px solid #2196F3;
             border-radius: 50%;
+        }
+
+        /* Phones: keep the tracking panel to under two thirds of the width so the map stays usable
+           (long names wrap instead of widening it) */
+        @media (max-width: 600px) {
+            .info-panel { max-width: min(320px, 62vw); }
+            .category-content { padding: 0 8px; }
         }
 
         /* Mobile: show info icon, hide name */
@@ -1153,28 +1163,28 @@
                     <span>⛵ Sailors (<span id="sailorCount">0</span>)</span>
                     <span id="sailorToggle">▼</span>
                 </div>
-                <div class="category-content" id="sailorList"></div>
+                <div class="category-content sailor-list" id="sailorList"></div>
             </div>
             <div class="category-section" id="supportSection">
                 <div class="category-header" onclick="toggleCategory('support')">
                     <span>🚤 Support (<span id="supportCount">0</span>)</span>
                     <span id="supportToggle">▼</span>
                 </div>
-                <div class="category-content" id="supportList"></div>
+                <div class="category-content sailor-list" id="supportList"></div>
             </div>
             <div class="category-section" id="spectatorSection">
                 <div class="category-header" onclick="toggleCategory('spectator')">
                     <span>🔭 Spectators (<span id="spectatorCount">0</span>)</span>
                     <span id="spectatorToggle">▼</span>
                 </div>
-                <div class="category-content" id="spectatorList"></div>
+                <div class="category-content sailor-list" id="spectatorList"></div>
             </div>
             <div class="category-section" id="buoySection">
                 <div class="category-header" onclick="toggleCategory('buoy')">
                     <span>🛟 Buoys (<span id="buoyCount">0</span>)</span>
                     <span id="buoyToggle">▼</span>
                 </div>
-                <div class="category-content" id="buoyList"></div>
+                <div class="category-content sailor-list" id="buoyList"></div>
             </div>
             <div class="last-update" id="lastUpdate" style="padding:8px 12px;"></div>
             <div class="panel-legend">
