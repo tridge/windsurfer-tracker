@@ -185,9 +185,11 @@ def migrate_public_bin_files(data_dir: Path, bin_file: Path, eid: int) -> None:
         if not isinstance(legacy, list) or not isinstance(current, list):
             raise ValueError("recycle bin is not a list")
     except Exception as e:
-        bad = bin_file.with_name(f"{bin_file.name}.bad-{int(time.time())}")
-        shutil.copyfile(old, bad)
-        os.chmod(bad, 0o600)
+        import tempfile
+        fd, bad = tempfile.mkstemp(dir=str(bin_file.parent), prefix=f"{bin_file.name}.bad-{int(time.time())}-")
+        with os.fdopen(fd, 'wb') as f, open(old, 'rb') as src:   # 0600 from creation, never overwrites
+            shutil.copyfileobj(src, f)
+        bad = Path(bad)
         old.unlink()
         log(f"[EVENT {eid}] Unreadable recycle bin moved out of the public data dir to {bad.name}: {e}")
         return
@@ -911,6 +913,12 @@ class EventManager:
             for field in allowed_fields:
                 if field in updates:
                     event[field] = updates[field]
+            # idle_interval is a number of seconds (0 = off); it is sent to clients and shown in pages
+            if 'idle_interval' in updates:
+                try:
+                    event['idle_interval'] = max(0, min(86400, int(updates['idle_interval'])))
+                except (TypeError, ValueError):
+                    event['idle_interval'] = 0
             # Coerce priority to int — a non-int would break the public list sort
             if 'priority' in updates:
                 try:
