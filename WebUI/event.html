@@ -540,6 +540,7 @@
             background: #e8f5e9;
             color: #2e7d32;
         }
+        .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .menu-item a {
             color: inherit;
@@ -1281,17 +1282,23 @@
     <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
 
     <div class="menu-panel" id="menuPanel">
-        <div class="menu-item" id="menuLabels" onclick="toggleLabels()">
-            <span>🏷</span>
-            <span>Show Labels</span>
+        <div class="menu-item" onclick="toggleFeaturesSubmenu()">
+            <span>🎛️</span>
+            <span>Features ▼</span>
         </div>
-        <div class="menu-item" id="menuTails" onclick="toggleTails()">
-            <span>〰️</span>
-            <span>Show Tails</span>
-        </div>
-        <div class="menu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
-            <span>🌬️</span>
-            <span>Show Live Wind</span>
+        <div class="menu-submenu" id="featuresSubmenu">
+            <div class="menu-submenu-item" id="menuLabels" onclick="toggleLabels()">
+                <span>🏷 Labels</span>
+                <span class="menu-check" id="chkLabels"></span>
+            </div>
+            <div class="menu-submenu-item" id="menuTails" onclick="toggleTails()">
+                <span>〰️ Tails</span>
+                <span class="menu-check" id="chkTails"></span>
+            </div>
+            <div class="menu-submenu-item" id="menuLiveWind" onclick="WindDisplay.toggle()" style="display:none">
+                <span>🌬️ Live wind</span>
+                <span class="menu-check" id="chkLiveWind"></span>
+            </div>
         </div>
         <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
             <span>🗺️</span>
@@ -1898,10 +1905,14 @@
             menuOpen = false;
         }
 
+        function toggleFeaturesSubmenu() {
+            document.getElementById('featuresSubmenu').classList.toggle('visible');
+        }
+
         function toggleLabels() {
             showLabels = !showLabels;
             localStorage.setItem('showLabels', showLabels);
-            document.getElementById('menuLabels').classList.toggle('active', showLabels);
+            document.getElementById('chkLabels').textContent = showLabels ? '✓' : '';
             // Refresh markers to show/hide labels
             if (currentPositions?.sailors) {
                 updateMarkers(currentPositions.sailors);
@@ -1911,7 +1922,7 @@
         function toggleTails() {
             showTails = !showTails;
             localStorage.setItem('showTails', showTails);
-            document.getElementById('menuTails').classList.toggle('active', showTails);
+            document.getElementById('chkTails').textContent = showTails ? '✓' : '';
             // Show or hide all tail polylines
             if (showTails) {
                 // Refresh markers to draw tails
@@ -1931,8 +1942,8 @@
 
         // Initialize menu item states
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('menuLabels').classList.toggle('active', showLabels);
-            document.getElementById('menuTails').classList.toggle('active', showTails);
+            document.getElementById('chkLabels').textContent = showLabels ? '✓' : '';
+            document.getElementById('chkTails').textContent = showTails ? '✓' : '';
         });
 
         // Close menu/admin when clicking outside
@@ -1966,7 +1977,7 @@
         // live wind under the zoom buttons, when the event has a wind.json
         // live wind: bottom left, just above the map scale
         WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind',
-                                position: 'bottomleft' });
+                                menuCheck: 'chkLiveWind', position: 'bottomleft' });
         // On a short screen the wind box would reach up into the zoom/finish buttons:
         // then it moves right to sit beside them.
         function placeWindAboveScale() {
