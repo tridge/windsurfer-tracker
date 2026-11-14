@@ -494,3 +494,12 @@ G312359, G378830, G378848 W07 V6.68; G334189, G347082, G370498, G594715, G623050
 706fefd/252801f units, including G370977 and G312334, which had finished the interrupted 706fefd
 update). All 19 back on 526aa7a and `auth` within ~5 min; idle GPSSTAT shows `avg1 gr200`.
 Not updated: G388862 (offline).
+
+## 2026-11-15 — Parkdale fleet to `WSTR-STD1_5baeee1`
+
+Fixes from Codex review of 526aa7a: a pending average no longer leaks the last fix of one tracking
+session into the next (or merges fixes with the same mm:ss an hour apart), and the r10 window closes
+on time so RMC stopping while GGA/GSA continue reads as 0 and the rate is resent. Re-review clean.
+`FW_HASH=5baeee1 ota.py` to the same 19 online units at 06:30 (all idle): 19/19 back on 5baeee1,
+`auth`. `firmware_latest_B53.bin` -> `W07_MG133_WSTR_B53_5baeee1.bin` (sha256 fea7c5e7825ee225…).
+Still not updated: G388862 (offline since 11-04).
