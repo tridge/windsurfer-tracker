@@ -766,32 +766,36 @@
 
         // The manager password is kept for this browser tab only (sessionStorage), so a refresh stays
         // logged in but closing the tab logs out.
+        let loginGen = 0;                 // only the latest login attempt's answer counts
         function login(saved) {
-            managerPassword = saved || document.getElementById('managerPassword').value;
-            if (!managerPassword) {
+            const pw = saved || document.getElementById('managerPassword').value;
+            if (!pw) {
                 showLoginError('Please enter the manager password');
                 return;
             }
+            const attempt = ++loginGen;
 
-            // Test the password
+            // Test the password; the page only takes it on once the server accepts it
             fetch(`${API_BASE}/api/manage/events`, {
-                headers: { 'X-Manager-Password': managerPassword }
+                headers: { 'X-Manager-Password': pw }
             })
             .then(response => {
+                if (attempt !== loginGen) return;    // a newer attempt (e.g. typed during a restore) decides
                 if (response.ok) {
-                    sessionStorage.setItem('managerPassword', managerPassword);
+                    managerPassword = pw;
+                    sessionStorage.setItem('managerPassword', pw);
+                    document.getElementById('loginError').style.display = 'none';
                     document.getElementById('loginPanel').style.display = 'none';
                     document.getElementById('tabBar').style.display = 'flex';
                     const tab = sessionStorage.getItem('manageTab');
-                    showTab(TABS[tab] ? tab : 'events');
+                    showTab(Object.prototype.hasOwnProperty.call(TABS, tab) ? tab : 'events');
                 } else {
                     sessionStorage.removeItem('managerPassword');
                     showLoginError(saved ? 'Please log in again' : 'Invalid manager password');
-                    managerPassword = '';
                 }
             })
             .catch(e => {
-                showLoginError('Connection error: ' + e.message);
+                if (attempt === loginGen) showLoginError('Connection error: ' + e.message);
             });
         }
 

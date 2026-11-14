@@ -579,10 +579,12 @@
 // ── URL params & API paths ──────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
 const API_BASE = urlParams.get('api') || window.location.origin;
+// A saved password is only ever sent to this site's own API: an ?api= pointing elsewhere gets none
+const API_IS_OURS = (() => { try { return new URL(API_BASE, location.href).origin === location.origin; } catch (e) { return false; } })();
 const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
 const DATA_BASE = `${EVENT_ID}/`;
 const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
-let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+let adminPassword = API_IS_OURS ? (localStorage.getItem(`adminPassword_${EVENT_ID}`) || '') : '';
 
 // ── State ────────────────────────────────────────────────────
 let races = [];
@@ -631,7 +633,7 @@ async function doAuth() {
         const r = await fetch(`${EVENT_API}/auth/check`, { headers: { 'X-Admin-Password': pw } });
         const d = await r.json();
         if (d.authenticated) {
-            localStorage.setItem(`adminPassword_${EVENT_ID}`, pw);
+            if (API_IS_OURS) localStorage.setItem(`adminPassword_${EVENT_ID}`, pw);
             document.getElementById('authScreen').style.display = 'none';
             document.getElementById('mainUI').style.display = '';
             init();

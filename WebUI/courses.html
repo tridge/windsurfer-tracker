@@ -828,6 +828,8 @@
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
+        // A saved password is only ever sent to this site's own API: an ?api= pointing elsewhere gets none
+        const API_IS_OURS = (() => { try { return new URL(API_BASE, location.href).origin === location.origin; } catch (e) { return false; } })();
         const EVENT_ID = parseInt(urlParams.get('eid')) || 1;
         const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
 
@@ -1004,7 +1006,8 @@
 
         // Admin state
         let adminMode = false;
-        let adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+        let adminGen = 0;               // bumped on every admin enter/exit: a slower, older enter is dropped
+        let adminPassword = API_IS_OURS ? (localStorage.getItem(`adminPassword_${EVENT_ID}`) || '') : '';
 
         // Course display state
         let courseMarkers = [];
@@ -1536,6 +1539,7 @@
 
             if (adminMode) {
                 adminMode = false;
+                adminGen++;                 // cancels an enter still waiting on its password check
                 sessionStorage.setItem(`adminOff_${EVENT_ID}`, '1');  // a refresh keeps the normal view
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('adminToolbar').classList.remove('visible');
@@ -1551,10 +1555,12 @@
                     adminPassword = prompt('Enter admin password:');
                     if (!adminPassword) return;
                 }
+                const gen = ++adminGen;
                 const authenticated = await checkAdminAuth();
+                if (gen !== adminGen || adminMode) return;   // exited, or entered by a newer call, meanwhile
                 if (authenticated) {
                     adminMode = true;
-                    localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
+                    if (API_IS_OURS) localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
                     sessionStorage.removeItem(`adminOff_${EVENT_ID}`);
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('adminToolbar').classList.add('visible');
@@ -3135,7 +3141,7 @@
         // Restore admin mode after a refresh if this event's password was saved, unless admin was
         // switched off in this tab (same as event.html)
         if (adminPassword && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) {
-            checkAdminAuth().then(ok => { if (ok && !adminMode) toggleAdminMode(); });
+            checkAdminAuth().then(ok => { if (ok && !adminMode && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) toggleAdminMode(); });
         }
         // Poll for course changes every 20 seconds
         setInterval(() => loadCourses(true), 20000);

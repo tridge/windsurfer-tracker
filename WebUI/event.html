@@ -206,6 +206,8 @@
         
         .sailor-info {
             flex-grow: 1;
+            min-width: 0;                /* may shrink in the narrow phone panel... */
+            overflow-wrap: anywhere;     /* ...so a long unbroken name wraps instead of being clipped */
         }
         
         .sailor-id {
@@ -1795,6 +1797,7 @@
         
         // Admin state
         let adminMode = false;
+        let adminGen = 0;               // bumped on every admin enter/exit: a slower, older enter is dropped
         let simPollInterval = null;
         let adminPassword = '';  // Loaded per-event after EVENT_ID is defined
         let showHiddenTrackers = false;
@@ -1969,6 +1972,8 @@
         // Default: same origin (works with nginx proxy) or same host with tracker port
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
+        // A saved password is only ever sent to this site's own API: an ?api= pointing elsewhere gets none
+        const API_IS_OURS = (() => { try { return new URL(API_BASE, location.href).origin === location.origin; } catch (e) { return false; } })();
 
         // Event ID - required for multi-event mode
         // Read from ?eid=N URL parameter, default to 1 for backwards compatibility
@@ -2001,7 +2006,7 @@
         const EVENT_API = `${API_BASE}/api/event/${EVENT_ID}`;
 
         // Load per-event admin password
-        adminPassword = localStorage.getItem(`adminPassword_${EVENT_ID}`) || '';
+        adminPassword = API_IS_OURS ? (localStorage.getItem(`adminPassword_${EVENT_ID}`) || '') : '';
 
         // Store event info for modal (used by modal.js)
         let currentEventInfo = null;
@@ -2134,6 +2139,7 @@
             if (adminMode) {
                 // Exit admin mode
                 adminMode = false;
+                adminGen++;                 // cancels an enter still waiting on its password check
                 sessionStorage.setItem(`adminOff_${EVENT_ID}`, '1');  // a refresh keeps the normal view
                 document.getElementById('adminBtn').classList.remove('active');
                 document.getElementById('adminPanel').classList.remove('visible');
@@ -2159,10 +2165,12 @@
                     if (!adminPassword) return;
                 }
 
+                const gen = ++adminGen;
                 const authenticated = await checkAdminAuth();
+                if (gen !== adminGen || adminMode) return;   // exited, or entered by a newer call, meanwhile
                 if (authenticated) {
                     adminMode = true;
-                    localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
+                    if (API_IS_OURS) localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
                     sessionStorage.removeItem(`adminOff_${EVENT_ID}`);
                     document.getElementById('adminBtn').classList.add('active');
                     document.getElementById('menuAdmin').classList.add('active');
@@ -5030,7 +5038,7 @@
         // in this tab
         if (adminPassword && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) {
             checkAdminAuth().then(ok => {
-                if (ok) toggleAdminMode();
+                if (ok && !adminMode && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) toggleAdminMode();
             });
         }
 
