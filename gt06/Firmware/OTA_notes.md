@@ -503,3 +503,11 @@ on time so RMC stopping while GGA/GSA continue reads as 0 and the rate is resent
 `FW_HASH=5baeee1 ota.py` to the same 19 online units at 06:30 (all idle): 19/19 back on 5baeee1,
 `auth`. `firmware_latest_B53.bin` -> `W07_MG133_WSTR_B53_5baeee1.bin` (sha256 fea7c5e7825ee225…).
 Still not updated: G388862 (offline since 11-04).
+
+## 2026-11-15 — Parkdale fleet to `WSTR-STD1_14b393e` (idle LED flash)
+
+Idle units now flash the blue LED for 60 ms every 2 s (about every 5 s while offline; none in night
+sleep), yellow instead of blue at or below 3.61 V (~25%), back to blue at 3.64 V. Tested first on
+G334189 (looked right in person), then the real-time SITL suite (17 suites incl. test_leds) passed.
+`FW_HASH=14b393e ota.py` to the other 18 online Parkdale units: 18/18 back on 14b393e, `auth`.
+`firmware_latest_B53.bin` -> `W07_MG133_WSTR_B53_14b393e.bin`. Still not updated: G388862 (offline).
