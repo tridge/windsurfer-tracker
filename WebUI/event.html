@@ -2133,6 +2133,7 @@
             if (adminMode) {
                 // Exit admin mode
                 adminMode = false;
+                sessionStorage.setItem(`adminOff_${EVENT_ID}`, '1');  // a refresh keeps the normal view
                 document.getElementById('adminBtn').classList.remove('active');
                 document.getElementById('adminPanel').classList.remove('visible');
                 document.getElementById('menuAdmin').classList.remove('active');
@@ -2161,6 +2162,7 @@
                 if (authenticated) {
                     adminMode = true;
                     localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
+                    sessionStorage.removeItem(`adminOff_${EVENT_ID}`);
                     document.getElementById('adminBtn').classList.add('active');
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('menuExportCourse').style.display = '';
@@ -5024,8 +5026,9 @@
             }
         });
 
-        // Auto-restore admin mode if password was previously saved
-        if (adminPassword) {
+        // Auto-restore admin mode if password was previously saved, unless admin was switched off
+        // in this tab
+        if (adminPassword && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) {
             checkAdminAuth().then(ok => {
                 if (ok) toggleAdminMode();
             });

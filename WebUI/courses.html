@@ -1507,6 +1507,7 @@
 
             if (adminMode) {
                 adminMode = false;
+                sessionStorage.setItem(`adminOff_${EVENT_ID}`, '1');  // a refresh keeps the normal view
                 document.getElementById('menuAdmin').classList.remove('active');
                 document.getElementById('adminToolbar').classList.remove('visible');
                 document.body.classList.remove('admin-mode');
@@ -1525,6 +1526,7 @@
                 if (authenticated) {
                     adminMode = true;
                     localStorage.setItem(`adminPassword_${EVENT_ID}`, adminPassword);
+                    sessionStorage.removeItem(`adminOff_${EVENT_ID}`);
                     document.getElementById('menuAdmin').classList.add('active');
                     document.getElementById('adminToolbar').classList.add('visible');
                     document.body.classList.add('admin-mode');
@@ -3067,8 +3069,9 @@
         }
 
         loadCourses(false);
-        // Restore admin mode after a refresh if this event's password was saved (same as event.html)
-        if (adminPassword) {
+        // Restore admin mode after a refresh if this event's password was saved, unless admin was
+        // switched off in this tab (same as event.html)
+        if (adminPassword && !sessionStorage.getItem(`adminOff_${EVENT_ID}`)) {
             checkAdminAuth().then(ok => { if (ok && !adminMode) toggleAdminMode(); });
         }
         // Poll for course changes every 20 seconds
