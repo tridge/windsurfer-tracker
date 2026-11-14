@@ -824,7 +824,7 @@
     <script src="js/wmm.js?v=b995cae3"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
-    <script src="js/wind.js?v=263077b8"></script>
+    <script src="js/wind.js?v=e3592b4f"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -838,7 +838,7 @@
         const map = L.map('map', { zoomControl: true });
         // live wind bottom left, just above the map scale, when the event has a wind.json
         WindDisplay.init(map, { url: `${EVENT_ID}/wind.json`, storageKey: `showWind_${EVENT_ID}`,
-                                menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind', aboveScale: 'customScale',
+                                menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind', aboveScale: 'customScale', avoid: ['courseInfoBox'],
                                 onUpdate: () => tfUpdateWindBtn() });
 
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -909,6 +909,7 @@
         function applyInfoBox(on) {
             document.body.classList.toggle('hide-info-box', !on);
             document.getElementById('chkInfoBox').textContent = on ? '✓' : '';
+            if (typeof WindDisplay !== 'undefined') WindDisplay.place();
         }
         function toggleInfoBox() {
             const on = document.body.classList.contains('hide-info-box');

@@ -9,12 +9,14 @@
 //   menuCheck:  optional id of an element that shows ✓ when on
 //   position:   Leaflet control corner (default 'topleft', under the zoom buttons)
 //   aboveScale: id of a scale element at the bottom left: keep the box just above it
+//   avoid:      ids of other boxes to stay clear of (moves up above any visible one it would overlap)
 //   onUpdate:   called after each poll/age refresh (e.g. to show controls that use current())
 // WindDisplay.current(): { dir, speed_kn, age } while the reading is under 10 minutes old, else null.
 //   dir is where the wind comes from, °T: the 10 minute average when the station gives one.
 const WindDisplay = (() => {
     const POLL_MS = 60000;
     const OLD_S = 600;            // older than this: shown as "N minutes old", faded, not used
+    const AHEAD_S = 120;          // an observation time further ahead than this is treated as unknown
     let control = null, el = null, opts = {}, data = null, shown = true, link = null, map = null;
 
     const css = `
@@ -47,8 +49,11 @@ const WindDisplay = (() => {
         const st = d.station || {};
         const decl = typeof wmmDeclination === 'function' && num(st.lat) && num(st.lon) ? wmmDeclination(st.lat, st.lon) : null;
         const bearing = `${fmt3(d.dir_deg)}°T`;
-        // age of the observation; without one, of the fetch (shown as such); else unknown
-        const when = num(d.obs_ts) ? d.obs_ts : num(d.fetched) ? d.fetched : null;
+        // age of the observation; without one, of the fetch (shown as such); else unknown.
+        // A time in the future (station clock or units wrong) is as good as none.
+        const sane = t => num(t) && t - Date.now() / 1000 <= AHEAD_S;
+        const obsOk = sane(d.obs_ts);
+        const when = obsOk ? d.obs_ts : sane(d.fetched) ? d.fetched : null;
         const age = when === null ? Infinity : Math.max(0, Date.now() / 1000 - when);
         const compass = typeof d.dir_compass === 'string' ? d.dir_compass.replace(/[^A-Z]/g, '').slice(0, 3) : '';
         // dir_deg is where the wind comes from; the arrow (head down at 0°) points downwind
@@ -60,7 +65,7 @@ const WindDisplay = (() => {
             (num(d.gust_kn) ? `<div class="wind-sub">gust ${d.gust_kn.toFixed(1)}</div>` : '') +
             `<div class="wind-sub">${compass} ${bearing}</div>` +
             (when === null ? `<div class="wind-age">time unknown</div>`
-                : !num(d.obs_ts) ? `<div class="wind-age">obs time unknown</div>`
+                : !obsOk ? `<div class="wind-age">obs time unknown</div>`
                 : age > OLD_S ? `<div class="wind-age">${Math.round(age / 60)} minutes old</div>` : '');
         el.classList.toggle('wind-old', age > OLD_S);
         const lines = [];
@@ -90,10 +95,10 @@ const WindDisplay = (() => {
         const d = data;
         // only a reading whose observation time is known and recent
         if (!d || !num(d.dir_deg) || !num(d.speed_kn) || !num(d.obs_ts)) return null;
-        const age = Math.max(0, Date.now() / 1000 - d.obs_ts);
-        if (!(age <= OLD_S)) return null;
+        const age = Date.now() / 1000 - d.obs_ts;
+        if (!(age >= -AHEAD_S && age <= OLD_S)) return null;
         return { dir: num(d.dir_avg10m_deg) ? d.dir_avg10m_deg : d.dir_deg, avg: num(d.dir_avg10m_deg),
-                 speed_kn: d.speed_kn, age };
+                 speed_kn: d.speed_kn, age: Math.max(0, age) };
     }
 
     // bottom left, just above the scale; moved right if it would reach up into the top-left controls
@@ -103,9 +108,21 @@ const WindDisplay = (() => {
         const mapRect = map.getContainer().getBoundingClientRect();
         wind.style.marginBottom = `${Math.max(10, Math.round(mapRect.bottom - scale.getBoundingClientRect().top + 6))}px`;
         wind.style.marginLeft = '';
+        if (wind.offsetParent === null) return;
+        // clear of other boxes at the bottom (e.g. the course info box on a phone): sit just above
+        let w = wind.getBoundingClientRect();
+        for (const id of opts.avoid || []) {
+            const a = document.getElementById(id);
+            if (!a || a.offsetParent === null) continue;
+            const r = a.getBoundingClientRect();
+            if (r.width && r.height && r.left < w.right && r.right > w.left && r.top < w.bottom && r.bottom > w.top) {
+                wind.style.marginBottom = `${Math.round(mapRect.bottom - r.top + 6)}px`;
+                w = wind.getBoundingClientRect();
+            }
+        }
         const topLeft = map.getContainer().querySelector('.leaflet-top.leaflet-left');
-        if (!topLeft || wind.offsetParent === null) return;
-        const tl = topLeft.getBoundingClientRect(), w = wind.getBoundingClientRect();
+        if (!topLeft) return;
+        const tl = topLeft.getBoundingClientRect();
         if (tl.height > 0 && w.top < tl.bottom + 4) wind.style.marginLeft = `${Math.round(tl.right - mapRect.left + 10)}px`;
     }
 
@@ -148,7 +165,8 @@ const WindDisplay = (() => {
             if (window.ResizeObserver) {
                 const ro = new ResizeObserver(() => placeAboveScale());
                 [document.getElementById(opts.aboveScale), control.getContainer(),
-                 map.getContainer().querySelector('.leaflet-top.leaflet-left')].forEach(e => e && ro.observe(e));
+                 map.getContainer().querySelector('.leaflet-top.leaflet-left'),
+                 ...(opts.avoid || []).map(id => document.getElementById(id))].forEach(e => e && ro.observe(e));
             }
         }
         poll();
@@ -164,5 +182,5 @@ const WindDisplay = (() => {
         updated();
     }
 
-    return { init, toggle, current, isShown: () => shown, container: () => control && control.getContainer() };
+    return { init, toggle, current, place: placeAboveScale, isShown: () => shown, container: () => control && control.getContainer() };
 })();
