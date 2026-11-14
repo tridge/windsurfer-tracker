@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import threading
+import shutil
 import traceback
 import email.utils
 from datetime import datetime, date, timezone
@@ -137,35 +138,78 @@ def course_lock(eid: int) -> threading.Lock:
         return _course_locks.setdefault(eid, threading.Lock())
 
 
-def migrate_public_bin(tracker) -> None:
-    """Move a recycle bin left in the event's (public) data dir by an earlier
-    version into the private bin, merging with any private one (entries kept by
-    id/content, none dropped). The public file is removed only once the merged
-    bin is saved. Call with course_lock held."""
-    old = tracker.data_dir / "deleted_courses.json"
+def private_bin_path(data_dir: Path, eid: int) -> Path:
+    """Recycle bin for an event: outside the public web tree, <static>/../private/<eid>/
+    (resolved first, so a relative static dir such as "." still lands outside it)."""
+    return data_dir.resolve().parent.parent / "private" / str(eid) / "deleted_courses.json"
+
+
+def normalize_bin(entries) -> tuple[list[dict], bool]:
+    """Recycle-bin entries cleaned up: only well-formed ones, exact duplicates dropped,
+    and every entry given a valid id unique within the bin. Returns (entries, changed)."""
+    import uuid
+    out, seen_content, seen_ids, changed = [], set(), set(), False
+    for e in entries if isinstance(entries, list) else []:
+        if not isinstance(e, dict) or not isinstance(e.get('course'), dict):
+            changed = True
+            continue
+        content = json.dumps({k: v for k, v in e.items() if k != 'id'}, sort_keys=True)
+        if content in seen_content:
+            changed = True
+            continue
+        seen_content.add(content)
+        if not isinstance(e.get('deleted'), (int, float)):
+            e['deleted'] = 0
+            changed = True
+        eid_ = e.get('id')
+        if not isinstance(eid_, str) or not re.fullmatch(r'[0-9a-f]{32}', eid_) or eid_ in seen_ids:
+            e['id'] = uuid.uuid4().hex
+            changed = True
+        seen_ids.add(e['id'])
+        out.append(e)
+    return out, changed
+
+
+def migrate_public_bin_files(data_dir: Path, bin_file: Path, eid: int) -> None:
+    """Move a recycle bin left in the event's (public) data dir by an earlier version
+    into the private bin, merging with any private one (nothing dropped). A file that
+    can't be read is moved into the private dir as deleted_courses.json.bad-<time>,
+    so it is no longer public but still kept. Call with course_lock held."""
+    old = data_dir / "deleted_courses.json"
     if not old.exists():
         return
-    legacy = load_json_file(old, [])      # a bad file raises: left in place, not lost
-    current = load_json_file(tracker.deleted_courses_file, [])
-    if not isinstance(legacy, list) or not isinstance(current, list):
-        raise ValueError("recycle bin is not a list")
-    seen = {json.dumps(e, sort_keys=True) for e in current}
-    merged = current + [e for e in legacy if json.dumps(e, sort_keys=True) not in seen]
-    save_deleted_courses(tracker, merged, keep_all=True)
+    bin_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        legacy = load_json_file(old, [])
+        current = load_json_file(bin_file, [])
+        if not isinstance(legacy, list) or not isinstance(current, list):
+            raise ValueError("recycle bin is not a list")
+    except Exception as e:
+        bad = bin_file.with_name(f"{bin_file.name}.bad-{int(time.time())}")
+        shutil.copyfile(old, bad)
+        os.chmod(bad, 0o600)
+        old.unlink()
+        log(f"[EVENT {eid}] Unreadable recycle bin moved out of the public data dir to {bad.name}: {e}")
+        return
+    merged, _ = normalize_bin(current + legacy)
+    merged.sort(key=lambda x: x.get('deleted', 0))
+    save_json_atomic(bin_file, merged, mode=0o600)
     old.unlink()
-    log(f"[EVENT {tracker.eid}] Recycle bin moved out of the public data dir ({len(legacy)} entries)")
+    log(f"[EVENT {eid}] Recycle bin moved out of the public data dir ({len(legacy)} entries)")
+
+
+def migrate_public_bin(tracker) -> None:
+    migrate_public_bin_files(tracker.data_dir, tracker.deleted_courses_file, tracker.eid)
 
 
 def load_deleted_courses(tracker) -> list[dict]:
     """The event's recycle bin, newest last; entries {id, name, deleted, course}.
-    Kept outside the public web tree. Call with course_lock held."""
-    import uuid
+    Kept outside the public web tree. Clean-ups are saved without trimming, so
+    reading never drops entries. Call with course_lock held."""
     migrate_public_bin(tracker)
-    deleted = load_json_file(tracker.deleted_courses_file, [])
-    if any(not e.get('id') for e in deleted):
-        for e in deleted:
-            e.setdefault('id', uuid.uuid4().hex)
-        save_deleted_courses(tracker, deleted)
+    deleted, changed = normalize_bin(load_json_file(tracker.deleted_courses_file, []))
+    if changed:
+        save_deleted_courses(tracker, deleted, keep_all=True)
     return deleted
 
 
@@ -1669,9 +1713,8 @@ class EventTracker:
         self.course_file = data_dir / "course.json"
         self.users_file = data_dir / "users.json"
         self.courses_file = data_dir / "courses.json"
-        # recycle bin for named courses: outside the public web tree, <static>/../private/<eid>/
-        # (resolved first, so a relative static dir such as "." still lands outside it)
-        self.deleted_courses_file = data_dir.resolve().parent.parent / "private" / str(eid) / "deleted_courses.json"
+        # recycle bin for named courses, outside the public web tree
+        self.deleted_courses_file = private_bin_path(data_dir, eid)
         self.log_dir = data_dir / "logs"
 
         # Ensure directories exist
@@ -6038,6 +6081,15 @@ def run_server(port: int, http_port: int | None = None,
     _gt06_user_defaults = load_gt06_user_defaults()
 
     log(f"[EVENTS] Loaded {len(_event_manager.events)} events\n")
+    # recycle bins left public by an earlier version move out of the web tree for every event
+    # now, not only when an event's tracker is first created
+    for _eid in list(_event_manager.events):
+        try:
+            _dd = _event_manager.get_event_data_dir(int(_eid))
+            with course_lock(int(_eid)):
+                migrate_public_bin_files(_dd, private_bin_path(_dd, int(_eid)), int(_eid))
+        except Exception as e:
+            log(f"[EVENT {_eid}] Recycle bin migration failed: {e}")
 
     # Update postfix virtual aliases from event admin_emails
     try:

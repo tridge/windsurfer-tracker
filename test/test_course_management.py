@@ -304,3 +304,36 @@ def test_public_bin_merged_into_private(http_client, server):
     assert sorted(e["name"] for e in body["deleted"]) == ["Legacy", "Private"]
     assert all(len(e["id"]) == 32 for e in body["deleted"])
     assert not public.exists()
+
+
+def test_bin_migration_edge_cases(http_client, server):
+    """Duplicate/blank ids become unique (restoring one removes only it), an
+    unreadable public bin is moved out of the web tree, and reading never trims."""
+    eid = create_event(http_client, name="Course Bin Edge", admin_password="edge1")
+    headers = {"X-Admin-Password": "edge1"}
+    course = {"start": {"lat": -36.1, "lon": 174.76}, "finish": {"lat": -36.1, "lon": 174.77}}
+    pub = server.data_dir / "html" / str(eid) / "deleted_courses.json"
+    priv = server.data_dir / "private" / str(eid) / "deleted_courses.json"
+    priv.parent.mkdir(parents=True, exist_ok=True)
+    same = "a" * 32
+    priv.write_text(json.dumps([{"id": same, "name": "P", "deleted": 2.0, "course": course}]))
+    legacy = [{"id": same, "name": "L", "deleted": 1.0, "course": course},
+              {"id": None, "name": "N", "deleted": 3.0, "course": course},
+              {"id": None, "name": "N", "deleted": 3.0, "course": course}]     # exact duplicate
+    legacy += [{"name": f"Old{i}", "deleted": 10.0 + i, "course": course} for i in range(250)]
+    pub.write_text(json.dumps(legacy))
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert status == 200 and not pub.exists()
+    ids = [e["id"] for e in body["deleted"]]
+    assert len(ids) == len(set(ids)) == 253          # P, L, one N, 250 Old: nothing trimmed
+    status, body = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert len(body["deleted"]) == 253               # a second read still trims nothing
+    p_id = next(e["id"] for e in body["deleted"] if e["name"] == "P")
+    status, body = http_client.delete(f"/api/event/{eid}/admin/deleted-courses/{p_id}", headers=headers)
+    assert body["removed"] == 1
+
+    # unreadable public bin: moved into the private dir, not left public
+    pub.write_text("{not json")
+    status, _ = http_client.get(f"/api/event/{eid}/admin/deleted-courses", headers=headers)
+    assert status == 200 and not pub.exists()
+    assert list(priv.parent.glob("deleted_courses.json.bad-*"))
