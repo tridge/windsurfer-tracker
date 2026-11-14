@@ -1395,7 +1395,7 @@
             <h4>Track Data</h4>
             <div class="admin-btn-group">
                 <button class="admin-action-btn danger" onclick="clearTracks()">
-                    🗑 Clear Today's Tracks
+                    📄 Start New Log
                 </button>
                 <button class="admin-action-btn danger" onclick="stopAllUsers()">
                     ⏹ All IDLE
@@ -2197,7 +2197,7 @@
         }
         
         async function clearTracks() {
-            if (!confirm('Clear all track data? Old tracks are available via review page.')) return;
+            if (!confirm('Start a new track log? Tracks are cleared from the map; earlier tracks stay available on the review page.')) return;
             
             try {
                 const response = await fetch(`${EVENT_API}/admin/clear-tracks`, {
@@ -2214,12 +2214,12 @@
                         }
                     }
                     trackLogLastModified = null;
-                    alert('Tracks cleared');
+                    alert('New log started');
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
                 }
             } catch (e) {
-                alert('Error clearing tracks: ' + e.message);
+                alert('Error starting new log: ' + e.message);
             }
         }
         

@@ -417,7 +417,7 @@ Overrides are stored per-event in `html/{eid}/users.json`.
 ### Per-Event Admin (requires X-Admin-Password header)
 
 - `GET /api/event/{eid}/auth/check` - Check admin authentication
-- `POST /api/event/{eid}/admin/clear-tracks` - Clear today's track logs
+- `POST /api/event/{eid}/admin/clear-tracks` - Start a new track log (today's log is rotated; earlier tracks stay available for review)
 - `POST /api/event/{eid}/admin/course` - Save course data
 - `DELETE /api/event/{eid}/admin/course` - Delete course
 - `GET /api/event/{eid}/users` - Get user overrides
