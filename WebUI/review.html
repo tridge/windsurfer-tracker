@@ -400,7 +400,7 @@
             document.head.appendChild(script);
         }
     </script>
-    <script src="js/utils.js?v=f1f51396"></script>
+    <script src="js/utils.js?v=1b6d5619"></script>
     <script src="js/modal.js?v=3260ad1a"></script>
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
@@ -1938,7 +1938,7 @@
                             ${points} pts | Max: ${maxSpeed.toFixed(1)} kts | Avg: ${avgSpeed.toFixed(1)} kts
                         </div>
                     </div>
-                    <input type="checkbox" class="follow-checkbox" data-user-id="${userId}" title="Follow this sailor during playback">
+                    <input type="checkbox" class="follow-checkbox" data-user-id="${escapeHtml(userId)}" title="Follow this sailor during playback">
                 `;
 
                 div.addEventListener('click', (e) => {
@@ -4927,7 +4927,7 @@
             document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
 
             selectedUsers.add(userId);
-            const element = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+            const element = document.querySelector(`.user-item[data-user-id="${CSS.escape(userId)}"]`);
             if (element) element.classList.add('selected');
 
             // Reset playback to show all of this user's data

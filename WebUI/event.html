@@ -1594,7 +1594,7 @@
         </div>
     </div>
 
-    <script src="js/utils.js?v=f1f51396"></script>
+    <script src="js/utils.js?v=1b6d5619"></script>
     <script src="js/modal.js?v=3260ad1a"></script>
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
@@ -2084,8 +2084,8 @@
             if (!currentEventInfo) return;
             document.getElementById('eventModalTitle').textContent = currentEventInfo.name;
             const info = await loadEventInfo();
-            // Convert newlines to <br> and make links clickable
-            const formatted = linkifyText(info.replace(/\n/g, '<br>'));
+            // Plain text (escaped) with links made clickable, then newlines as <br>
+            const formatted = linkifyText(info).replace(/\n/g, '<br>');
             document.getElementById('eventModalDescription').innerHTML = formatted;
             document.getElementById('eventModalOverlay').classList.add('visible');
             // Show edit button only in admin mode
@@ -4618,11 +4618,11 @@
             const userInfo = escInfo(sailor.info);
             const infoLine = userInfo ? `<br><span style="color:#2196f3;font-size:12px">${userInfo}</span>` : '';
 
-            const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser('${id}')">Edit</button>` : '';
-            const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser('${id}')">Stop</button>` : '';
-            const sleepBtn = (adminMode && currentEventInfo && currentEventInfo.enable_sleep) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();sleepUser('${id}')" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
-            const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser('${id}')">Start</button>` : '';
-            const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser('${id}')">Cancel Assist</button>` : '';
+            const editBtn = adminMode ? `<button class="popup-edit-btn" onclick="closeTrackerInfo();showEditUser(${jsArg(id)})">Edit</button>` : '';
+            const stopBtn = (adminMode && !sailor.stopped && !sailor.idle) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();stopUser(${jsArg(id)})"">Stop</button>` : '';
+            const sleepBtn = (adminMode && currentEventInfo && currentEventInfo.enable_sleep) ? `<button class="popup-stop-btn" onclick="closeTrackerInfo();sleepUser(${jsArg(id)})"" title="Overnight SLEEP (MODE5 deep sleep)">💤 SLEEP</button>` : '';
+            const startBtn = (adminMode && sailor.idle) ? `<button class="popup-edit-btn" style="background:#16a34a;color:white;" onclick="closeTrackerInfo();startUser(${jsArg(id)})"">Start</button>` : '';
+            const cancelAssistBtn = (adminMode && sailor.ast) ? `<button class="popup-cancel-assist-btn" onclick="closeTrackerInfo();cancelAssistUser(${jsArg(id)})"">Cancel Assist</button>` : '';
 
             const flg = sailor.flg || {};
             const powerSaveWarning = flg.ps ? '<br><span style="color:#f97316;font-weight:bold">⚡ Power Saver ON</span>' : '';
@@ -4848,7 +4848,7 @@
                     Version: <span style="color:#666;font-size:11px">${esc(versionStr)}</span>${osLine}${samplingStr}${sailor.nsats === 0 ? '' : powerSaveWarning + batOptWarning}
                     <div class="popup-checkbox">
                         <label>
-                            <input type="checkbox" ${trackChecked} onchange="toggleTrack('${id}', this.checked)">
+                            <input type="checkbox" ${trackChecked} onchange="toggleTrack(${jsArg(id)}, this.checked)">
                             Display Track${trackInfo}
                         </label>
                     </div>

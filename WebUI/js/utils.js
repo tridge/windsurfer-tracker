@@ -20,6 +20,7 @@ function escapeHtml(str) {
  */
 function linkifyText(text) {
     if (!text) return '';
-    const urlPattern = /(https?:\/\/[^\s<]+)/g;
-    return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    // the text is escaped first, so only the links themselves become HTML
+    const urlPattern = /(https?:\/\/[^\s<>"']+)/g;
+    return escapeHtml(text).replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }

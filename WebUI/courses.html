@@ -1027,6 +1027,7 @@
         let editTarget = null;          // {name, data, letter}: course the Edit dialog was opened on
         let importing = false;
         let renaming = false;           // a rename is in progress: no edits until it's done
+        const pendingCreates = new Map(); // name -> queued create-only save not yet answered
         let courseDataSig = null;       // courseSig() of the file courseData was loaded or last saved as
         let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
@@ -1563,8 +1564,19 @@
             const entry = { data: snap };
             pendingSaves.set(name, entry);
             allCourses[name] = snap;
-            const run = saveChain.then(() => postCourse(name, snap, live, query));
+            // a create still waiting on the server holds later saves of that name; if it was
+            // refused (the name exists), they would overwrite someone else's course, so drop them
+            const creating = pendingCreates.get(name);
+            const run = saveChain.then(async () => {
+                if (creating && !query.includes('create=1') && !(await creating).saved)
+                    return { saved: false, error: `Not saved: course "${name}" couldn't be created` };
+                return postCourse(name, snap, live, query);
+            });
             saveChain = run;
+            if (query.includes('create=1')) {
+                pendingCreates.set(name, run);
+                run.then(() => { if (pendingCreates.get(name) === run) pendingCreates.delete(name); });
+            }
             return run.then(r => {
                 if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
                 return r;
@@ -1808,7 +1820,7 @@
             if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 
             // the course letters refer to the file as it was when drawing started
-            if (courseSig(allCourses[courseName]) !== drawingBase) {
+            if (renaming || courseSig(allCourses[courseName]) !== drawingBase) {
                 cancelDrawing();
                 editorClosed();
                 alert(`Course "${courseName}" was changed while you were drawing; drawing not saved`);
@@ -1938,6 +1950,7 @@
 
         async function renameCourse() {
             if (importBusy()) return;
+            if (drawingMode) { alert('Finish or cancel the drawing first'); return; }
             // end anything in progress that would save under the old name
             closeTransform();
             closeMarkOrder();
