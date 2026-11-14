@@ -8,10 +8,9 @@
  * @returns {string} HTML-escaped string
  */
 function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (str === undefined || str === null || str === '') return '';
+    // quotes too, so the result is safe inside attribute values as well as text
+    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /**

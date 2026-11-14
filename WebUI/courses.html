@@ -1002,6 +1002,7 @@
         let longPressStartPos = null;
         let drawingCourseName = null;   // Name to save drawn course under
         let drawingSub = 'A';           // which course (A, B...) of that file is being drawn
+        let drawingNew = false;         // drawing a brand-new course (New), saved create-only
         const drawingMulti = () => CourseOrder.courseCount(allCourses[drawingCourseName]) > 1;
         const drawingColor = () => CourseOrder.COURSE_COLORS[drawingSub.charCodeAt(0) - 65] || '#ff6600';
 
@@ -1184,6 +1185,7 @@
             ev.target.value = '';
             if (!file) return;
             if (importing) { alert('An import is already running'); return; }
+            if (renaming) { alert('Please wait for the rename to finish'); return; }
             // no edits (or other imports) until this import is saved and reloaded
             importing = true;
             try {
@@ -1537,15 +1539,16 @@
         }
 
         // Save courseData back to the selected named course
-        async function saveSelectedCourse() {
+        // query: e.g. 'create=1' for a brand-new course (refused if the name appeared meanwhile)
+        async function saveSelectedCourse(query = '') {
             if (!selectedCourseName || !courseData) return false;
-            return saveCourse(selectedCourseName, courseData);
+            return saveCourse(selectedCourseName, courseData, query);
         }
 
         // Saves are queued so the server applies them in order, and until confirmed the
         // saved data stands in for the course in reloads (so a reselect shows it).
-        async function saveCourse(name, data) {
-            const r = await queueSave(name, data, true);
+        async function saveCourse(name, data, query = '') {
+            const r = await queueSave(name, data, true, query);
             if (r.error) alert(r.error);
             await reloadAndReselect();
             return r.saved;
@@ -1632,6 +1635,7 @@
             }
             drawingCourseName = selectedCourseName;
             drawingBase = courseSig(allCourses[drawingCourseName]);
+            drawingNew = false;
             drawingMode = true;
             drawingPoints = [];
             drawingMarkers = [];
@@ -1841,7 +1845,8 @@
             drawingPoints = [];
             editorClosed();
 
-            saveSelectedCourse();
+            saveSelectedCourse(drawingNew ? 'create=1' : '');
+            drawingNew = false;
         }
 
         function clearDrawingLabels() {
@@ -1881,6 +1886,7 @@
             drawingCourseName = name;
             drawingBase = courseSig(allCourses[name]);
             drawingSub = 'A';
+            drawingNew = true;
             selectedCourseName = name;
             // Enter drawing mode immediately
             drawingMode = true;
@@ -1932,7 +1938,11 @@
 
         async function renameCourse() {
             if (importBusy()) return;
+            // end anything in progress that would save under the old name
             closeTransform();
+            closeMarkOrder();
+            cancelMoveMark();
+            closeEditMark();
             if (!selectedCourseName || !courseData) return;
             const oldName = selectedCourseName;  // fixed now: the selection may change while we wait
             const newName = prompt(`Rename "${oldName}" to:`, oldName);

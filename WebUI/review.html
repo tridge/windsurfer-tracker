@@ -400,7 +400,7 @@
             document.head.appendChild(script);
         }
     </script>
-    <script src="js/utils.js?v=064f359a"></script>
+    <script src="js/utils.js?v=f1f51396"></script>
     <script src="js/modal.js?v=3260ad1a"></script>
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
@@ -1928,12 +1928,12 @@
                 const roleClass = role === 'support' ? 'role-support' : (role === 'spectator' ? 'role-spectator' : (role === 'buoy' ? 'role-buoy' : 'role-sailor'));
 
                 // Show original ID suffix for admins when displayid is set
-                const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+                const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${escapeHtml(getOriginalTrackerId(userId))}]</span>` : '';
 
                 div.innerHTML = `
                     <div class="user-color ${roleClass}" style="background:${color}"></div>
                     <div class="user-info">
-                        <div class="user-name">${getDisplayName(userId)}${idSuffix}</div>
+                        <div class="user-name">${escapeHtml(getDisplayName(userId))}${idSuffix}</div>
                         <div class="user-stats">
                             ${points} pts | Max: ${maxSpeed.toFixed(1)} kts | Avg: ${avgSpeed.toFixed(1)} kts
                         </div>
@@ -2486,8 +2486,8 @@
                     // Build popup content
                     const speedKnots = (closest.spd || 0).toFixed(1);
                     const time = formatTimeInTz(closest.ts);
-                    const popupIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
-                    let content = `<b>${getDisplayName(userId)}</b>${popupIdSuffix}<br>
+                    const popupIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${escapeHtml(getOriginalTrackerId(userId))}]</span>` : '';
+                    let content = `<b>${escapeHtml(getDisplayName(userId))}</b>${popupIdSuffix}<br>
                         Time: ${time}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${closest.hdg || 0}°<br>
@@ -2577,14 +2577,14 @@
                     }
 
                     const role = getUserRole(userId);
-                    const markerIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+                    const markerIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${escapeHtml(getOriginalTrackerId(userId))}]</span>` : '';
                     const marker = createRoleMarker(
                         L.latLng(last.lat, last.lon),
                         role,
                         userColor,
                         { radius: 8, fillOpacity: 1, weight: 2, color: '#fff' }
                     ).bindPopup(`
-                        <b>${getDisplayName(userId)}</b>${markerIdSuffix}<br>
+                        <b>${escapeHtml(getDisplayName(userId))}</b>${markerIdSuffix}<br>
                         Speed: ${speedKnots} kts<br>
                         Heading: ${last.hdg || 0}°<br>
                         Battery: ${last.bat || '?'}%${markerHacText}${markerHrText}${markerWarnings}
@@ -3993,9 +3993,9 @@
 
                 // Add tooltip with info
                 const time = formatTimeInTz(closest.ts);
-                const tooltipIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
+                const tooltipIdSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${escapeHtml(getOriginalTrackerId(userId))}]</span>` : '';
                 let tooltipHtml = `
-                    <b>${getDisplayName(userId)}</b>${tooltipIdSuffix}<br>
+                    <b>${escapeHtml(getDisplayName(userId))}</b>${tooltipIdSuffix}<br>
                     Time: ${time}<br>
                     Battery: ${closest.bat !== undefined ? closest.bat + '%' : 'N/A'}<br>
                     Speed: ${(closest.spd || 0).toFixed(1)} kts`;
@@ -5581,8 +5581,8 @@
 
         function createSailorPopupContent(userId, point) {
             const name = getDisplayName(userId);
-            const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${getOriginalTrackerId(userId)}]</span>` : '';
-            let html = `<b>${name}</b>${idSuffix}<br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
+            const idSuffix = (isAdmin && hasDisplayMapping(userId)) ? ` <span style="color:#999;font-size:10px">[${escapeHtml(getOriginalTrackerId(userId))}]</span>` : '';
+            let html = `<b>${escapeHtml(name)}</b>${idSuffix}<br>Speed: ${point.spd?.toFixed(1) || '?'} kn`;
             if (point.hac !== undefined) {
                 const hacColor = point.hac > 50 ? '#e74c3c' : point.hac > 20 ? '#f39c12' : '#2ecc71';
                 html += `<br>Accuracy: <span style="color:${hacColor}">${point.hac.toFixed(1)}m</span>`;
