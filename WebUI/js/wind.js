@@ -4,14 +4,18 @@
 // (the tooltip adds magnetic via wmmDeclination() from wmm.js when loaded).
 // Hidden if the event has no wind.json.
 //
-// WindDisplay.init(map, { url, storageKey, menuItem, menuCheck, position })
-//   menuItem:  id of a menu entry that toggles the display (shown once wind data exists)
-//   menuCheck: optional id of an element that shows ✓ when on
-//   position:  Leaflet control corner (default 'topleft', under the zoom buttons)
+// WindDisplay.init(map, { url, storageKey, menuItem, menuCheck, position, aboveScale, onUpdate })
+//   menuItem:   id of a menu entry that toggles the display (shown once wind data exists)
+//   menuCheck:  optional id of an element that shows ✓ when on
+//   position:   Leaflet control corner (default 'topleft', under the zoom buttons)
+//   aboveScale: id of a scale element at the bottom left: keep the box just above it
+//   onUpdate:   called after each poll/age refresh (e.g. to show controls that use current())
+// WindDisplay.current(): { dir, speed_kn, age } while the reading is under 10 minutes old, else null.
+//   dir is where the wind comes from, °T: the 10 minute average when the station gives one.
 const WindDisplay = (() => {
     const POLL_MS = 60000;
-    const STALE_S = 300, OLD_S = 900;
-    let control = null, el = null, opts = {}, data = null, shown = true, link = null;
+    const OLD_S = 600;            // older than this: shown as "N minutes old", faded, not used
+    let control = null, el = null, opts = {}, data = null, shown = true, link = null, map = null;
 
     const css = `
         .wind-box { background: rgba(255,255,255,0.92); border-radius: 6px; box-shadow: 0 1px 5px rgba(0,0,0,0.4);
@@ -57,7 +61,7 @@ const WindDisplay = (() => {
             `<div class="wind-sub">${compass} ${bearing}</div>` +
             (when === null ? `<div class="wind-age">time unknown</div>`
                 : !num(d.obs_ts) ? `<div class="wind-age">obs time unknown</div>`
-                : age > STALE_S ? `<div class="wind-age">${Math.round(age / 60)} min old</div>` : '');
+                : age > OLD_S ? `<div class="wind-age">${Math.round(age / 60)} minutes old</div>` : '');
         el.classList.toggle('wind-old', age > OLD_S);
         const lines = [];
         if (st.name) lines.push(String(st.name));
@@ -82,6 +86,34 @@ const WindDisplay = (() => {
         if (chk) chk.textContent = shown ? '✓' : '';
     }
 
+    function current() {
+        const d = data;
+        // only a reading whose observation time is known and recent
+        if (!d || !num(d.dir_deg) || !num(d.speed_kn) || !num(d.obs_ts)) return null;
+        const age = Math.max(0, Date.now() / 1000 - d.obs_ts);
+        if (!(age <= OLD_S)) return null;
+        return { dir: num(d.dir_avg10m_deg) ? d.dir_avg10m_deg : d.dir_deg, avg: num(d.dir_avg10m_deg),
+                 speed_kn: d.speed_kn, age };
+    }
+
+    // bottom left, just above the scale; moved right if it would reach up into the top-left controls
+    function placeAboveScale() {
+        const scale = document.getElementById(opts.aboveScale), wind = control && control.getContainer();
+        if (!scale || !wind || !map) return;
+        const mapRect = map.getContainer().getBoundingClientRect();
+        wind.style.marginBottom = `${Math.max(10, Math.round(mapRect.bottom - scale.getBoundingClientRect().top + 6))}px`;
+        wind.style.marginLeft = '';
+        const topLeft = map.getContainer().querySelector('.leaflet-top.leaflet-left');
+        if (!topLeft || wind.offsetParent === null) return;
+        const tl = topLeft.getBoundingClientRect(), w = wind.getBoundingClientRect();
+        if (tl.height > 0 && w.top < tl.bottom + 4) wind.style.marginLeft = `${Math.round(tl.right - mapRect.left + 10)}px`;
+    }
+
+    function updated() {
+        if (opts.aboveScale) placeAboveScale();
+        if (typeof opts.onUpdate === 'function') opts.onUpdate();
+    }
+
     async function poll() {
         try {
             const r = await fetch(opts.url, { cache: 'no-cache' });
@@ -92,9 +124,11 @@ const WindDisplay = (() => {
         }
         render();
         updateMenu();
+        updated();
     }
 
-    function init(map, o) {
+    function init(m, o) {
+        map = m;
         opts = o || {};
         addStyle();
         shown = localStorage.getItem(opts.storageKey) !== 'false';
@@ -108,9 +142,18 @@ const WindDisplay = (() => {
         });
         control = new Ctl({ position: opts.position || 'topleft' }).addTo(map);
         control.getContainer().style.display = 'none';
+        if (opts.aboveScale) {
+            if (opts.position === undefined) control.setPosition('bottomleft');
+            window.addEventListener('resize', placeAboveScale);
+            if (window.ResizeObserver) {
+                const ro = new ResizeObserver(() => placeAboveScale());
+                [document.getElementById(opts.aboveScale), control.getContainer(),
+                 map.getContainer().querySelector('.leaflet-top.leaflet-left')].forEach(e => e && ro.observe(e));
+            }
+        }
         poll();
         setInterval(poll, POLL_MS);
-        setInterval(render, 30000);  // keep the age current between polls
+        setInterval(() => { render(); updated(); }, 30000);  // keep the age current between polls
     }
 
     function toggle() {
@@ -118,7 +161,8 @@ const WindDisplay = (() => {
         if (opts.storageKey) localStorage.setItem(opts.storageKey, shown);
         render();
         updateMenu();
+        updated();
     }
 
-    return { init, toggle, isShown: () => shown, container: () => control && control.getContainer() };
+    return { init, toggle, current, isShown: () => shown, container: () => control && control.getContainer() };
 })();

@@ -703,6 +703,9 @@
                 <button class="tf-small-btn" onclick="tfNudge('tfRotate', 1)">+1°</button>
                 <button class="tf-small-btn" onclick="tfNudge('tfRotate', 5)">+5°</button>
             </div>
+            <div class="tf-row" id="tfWindRow" style="display:none">
+                <button class="tf-small-btn" id="tfWindBtn" onclick="tfAlignToWind()">🧭 Align to wind</button>
+            </div>
         </div>
         <div class="tf-section">
             <div class="tf-title">Translate (metres)</div>
@@ -821,7 +824,7 @@
     <script src="js/wmm.js?v=b995cae3"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
-    <script src="js/wind.js?v=9488dc92"></script>
+    <script src="js/wind.js?v=263077b8"></script>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const API_BASE = urlParams.get('api') || window.location.origin;
@@ -833,9 +836,10 @@
 
         // Map setup
         const map = L.map('map', { zoomControl: true });
-        // live wind under the zoom buttons, when the event has a wind.json
+        // live wind bottom left, just above the map scale, when the event has a wind.json
         WindDisplay.init(map, { url: `${EVENT_ID}/wind.json`, storageKey: `showWind_${EVENT_ID}`,
-                                menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind' });
+                                menuItem: 'menuLiveWind', menuCheck: 'chkLiveWind', aboveScale: 'customScale',
+                                onUpdate: () => tfUpdateWindBtn() });
 
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
@@ -2647,7 +2651,39 @@
             tfUpdateTargets();
             resetTransform();
             document.getElementById('transformPanel').classList.add('visible');
+            tfUpdateWindBtn();
             document.addEventListener('keydown', handleTransformKeydown);
+        }
+
+        // Align to wind: rotate the course being transformed so its first leg points into the wind
+        // (the wind's from-bearing). Only with a live reading under 10 minutes old.
+        function tfFirstLegBearing() {
+            const pts = courseSequence(CourseOrder.subCourse(tfResized(), tfSession.target)).map(e => e.pt);
+            return pts.length >= 2 ? bearingDeg(pts[0], pts[1]) : null;
+        }
+
+        function tfUpdateWindBtn() {
+            const row = document.getElementById('tfWindRow');
+            if (!row) return;
+            const w = typeof WindDisplay !== 'undefined' ? WindDisplay.current() : null;
+            const ok = !!(w && transformActive && tfSession && tfFirstLegBearing() !== null);
+            row.style.display = ok ? '' : 'none';
+            if (ok) {
+                const d = String(Math.round(w.dir) % 360).padStart(3, '0');
+                const btn = document.getElementById('tfWindBtn');
+                btn.textContent = `🧭 Align to wind (${d}°T)`;
+                btn.title = `First leg into the wind: from ${d}°T` + (w.avg ? ' (10 minute average)' : '') +
+                            `, ${w.speed_kn.toFixed(1)} kn, ${Math.round(w.age / 60)} min ago`;
+            }
+        }
+
+        function tfAlignToWind() {
+            const w = WindDisplay.current();
+            const leg = tfSession ? tfFirstLegBearing() : null;
+            if (!w || leg === null) { tfUpdateWindBtn(); return; }
+            const rot = Math.round(((w.dir - leg) % 360 + 540) % 360 - 180);   // -180..179
+            ['tfRotate', 'tfRotateSlider'].forEach(id => document.getElementById(id).value = rot);
+            updateTransformPreview();
         }
 
         function resetTransform() {
@@ -2704,6 +2740,7 @@
             if (grew || s.target.charCodeAt(0) - 65 >= n) s.target = CourseOrder.letterOf(n - 1);
             tfUpdateTargets();
             tfSetFields(s.params[s.target]);
+            tfUpdateWindBtn();
             updateTransformPreview();
         }
 
@@ -2713,6 +2750,7 @@
             s.params[s.target] = tfFields();
             s.target = document.getElementById('tfTarget').value;
             tfSetFields(s.params[s.target]);
+            tfUpdateWindBtn();
             updateTransformPreview();
         }
 

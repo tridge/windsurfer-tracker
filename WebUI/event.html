@@ -1616,7 +1616,7 @@
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/course-order.js?v=2ff464d3"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
-    <script src="js/wind.js?v=9488dc92"></script>
+    <script src="js/wind.js?v=263077b8"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
     <script>
         // Initialize map centered on Auckland
@@ -1987,27 +1987,7 @@
         // live wind under the zoom buttons, when the event has a wind.json
         // live wind: bottom left, just above the map scale
         WindDisplay.init(map, { url: `${DATA_BASE}wind.json`, storageKey: `showWind_${EVENT_ID}`, menuItem: 'menuLiveWind',
-                                menuCheck: 'chkLiveWind', position: 'bottomleft' });
-        // On a short screen the wind box would reach up into the zoom/finish buttons:
-        // then it moves right to sit beside them.
-        function placeWindAboveScale() {
-            const scale = document.getElementById('customScale'), wind = WindDisplay.container();
-            if (!scale || !wind) return;
-            const mapRect = map.getContainer().getBoundingClientRect();
-            wind.style.marginBottom = `${Math.max(10, Math.round(mapRect.bottom - scale.getBoundingClientRect().top + 6))}px`;
-            wind.style.marginLeft = '';
-            const topLeft = map.getContainer().querySelector('.leaflet-top.leaflet-left');
-            if (!topLeft || wind.offsetParent === null) return;
-            const tl = topLeft.getBoundingClientRect(), w = wind.getBoundingClientRect();
-            if (tl.height > 0 && w.top < tl.bottom + 4) wind.style.marginLeft = `${Math.round(tl.right - mapRect.left + 10)}px`;
-        }
-        placeWindAboveScale();
-        window.addEventListener('resize', placeWindAboveScale);
-        if (window.ResizeObserver) {
-            const ro = new ResizeObserver(() => placeWindAboveScale());
-            [document.getElementById('customScale'), WindDisplay.container(),
-             map.getContainer().querySelector('.leaflet-top.leaflet-left')].forEach(e => e && ro.observe(e));
-        }
+                                menuCheck: 'chkLiveWind', aboveScale: 'customScale' });
         // the finish recorder button stacks under the zoom buttons
         new (L.Control.extend({
             onAdd() {
