@@ -3067,6 +3067,10 @@
         }
 
         loadCourses(false);
+        // Restore admin mode after a refresh if this event's password was saved (same as event.html)
+        if (adminPassword) {
+            checkAdminAuth().then(ok => { if (ok && !adminMode) toggleAdminMode(); });
+        }
         // Poll for course changes every 20 seconds
         setInterval(() => loadCourses(true), 20000);
     </script>
