@@ -384,6 +384,9 @@ static int g_gps_poweroff_skip;                   /* SITL_GNSS_POWEROFF_SKIP: le
  * way to exercise the largest frame (and the batch-full path) — at 1 Hz phase alignment leaves it one
  * short. Real hardware is 1 Hz; this exists for tests. */
 static unsigned g_nmea_period_us = 1000 * 1000;
+/* SITL_NMEA_CFGNAV: model the receiver obeying $CFGNAV,<ms>,... and forgetting it at power-off (the
+ * real UC6228 comes back at 1 Hz), so the firmware's rate reassert is exercised. */
+static int g_nmea_cfgnav;
 /* SITL_NMEA_TIME_OFFSET_S: shift the UTC stamp the injector puts in GGA/RMC. Lets a test place the fix
  * stream just before midnight so a batch straddles 23:59:59 -> 00:00:00, which is otherwise only
  * reachable once a day. */
@@ -411,6 +414,7 @@ static int sitl_gnss_power(int on)
      * unnoticed in SITL for so long. Checked AFTER the injections so a simulated fault still wins. */
     if (g_gps_on == (on ? 1 : 0)) return -1;
     g_gps_on = on ? 1 : 0;
+    if (!on && g_nmea_cfgnav) g_nmea_period_us = 1000 * 1000;
     fprintf(stderr, "[SITL] GNSS power %s\n", on ? "on" : "off");
     return 0;
 }
@@ -521,6 +525,11 @@ static int sitl_at_send(const char *cmd, int len)
     if (strstr(cmd, "CSQ")) { urc_push("\r\n+CSQ: 22,0\r\n"); return len; }
     if (strstr(cmd, "CGNSSCMD=")) {                /* receiver command: log it, reply like the modem */
         fprintf(stderr, "[SITL] %.*s\n", len - 1, cmd);
+        const char *nav = strstr(cmd, "$CFGNAV,");
+        if (nav && g_nmea_cfgnav && g_gps_on) {
+            int ms = atoi(nav + 8);
+            if (ms >= 100 && ms <= 1000) g_nmea_period_us = (unsigned)ms * 1000;
+        }
         urc_push("\r\nOK\r\n");
         return len;
     }
@@ -1084,6 +1093,7 @@ int main(int argc, char **argv)
     if (getenv("SITL_GNSS_INITIAL_ON")) g_gps_on = 1;
     if ((e = getenv("SITL_BATT_MV"))) { int v = atoi(e); if (v > 0) g_batt_mv_sim = (unsigned)v; }
     if ((e = getenv("SITL_NMEA_TIME_OFFSET_S"))) g_nmea_time_offset_s = atol(e);
+    if (getenv("SITL_NMEA_CFGNAV")) g_nmea_cfgnav = 1;
     if ((e = getenv("SITL_NMEA_HZ"))) {
         int hz = atoi(e);
         if (hz > 0 && hz <= 20) g_nmea_period_us = (unsigned)(1000000 / hz);

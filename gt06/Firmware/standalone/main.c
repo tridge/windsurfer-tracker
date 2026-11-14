@@ -797,10 +797,13 @@ static void batch_fill(batchfix_t *b, const rmc_t *rc)
     b->hdg_deg = (unsigned short)(rc->hdg_deg > 359u ? 0u : rc->hdg_deg);
 }
 
-/* ---- GNSS rate test (diagnostic, RAM only) ----
- * SZCS#GNSSAVG=1: fold all valid fixes within one RMC second into one fix: mean position, vector mean
- * of velocity, mean sub-second. A 5 Hz receiver then still ships 1 Hz, with less noise. */
-static unsigned char g_gnss_avg;
+/* ---- GNSS rate + averaging (RAM only, defaults restored at boot) ----
+ * Default: receiver at 5 Hz (g_gnss_rate_ms) and SZCS#GNSSAVG=1 folds all valid fixes within one RMC
+ * second into one fix: mean position, vector mean of velocity, mean sub-second. Ships 1 Hz with much
+ * less speed noise (2026-11-14 walk test). SZCS#GNSSRATE=1000 / GNSSAVG=0 restore plain 1 Hz. */
+static unsigned char g_gnss_avg = 1;
+static unsigned short g_gnss_rate_ms = 200;
+static unsigned g_rate_ts, g_rate_tries;
 static const unsigned short g_sin1e4[91] = {0,175,349,523,698,872,1045,1219,1392,1564,1736,1908,2079,2250,2419,2588,2756,2924,3090,3256,3420,3584,3746,3907,4067,4226,4384,4540,4695,4848,5000,5150,5299,5446,5592,5736,5878,6018,6157,6293,6428,6561,6691,6820,6947,7071,7193,7314,7431,7547,7660,7771,7880,7986,8090,8192,8290,8387,8480,8572,8660,8746,8829,8910,8988,9063,9135,9205,9272,9336,9397,9455,9511,9563,9613,9659,9703,9744,9781,9816,9848,9877,9903,9925,9945,9962,9976,9986,9994,9998,10000};
 static int sin1e4(int d)                       /* sin(d degrees) * 10000, any d */
 {
@@ -2260,6 +2263,33 @@ static const char *skip_to_val(const char *cmd, const char *field)
 /* Handle a SZCS#/CXCS# server/APN config command: build the reply into `out`, return its length, or 0 if
  * `cmd` isn't one of these. Sets persist to cwprm.bin (+ backup) at the vendor offsets; SERVIP/SERVPORT
  * also request a live reconnect via g_srv_req. */
+/* Send "$<body>*hh" to the receiver. body: [A-Za-z0-9,.-] up to '#' or end. 0 = rejected. */
+static int gnss_cmd(const char *b)
+{
+    char at[96]; int n = put_str(at, "AT+CGNSSCMD=\"$");
+    unsigned x = 0;
+    for (int i = 0; b[i] && b[i] != '#'; i++) {
+        char c = b[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == ',' || c == '.' || c == '-') || n > 80)
+            return 0;
+        at[n++] = c; x ^= (unsigned char)c;
+    }
+    const char *hx = "0123456789ABCDEF";
+    at[n++] = '*'; at[n++] = hx[(x >> 4) & 15]; at[n++] = hx[x & 15];
+    at[n++] = '"'; at[n++] = '\r'; at[n] = 0;
+    g_gnsscmd_ts = wd_uptime(); g_gnsscmd_ts += !g_gnsscmd_ts;
+    at_cmd(at);
+    return 1;
+}
+static void gnss_set_rate(void)
+{
+    char b[32]; int n = put_str(b, "CFGNAV,");
+    n += put_uint(b + n, g_gnss_rate_ms); b[n++] = ',';
+    n += put_uint(b + n, g_gnss_rate_ms); n += put_str(b + n, ",3");
+    b[n] = 0;
+    gnss_cmd(b);
+}
 static int handle_config_cmd(const char *cmd, char *out)
 {
     static unsigned char cfg[0x800];
@@ -2575,22 +2605,17 @@ static int handle_config_cmd(const char *cmd, char *out)
         return n;
     }
     if (prefix_eq(cmd, "SZCS#GNSSCMD=")) {                   /* diagnostic: raw command to the receiver */
-        const char *b = cmd + 13;
-        char at[96]; int n = put_str(at, "AT+CGNSSCMD=\"$");
-        unsigned x = 0;
-        for (int i = 0; b[i] && b[i] != '#'; i++) {
-            char c = b[i];
-            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                  c == ',' || c == '.' || c == '-') || n > 80)
-                return put_str(out, "SET ERROR: GNSSCMD");
-            at[n++] = c; x ^= (unsigned char)c;
-        }
-        const char *hx = "0123456789ABCDEF";
-        at[n++] = '*'; at[n++] = hx[(x >> 4) & 15]; at[n++] = hx[x & 15];
-        at[n++] = '"'; at[n++] = '\r'; at[n] = 0;
-        g_gnsscmd_ts = wd_uptime(); g_gnsscmd_ts += !g_gnsscmd_ts;
-        at_cmd(at);
-        n = put_str(out, "SETOK:GNSSCMD rc"); n += put_sint(out + n, g_at_rc);
+        if (!gnss_cmd(cmd + 13)) return put_str(out, "SET ERROR: GNSSCMD");
+        int n = put_str(out, "SETOK:GNSSCMD rc"); n += put_sint(out + n, g_at_rc);
+        return n;
+    }
+    if (prefix_eq(cmd, "SZCS#GNSSRATE=")) {                  /* receiver fix interval, ms (200 = 5 Hz) */
+        const char *p = cmd + 14;
+        int v = at_num(&p);
+        if (v < 100 || v > 1000 || (*p && *p != '#')) return put_str(out, "SET ERROR: GNSSRATE");
+        g_gnss_rate_ms = (unsigned short)v; g_rate_tries = 0;
+        gnss_set_rate(); g_rate_ts = wd_uptime();
+        int n = put_str(out, "SETOK:GNSSRATE="); n += put_uint(out + n, g_gnss_rate_ms);
         return n;
     }
     if (prefix_eq(cmd, "CXCS#GNSSLOG")) {
@@ -2641,6 +2666,7 @@ static int handle_config_cmd(const char *cmd, char *out)
         n += put_str(out + n, " cy");  n += put_uint(out + n, g_gps_cycles_total);   /* silent-GPS cycles */
         n += put_str(out + n, " r10"); n += put_uint(out + n, g_rmc_10);     /* RMC per 10 s */
         n += put_str(out + n, " avg"); out[n++] = (char)('0' + g_gnss_avg);
+        n += put_str(out + n, " gr"); n += put_uint(out + n, g_gnss_rate_ms);
         return n;
         #undef PUT_SIGNED
     }
@@ -4337,6 +4363,17 @@ void standalone_main(u32 loader_resolver)
                 apply_gps(1);
                 g_gps_cycles++; g_gps_cycles_total++;
                 last_gps_power = now;
+            }
+        }
+        /* The receiver comes up at 1 Hz after each power-on (the rate isn't saved), so set it whenever the
+         * measured RMC rate is under 60% of the target. Back off if the receiver won't do it. */
+        if (!track) {
+            g_rate_tries = 0;                      /* restart the rate window: no stale r10 at power-on */
+            g_rmc_10 = 0; g_rmc_win_base = g_rmc_seen; g_rmc_win_ts = now;
+        } else if (g_gnss_rate_ms < 1000 && g_nmea_ts && (now - g_nmea_ts) < 3) {
+            if (g_rmc_10 * g_gnss_rate_ms >= 6000) g_rate_tries = 0;
+            else if (!g_rate_ts || (now - g_rate_ts) >= (g_rate_tries < 3 ? 30u : 600u)) {
+                gnss_set_rate(); g_rate_ts = now; g_rate_tries++;
             }
         }
         if (track && (now - last_gps_power) >= GPS_RETRY_SEC) {

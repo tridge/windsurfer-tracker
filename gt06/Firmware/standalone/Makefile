@@ -151,7 +151,7 @@ test-lte-sleep: sitl-asan            ## direct CPSI telemetry + GPS-safe disconn
 test-plmn-policy: sitl-asan          ## persistent carrier restrictions and offline recovery
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_plmn_policy.py
 
-test-gnss-avg: sitl-asan           ## 5 Hz receiver averaged to 1 Hz, GNSSCMD/GNSSLOG, RMC rate
+test-gnss-avg: sitl-asan           ## default 5 Hz averaged to 1 Hz, rate kept across GPS power cycles, GNSSRATE/GNSSCMD
 	SITL_BIN=$(SITL_TEST_BIN) python3 test_gnss_avg.py
 
 test-track-recovery: sitl-asan     ## tracking: early, repeated no-data radio cycles

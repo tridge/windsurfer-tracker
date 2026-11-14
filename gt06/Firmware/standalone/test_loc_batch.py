@@ -253,6 +253,7 @@ def test_full_batch_serialises_the_maximum_frame():
         conn, _ = listener.accept()
         drain(conn, 2)
         conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        conn.sendall(gt06_cmd("SZCS#GNSSAVG=0", 99))   # want every 5 Hz fix, not the 1 Hz mean
         drain(conn, 2)
         conn.sendall(gt06_cmd("SZCS#LOCBATCH=10", 2))
         got = drain(conn, 26)
@@ -358,6 +359,7 @@ def test_blind_replay_is_batched_and_fast():
         conn, _ = listener.accept()
         drain(conn, 2)
         conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        conn.sendall(gt06_cmd("SZCS#GNSSAVG=0", 99))   # want every 5 Hz fix, not the 1 Hz mean
         drain(conn, 2)
 
         proc.send_signal(signal.SIGUSR1)          # coverage DOWN — accumulate a backlog
@@ -477,6 +479,7 @@ def test_overflow_fixes_are_kept_and_ordered():
         conn, _ = listener.accept()
         drain(conn, 2)
         conn.sendall(gt06_cmd("TIMER,1,1#", 1))
+        conn.sendall(gt06_cmd("SZCS#GNSSAVG=0", 99))   # want every 5 Hz fix, not the 1 Hz mean
         got = drain(conn, 18)
         batches = [parse_batch(pl) for p, pl in frames(got) if p == BATCH_PROTO]
         assert batches, "no batches under overflow"
