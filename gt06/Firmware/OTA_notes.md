@@ -473,3 +473,18 @@ G378830, G378848 (W07 V6.68), G623050, G312359 (W07 V6.68), G370498, G388862, G5
 
 Lesson: tell operators before an OTA batch so units aren't powered down mid-update; send in small
 batches to units that are on and staying on.
+
+## 2026-11-14 — 5 Hz walk test; `firmware_latest_B53.bin` -> `WSTR-STD1_526aa7a`
+
+Walk test, four units carried together on 252801f (AndrewT1 G306088, AndrewT2 G341846, PaulG1
+G334023, PaulG2 G371116), two at 5 Hz and two at 1 Hz, roles swapped halfway. Speed noise (RMS
+deviation from a 9 s running median): 5 Hz averaged 0.31–0.34 kn in every leg; 1 Hz 0.30–0.70 kn,
+with the Andrew units the noisy ones (spikes over 1 kn up to ~9/min, vs ~1/min averaged). Taking
+one of the five fixes is noisier than native 1 Hz (the receiver smooths at 1 Hz), so 5 Hz only helps
+averaged; mean beats median and trimmed mean, and the firmware's vector mean matches the scalar mean.
+No measurable battery difference over ~2 h (all ~10–20 mV/h). Raw 5 Hz = 3× the packets.
+
+526aa7a makes 5 Hz averaged the default and reasserts `$CFGNAV,200,200,3` after every GPS power-on
+(the receiver comes back at 1 Hz). `SZCS#GNSSRATE=1000` / `SZCS#GNSSAVG=0` restore plain 1 Hz; GPSSTAT
+shows `r10` (RMC per 10 s, ~50 at 5 Hz), `avg` and `gr`. Image `W07_MG133_WSTR_B53_526aa7a.bin`
+(65536 B, sha256 728afb05a3e6d9db…), `firmware_latest_B53.bin` now points at it.
