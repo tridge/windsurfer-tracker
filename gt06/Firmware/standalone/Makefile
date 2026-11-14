@@ -184,7 +184,10 @@ test-offline: sitl-asan              ## idle offline: connect backoff, sleep, no
 test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never commit a bad image
 	$(call run_suite,test_fota_fail.py)
 
-TEST_SUITES := test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg
+test-leds: sitl-asan                 ## status LEDs: idle blue flash every 2 s, solid while tracking
+	$(call run_suite,test_leds.py)
+
+TEST_SUITES := test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg test-leds
 
 # all SITL regression tests, TEST_JOBS suites at a time (output grouped per suite).
 # make test TEST_JOBS=1 runs them serially; make test-<name> runs one.

@@ -1802,7 +1802,8 @@ static unsigned g_fix_ts;                        /* wd_uptime() of the last vali
 
 /* ---- item 14: status LEDs. Two app LEDs via the resident GPIO sAPI (RE re_leds.md): gpio ids 7 & 0x78,
  * gpio_set_level(id,1|0). Behaviour (user spec 2026-07-23):
- *   idle                                    -> both off
+ *   idle                                    -> both off, BLUE flashes briefly every 2 s (shows it's on;
+ *                                              ~5 s while offline, as the idle loop then runs slower)
  *   tracking + GPS lock + radio(data) OK    -> both solid on
  *   tracking but failing (stale/no fix OR not connected) -> BLUE solid, YELLOW flashing
  *   SOS active                              -> both flashing
@@ -1811,6 +1812,9 @@ static unsigned g_fix_ts;                        /* wd_uptime() of the last vali
 #define LED_ID_A 7u                              /* BLUE  (bench-confirmed) */
 #define LED_ID_B 0x78u                           /* YELLOW (bench-confirmed) */
 #define LED_FIX_STALE_SEC 6                      /* a valid fix older than this = GPS lock considered lost */
+#define LED_IDLE_FLASH_SEC 2                     /* idle: one short blue flash this often */
+#define LED_IDLE_FLASH_MS 60
+static unsigned g_led_flash_ts;
 static volatile unsigned char g_led_swap;        /* 0: A=blue,B=yellow ; 1: swapped (SZCS#LEDSWAP) */
 
 static void leds_init(void)                      /* call once after the resolver table is filled */
@@ -1837,7 +1841,14 @@ static void leds_update(int track, int connected, int sos, unsigned now)
     int gps_ok = g_have_fix && (now - g_fix_ts) <= LED_FIX_STALE_SEC;
     int blue, yellow;                            /* blue = "trying to track", yellow = health */
     if (sos)         { blue = blink; yellow = blink; }
-    else if (!track) { blue = 0;     yellow = 0; }
+    else if (!track) {
+        blue = 0; yellow = 0;
+        if ((now - g_led_flash_ts) >= LED_IDLE_FLASH_SEC) {   /* brief blink, then off again below */
+            g_led_flash_ts = now;
+            led_write(g_led_swap ? LED_ID_B : LED_ID_A, 1);
+            wd_sleep(LED_IDLE_FLASH_MS);
+        }
+    }
     else             { blue = 1;     yellow = (connected && gps_ok) ? 1 : blink; }
     led_write(g_led_swap ? LED_ID_B : LED_ID_A, blue);
     led_write(g_led_swap ? LED_ID_A : LED_ID_B, yellow);

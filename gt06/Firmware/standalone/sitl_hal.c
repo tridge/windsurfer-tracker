@@ -889,7 +889,9 @@ static int sitl_system_alarm_wake(unsigned long ms)
 static int sitl_gpio_config(unsigned id, unsigned mode) { (void)id; (void)mode; return 0; }
 static int sitl_gpio_set(unsigned id, unsigned level)
 {
-    fprintf(stderr, "[SITL] LED id=%u level=%u\n", id, level);
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    fprintf(stderr, "[SITL] LED id=%u level=%u t=%lld\n", id, level,
+            (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
     return 0;
 }
 
