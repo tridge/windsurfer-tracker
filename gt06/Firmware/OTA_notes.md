@@ -488,3 +488,9 @@ No measurable battery difference over ~2 h (all ~10–20 mV/h). Raw 5 Hz = 3× t
 (the receiver comes back at 1 Hz). `SZCS#GNSSRATE=1000` / `SZCS#GNSSAVG=0` restore plain 1 Hz; GPSSTAT
 shows `r10` (RMC per 10 s, ~50 at 5 Hz), `avg` and `gr`. Image `W07_MG133_WSTR_B53_526aa7a.bin`
 (65536 B, sha256 728afb05a3e6d9db…), `firmware_latest_B53.bin` now points at it.
+
+Fleet update the same evening: `FW_HASH=526aa7a ota.py` to all 19 online Parkdale units (8 vendor —
+G312359, G378830, G378848 W07 V6.68; G334189, G347082, G370498, G594715, G623050 NT19D V667 — plus
+706fefd/252801f units, including G370977 and G312334, which had finished the interrupted 706fefd
+update). All 19 back on 526aa7a and `auth` within ~5 min; idle GPSSTAT shows `avg1 gr200`.
+Not updated: G388862 (offline).
