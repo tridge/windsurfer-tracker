@@ -53,7 +53,9 @@ def main():
 
     idle = flashes(t0, t1)
     assert 4 <= len(idle) <= 7, f"{len(idle)} blue flashes in 12 s idle, expected ~6"
-    assert all(40 <= d <= 400 for _, d in idle), f"flash lengths (ms): {[round(d) for _, d in idle]}"
+    # 60 ms; host scheduling counts TIME_SCALE x in sim time, so allow more when accelerated
+    hi = 120 if TIME_SCALE == 1 else 400
+    assert all(40 <= d <= hi for _, d in idle), f"flash lengths (ms): {[round(d) for _, d in idle]}"
     gaps = [sim(idle[k][0] - idle[k - 1][0]) / 1000 for k in range(1, len(idle))]
     assert all(1.5 <= g <= 3.5 for g in gaps), f"flash spacing (s): {gaps}"
     assert not any(i == YELLOW and lv == 1 and t0 <= t < t1 for i, lv, t in ev), "yellow on while idle"

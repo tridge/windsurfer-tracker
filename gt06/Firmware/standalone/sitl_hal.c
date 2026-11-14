@@ -1126,7 +1126,9 @@ int main(int argc, char **argv)
         if (s >= 1.0 && s <= 100.0) g_tscale = s;
     }
     { struct timespec now; clock_gettime(CLOCK_REALTIME, &now);
-      g_tanchor = (e = getenv("SITL_TIME_ANCHOR")) ? atof(e) : (double)now.tv_sec; }
+      g_tanchor = (e = getenv("SITL_TIME_ANCHOR")) ? atof(e) : (double)now.tv_sec;
+      char a[32]; snprintf(a, sizeof a, "%.3f", g_tanchor);
+      setenv("SITL_TIME_ANCHOR", a, 1); }        /* a re-exec (reset) keeps the same sim clock */
     const char *fwd_arg = getenv("SITL_FWD");           /* preset FWDSERVER/FWDPORT (seeded after cwprm) */
 
     static const struct option lo[] = {
