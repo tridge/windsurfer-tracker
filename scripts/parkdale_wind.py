@@ -14,6 +14,7 @@ Examples:
   python3 scripts/parkdale_wind.py                      # Parkdale YC, print summary
   python3 scripts/parkdale_wind.py --json               # JSON to stdout
   python3 scripts/parkdale_wind.py --output wind.json   # atomic write (for cron)
+  python3 scripts/parkdale_wind.py -o wind.json --history wind_history.jsonl
   python3 scripts/parkdale_wind.py --url 'https://www.ecowitt.net/home/share?authorize=XXX&device_id=YYY'
 """
 
@@ -179,12 +180,40 @@ def atomic_write(path, obj):
         raise
 
 
+def last_history_ts(path):
+    """obs ts of the last line in the history file, or None."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 512))
+            lines = f.read().splitlines()
+        return json.loads(lines[-1]).get("t") if lines else None
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def append_history(path, w):
+    """Append a compact record: t=obs unix ts, s/g=speed/gust kn,
+    d=dir deg, a=10min avg dir deg. Skips repeats of the same observation."""
+    t = w["obs_ts"] or w["fetched"]
+    if last_history_ts(path) == t:
+        return
+    rec = {"t": t, "s": w["speed_kn"], "g": w["gust_kn"],
+           "d": w["dir_deg"], "a": w["dir_avg10m_deg"]}
+    for k in ("d", "a"):
+        if rec[k] is not None and rec[k] == int(rec[k]):
+            rec[k] = int(rec[k])
+    with open(path, "a") as f:
+        f.write(json.dumps(rec, separators=(",", ":")) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default=DEFAULT_URL, help="ecowitt.net share URL")
     ap.add_argument("--json", action="store_true", help="print JSON to stdout")
     ap.add_argument("--output", "-o", help="write JSON atomically to this file")
+    ap.add_argument("--history", help="append a compact record to this JSONL file")
     ap.add_argument("--timeout", type=float, default=20, help="HTTP timeout (s)")
     args = ap.parse_args()
 
@@ -198,9 +227,11 @@ def main():
 
     if args.output:
         atomic_write(args.output, w)
+    if args.history:
+        append_history(args.history, w)
     if args.json:
         print(json.dumps(w, indent=1))
-    elif not args.output:
+    elif not args.output and not args.history:
         print(f"{w['station']['name']}  obs {w['obs_local']} (age {w['age_s']}s)")
         print(f"  wind {w['speed_kn']} kn  gust {w['gust_kn']} kn  "
               f"from {w['dir_deg']:.0f}° {w['dir_compass']} "
