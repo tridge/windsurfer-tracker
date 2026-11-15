@@ -1,0 +1,36 @@
+{
+ "model": "course-time v2",
+ "vmg_slope": 0.165027,
+ "w0_kn": 2.0,
+ "beta_deg": 50.0,
+ "gamma_deg": 165.0,
+ "ratio_angles": [
+  50.0,
+  90,
+  135,
+  165.0
+ ],
+ "ratios": [
+  1.555724,
+  3.05671,
+  2.439731,
+  2.064004
+ ],
+ "turn_s": 2.0,
+ "gybe_s": 6.0,
+ "fitted_on": [
+  "parkdale_2026_11_15 Race 1",
+  "parkdale_2026_11_15 Race 2",
+  "parkdale_2026_11_15 Race 3"
+ ],
+ "sailor_factors": {
+  "AndrewT": 0.796,
+  "Darrell": 1.0,
+  "David Woods": 1.086,
+  "Frank": 0.934,
+  "Paul Grimshaw 307": 0.934,
+  "peter M": 1.144,
+  "scott L": 1.107
+ },
+ "rms_log": 0.1575
+}

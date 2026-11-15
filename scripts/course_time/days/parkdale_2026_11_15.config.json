@@ -1,0 +1,14 @@
+{
+ "event": 11, "date": "2026-11-15", "log_file": "2026_11_15.jsonl",
+ "races": {
+  "Race 1": {"gun": 1794708475.2, "pursuit": false},
+  "Race 2": {"gun": 1794712391.0, "pursuit": false},
+  "Race 3": {"gun": null, "pursuit": true}
+ },
+ "mark_trackers": {"1": "G378830", "2": "G378848", "3": "G375430"},
+ "finish_line": [{"tracker": "G312359"}, [-37.997684542438726, 145.0715231895447]],
+ "wind_offset_deg": 7,
+ "sailors": ["G623050", "G370977", "G306088", "G312334", "G594715", "AndrewT", "Frank"],
+ "exclude": {"Race 3": {"G312334": "1.8 km detour off course on lap 2", "AndrewT": "did not round M2/M3 (closest 42 m)"}},
+ "notes": "Parkdale. Guns estimated from earliest clean start-boat-line crossings (no official record). Finish line as sailed: finish flag tracker to the original course finish point. Wind offset from tack bisectors (offset command gives +2..+13 per beat)."
+}
