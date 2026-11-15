@@ -732,6 +732,8 @@ const CourseOrder = (() => {
         checkImportedSub(j, '');
         if (j.info !== undefined && (typeof j.info !== 'string' || j.info.length > MAX_INFO))
             throw new Error('invalid race information');
+        if (j.wind_from !== undefined && !(typeof j.wind_from === 'number' && j.wind_from >= 0 && j.wind_from <= 360))
+            throw new Error('invalid wind direction');
         if (j.extraCourses !== undefined) {
             if (!Array.isArray(j.extraCourses) || j.extraCourses.length > MAX_COURSES - 1)
                 throw new Error('invalid extra courses');
