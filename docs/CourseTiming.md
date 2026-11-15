@@ -4,15 +4,16 @@ How long a course will take, for the median sailor, given the wind speed and the
 course geometry (leg lengths, leg directions and mark order). The model is fitted
 to tracker data from real races and refitted each time we race with trackers.
 
-Scripts: `scripts/course_time/`. Current parameters: `scripts/course_time/params.json`.
+Page library: `WebUI/js/course-time.js` (used by `courses.html`). Fitting scripts:
+`scripts/course_time/`. Current parameters: `scripts/course_time/params.json`.
 
 ## Why
 
-The courses page (`formatCourseTime` in `WebUI/courses.html`) uses one constant
-speed per wind band (course length / (upwind/5) m/min). It ignores leg direction,
-so a beat counts the same as a reach, and it is far too fast in light wind. On
-the Parkdale races of 2026-11-15 it was 32% short in 9 kn, 20% short in 14 kn
-and about right in 21 kn.
+The courses page used to estimate race time from course length alone, at one
+speed per wind strength. It ignored leg direction, so a beat counted the same as
+a reach, and it was far too fast in light wind: on the Parkdale races of
+2026-11-15 it was 32% short in 9 kn, 20% short in 14 kn and about right in 21 kn.
+That is the "old page" column below.
 
 ## The model
 
@@ -70,22 +71,25 @@ the 12–23° off-wind beats actually sailed), so it reads a few percent long he
 
 Sailors spread from 0.80 to 1.14 of the median sailor's speed.
 
-## Using it in the courses page
+## In the courses page
 
-`scripts/course_time/course_time.js` is a dependency-free implementation that
-matches the Python exactly (`test_js_parity.py`). The page should:
+`WebUI/js/course-time.js` (`CourseTime`) implements the model with the fitted
+parameters embedded in `PARAMS`; `test_js_parity.py` checks it matches the Python
+and `params.json` exactly. `courses.html` shows `CourseTime.estimate(course, kn)`
+for the wind slider speed, in the course list and the info box (per sub-course
+for multi-course files).
 
-- Build legs `[{dist, bearing}]` from `CourseOrder.sequence(course)` (the same
-  points `calculateCourseLength` uses), per sub-course for multi-course files.
-- **Wind direction: assume the first leg is a beat** (wind from the first leg's
-  bearing) unless a direction is given. This is right for windward/leeward,
-  triangle and trapezoid courses. It is wrong for slalom courses, which start on
-  a reach; for those, use the live wind direction or ask for one.
-- Wind speed: the selected band's middle (3–7 → 5, 8–12 → 10, 13–17 → 15,
-  18–25 → 21.5 kn), or the live reading.
-- Embed the numbers from `params.json`; update them when the model is refitted.
-- Optionally flag legs at untested angles (TWA 50–80°, > 170°) and winds below
-  7 or above 22 kn.
+- Legs come from `CourseOrder.sequence(course)`, the same points the course
+  length is measured on.
+- **Wind direction: the first leg is assumed to be a beat** (wind from the first
+  leg's bearing). Right for windward/leeward, triangle and trapezoid courses;
+  wrong for slalom courses, which start on a reach. `estimate(course, kn,
+  windFrom)` takes an explicit direction for when the page has one (e.g. live
+  wind, corrected by the station offset).
+- After a refit, copy the numbers from `params.json` into `PARAMS` and run
+  `test_js_parity.py`.
+- Possible additions: flag legs at untested angles (TWA 50–80°, > 170°) and winds
+  below 7 or above 22 kn.
 
 Example predictions, first leg into the wind (minutes):
 
@@ -167,6 +171,7 @@ From our own checks and an independent Codex review:
 
    ```
    scripts/course_time/course_time_model.py fit DAY1 DAY2 ... -o scripts/course_time/params.json
+   # copy the params.json numbers into PARAMS in WebUI/js/course-time.js, then
    scripts/course_time/test_js_parity.py scripts/course_time/params.json DAYDIR/courses.json
    scripts/course_time/course_time_model.py predict --params scripts/course_time/params.json --courses DAYDIR/courses.json
    ```
