@@ -1541,9 +1541,24 @@
             displayCourse(course);
 
             updateInfoBox(name, course);
+            // a course picked by the user goes in the URL (shareable); an automatic choice (the newest)
+            // leaves a plain URL, so a bookmark keeps opening today's course. A URL naming some other
+            // course than the one shown (deleted, or not found) is cleared.
+            const inUrl = new URLSearchParams(location.search).get('course');
+            if (fromUser) setCourseUrl(name);
+            else if (inUrl !== null && inUrl !== name) setCourseUrl(null);
             // an edit in progress belongs to the course it started on: leave it if another is selected
             if (raceInfoTarget && raceInfoTarget.name !== name) raceInfoTarget = null;
             refreshRaceInfo();
+        }
+
+        // The page URL names the selected course (?course=), so it can be shared as a link to it
+        function setCourseUrl(name) {
+            try {
+                const u = new URL(location.href);
+                if (name) u.searchParams.set('course', name); else u.searchParams.delete('course');
+                if (u.href !== location.href) history.replaceState(null, '', u.href);
+            } catch (e) { /* e.g. a file: URL: nothing to update */ }
         }
 
         // e.g. "Order: S-1-2-F", '' if no custom order
@@ -3233,6 +3248,7 @@
                     document.getElementById('courseInfoBox').style.display = 'none';
                     clearCourseDisplay();
                     selectedCourseName = null;
+                    setCourseUrl(null);
                     refreshRaceInfo();
                     return;
                 }
@@ -3274,8 +3290,11 @@
                     return;
                 }
 
-                // Preserve previous selection if it still exists, otherwise auto-select first
-                const selectName = selectedCourseName && allCourses[selectedCourseName] ? selectedCourseName : names[0];
+                // Preserve previous selection if it still exists; on first load a shared ?course= link
+                // picks the course; otherwise the most recently edited (first)
+                const linked = !isRefresh && !selectedCourseName ? urlParams.get('course') : null;
+                const selectName = selectedCourseName && allCourses[selectedCourseName] ? selectedCourseName
+                    : linked && Object.prototype.hasOwnProperty.call(allCourses, linked) ? linked : names[0];
                 // On a background refresh where the user has panned/zoomed, don't yank the view back
                 const suppressFit = isRefresh && userInteracted;
                 const prevFitBounds = map.fitBounds;
