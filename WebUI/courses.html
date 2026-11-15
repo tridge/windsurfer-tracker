@@ -458,6 +458,12 @@
                                    font: 14px/1.4 system-ui, sans-serif; color: black; }
         .raceinfo-edit-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
         .menu-link { color: inherit; text-decoration: none; }
+        .wind-slider-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px 42px; }
+        .wind-slider-row input[type=range] { flex: 1; min-width: 110px; accent-color: #1976d2; }
+        .wind-slider-row.off input[type=range] { opacity: 0.45; }
+        .wind-slider-value { min-width: 42px; text-align: right; font-size: 13px; font-weight: 600; color: #1976d2; }
+        .wind-slider-row.off .wind-slider-value { color: #888; font-weight: 400; }
+        .wind-off-btn { border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; font-size: 12px; padding: 2px 7px; cursor: pointer; }
         .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .custom-scale {
@@ -779,11 +785,13 @@
             <span>Wind ▼</span>
         </div>
         <div class="menu-submenu" id="windSubmenu">
-            <div class="menu-submenu-item selected" data-wind="" onclick="setWindRange('')">None</div>
-            <div class="menu-submenu-item" data-wind="3-7" onclick="setWindRange('3-7')">3 to 7 knots</div>
-            <div class="menu-submenu-item" data-wind="8-12" onclick="setWindRange('8-12')">8 to 12 knots</div>
-            <div class="menu-submenu-item" data-wind="13-17" onclick="setWindRange('13-17')">13 to 17 knots</div>
-            <div class="menu-submenu-item" data-wind="18-25" onclick="setWindRange('18-25')">18 to 25 knots</div>
+            <div class="wind-slider-row">
+                <input type="range" id="windSlider" min="1" max="25" step="1" value="12"
+                       aria-label="Wind speed for race time estimates"
+                       oninput="setWindKnots(+this.value, true)" onchange="setWindKnots(+this.value)">
+                <span id="windSliderValue" class="wind-slider-value">Off</span>
+                <button id="windOffBtn" class="wind-off-btn" onclick="setWindKnots(null)">Off</button>
+            </div>
         </div>
         <div class="menu-item" onclick="toggleFeaturesSubmenu()">
             <span>🎛️</span>
@@ -982,24 +990,27 @@
         }
         applyInfoBox(localStorage.getItem('courseInfoBox') !== '0');
 
-        function setWindRange(key) {
-            selectedWind = key || null;
-            if (key) {
-                localStorage.setItem('windRange', key);
-            } else {
-                localStorage.removeItem('windRange');
-            }
+        // Wind speed for the race time estimates: 1-25 kn from the slider, or null (off).
+        // live: while dragging, redraw at most every 150 ms; the menu stays open.
+        let windRedrawTimer = null;
+        function setWindKnots(kn, live = false) {
+            selectedWind = kn === null ? null : Math.max(1, Math.min(25, Math.round(kn)));
+            if (selectedWind === null) localStorage.removeItem('windKnots');
+            else localStorage.setItem('windKnots', String(selectedWind));
             updateWindSubmenuSelection();
-            document.getElementById('windSubmenu').classList.remove('visible');
-            document.getElementById('menuPanel').classList.remove('visible');
-            lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
-            loadCourses(true);  // display-only toggle: preserve the user's pan/zoom
+            clearTimeout(windRedrawTimer);
+            windRedrawTimer = setTimeout(() => {
+                lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
+                loadCourses(true);  // display-only toggle: preserve the user's pan/zoom
+            }, live ? 150 : 0);
         }
 
         function updateWindSubmenuSelection() {
-            document.querySelectorAll('#windSubmenu .menu-submenu-item').forEach(item => {
-                item.classList.toggle('selected', item.dataset.wind === (selectedWind || ''));
-            });
+            const off = selectedWind === null;
+            if (!off) document.getElementById('windSlider').value = selectedWind;
+            document.getElementById('windSliderValue').textContent = off ? 'Off' : `${selectedWind} kn`;
+            document.querySelector('.wind-slider-row').classList.toggle('off', off);
+            document.getElementById('windOffBtn').style.display = off ? 'none' : '';
         }
 
         function refreshCourses() {
@@ -1181,16 +1192,28 @@
             return `${km.toFixed(decimals)} km / ${(km / 1.852).toFixed(decimals)} nm`;
         }
 
-        // Race-length benchmark: upwind leg per wind bracket of a triangle+windward-return
+        // Race-length benchmark: upwind leg for a wind speed, for a triangle+windward-return
         // course; full course ≈ 5x upwind, calibrated to a ~25 minute race.
         // => pace (m/min) = 5*upwind/25 = upwind/5
-        const WIND_RANGES = [
-            { key: '3-7',   upwind: 500 },
-            { key: '8-12',  upwind: 650 },
-            { key: '13-17', upwind: 800 },
-            { key: '18-25', upwind: 1000 },
-        ];
-        let selectedWind = localStorage.getItem('windRange') || null;  // remembered like mapType
+        // Points are the old wind brackets' midpoints (3-7, 8-12, 13-17, 18-25 kn), joined by straight
+        // lines and extended past the ends, never below 300 m.
+        const WIND_UPWIND = [[5, 500], [10, 650], [15, 800], [21.5, 1000]];
+        function upwindFor(kn) {
+            const P = WIND_UPWIND;
+            let i = 1;
+            while (i < P.length - 1 && kn > P[i][0]) i++;
+            const [k0, u0] = P[i - 1], [k1, u1] = P[i];
+            return Math.max(300, u0 + (u1 - u0) * (kn - k0) / (k1 - k0));
+        }
+        // remembered like mapType; an old bracket choice becomes its midpoint
+        let selectedWind = (() => {
+            const v = parseInt(localStorage.getItem('windKnots'), 10);
+            if (v >= 1 && v <= 25) return v;
+            const old = { '3-7': 5, '8-12': 10, '13-17': 15, '18-25': 21 }[localStorage.getItem('windRange')];
+            localStorage.removeItem('windRange');
+            if (old) { localStorage.setItem('windKnots', String(old)); return old; }
+            return null;
+        })();
         updateWindSubmenuSelection();  // reflect the remembered selection on load
 
         // Leg label content (bearings / distances), remembered like the wind range
@@ -1349,15 +1372,13 @@
             alert(msg);
         }
 
-        // Approx race time for the selected wind, e.g. "Wind 3-7kn, 1hr 25min" ('' if none)
+        // Approx race time for the selected wind, e.g. "Wind 12kn, 1hr 25min" ('' if none)
         function formatCourseTime(km) {
-            if (!selectedWind) return '';
-            const range = WIND_RANGES.find(r => r.key === selectedWind);
-            if (!range || !(km > 0)) return '';
-            const minutes = Math.round(km * 1000 / (range.upwind / 5));
+            if (selectedWind === null || !(km > 0)) return '';
+            const minutes = Math.round(km * 1000 / (upwindFor(selectedWind) / 5));
             const h = Math.floor(minutes / 60), m = minutes % 60;
             const dur = h > 0 ? `${h}hr ${m}min` : `${m}min`;
-            return `Wind ${range.key}kn, ${dur}`;
+            return `Wind ${selectedWind}kn, ${dur}`;
         }
 
         const darkenColor = CourseOrder.darkenColor;
