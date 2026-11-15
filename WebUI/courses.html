@@ -458,8 +458,9 @@
                                    font: 14px/1.4 system-ui, sans-serif; color: black; }
         .raceinfo-edit-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
         .menu-link { color: inherit; text-decoration: none; }
-        .info-edit-btn { background: none; border: 1px solid rgba(255,255,255,0.35); color: inherit; border-radius: 4px;
-                         font-size: 12px; padding: 0 5px; margin-left: 4px; cursor: pointer; }
+        .wind-dir-row { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px 42px; font-size: 13px; flex-wrap: wrap; }
+        .wind-dir-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+        .wind-dir-row input[type=number] { width: 58px; padding: 2px 4px; font-size: 13px; }
         .wind-slider-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px 42px; }
         .wind-slider-row input[type=range] { flex: 1; min-width: 110px; accent-color: #1976d2; }
         .wind-slider-row.off input[type=range] { opacity: 0.45; }
@@ -577,9 +578,6 @@
         <div class="info-detail" id="infoMarks"></div>
         <div class="info-detail" id="infoLength"></div>
         <div class="info-detail" id="infoTime" style="display:none"></div>
-        <div class="info-detail" id="infoWindFrom"><span id="infoWindFromText"></span>
-            <button class="info-edit-btn admin-only" id="infoWindFromEdit" style="display:none" onclick="editWindFrom()"
-                    title="Wind direction for the race time estimate">✎</button></div>
         <div class="info-detail" id="infoOrder" style="display:none"></div>
     </div>
 
@@ -797,6 +795,12 @@
                 <span id="windSliderValue" class="wind-slider-value">Off</span>
                 <button id="windOffBtn" class="wind-off-btn" onclick="setWindKnots(null)">Off</button>
             </div>
+            <div class="wind-dir-row">
+                <label><input type="checkbox" id="windFirstLeg" checked onchange="windFirstLegChanged()"> First leg upwind</label>
+                <span id="windDirWrap" style="display:none">from
+                    <input type="number" id="windDirInput" min="0" max="359" step="1" inputmode="numeric"
+                           aria-label="Wind direction, degrees true the wind blows from" oninput="windDirInputChanged()"> °T</span>
+            </div>
         </div>
         <div class="menu-item" onclick="toggleFeaturesSubmenu()">
             <span>🎛️</span>
@@ -856,7 +860,7 @@
 
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
-    <script src="js/course-order.js?v=678d1a08"></script>
+    <script src="js/course-order.js?v=f8bb5e9b"></script>
     <script src="js/course-time.js?v=d7202d30"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/wind.js?v=e3592b4f"></script>
@@ -1009,6 +1013,36 @@
                 lastCoursesJSON = null;  // Force rebuild (also re-runs selectCourse -> info box)
                 loadCourses(true);  // display-only toggle: preserve the user's pan/zoom
             }, live ? 150 : 0);
+        }
+
+        // Wind direction for the estimates: null = the first leg is upwind (the usual course), else
+        // degrees true the wind blows FROM, for courses that don't start upwind (e.g. marathons)
+        function setWindFrom(deg) {
+            selectedWindFrom = deg === null ? null : ((Math.round(deg) % 360) + 360) % 360;
+            if (selectedWindFrom === null) localStorage.removeItem('windFrom');
+            else localStorage.setItem('windFrom', String(selectedWindFrom));
+            clearTimeout(windRedrawTimer);
+            windRedrawTimer = setTimeout(() => { lastCoursesJSON = null; loadCourses(true); }, 150);
+        }
+
+        function windFirstLegChanged() {
+            const first = document.getElementById('windFirstLeg').checked;
+            document.getElementById('windDirWrap').style.display = first ? 'none' : '';
+            if (first) { setWindFrom(null); return; }
+            const inp = document.getElementById('windDirInput');
+            if (inp.value === '') {          // suggest the live station wind, if there is one
+                const live = typeof WindDisplay !== 'undefined' && WindDisplay.current();
+                if (live) inp.value = Math.round(live.dir) % 360;
+            }
+            inp.focus();
+            windDirInputChanged();
+        }
+
+        function windDirInputChanged() {
+            const v = document.getElementById('windDirInput').value.trim();
+            const n = Number(v);
+            // until there's a valid bearing, keep the first-leg assumption
+            setWindFrom(v !== '' && isFinite(n) && n >= 0 && n <= 360 ? n : null);
         }
 
         function updateWindSubmenuSelection() {
@@ -1207,6 +1241,15 @@
             if (old) { localStorage.setItem('windKnots', String(old)); return old; }
             return null;
         })();
+        let selectedWindFrom = (() => {
+            const v = Number(localStorage.getItem('windFrom'));
+            return localStorage.getItem('windFrom') !== null && isFinite(v) && v >= 0 && v < 360 ? v : null;
+        })();
+        if (selectedWindFrom !== null) {
+            document.getElementById('windFirstLeg').checked = false;
+            document.getElementById('windDirWrap').style.display = '';
+            document.getElementById('windDirInput').value = selectedWindFrom;
+        }
         updateWindSubmenuSelection();  // reflect the remembered selection on load
 
         // Leg label content (bearings / distances), remembered like the wind range
@@ -1367,15 +1410,16 @@
 
         // Approx median-sailor race time for the selected wind, wind assumed down the first
         // leg (CourseTime, js/course-time.js), e.g. "Wind 12kn, 1hr 25min" ('' if none)
-        // windFrom: the course file's wind_from (°T) if set, else the wind blows down the first leg
-        function formatCourseTime(course, windFrom = courseWindFrom(course)) {
+        // wind from selectedWindFrom (°T) if set in the Wind menu, else down the first leg
+        function formatCourseTime(course) {
             if (selectedWind === null) return '';
-            const secs = CourseTime.estimate(course, selectedWind, windFrom);
+            const secs = CourseTime.estimate(course, selectedWind, selectedWindFrom);
             if (!(secs > 0) || !isFinite(secs)) return '';
             const minutes = Math.round(secs / 60);
             const h = Math.floor(minutes / 60), m = minutes % 60;
             const dur = h > 0 ? `${h}hr ${m}min` : `${m}min`;
-            return `Wind ${selectedWind}kn, ${dur}`;
+            const from = selectedWindFrom === null ? '' : ` from ${String(selectedWindFrom).padStart(3, '0')}°T`;
+            return `Wind ${selectedWind}kn${from}, ${dur}`;
         }
 
         const darkenColor = CourseOrder.darkenColor;
@@ -1610,47 +1654,10 @@
             } else {
                 show('infoMarks', `${subs.length} courses`);
                 show('infoLength', subs.map(s => `${s.letter}: ${marks(s.course)}, ${formatCourseLength(calculateCourseLength(s.course), 2)}`).join('\n'));
-                show('infoTime', subs.map(s => { const t = formatCourseTime(s.course, courseWindFrom(course)); return t ? `${s.letter}: ${t}` : ''; }).filter(x => x).join('\n'));
+                show('infoTime', subs.map(s => { const t = formatCourseTime(s.course); return t ? `${s.letter}: ${t}` : ''; }).filter(x => x).join('\n'));
                 show('infoOrder', subs.map(s => { const o = orderSummary(s.course); return o ? `${s.letter}: ${o}` : ''; }).filter(x => x).join('\n'));
             }
-            // wind direction the estimate assumes: shown when set; admins can set or clear it
-            const wf = courseWindFrom(course);
-            document.getElementById('infoWindFromText').textContent =
-                wf !== null ? `Wind from ${String(Math.round(wf) % 360).padStart(3, '0')}°T` : (adminMode ? 'Wind: first leg upwind' : '');
-            document.getElementById('infoWindFrom').style.display = wf !== null || adminMode ? '' : 'none';
             document.getElementById('courseInfoBox').style.display = 'block';
-        }
-
-        // A course file's wind direction for the time estimates (°T, wind from), or null: the
-        // first leg is then assumed to be upwind. For courses like marathons that don't start
-        // with a beat. One value per file: all its courses (A/B/C) sail in the same wind.
-        function courseWindFrom(course) {
-            const v = course && course.wind_from;
-            return typeof v === 'number' && isFinite(v) ? ((v % 360) + 360) % 360 : null;
-        }
-
-        async function editWindFrom() {
-            if (!adminMode || !selectedCourseName || !courseData || importBusy()) return;
-            const name = selectedCourseName, before = courseData.wind_from;
-            const cur = courseWindFrom(courseData);
-            const live = typeof WindDisplay !== 'undefined' && WindDisplay.current();
-            const suggest = cur !== null ? Math.round(cur) : live ? Math.round(live.dir) % 360 : '';
-            const ans = prompt(`Wind direction for "${name}" race time estimates: degrees true the wind blows FROM ` +
-                               '(0-359). Leave empty for the usual assumption that the first leg is upwind.', suggest);
-            if (ans === null) return;
-            const txt = ans.trim();
-            let val = null;
-            if (txt !== '') {
-                const n = Number(txt.replace(/°|T$/gi, ''));
-                if (!isFinite(n) || n < 0 || n > 360) { alert('Enter a bearing from 0 to 359, or leave it empty'); return; }
-                val = Math.round(n) % 360;
-            }
-            // only if it's still the same course and nobody changed the setting meanwhile
-            if (name !== selectedCourseName || !courseData) { alert(`Course "${name}" is no longer selected; not saved`); return; }
-            if (courseData.wind_from !== before) { alert(`Someone else changed the wind direction for "${name}"; not saved`); return; }
-            if (val === null) delete courseData.wind_from; else courseData.wind_from = val;
-            updateInfoBox(name, courseData);
-            await saveSelectedCourse();
         }
 
         function onCourseDropdownChange() {
@@ -1691,7 +1698,6 @@
                 raceInfoTarget = null;
                 placeTopLeftControls();
                 refreshRaceInfo();
-                if (courseData && selectedCourseName) updateInfoBox(selectedCourseName, courseData);
                 // Refresh display to remove edit buttons
                 if (courseData) displayCourse(courseData);
             } else {
@@ -1712,7 +1718,6 @@
                     document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
                     placeTopLeftControls();
                     refreshRaceInfo();
-                    if (courseData && selectedCourseName) updateInfoBox(selectedCourseName, courseData);
                     // Refresh display to show edit buttons
                     if (courseData) displayCourse(courseData);
                 } else {
