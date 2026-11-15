@@ -11,6 +11,7 @@
 //   cursor: optional () => unix s or null, drawn as a marker
 // WindGraph.close()
 // WindGraph.dayRange('YYYY-MM-DD', tz): [start, end] unix s of that day in tz
+// WindGraph.load(base, from, to, tz): Promise of [{t, s, g, d, a}] sorted by t (for other graphs)
 const WindGraph = (() => {
     const NS = 'http://www.w3.org/2000/svg';
     const LIVE_HOURS = [1, 3, 6, 12, 24];
@@ -421,5 +422,5 @@ const WindGraph = (() => {
         setInterval(() => check(true), 300000);      // a file appearing during the day
     }
 
-    return { open, close, attach, dayRange, isOpen: () => !!panel, _load: load, _localDate: localDate, _data: () => data, _range: () => [from, to] };
+    return { open, close, attach, dayRange, load, isOpen: () => !!panel, _load: load, _localDate: localDate, _data: () => data, _range: () => [from, to] };
 })();

@@ -66,7 +66,7 @@
                 <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
                 <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
                 <label><input type="checkbox" id="show-satellites-graph"> Satellites</label>
-                <label id="show-wind-graph" style="display:none" onclick="openWindGraph()">🌬️ Wind</label>
+                <label id="show-wind-graph-label" style="display:none"><input type="checkbox" id="show-wind-graph"> Wind</label>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -287,6 +287,28 @@
         </div>
     </div>
 
+    <!-- Wind graph panel (event wind station: logs/YYYY_MM_DD_wind.jsonl) -->
+    <div id="wind-graph-panel" class="graph-panel" data-type="wind">
+        <div id="wind-graph-resize" class="graph-resize"></div>
+        <div id="wind-graph-container" class="graph-container">
+            <div class="graph-title" id="wind-graph-title">Wind (knots)</div>
+            <div class="graph-y-axis" id="wind-y-labels">
+                <span>20</span>
+                <span>15</span>
+                <span>10</span>
+                <span>5</span>
+                <span>0</span>
+            </div>
+            <canvas id="wind-graph" class="graph-canvas"></canvas>
+            <div class="graph-range-overlay left"></div>
+            <div class="graph-range-overlay right"></div>
+            <div class="graph-x-axis">
+                <span id="wind-time-start">--:--</span>
+                <span id="wind-time-end">--:--</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Distance graph panel -->
     <div id="distance-graph-panel" class="graph-panel" data-type="distance">
         <div id="distance-graph-resize" class="graph-resize"></div>
@@ -408,7 +430,7 @@
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/export.js?v=e0b59685"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
-    <script src="js/wind-graph.js?v=4d538cd7"></script>
+    <script src="js/wind-graph.js?v=dce28149"></script>
     <script src="js/flatpickr/flatpickr.min.js?v=1eeab1cb"></script>
     <script>
         // Event ID from URL parameter (default to 2)
@@ -680,6 +702,7 @@
             if (document.getElementById('show-heartrate-graph').checked) graphs.push('heartrate');
             if (document.getElementById('show-accuracy-graph').checked) graphs.push('accuracy');
             if (document.getElementById('show-satellites-graph').checked) graphs.push('satellites');
+            if (document.getElementById('show-wind-graph').checked) graphs.push('wind');
             if (graphs.length > 0) params.set('graphs', graphs.join(','));
 
             // Build URL
@@ -720,6 +743,7 @@
                 if (graphs.includes('heartrate')) document.getElementById('show-heartrate-graph').checked = true;
                 if (graphs.includes('accuracy')) document.getElementById('show-accuracy-graph').checked = true;
                 if (graphs.includes('satellites')) document.getElementById('show-satellites-graph').checked = true;
+                if (graphs.includes('wind')) document.getElementById('show-wind-graph').checked = true;
                 updateGraphPositions();
             }
 
@@ -2024,6 +2048,7 @@
             drawHeartRateGraph();
             drawAccuracyGraph();
             drawSatellitesGraph();
+            drawWindGraph();
             drawDistanceGraph();
         }
 
@@ -2228,6 +2253,7 @@
             drawHeartRateGraph();
             drawAccuracyGraph();
             drawSatellitesGraph();
+            drawWindGraph();
             drawDistanceGraph();
         }
 
@@ -3705,6 +3731,182 @@
             }
         }
 
+        // --- Wind graph: the event's wind station readings over the shown time range ---
+        let windData = [], windKey = '', windLoading = false;
+
+        // (re)load the day files covering the loaded log when that changes; redraw when they arrive
+        function ensureWindData() {
+            if (typeof WindGraph === 'undefined' || !(maxTime > minTime)) return;
+            const key = `${minTime}-${maxTime}-${eventTimezone}`;
+            if (key === windKey) return;
+            windKey = key;
+            windLoading = true;
+            WindGraph.load(DATA_BASE, minTime - 600, maxTime + 600, eventTimezone)
+                .then(d => { if (windKey === key) windData = d; })
+                .catch(() => { if (windKey === key) windData = []; })
+                .finally(() => {
+                    if (windKey !== key) return;
+                    windLoading = false;
+                    if (document.getElementById('show-wind-graph').checked) drawWindGraph();
+                });
+        }
+
+        // readings in the shown range (plus one either side so the line reaches the edges), and the
+        // gap beyond which the line breaks
+        function windVisible() {
+            const pts = [];
+            for (let i = 0; i < windData.length; i++) {
+                const p = windData[i];
+                if (p.s === null) continue;
+                if (p.t < rangeStartTime && !(windData[i + 1] && windData[i + 1].t >= rangeStartTime)) continue;
+                if (p.t > rangeEndTime && !(windData[i - 1] && windData[i - 1].t <= rangeEndTime)) continue;
+                pts.push(p);
+            }
+            const dts = [];
+            for (let i = 1; i < pts.length; i++) dts.push(pts[i].t - pts[i - 1].t);
+            dts.sort((a, b) => a - b);
+            return { pts, gap: Math.max(300, 3 * (dts.length ? dts[dts.length >> 1] : 60)) };
+        }
+
+        function windScale(pts) {
+            let max = 0;
+            for (const p of pts) max = Math.max(max, p.s, p.g ?? 0);
+            return max > 0 ? Math.max(10, Math.ceil((max * 1.1) / 5) * 5) : 20;
+        }
+
+        // nearest reading to t, if it's within the gap (so the cursor never jumps across missing data)
+        function windNearest(pts, gap, t) {
+            let best = null;
+            for (const p of pts) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+            return best && Math.abs(best.t - t) <= gap / 2 ? best : null;
+        }
+
+        function drawWindArrow(ctx, x, y, dir) {
+            // as js/wind.js: head down at 0°, rotated by the from-direction, so it points downwind
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(dir * Math.PI / 180);
+            ctx.scale(0.55, 0.55);
+            ctx.beginPath();
+            ctx.moveTo(0, 15); ctx.lineTo(7, -1); ctx.lineTo(2, -1); ctx.lineTo(2, -15);
+            ctx.lineTo(-2, -15); ctx.lineTo(-2, -1); ctx.lineTo(-7, -1); ctx.closePath();
+            ctx.fillStyle = '#f8fafc';
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawWindGraph() {
+            if (!document.getElementById('show-wind-graph').checked) return;
+            ensureWindData();
+            const canvas = document.getElementById('wind-graph');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            const width = rect.width, height = rect.height;
+            ctx.clearRect(0, 0, width, height);
+            document.getElementById('wind-time-start').textContent = formatTimeShortInTz(rangeStartTime);
+            document.getElementById('wind-time-end').textContent = formatTimeShortInTz(rangeEndTime);
+
+            const { pts, gap } = windVisible();
+            const maxS = windScale(pts);
+            document.getElementById('wind-y-labels').innerHTML = [1, 0.75, 0.5, 0.25, 0]
+                .map(f => `<span>${Math.round(maxS * f)}</span>`).join('');
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (i / 4) * height;
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+            }
+            if (!pts.length) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(windLoading ? 'Loading wind…' : 'No wind data for this period', width / 2, height / 2);
+                return;
+            }
+            const span = rangeEndTime - rangeStartTime;
+            const X = t => ((t - rangeStartTime) / span) * width;
+            const Y = v => height - (v / maxS) * height;
+            // runs of readings without a gap
+            const runs = [];
+            for (const p of pts) {
+                const run = runs[runs.length - 1];
+                if (run && p.t - run[run.length - 1].t <= gap) run.push(p); else runs.push([p]);
+            }
+            for (const run of runs) {
+                const g = run.filter(p => p.g !== null && p.g >= p.s);
+                if (g.length >= 2 && g.length === run.length) {      // gust band between speed and gust
+                    ctx.beginPath();
+                    run.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.g)) : ctx.moveTo(X(p.t), Y(p.g)));
+                    for (let i = run.length - 1; i >= 0; i--) ctx.lineTo(X(run[i].t), Y(run[i].s));
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(96, 165, 250, 0.25)';
+                    ctx.fill();
+                }
+                if (g.length >= 2) {
+                    ctx.beginPath();
+                    let on = false;
+                    for (const p of run) {
+                        if (p.g === null) { on = false; continue; }
+                        on ? ctx.lineTo(X(p.t), Y(p.g)) : ctx.moveTo(X(p.t), Y(p.g));
+                        on = true;
+                    }
+                    ctx.strokeStyle = 'rgba(147, 197, 253, 0.8)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+                ctx.beginPath();
+                run.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.s)) : ctx.moveTo(X(p.t), Y(p.s)));
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            // a downwind arrow on the speed line every 5 min (wider apart when they'd crowd)
+            const step = [300, 600, 900, 1800, 3600, 7200, 10800].find(st => st / span * width >= 26) || 10800;
+            for (let t = Math.ceil(rangeStartTime / step) * step; t <= rangeEndTime; t += step) {
+                const p = windNearest(pts, gap, t);
+                if (!p) continue;
+                const dir = p.a !== null ? p.a : p.d;
+                if (dir === null) continue;
+                drawWindArrow(ctx, X(t), Y(p.s), dir);
+            }
+        }
+
+        // cursor on the wind graph: line, dot on the speed line, readings in the title
+        function drawWindHighlight(highlightX, timestamp) {
+            const canvas = document.getElementById('wind-graph');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 3]);
+            ctx.beginPath(); ctx.moveTo(highlightX, 0); ctx.lineTo(highlightX, rect.height); ctx.stroke();
+            ctx.setLineDash([]);
+            const { pts, gap } = windVisible();
+            const p = windNearest(pts, gap, timestamp);
+            const title = document.getElementById('wind-graph-title');
+            if (!p) { title.textContent = 'Wind (knots)'; return; }
+            const maxS = windScale(pts);
+            const x = ((p.t - rangeStartTime) / (rangeEndTime - rangeStartTime)) * rect.width;
+            const y = rect.height - (p.s / maxS) * rect.height;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#38bdf8';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            const dir = p.a !== null ? p.a : p.d;
+            const d3 = v => String(Math.round(((v % 360) + 360) % 360) % 360).padStart(3, '0');
+            title.textContent = `Wind ${formatTimeShortInTz(p.t)}: ${p.s.toFixed(1)} kn` +
+                (p.g !== null ? `, gust ${p.g.toFixed(1)}` : '') + (dir !== null ? `, from ${d3(dir)}°T` : '');
+        }
+
         function drawDistanceGraph() {
             // Only draw if distance graph is visible
             if (!document.getElementById('show-distance-graph').checked) return;
@@ -3922,6 +4124,9 @@
             if (document.getElementById('show-satellites-graph').checked) {
                 drawSatellitesGraph();
             }
+            if (document.getElementById('show-wind-graph').checked) {
+                drawWindGraph();
+            }
             if (document.getElementById('show-distance-graph').checked) {
                 drawDistanceGraph();
             }
@@ -4103,6 +4308,7 @@
                 ['show-heartrate-graph', 'heartrate-graph', drawHeartRateGraph],
                 ['show-accuracy-graph', 'accuracy-graph', drawAccuracyGraph],
                 ['show-satellites-graph', 'satellites-graph', drawSatellitesGraph],
+                ['show-wind-graph', 'wind-graph', drawWindGraph],
                 ['show-distance-graph', 'distance-graph', drawDistanceGraph],
             ];
 
@@ -4149,6 +4355,7 @@
             if (document.getElementById('show-heartrate-graph').checked) drawHeartRateGraph();
             if (document.getElementById('show-accuracy-graph').checked) drawAccuracyGraph();
             if (document.getElementById('show-satellites-graph').checked) drawSatellitesGraph();
+            if (document.getElementById('show-wind-graph').checked) drawWindGraph();
             if (document.getElementById('show-distance-graph').checked) drawDistanceGraph();
         }
 
@@ -4337,6 +4544,11 @@
                     maxSats = Math.max(maxSats, 10);
                 }
                 drawHighlightOnGraph('satellites-graph', highlightX, ratio, timestamp, 'nsats', maxSats, 0);
+            }
+
+            if (document.getElementById('show-wind-graph').checked) {
+                drawWindGraph();
+                drawWindHighlight(highlightX, timestamp);
             }
         }
 
@@ -4534,6 +4746,16 @@
             clearGraphHighlight();
         });
 
+        document.getElementById('wind-graph').addEventListener('mousemove', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            showGraphHighlight(e.clientX - rect.left, 'wind-graph');
+        });
+
+        document.getElementById('wind-graph').addEventListener('mouseleave', () => {
+            clearGraphHighlight();
+            document.getElementById('wind-graph-title').textContent = 'Wind (knots)';
+        });
+
         document.getElementById('distance-graph').addEventListener('mousemove', (e) => {
             const rect = e.target.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -4577,7 +4799,7 @@
 
         // Set up rubber-band selection on all graph canvases
         ['speed-graph', 'heading-graph', 'battery-graph', 'signal-graph', 'latency-graph',
-         'heartrate-graph', 'accuracy-graph', 'satellites-graph', 'distance-graph'].forEach(id => {
+         'heartrate-graph', 'accuracy-graph', 'satellites-graph', 'wind-graph', 'distance-graph'].forEach(id => {
             const canvas = document.getElementById(id);
             if (canvas) {
                 setupGraphRubberBand(canvas);
@@ -4602,6 +4824,7 @@
         let heartrateGraphHeight = parseInt(localStorage.getItem('heartrateGraphHeight')) || 150;
         let accuracyGraphHeight = parseInt(localStorage.getItem('accuracyGraphHeight')) || 150;
         let satellitesGraphHeight = parseInt(localStorage.getItem('satellitesGraphHeight')) || 150;
+        let windGraphHeight = parseInt(localStorage.getItem('windGraphHeight')) || 150;
         let distanceGraphHeight = parseInt(localStorage.getItem('distanceGraphHeight')) || 150;
         const speedPanel = document.getElementById('speed-graph-panel');
         const headingPanel = document.getElementById('heading-graph-panel');
@@ -4611,6 +4834,7 @@
         const heartratePanel = document.getElementById('heartrate-graph-panel');
         const accuracyPanel = document.getElementById('accuracy-graph-panel');
         const satellitesPanel = document.getElementById('satellites-graph-panel');
+        const windPanel = document.getElementById('wind-graph-panel');
         const distancePanel = document.getElementById('distance-graph-panel');
         const speedResizeHandle = document.getElementById('speed-graph-resize');
         const headingResizeHandle = document.getElementById('heading-graph-resize');
@@ -4620,6 +4844,7 @@
         const heartrateResizeHandle = document.getElementById('heartrate-graph-resize');
         const accuracyResizeHandle = document.getElementById('accuracy-graph-resize');
         const satellitesResizeHandle = document.getElementById('satellites-graph-resize');
+        const windResizeHandle = document.getElementById('wind-graph-resize');
         const distanceResizeHandle = document.getElementById('distance-graph-resize');
         let isResizing = false;
         let resizingPanel = null;
@@ -4635,6 +4860,7 @@
         heartratePanel.style.height = heartrateGraphHeight + 'px';
         accuracyPanel.style.height = accuracyGraphHeight + 'px';
         satellitesPanel.style.height = satellitesGraphHeight + 'px';
+        windPanel.style.height = windGraphHeight + 'px';
         distancePanel.style.height = distanceGraphHeight + 'px';
 
         function updateGraphPositions() {
@@ -4647,6 +4873,7 @@
             const heartrateVisible = document.getElementById('show-heartrate-graph').checked;
             const accuracyVisible = document.getElementById('show-accuracy-graph').checked;
             const satellitesVisible = document.getElementById('show-satellites-graph').checked;
+            const windVisible = document.getElementById('show-wind-graph').checked;
             const distanceVisible = document.getElementById('show-distance-graph').checked;
 
             // Get actual timeline height (different on mobile vs desktop)
@@ -4654,7 +4881,16 @@
             let totalHeight = timelineHeight;
             let currentBottom = timelineHeight;
 
-            // Stack from bottom: distance, satellites, accuracy, heartrate, latency, signal, battery, heading, speed
+            // Stack from bottom: wind, distance, satellites, accuracy, heartrate, latency, signal, battery, heading, speed
+            if (windVisible) {
+                windPanel.style.display = 'block';
+                windPanel.style.bottom = currentBottom + 'px';
+                currentBottom += windGraphHeight;
+                totalHeight += windGraphHeight;
+            } else {
+                windPanel.style.display = 'none';
+            }
+
             if (distanceVisible) {
                 distancePanel.style.display = 'block';
                 distancePanel.style.bottom = currentBottom + 'px';
@@ -4820,6 +5056,17 @@
             e.preventDefault();
         });
 
+        windResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizingPanel = 'wind';
+            startY = e.clientY;
+            startHeight = windPanel.offsetHeight;
+            windResizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
         satellitesResizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
             resizingPanel = 'satellites';
@@ -4872,6 +5119,9 @@
             } else if (resizingPanel === 'satellites') {
                 satellitesPanel.style.height = newHeight + 'px';
                 satellitesGraphHeight = newHeight;
+            } else if (resizingPanel === 'wind') {
+                windPanel.style.height = newHeight + 'px';
+                windGraphHeight = newHeight;
             } else if (resizingPanel === 'distance') {
                 distancePanel.style.height = newHeight + 'px';
                 distanceGraphHeight = newHeight;
@@ -4888,6 +5138,7 @@
             drawHeartRateGraph();
             drawAccuracyGraph();
             drawSatellitesGraph();
+            drawWindGraph();
             drawDistanceGraph();
         });
 
@@ -4902,6 +5153,7 @@
                 heartrateResizeHandle.classList.remove('dragging');
                 accuracyResizeHandle.classList.remove('dragging');
                 satellitesResizeHandle.classList.remove('dragging');
+                windResizeHandle.classList.remove('dragging');
                 distanceResizeHandle.classList.remove('dragging');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
@@ -4913,6 +5165,7 @@
                 localStorage.setItem('heartrateGraphHeight', heartrateGraphHeight);
                 localStorage.setItem('accuracyGraphHeight', accuracyGraphHeight);
                 localStorage.setItem('satellitesGraphHeight', satellitesGraphHeight);
+                localStorage.setItem('windGraphHeight', windGraphHeight);
                 localStorage.setItem('distanceGraphHeight', distanceGraphHeight);
                 resizingPanel = null;
             }
@@ -5380,6 +5633,13 @@
             }
         });
 
+        document.getElementById('show-wind-graph').addEventListener('change', (e) => {
+            updateGraphPositions();
+            if (e.target.checked) {
+                drawWindGraph();
+            }
+        });
+
         document.getElementById('show-distance-graph').addEventListener('change', (e) => {
             updateGraphPositions();
             if (e.target.checked) {
@@ -5402,6 +5662,7 @@
             drawHeartRateGraph();
             drawAccuracyGraph();
             drawSatellitesGraph();
+            drawWindGraph();
             drawDistanceGraph();
         });
 
@@ -6077,19 +6338,9 @@
 
         // Load summary (will auto-select log if URL has log param)
         loadSummary();
-    </script>
-    <script>
-        // wind graph for the selected sub-log, else the loaded log, else the whole day
-        function openWindGraph() {
-            document.getElementById('graphs-dropdown-content').classList.remove('show');
-            const r = selectedSublog ? [selectedSublog.start_ts, selectedSublog.end_ts]
-                : maxTime > minTime ? [minTime, maxTime]
-                : WindGraph.dayRange(document.getElementById('date-picker').value || getTodayInEventTz(), eventTimezone);
-            if (!r) return;
-            WindGraph.open({ base: DATA_BASE, from: r[0], to: r[1], tz: eventTimezone,
-                             cursor: () => playbackCurrentTime > rangeStartTime && playbackCurrentTime < rangeEndTime ? playbackCurrentTime : null });
-        }
-        WindGraph.attach('show-wind-graph', DATA_BASE, { tz: () => eventTimezone,
+
+        // Wind graph option only for days with wind readings (event wind station)
+        WindGraph.attach('show-wind-graph-label', DATA_BASE, { tz: () => eventTimezone,
                          date: () => document.getElementById('date-picker').value || getTodayInEventTz() });
     </script>
 </body>
