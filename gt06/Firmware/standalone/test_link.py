@@ -8,7 +8,7 @@ import socket
 import struct
 import time
 
-from sitl_util import RUN_DIR, Server, start, finish
+from sitl_util import RUN_DIR, Server, start, finish, run_tests
 
 STUCK = os.path.join(RUN_DIR, "sitl_tx_stuck.flag")
 
@@ -280,15 +280,16 @@ def test_cxzt_reports_the_real_heartbeat():
 
 
 if __name__ == "__main__":
-    test_cxzt_reports_the_real_heartbeat()
-    test_second_sos_on_the_same_connection()
-    test_slow_acks_still_release_inflight_fixes()
-    test_rejected_hbt_changes_nothing()
-    test_backward_gps_time_kept_in_replay()
-    test_blind_replay_across_a_day_gap()
-    test_bad_commands_are_not_acted_on()
-    test_reset_connection_reconnects()
-    test_sos_until_acked()
-    test_silent_server_requeues_inflight_fixes()
-    test_stuck_send_buffer()
-    print("dead links are detected, in-flight fixes and SOS are not lost")
+    run_tests([
+        test_cxzt_reports_the_real_heartbeat,
+        test_second_sos_on_the_same_connection,
+        test_slow_acks_still_release_inflight_fixes,
+        test_rejected_hbt_changes_nothing,
+        test_backward_gps_time_kept_in_replay,
+        test_blind_replay_across_a_day_gap,
+        test_bad_commands_are_not_acted_on,
+        test_reset_connection_reconnects,
+        test_sos_until_acked,
+        test_silent_server_requeues_inflight_fixes,
+        test_stuck_send_buffer,
+    ], "dead links are detected, in-flight fixes and SOS are not lost")

@@ -5,7 +5,7 @@ import os
 import signal
 import time
 
-from sitl_util import Server, start, finish, reset_state
+from sitl_util import Server, start, finish, reset_state, run_tests
 
 
 def attempts(out):
@@ -60,16 +60,17 @@ def test_night_sleep_while_offline():
         srv.accept_login()
         srv.query("HBT,10,10#", r"HBT,10,10# OK")
         srv.query("SZCS#SLPDISCONNECT=1", r"SETOK:SLPDISCONNECT=1")
+        srv.pump(8)                                # let PLMN confirm registration: a fixed loss path
         os.kill(proc.pid, signal.SIGUSR1)          # lose coverage before the connected sleep starts
         srv.wait_closed(40)
-        time.sleep(120)                            # PLMN round (~70 s in SITL), then sleep cycles
+        time.sleep(170)                            # grace + PLMN round (~110 s in SITL), then sleep cycles
         os.kill(proc.pid, signal.SIGUSR1)
         srv.accept_login(40)
     finally:
         srv.close()
         out, _ = finish(proc)
     sleeps = out.count(b"SLEEP: awake, GPS remains off")
-    assert sleeps >= 2, f"only {sleeps} sleeps while offline"
+    assert sleeps >= 2, f"only {sleeps} sleeps while offline\n" + out.decode(errors="replace")[-4000:]
     print(f"night sleep while offline: {sleeps} sleep cycles, {attempts(out)} attempts PASS")
 
 
@@ -92,14 +93,15 @@ def test_offline_sleep_with_server_down_still_tries_on_wake():
         srv.close()
         out, _ = finish(proc)
     sleeps = out.count(b"SLEEP: awake, GPS remains off")
-    assert sleeps >= 2, f"only {sleeps} sleeps"
+    assert sleeps >= 2, f"only {sleeps} sleeps\n" + out.decode(errors="replace")[-4000:]
     assert took < 30, f"took {took:.0f}s to come back after the server returned"
     print(f"server down while registered: {sleeps} sleeps, back {took:.0f}s after the server PASS")
 
 
 if __name__ == "__main__":
-    test_offline_sleep_with_server_down_still_tries_on_wake()
-    test_idle_offline_backoff()
-    test_night_sleep_while_offline()
-    test_nodata_reboot()
-    print("idle units out of coverage back off, sleep, and recover a dead data path")
+    run_tests([
+        test_offline_sleep_with_server_down_still_tries_on_wake,
+        test_idle_offline_backoff,
+        test_night_sleep_while_offline,
+        test_nodata_reboot,
+    ], "idle units out of coverage back off, sleep, and recover a dead data path")

@@ -132,8 +132,9 @@ SITL_TIME_SCALE ?= 1
 TEST_JOBS ?= 16
 define run_suite
 	@rm -rf $(TEST_RUN_ROOT)/$@ && mkdir -p $(TEST_RUN_ROOT)/$@
-	cd $(TEST_RUN_ROOT)/$@ && SITL_RUN_DIR=$(TEST_RUN_ROOT)/$@ TMPDIR=$(TEST_RUN_ROOT)/$@ \
-		SITL_TIME_SCALE=$(SITL_TIME_SCALE) SITL_BIN=$(abspath $(SITL_TEST_BIN)) python3 $(CURDIR)/$(1)
+	cd $(TEST_RUN_ROOT)/$@ && t0=$$(date +%s) && SITL_RUN_DIR=$(TEST_RUN_ROOT)/$@ TMPDIR=$(TEST_RUN_ROOT)/$@ \
+		SITL_TIME_SCALE=$(SITL_TIME_SCALE) SITL_BIN=$(abspath $(SITL_TEST_BIN)) python3 $(CURDIR)/$(1) && \
+		echo "$@: passed in $$(($$(date +%s) - t0)) s"
 	@rm -rf $(TEST_RUN_ROOT)/$@
 endef
 test-gps-retry: sitl-asan            ## exercise truthful GPS STATUS + 10-second power-on retry
@@ -172,14 +173,24 @@ test-track-recovery: sitl-asan     ## tracking: early, repeated no-data radio cy
 test-watchdog: sitl-asan            ## real reliability.c: hung send + boot hang reset, reset reasons
 	$(call run_suite,test_watchdog.py)
 
-test-link: sitl-asan                 ## dead-link detection, in-flight replay, SOS until ACK, bad commands
-	$(call run_suite,test_link.py)
+# test_link.py and test_offline.py run one target per sub-test (test-link-<name>, see --list), each in its
+# own run dir; test-link / test-offline run them all. Names come from the test_ functions in the script.
+subtests = $(addprefix test-$(1)-,$(shell sed -n 's/^def test_\([a-z0-9_]*\).*/\1/p' test_$(1).py | tr _ -))
+LINK_TESTS := $(call subtests,link)
+OFFLINE_TESTS := $(call subtests,offline)
+
+$(LINK_TESTS): test-link-%: sitl-asan
+	$(call run_suite,test_link.py $*)
+
+$(OFFLINE_TESTS): test-offline-%: sitl-asan
+	$(call run_suite,test_offline.py $*)
+
+test-link: $(LINK_TESTS)             ## dead-link detection, in-flight replay, SOS until ACK, bad commands
 
 test-gps-stall: sitl-asan            ## silent GNSS: power-cycle, one reboot, recovery
 	$(call run_suite,test_gps_stall.py)
 
-test-offline: sitl-asan              ## idle offline: connect backoff, sleep, no-data reboot
-	$(call run_suite,test_offline.py)
+test-offline: $(OFFLINE_TESTS)       ## idle offline: connect backoff, sleep, no-data reboot
 
 test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never commit a bad image
 	$(call run_suite,test_fota_fail.py)
@@ -187,7 +198,10 @@ test-fota-fail: sitl-asan standalone_fw.bin  ## FOTA failures are bounded, never
 test-leds: sitl-asan                 ## status LEDs: idle blue flash every 2 s, solid while tracking
 	$(call run_suite,test_leds.py)
 
-TEST_SUITES := test-watchdog test-link test-gps-stall test-offline test-fota-fail test-gps-retry test-loc-batch test-fota-image test-battery-mv test-gpsstat test-sapifind test-usb-debug test-lte-sleep test-plmn-policy test-track-recovery test-gnss-avg test-leds
+# roughly longest first, so the long suites never wait for a free job slot
+TEST_SUITES := test-gnss-avg test-loc-batch $(OFFLINE_TESTS) test-plmn-policy test-gps-stall test-gps-retry \
+               test-lte-sleep test-track-recovery test-gpsstat test-leds $(LINK_TESTS) test-watchdog \
+               test-fota-fail test-fota-image test-battery-mv test-sapifind test-usb-debug
 
 # all SITL regression tests, TEST_JOBS suites at a time (output grouped per suite).
 # make test TEST_JOBS=1 runs them serially; make test-<name> runs one.
@@ -203,4 +217,4 @@ clean:
 	      customer_app_usb_debug.bin customer_app_usb_debug.bin.flash.zip W07_USBDBG_B53.bin usb-debug-sitl
 	rm -rf $(TEST_RUN_ROOT)
 
-.PHONY: all flashimg fotaimg usb-debug sitl-all test test-fast $(TEST_SUITES) clean
+.PHONY: all flashimg fotaimg usb-debug sitl-all test test-fast test-link test-offline $(TEST_SUITES) clean

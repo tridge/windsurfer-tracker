@@ -4,6 +4,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -227,6 +228,31 @@ def finish(proc):
     if b"AddressSanitizer" in stderr or b"runtime error" in stderr:
         raise AssertionError("sanitizer reported a fault:\n" + stderr.decode(errors="replace")[-3000:])
     return stdout, stderr
+
+
+def run_tests(tests, summary):
+    """Run the sub-tests named on the command line (e.g. `sos-until-acked`), or all of them in order.
+    --list prints the names. Each name is its function name minus test_, with _ as -."""
+    mod = sys.modules["__main__"]
+    defined = {n for n, f in vars(mod).items()
+               if n.startswith("test_") and callable(f) and getattr(f, "__module__", "") == "__main__"}
+    missing = defined - {f.__name__ for f in tests}
+    assert not missing, f"sub-tests not in the run list: {sorted(missing)}"
+    by_name = {f.__name__[5:].replace("_", "-"): f for f in tests}
+    args = sys.argv[1:]
+    if args == ["--list"]:
+        print("\n".join(by_name))
+        return
+    picked = []
+    for a in args:
+        key = a.removeprefix("test_").replace("_", "-")
+        if key not in by_name:
+            sys.exit(f"unknown sub-test {a!r}; have: {' '.join(by_name)}")
+        picked.append(by_name[key])
+    for f in picked or tests:
+        f()
+    if not picked:
+        print(summary)
 
 
 def reset_state():

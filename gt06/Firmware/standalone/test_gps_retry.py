@@ -73,8 +73,9 @@ def test_power_on_retry():
         receive_until(conn, received, b"TIMER,1,1# OK", 5)
 
         # The first injected power-on failure must not make STATUS claim that GPS is on.
+        # 8 s: tracking with the GPS off, the loop only comes round on its 5 s queue wait
         conn.sendall(gt06_cmd("STATUS#", 2))
-        receive_until(conn, received, b"GPS:OFF", 5)
+        receive_until(conn, received, b"GPS:OFF", 8)
 
         # Immediate start and the first 10-second retry fail; the second retry succeeds at ~20 seconds.
         time.sleep(21)
