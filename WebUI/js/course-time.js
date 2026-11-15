@@ -62,11 +62,11 @@ const CourseTime = (() => {
         if (windFrom === null || windFrom === undefined) windFrom = legs[0].bearing;
         let total = 0, prev = null;
         const detail = legs.map(l => {
-            const d = angDiff(l.bearing, windFrom), twa = Math.abs(d), stbd = d > 0;
+            const d = angDiff(l.bearing, windFrom), twa = Math.abs(d), port = d > 0;   // port tack
             const r = legTime(P, l.dist, twsKn, twa);
             let s = r.s;
-            if (prev) s += (prev.twa >= 90 && twa >= 90 && prev.stbd !== stbd) ? P.gybe_s : P.turn_s;
-            prev = { twa, stbd };
+            if (prev) s += (prev.twa >= 90 && twa >= 90 && prev.port !== port) ? P.gybe_s : P.turn_s;
+            prev = { twa, port };
             total += s;
             return { twa, mode: r.mode, s };
         });
