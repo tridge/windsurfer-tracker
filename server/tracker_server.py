@@ -11,6 +11,7 @@ import socket
 import json
 import struct
 import time
+import math
 import argparse
 import os
 import re
@@ -136,6 +137,87 @@ _course_locks_guard = threading.Lock()
 def course_lock(eid: int) -> threading.Lock:
     with _course_locks_guard:
         return _course_locks.setdefault(eid, threading.Lock())
+
+
+# One lock per day summary file, round admin edits (sublogs, hidden, sublog
+# course) and the summary generator's merge-and-write, so neither loses the other's change.
+_summary_locks: dict[str, threading.Lock] = {}
+_summary_locks_guard = threading.Lock()
+
+
+def summary_lock(path: Path) -> threading.Lock:
+    with _summary_locks_guard:
+        return _summary_locks.setdefault(str(path.resolve()), threading.Lock())
+
+
+LOG_FILE_RE = re.compile(r'^(\d{4}_\d{2}_\d{2})\.jsonl(\.\d+)?$')
+
+# Limits for a course stored with a sub-log (marks as laid for that race)
+SUBLOG_COURSE_MAX_BYTES = 256 * 1024
+SUBLOG_COURSE_MAX_COURSES = 6
+SUBLOG_COURSE_MAX_MARKS = 100
+SUBLOG_COURSE_MAX_DEPTH = 8
+
+
+def validate_course(course) -> str | None:
+    """Sanity-check a course object (as course.json holds). Returns an error or None."""
+    if not isinstance(course, dict):
+        return "course must be an object"
+    if len(json.dumps(course)) > SUBLOG_COURSE_MAX_BYTES:
+        return "course too large"
+
+    # json.loads accepts NaN/Infinity, which would make the summary invalid JSON
+    def walk(v, depth):
+        if depth > SUBLOG_COURSE_MAX_DEPTH:
+            return "course nested too deeply"
+        if isinstance(v, float) and not math.isfinite(v):
+            return "course contains a non-finite number"
+        children = v.values() if isinstance(v, dict) else v if isinstance(v, list) else ()
+        for c in children:
+            err = walk(c, depth + 1)
+            if err:
+                return err
+        return None
+    err = walk(course, 0)
+    if err:
+        return err
+
+    def point_err(p, what):
+        if not isinstance(p, dict):
+            return f"{what} must be an object"
+        lat, lon = p.get('lat'), p.get('lon')
+        if (not isinstance(lat, (int, float)) or isinstance(lat, bool) or
+                not isinstance(lon, (int, float)) or isinstance(lon, bool)):
+            return f"{what} needs numeric lat and lon"
+        if not (-90 <= lat <= 90 and -540 <= lon <= 540):
+            return f"{what} position out of range"
+        return None
+
+    extra = course.get('extraCourses', [])
+    if not isinstance(extra, list):
+        return "extraCourses must be a list"
+    subs = [course] + extra
+    if len(subs) > SUBLOG_COURSE_MAX_COURSES:
+        return "too many courses"
+    for i, c in enumerate(subs):
+        if not isinstance(c, dict):
+            return "each course must be an object"
+        letter = chr(65 + i)
+        for key in ('start', 'finish'):
+            if c.get(key) is not None:
+                err = point_err(c[key], f"course {letter} {key}")
+                if err:
+                    return err
+        marks = c.get('marks', [])
+        if not isinstance(marks, list):
+            return f"course {letter} marks must be a list"
+        if len(marks) > SUBLOG_COURSE_MAX_MARKS:
+            return f"course {letter} has too many marks"
+        for n, m in enumerate(marks, 1):
+            err = point_err(m, f"course {letter} mark {n}")
+            if err:
+                return err
+    return None
 
 
 def private_bin_path(data_dir: Path, eid: int) -> Path:
@@ -528,6 +610,38 @@ def find_applicable_course(event_dir: Path, log_end_ts: float) -> tuple[str, flo
     return None
 
 
+SUMMARY_EDIT_KEYS = ('sublogs', 'hidden')   # admin-set log entry fields kept on regeneration
+
+
+def preserve_summary_edits(summary_file: Path, logs_data: list) -> None:
+    """Copy admin-set fields (sublogs, hidden) from the existing summary into
+    freshly generated log entries. Entries match by start_ts first (a log rotated
+    to .N keeps its start), else by file name. Call with summary_lock held."""
+    try:
+        old_summary = load_json_file(summary_file, {})
+    except Exception:
+        return  # unreadable old summary: continue without its edits
+    old_logs = [o for o in old_summary.get('logs', []) or []
+                if isinstance(o, dict) and any(k in o for k in SUMMARY_EDIT_KEYS)]
+    if not old_logs:
+        return
+    new_starts = {e.get('start_ts') for e in logs_data}
+    used = set()
+    for entry in logs_data:
+        match = next((i for i, o in enumerate(old_logs)
+                      if i not in used and o.get('start_ts') == entry.get('start_ts')), None)
+        if match is None:
+            match = next((i for i, o in enumerate(old_logs)
+                          if i not in used and o.get('file') == entry.get('file')
+                          and o.get('start_ts') not in new_starts), None)
+        if match is None:
+            continue
+        used.add(match)
+        for k in SUMMARY_EDIT_KEYS:
+            if k in old_logs[match]:
+                entry[k] = old_logs[match][k]
+
+
 def generate_log_summaries(log_dir: Path) -> int:
     """
     Generate summary JSON files for each day's logs.
@@ -700,40 +814,19 @@ def generate_log_summaries(log_dir: Path) -> int:
         if not logs_data:
             continue
 
-        # Preserve sublogs from existing summary if present
-        if summary_file.exists():
-            try:
-                with open(summary_file, 'r') as f:
-                    old_summary = json.load(f)
-                # Build map of file -> sublogs from old summary
-                old_sublogs = {}
-                for old_log in old_summary.get('logs', []):
-                    if old_log.get('sublogs'):
-                        old_sublogs[old_log.get('file')] = old_log['sublogs']
-                # Merge sublogs into new log entries
-                for log_entry in logs_data:
-                    file_name = log_entry.get('file')
-                    if file_name in old_sublogs:
-                        log_entry['sublogs'] = old_sublogs[file_name]
-            except Exception:
-                pass  # If we can't read old summary, just continue without sublogs
-
         # Sort by start time (most recent first for display)
         logs_data.sort(key=lambda x: x.get('start_ts', 0), reverse=True)
 
-        # Write summary file
-        summary = {
-            'date': date_str,
-            'generated': time.time(),
-            'generated_iso': datetime.now().isoformat(),
-            'logs': logs_data
-        }
-
         try:
-            tmp_file = summary_file.with_suffix('.tmp')
-            with open(tmp_file, 'w') as f:
-                json.dump(summary, f, indent=2)
-            tmp_file.rename(summary_file)
+            with summary_lock(summary_file):
+                preserve_summary_edits(summary_file, logs_data)
+                summary = {
+                    'date': date_str,
+                    'generated': time.time(),
+                    'generated_iso': datetime.now().isoformat(),
+                    'logs': logs_data
+                }
+                save_json_atomic(summary_file, summary)
             updated_count += 1
             total_points = sum(log['point_count'] for log in logs_data)
             log(f"[SUMMARY] Generated {summary_file.name}: {len(logs_data)} logs, {total_points} points")
@@ -2762,6 +2855,70 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _read_json_object(self, max_bytes: int = 512 * 1024):
+        """JSON object request body, or None after sending an error response."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            length = -1
+        if length < 0 or length > max_bytes:
+            self._send_json({"error": "Payload too large" if length > 0 else "Bad Content-Length"},
+                            413 if length > 0 else 400)
+            return None
+        try:
+            data = json.loads(self.rfile.read(length).decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json({"error": "Invalid JSON"}, 400)
+            return None
+        if not isinstance(data, dict):
+            self._send_json({"error": "JSON object required"}, 400)
+            return None
+        return data
+
+    def _edit_log_summary(self, eid: int, log_file: str, edit) -> None:
+        """Locked read-modify-write of log_file's entry in its day summary.
+        edit(entry) returns (error, status) to refuse, or None to save.
+        Responds with the updated summary."""
+        m = LOG_FILE_RE.match(log_file or '')
+        if not m:
+            self._send_json({"error": "Invalid log file format"}, 400)
+            return
+        tracker = get_event_tracker(eid)
+        if not tracker:
+            self._send_json({"error": "Could not get event tracker"}, 500)
+            return
+        summary_file = tracker.log_dir / f"{m.group(1)}_summary.json"
+        try:
+            with summary_lock(summary_file):
+                if not summary_file.exists():
+                    self._send_json({"error": "Summary file not found"}, 404)
+                    return
+                summary = load_json_file(summary_file, {})
+                entry = next((e for e in summary.get('logs', []) if e.get('file') == log_file), None)
+                if entry is None:
+                    self._send_json({"error": f"Log {log_file} not found in summary"}, 404)
+                    return
+                err = edit(entry)
+                if err:
+                    self._send_json({"error": err[0]}, err[1])
+                    return
+                save_json_atomic(summary_file, summary)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+            return
+        self._send_json(summary)
+
+    @staticmethod
+    def _sublog_at(entry: dict, index: int, start_ts):
+        """(sublog, None) or (None, (error, status)). start_ts, if given, must
+        match, so an index shifted by a concurrent add/delete is refused."""
+        sublogs = entry.get('sublogs') or []
+        if not 0 <= index < len(sublogs):
+            return None, ("Sublog index out of range", 400)
+        if start_ts is not None and sublogs[index].get('start_ts') != start_ts:
+            return None, ("Sublog has changed, reload and try again", 409)
+        return sublogs[index], None
+
     def do_OPTIONS(self):
         """Handle CORS preflight."""
         self.send_response(200)
@@ -2998,6 +3155,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             # Load user overrides for display names
             user_overrides = tracker.user_overrides or {}
 
+            # Hidden logs/sublogs only for admins (no header: skip the check so
+            # anonymous searches don't count as failed auth)
+            show_hidden = bool(self.headers.get('X-Admin-Password')) and self._check_event_admin_auth(eid)
+
             results = []
             # Scan all summary files
             if tracker.log_dir.exists():
@@ -3009,8 +3170,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
                         logs = summary.get('logs', [])
                         for log_idx, log in enumerate(logs):
+                            if log.get('hidden') and not show_hidden:
+                                continue
                             # Named sublogs (race markers), e.g. "Marathon"
                             for sub_idx, sublog in enumerate(log.get('sublogs', []) or []):
+                                if sublog.get('hidden') and not show_hidden:
+                                    continue
                                 sub_name = str(sublog.get('name', ''))
                                 if query in sub_name.lower():
                                     s_ts = sublog.get('start_ts', 0)
@@ -3415,15 +3580,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 errors.append(f"{date_str}.jsonl: {e}")
 
         # Regenerate summaries and .gz files for modified log files.
-        # Delete stale summaries first so generate_log_summaries() doesn't
-        # skip them due to mtime-based caching.
+        # Back-date stale summaries so generate_log_summaries() doesn't skip
+        # them due to mtime-based caching (not deleted: that would lose admin
+        # edits such as sublogs and hidden flags).
         if merged_files:
             for fname in merged_files:
                 date_str = fname.replace('.jsonl', '')
                 for suffix in ('_summary.json',):
                     stale = tracker.log_dir / f"{date_str}{suffix}"
                     if stale.exists():
-                        stale.unlink()
+                        os.utime(stale, (0, 0))
             try:
                 generate_log_summaries(tracker.log_dir)
             except Exception as e:
@@ -3946,6 +4112,70 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             log(f"[EVENT {eid}] Remote shutdown queued for {user_id}")
             self._send_json({"success": True, "user_id": user_id, "event_id": eid})
 
+        elif re.match(r'^/log/[^/]+/hidden$', subpath):
+            # Hide/unhide a log or one of its sublogs from non-admin viewers:
+            # {"hidden": bool, "sublog": index (optional), "start_ts": sublog start (optional check)}
+            log_file = subpath[len('/log/'):-len('/hidden')]
+            data = self._read_json_object()
+            if data is None:
+                return
+            hidden = data.get('hidden')
+            sub = data.get('sublog')
+            if not isinstance(hidden, bool):
+                self._send_json({"error": "hidden must be true or false"}, 400)
+                return
+            if sub is not None and (not isinstance(sub, int) or isinstance(sub, bool)):
+                self._send_json({"error": "sublog must be an index"}, 400)
+                return
+
+            def edit(entry):
+                target = entry
+                if sub is not None:
+                    target, err = self._sublog_at(entry, sub, data.get('start_ts'))
+                    if err:
+                        return err
+                if hidden:
+                    target['hidden'] = True
+                else:
+                    target.pop('hidden', None)
+                what = f"sublog '{target.get('name', '')}' of {log_file}" if sub is not None else log_file
+                log(f"[EVENT {eid}] {'Hid' if hidden else 'Unhid'} {what}")
+                return None
+            self._edit_log_summary(eid, log_file, edit)
+
+        elif re.match(r'^/log/[^/]+/sublog/\d+/course$', subpath):
+            # Course as laid for one sublog: {"course": {...} or null to reset to
+            # the planned course, "start_ts": sublog start (optional check)}
+            m = re.match(r'^/log/([^/]+)/sublog/(\d+)/course$', subpath)
+            log_file, sub = m.group(1), int(m.group(2))
+            data = self._read_json_object()
+            if data is None:
+                return
+            if 'course' not in data:
+                self._send_json({"error": "course required (null to reset)"}, 400)
+                return
+            course = data['course']
+            if course is not None:
+                err = validate_course(course)
+                if err:
+                    self._send_json({"error": err}, 400)
+                    return
+
+            def edit(entry):
+                sublog, err = self._sublog_at(entry, sub, data.get('start_ts'))
+                if err:
+                    return err
+                if course is None:
+                    sublog.pop('course', None)
+                    sublog.pop('course_saved', None)
+                else:
+                    sublog['course'] = course
+                    sublog['course_saved'] = time.time()
+                log(f"[EVENT {eid}] {'Reset' if course is None else 'Set'} course for sublog "
+                    f"'{sublog.get('name', '')}' of {log_file}")
+                return None
+            self._edit_log_summary(eid, log_file, edit)
+
         elif subpath.startswith('/log/') and '/sublog' in subpath:
             # Add a sublog (race marker) to a log file's summary
             # URL format: /log/{log_file}/sublog
@@ -3958,86 +4188,36 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Log file required"}, 400)
                 return
 
+            data = self._read_json_object()
+            if data is None:
+                return
+            if 'name' not in data or 'start_ts' not in data or 'end_ts' not in data:
+                self._send_json({"error": "name, start_ts, and end_ts required"}, 400)
+                return
             try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length).decode('utf-8')
-                data = json.loads(body)
-
-                # Validate required fields
-                if 'name' not in data or 'start_ts' not in data or 'end_ts' not in data:
-                    self._send_json({"error": "name, start_ts, and end_ts required"}, 400)
-                    return
-
                 name = str(data['name']).strip()
                 start_ts = int(data['start_ts'])
                 end_ts = int(data['end_ts'])
+            except (TypeError, ValueError, OverflowError):
+                self._send_json({"error": "start_ts and end_ts must be numbers"}, 400)
+                return
+            if not name:
+                self._send_json({"error": "name cannot be empty"}, 400)
+                return
+            if start_ts >= end_ts:
+                self._send_json({"error": "start_ts must be before end_ts"}, 400)
+                return
 
-                if not name:
-                    self._send_json({"error": "name cannot be empty"}, 400)
-                    return
-                if start_ts >= end_ts:
-                    self._send_json({"error": "start_ts must be before end_ts"}, 400)
-                    return
-
-                tracker = get_event_tracker(eid)
-                if not tracker:
-                    self._send_json({"error": "Could not get event tracker"}, 500)
-                    return
-
-                # Find the summary file for this log
-                # Extract date from log file name (e.g., 2025_01_15.jsonl -> 2025_01_15_summary.json)
-                date_match = re.match(r'^(\d{4}_\d{2}_\d{2})\.jsonl', log_file)
-                if not date_match:
-                    self._send_json({"error": "Invalid log file format"}, 400)
-                    return
-                date_str = date_match.group(1)
-                summary_file = tracker.log_dir / f"{date_str}_summary.json"
-
-                if not summary_file.exists():
-                    self._send_json({"error": "Summary file not found"}, 404)
-                    return
-
-                # Load summary, add sublog, save
-                with open(summary_file, 'r') as f:
-                    summary = json.load(f)
-
-                # Find the log entry
-                log_entry = None
-                for entry in summary.get('logs', []):
-                    if entry.get('file') == log_file:
-                        log_entry = entry
-                        break
-
-                if not log_entry:
-                    self._send_json({"error": f"Log {log_file} not found in summary"}, 404)
-                    return
-
-                # Add sublog
-                if 'sublogs' not in log_entry:
-                    log_entry['sublogs'] = []
-
-                log_entry['sublogs'].append({
+            def edit(entry):
+                entry.setdefault('sublogs', []).append({
                     'name': name,
                     'start_ts': start_ts,
                     'end_ts': end_ts
                 })
-
-                # Sort sublogs by start time
-                log_entry['sublogs'].sort(key=lambda x: x.get('start_ts', 0))
-
-                # Save summary atomically
-                tmp_file = summary_file.with_suffix('.tmp')
-                with open(tmp_file, 'w') as f:
-                    json.dump(summary, f, indent=2)
-                tmp_file.rename(summary_file)
-
+                entry['sublogs'].sort(key=lambda x: x.get('start_ts', 0))
                 log(f"[EVENT {eid}] Added sublog '{name}' to {log_file}")
-                self._send_json(summary)
-
-            except json.JSONDecodeError:
-                self._send_json({"error": "Invalid JSON"}, 400)
-            except Exception as e:
-                self._send_json({"error": str(e)}, 500)
+                return None
+            self._edit_log_summary(eid, log_file, edit)
 
         elif subpath == '/admin/races':
             # Create a new race
@@ -4690,62 +4870,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid sublog index"}, 400)
                 return
 
-            if not log_file:
-                self._send_json({"error": "Log file required"}, 400)
-                return
-
-            tracker = get_event_tracker(eid)
-            if not tracker:
-                self._send_json({"error": "Could not get event tracker"}, 500)
-                return
-
-            # Find the summary file for this log
-            date_match = re.match(r'^(\d{4}_\d{2}_\d{2})\.jsonl', log_file)
-            if not date_match:
-                self._send_json({"error": "Invalid log file format"}, 400)
-                return
-            date_str = date_match.group(1)
-            summary_file = tracker.log_dir / f"{date_str}_summary.json"
-
-            if not summary_file.exists():
-                self._send_json({"error": "Summary file not found"}, 404)
-                return
-
-            try:
-                # Load summary
-                with open(summary_file, 'r') as f:
-                    summary = json.load(f)
-
-                # Find the log entry
-                log_entry = None
-                for entry in summary.get('logs', []):
-                    if entry.get('file') == log_file:
-                        log_entry = entry
-                        break
-
-                if not log_entry:
-                    self._send_json({"error": f"Log {log_file} not found in summary"}, 404)
-                    return
-
-                sublogs = log_entry.get('sublogs', [])
-                if sublog_index < 0 or sublog_index >= len(sublogs):
-                    self._send_json({"error": "Sublog index out of range"}, 400)
-                    return
-
-                # Remove the sublog
-                removed = sublogs.pop(sublog_index)
-
-                # Save summary atomically
-                tmp_file = summary_file.with_suffix('.tmp')
-                with open(tmp_file, 'w') as f:
-                    json.dump(summary, f, indent=2)
-                tmp_file.rename(summary_file)
-
+            def edit(entry):
+                _, err = self._sublog_at(entry, sublog_index, None)
+                if err:
+                    return err
+                removed = entry['sublogs'].pop(sublog_index)
                 log(f"[EVENT {eid}] Removed sublog '{removed.get('name', 'unnamed')}' from {log_file}")
-                self._send_json(summary)
-
-            except Exception as e:
-                self._send_json({"error": str(e)}, 500)
+                return None
+            self._edit_log_summary(eid, log_file, edit)
 
         elif re.match(r'^/admin/races/\d+$', subpath):
             # Delete a race

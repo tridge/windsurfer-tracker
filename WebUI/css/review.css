@@ -999,3 +999,82 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 #search-close:hover {
     background: #95a5a6;
 }
+
+/* Hidden logs/races (admin mode only lists them) */
+.race-item.log-hidden, .sublog-item.log-hidden {
+    opacity: 0.45;
+}
+
+.log-hide-btn {
+    padding: 1px 6px;
+    margin-left: 6px;
+    margin-right: 4px;
+    background: #95a5a6;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: normal;
+    vertical-align: middle;
+}
+
+.log-hide-btn:hover {
+    background: #7f8c8d;
+}
+
+.sublog-laid {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: normal;
+    color: #2563eb;
+}
+
+/* Admin bar for editing a race's marks as laid */
+#mark-edit-bar {
+    position: absolute;
+    top: 70px;
+    left: 60px;
+    z-index: 999;
+    max-width: calc(100% - 400px);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    font-size: 13px;
+}
+
+#mark-edit-bar.editing {
+    background: #fff7e6;
+    border: 2px solid #f39c12;
+}
+
+#mark-edit-bar button {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #3498db;
+    color: white;
+    font-size: 12px;
+}
+
+#mark-edit-save { background: #27ae60 !important; }
+#mark-edit-cancel { background: #95a5a6 !important; }
+#mark-edit-reset { background: #e67e22 !important; }
+
+@media (max-width: 768px) {
+    #mark-edit-bar { max-width: calc(100% - 80px); }
+}
+
+.pin-handle {
+    border-radius: 50%;
+    background: #f97316;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 2px #9a3412;
+    cursor: move;
+}

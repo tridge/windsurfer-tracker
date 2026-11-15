@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/common.css?v=192905ff" />
     <link rel="stylesheet" href="css/graphs.css?v=7eda7044" />
-    <link rel="stylesheet" href="css/review.css?v=a84053f7" />
+    <link rel="stylesheet" href="css/review.css?v=8b643941" />
     <link rel="stylesheet" href="js/flatpickr/flatpickr.min.css?v=1b34a425" />
 </head>
 <body>
@@ -105,6 +105,15 @@
     </div>
 
     <div id="map"></div>
+
+    <!-- Admin: marks as laid for the selected race (sublog) -->
+    <div id="mark-edit-bar" style="display:none">
+        <span id="mark-edit-text"></span>
+        <button id="mark-edit-start" onclick="startMarkEdit()">Edit marks</button>
+        <button id="mark-edit-save" onclick="saveMarkEdit()">Save</button>
+        <button id="mark-edit-cancel" onclick="cancelMarkEdit()">Cancel</button>
+        <button id="mark-edit-reset" onclick="resetSublogCourse()" title="Show the planned course for this race again">Reset to planned</button>
+    </div>
 
     <div class="custom-scale" id="customScale">
         <div class="scale-bar" id="scaleBar"></div>
@@ -426,7 +435,7 @@
     <script src="js/utils.js?v=1b6d5619"></script>
     <script src="js/modal.js?v=3260ad1a"></script>
     <script src="js/map-utils.js?v=4c62e6e7"></script>
-    <script src="js/course-order.js?v=9da7ee55"></script>
+    <script src="js/course-order.js?v=f8bb5e9b"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/export.js?v=e0b59685"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
@@ -496,7 +505,9 @@
             } else {
                 // Just disable admin mode, keep password cached for re-enable
                 isAdmin = false;
+                markEdit = null;
                 updateRaceList();
+                refreshCourseDisplay();
             }
         }
 
@@ -584,6 +595,195 @@
             }
         }
 
+        // Hide/unhide button for a log (subIndex null) or race, admin mode only
+        function hideButtonHtml(logIndex, subIndex, hidden) {
+            return `<button class="log-hide-btn" onclick="event.stopPropagation(); setLogHidden(${logIndex}, ${subIndex}, ${!hidden})" ` +
+                `title="${hidden ? 'Show to everyone again' : 'Hide from non-admin viewers'}">${hidden ? 'Unhide' : 'Hide'}</button>`;
+        }
+
+        // POST an admin edit of a log's summary entry; the updated summary, or null after an alert
+        async function postLogAdmin(logFile, path, body, what) {
+            try {
+                const response = await fetch(`/api/event/${EVENT_ID}/log/${encodeURIComponent(logFile)}/${path}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': getAdminPassword() },
+                    body: JSON.stringify(body)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (response.ok && data && Array.isArray(data.logs)) return data;
+                alert(`Failed to ${what}: ${data.error || response.status}`);
+            } catch (e) {
+                alert(`Failed to ${what}: ${e.message}`);
+            }
+            return null;
+        }
+
+        // Take a summary returned by an admin edit, keeping the current selection
+        function applySummaryUpdate(summary) {
+            const { si } = selectedSublogIndex();
+            currentSummary = summary;
+            if (si >= 0) {
+                const log = summary.logs.find(l => l.file === currentLogFile);
+                const fresh = log && (log.sublogs || []).find(s => s.start_ts === selectedSublog.start_ts && s.name === selectedSublog.name);
+                if (fresh) selectedSublog = fresh;
+            }
+            updateRaceList();
+            refreshCourseDisplay();
+        }
+
+        async function setLogHidden(logIndex, subIndex, hidden) {
+            const log = currentSummary && currentSummary.logs[logIndex];
+            if (!log) return;
+            const body = { hidden };
+            if (subIndex !== null) {
+                const sub = (log.sublogs || [])[subIndex];
+                if (!sub) return;
+                body.sublog = subIndex;
+                body.start_ts = sub.start_ts;
+            }
+            const summary = await postLogAdmin(log.file, 'hidden', body, hidden ? 'hide' : 'unhide');
+            if (summary) applySummaryUpdate(summary);
+        }
+
+        // Indexes of the loaded log and selected race in currentSummary (-1 if none)
+        function selectedSublogIndex() {
+            const logs = (currentSummary && currentSummary.logs) || [];
+            const li = logs.findIndex(l => l.file === currentLogFile);
+            const si = li < 0 || !selectedSublog ? -1 : (logs[li].sublogs || []).findIndex(s =>
+                s.start_ts === selectedSublog.start_ts && s.name === selectedSublog.name);
+            return { li, si };
+        }
+
+        function highlightSelection() {
+            const { li, si } = selectedSublogIndex();
+            if (li < 0) return;
+            const el = selectedSublog
+                ? document.querySelector(`.sublog-item[data-log-index="${li}"][data-sublog-index="${si}"]`)
+                : document.querySelector(`.race-item[data-index="${li}"]`);
+            if (el) el.classList.add('selected');
+        }
+
+        // Course shown: the selected race's marks as laid if set, else the planned course
+        function refreshCourseDisplay() {
+            const sub = selectedSublogIndex().si >= 0 ? selectedSublog : null;
+            if (markEdit && !(sub && currentLogFile === markEdit.logFile && sub.start_ts === markEdit.startTs)) {
+                markEdit = null;  // selection changed: drop the unsaved edit
+            }
+            const course = markEdit ? markEdit.course : (sub && sub.course) || plannedCourse;
+            if (course) displayCourse(course, markEdit ? moveCoursePoint : undefined);
+            else clearCourseDisplay();
+            updateMarkEditBar();
+        }
+
+        const normLon = lon => ((lon + 540) % 360 + 360) % 360 - 180;
+
+        function moveCoursePoint(pt, latlng) {
+            pt.lat = +latlng.lat.toFixed(7);
+            pt.lon = +normLon(latlng.lng).toFixed(7);
+            refreshCourseDisplay();
+        }
+
+        // Draggable start/finish pins while editing; a pin stays square to its leg
+        function addPinHandles(c, ll) {
+            for (const which of ['S', 'F']) {
+                const pl = CourseOrder.pinLine(c, which);
+                if (!pl) continue;
+                const m = L.marker(ll(pl.pin), {
+                    icon: L.divIcon({ className: 'pin-handle', iconSize: [16, 16] }),
+                    draggable: true, title: `${which === 'S' ? 'Start' : 'Finish'} pin`
+                }).addTo(map);
+                m.on('dragend', e => movePin(c, which, e.target.getLatLng()));
+                courseMarkers.push(m);
+            }
+        }
+
+        function movePin(c, which, latlng) {
+            const pt = which === 'S' ? c.start : c.finish;
+            const to = [latlng.lat, normLon(latlng.lng)];
+            const dist = Math.max(1, Math.round(map.distance([pt.lat, pt.lon], to)));
+            const orig = pt.pin;
+            let best = null;
+            for (const side of ['left', 'right']) {
+                pt.pin = { ...orig, dist, side };
+                const pl = CourseOrder.pinLine(c, which);
+                const d = pl ? map.distance([pl.pin.lat, pl.pin.lon], to) : Infinity;
+                if (!best || d < best.d) best = { d, side };
+            }
+            pt.pin = { ...orig, dist, side: best.side };
+            refreshCourseDisplay();
+        }
+
+        function updateMarkEditBar() {
+            const bar = document.getElementById('mark-edit-bar');
+            const sub = isAdmin && selectedSublogIndex().si >= 0 ? selectedSublog : null;
+            if (!sub) {
+                bar.style.display = 'none';
+                return;
+            }
+            const editing = !!markEdit;
+            bar.style.display = '';
+            bar.classList.toggle('editing', editing);
+            document.getElementById('mark-edit-text').textContent = editing
+                ? `Drag marks, start, finish and pins to where they were laid for ${sub.name}`
+                : `${sub.name}: ${sub.course ? 'marks as laid' : 'planned course'}`;
+            document.getElementById('mark-edit-start').style.display = editing ? 'none' : '';
+            document.getElementById('mark-edit-save').style.display = editing ? '' : 'none';
+            document.getElementById('mark-edit-cancel').style.display = editing ? '' : 'none';
+            document.getElementById('mark-edit-reset').style.display = !editing && sub.course ? '' : 'none';
+        }
+
+        async function startMarkEdit() {
+            if (!isAdmin || selectedSublogIndex().si < 0) return;
+            let base = selectedSublog.course || plannedCourse;
+            if (!base) {
+                // no course for this log: start from the current one
+                try {
+                    const r = await fetch(`${DATA_BASE}course.json`, { cache: 'no-cache' });
+                    if (r.ok) base = await r.json();
+                } catch (e) {}
+            }
+            if (!base) {
+                alert('No course to edit: set up a course first');
+                return;
+            }
+            if (!showCourse) {
+                showCourse = true;
+                document.getElementById('show-course').checked = true;
+            }
+            const course = JSON.parse(JSON.stringify(base));
+            ['updated', 'updated_iso', 'saved'].forEach(k => delete course[k]);
+            markEdit = { course, logFile: currentLogFile, startTs: selectedSublog.start_ts };
+            refreshCourseDisplay();
+            // bring all the points into view to drag them
+            const pts = courseMarkers.map(m => m.getLatLng());
+            if (pts.length && !pts.every(p => map.getBounds().contains(p))) {
+                map.fitBounds(L.latLngBounds(pts).pad(0.2));
+            }
+        }
+
+        function cancelMarkEdit() {
+            markEdit = null;
+            refreshCourseDisplay();
+        }
+
+        async function saveMarkEdit() {
+            const { si } = selectedSublogIndex();
+            if (!markEdit || si < 0) return;
+            const summary = await postLogAdmin(markEdit.logFile, `sublog/${si}/course`,
+                { course: markEdit.course, start_ts: markEdit.startTs }, 'save marks');
+            if (!summary) return;
+            markEdit = null;
+            applySummaryUpdate(summary);
+        }
+
+        async function resetSublogCourse() {
+            const { si } = selectedSublogIndex();
+            if (si < 0 || !confirm(`Show the planned course for ${selectedSublog.name} again? The marks as laid are removed.`)) return;
+            const summary = await postLogAdmin(currentLogFile, `sublog/${si}/course`,
+                { course: null, start_ts: selectedSublog.start_ts }, 'reset marks');
+            if (summary) applySummaryUpdate(summary);
+        }
+
         function selectSublog(logIndex, sublogIndex) {
             // Get the log entry and sublog
             if (!currentSummary || !currentSummary.logs || !currentSummary.logs[logIndex]) return;
@@ -620,6 +820,7 @@
             updateTimeDisplay();
             resetPlaybackPosition();
             redrawAll();
+            refreshCourseDisplay();
         }
 
         // Get today's date in event timezone (for date picker)
@@ -773,6 +974,7 @@
                 for (const log of currentSummary.logs) {
                     if (log.sublogs) {
                         const sublog = log.sublogs.find(s => s.start_ts === raceTs);
+                        if (sublog && !isAdmin && (log.hidden || sublog.hidden)) break;
                         if (sublog) {
                             // Apply race time range (sets slider bounds to race)
                             applySublogTimeRange(log, sublog);
@@ -983,6 +1185,8 @@
         let courseLines = [];    // Course line layers
         let showCourse = true;   // Whether to display course
         let currentCourseFile = null;  // Currently loaded course filename
+        let plannedCourse = null;      // Course data from currentCourseFile
+        let markEdit = null;           // Admin mark edit: {course, logFile, startTs}
         let batteryGraphMetric = 'pct';  // battery graph y-axis: 'pct' or 'volt' (corrected bat_v)
 
         // Expand log entry - handles both old format (lat/lon direct) and new format (pos array)
@@ -1031,7 +1235,8 @@
         const createMarkIcon = CourseOrder.markIcon;
         const createFinishIcon = CourseOrder.finishIcon;
 
-        function displayCourse(course) {
+        // onMove(pt, latlng): editing; points are draggable and onMove is called on drop
+        function displayCourse(course, onMove) {
             clearCourseDisplay();
             if (!showCourse) return;
             const multi = CourseOrder.courseCount(course) > 1;
@@ -1043,8 +1248,9 @@
             for (const sc of CourseOrder.subCourses(course)) {
                 const c = sc.course, letter = sc.letter;
                 const add = (pt, icon, popup) => {
-                    const marker = L.marker(ll(pt), { icon }).addTo(map);
+                    const marker = L.marker(ll(pt), { icon, draggable: !!onMove }).addTo(map);
                     marker.bindPopup(popup);
+                    if (onMove) marker.on('dragend', e => onMove(pt, e.target.getLatLng()));
                     courseMarkers.push(marker);
                 };
                 if (c.start) add(c.start, createStartIcon(null, multi ? letter : null),
@@ -1061,7 +1267,8 @@
 
                 // Course line: routed with rounding and arrows when a mark order is set;
                 // start/finish with a pin drawn as a line, legs from its middle
-                CourseOrder.pinLayers(c, { ref }).forEach(l => courseLines.push(l.addTo(map)));
+                CourseOrder.pinLayers(c, { ref, interactive: !onMove }).forEach(l => courseLines.push(l.addTo(map)));
+                if (onMove) addPinHandles(c, ll);
                 const legPoints = CourseOrder.sequence(c).map(e => ll(e.pt));
                 if (CourseOrder.keys(c)) {
                     courseLines.push(CourseOrder.routeLayer(c, { color: sc.color, letter: multi ? letter : null, ref }).addTo(map));
@@ -1075,24 +1282,25 @@
 
         async function loadCourse(courseFilename) {
             if (!courseFilename || courseFilename === currentCourseFile) {
+                refreshCourseDisplay();
                 return;
             }
             try {
                 const courseUrl = `${DATA_BASE}${courseFilename}`;
                 const response = await fetch(courseUrl);
                 if (response.ok) {
-                    const courseData = await response.json();
+                    plannedCourse = await response.json();
                     currentCourseFile = courseFilename;
-                    displayCourse(courseData);
                 } else {
-                    clearCourseDisplay();
+                    plannedCourse = null;
                     currentCourseFile = null;
                 }
             } catch (e) {
                 console.log('Error loading course:', e);
-                clearCourseDisplay();
+                plannedCourse = null;
                 currentCourseFile = null;
             }
+            refreshCourseDisplay();
         }
 
         // Mobile drawer toggle
@@ -1505,7 +1713,7 @@
 
                 if (response.ok) {
                     currentSummary = await response.json();
-                    updateRaceList();
+                    updateRaceList(true);
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('status').textContent = `Found ${currentSummary.logs.length} log(s) for this date`;
                 } else {
@@ -1521,20 +1729,23 @@
             }
         }
 
-        // Update race list UI
-        function updateRaceList() {
+        // Update race list UI; autoSelect: select the log/race given in the page URL
+        function updateRaceList(autoSelect = false) {
             const container = document.getElementById('race-list');
             container.innerHTML = '';
+            updateMarkEditBar();
 
-            if (!currentSummary || !currentSummary.logs || currentSummary.logs.length === 0) {
+            // hidden logs/races are only listed (greyed) in admin mode
+            if (!currentSummary || !currentSummary.logs || !currentSummary.logs.some(l => isAdmin || !l.hidden)) {
                 container.innerHTML = '<p style="color:#666">No logs found</p>';
                 return;
             }
 
             // Logs are already sorted by start_ts descending in the summary
             currentSummary.logs.forEach((log, index) => {
+                if (log.hidden && !isAdmin) return;
                 const div = document.createElement('div');
-                div.className = 'race-item';
+                div.className = 'race-item' + (log.hidden ? ' log-hidden' : '');
                 div.dataset.index = index;
 
                 const startTime = formatTimeInTz(log.start_ts);
@@ -1544,7 +1755,8 @@
 
                 // Add "+" button for admin to add a sublog
                 const addBtn = isAdmin ?
-                    `<button class="sublog-add" onclick="event.stopPropagation(); promptAddSublogForLog('${log.file}')" title="Add race marker">+</button>` : '';
+                    `<button class="sublog-add" onclick="event.stopPropagation(); promptAddSublogForLog('${log.file}')" title="Add race marker">+</button>` +
+                    hideButtonHtml(index, null, log.hidden) : '';
 
                 div.innerHTML = `
                     <div class="race-time">Log ${currentSummary.logs.length - index}: ${startTime} - ${endTime}${addBtn}</div>
@@ -1568,8 +1780,9 @@
                 // Add sublogs if present
                 if (log.sublogs && log.sublogs.length > 0) {
                     log.sublogs.forEach((sublog, subIndex) => {
+                        if (sublog.hidden && !isAdmin) return;
                         const subDiv = document.createElement('div');
-                        subDiv.className = 'sublog-item';
+                        subDiv.className = 'sublog-item' + (sublog.hidden ? ' log-hidden' : '');
                         subDiv.dataset.logIndex = index;
                         subDiv.dataset.sublogIndex = subIndex;
 
@@ -1580,9 +1793,11 @@
                         const deleteBtn = isAdmin ?
                             `<button class="sublog-delete" onclick="event.stopPropagation(); deleteSublog('${log.file}', ${subIndex})" title="Delete race">−</button>` : '';
 
+                        const laid = sublog.course ? '<span class="sublog-laid" title="Course shows the marks as laid for this race">marks as laid</span>' : '';
                         subDiv.innerHTML = `
-                            <div class="sublog-name">${escapeHtml(sublog.name)}</div>
+                            <div class="sublog-name">${escapeHtml(sublog.name)}${laid}</div>
                             <div class="sublog-time">${subStartTime} - ${subEndTime} (${subDuration}m)</div>
+                            ${isAdmin ? hideButtonHtml(index, subIndex, sublog.hidden) : ''}
                             ${deleteBtn}
                         `;
 
@@ -1600,6 +1815,11 @@
                 }
             });
 
+            if (!autoSelect) {
+                highlightSelection();
+                return;
+            }
+
             // Auto-select log from URL params if present
             const urlParams = new URLSearchParams(window.location.search);
             let matchingLog = null;
@@ -1614,6 +1834,7 @@
                 matchingLog = currentSummary.logs.find(log => log.file === targetLog);
             }
 
+            if (matchingLog && matchingLog.hidden && !isAdmin) matchingLog = null;
             if (matchingLog) {
                 const index = currentSummary.logs.indexOf(matchingLog);
                 const logDiv = container.querySelector(`[data-index="${index}"]`);
@@ -1787,8 +2008,9 @@
                 if (logEntry.course) {
                     await loadCourse(logEntry.course);
                 } else {
-                    clearCourseDisplay();
                     currentCourseFile = null;
+                    plannedCourse = null;
+                    refreshCourseDisplay();
                 }
 
                 document.getElementById('loading').style.display = 'none';
@@ -5392,7 +5614,8 @@
             resultsContainer.innerHTML = '<p class="search-hint">Searching...</p>';
 
             try {
-                const response = await fetch(`/api/event/${EVENT_ID}/search?q=${encodeURIComponent(query)}`);
+                const response = await fetch(`/api/event/${EVENT_ID}/search?q=${encodeURIComponent(query)}`,
+                    isAdmin ? { headers: { 'X-Admin-Password': getAdminPassword() } } : {});
                 if (!response.ok) {
                     throw new Error('Search failed');
                 }
@@ -5482,6 +5705,7 @@
 
                     // Sailor hit: plain log selection, drop any previous race marker
                     selectedSublog = null;
+                    refreshCourseDisplay();
 
                     // Select the specific sailor
                     selectedUsers.clear();
@@ -5561,14 +5785,7 @@
 
         document.getElementById('show-course').addEventListener('change', (e) => {
             showCourse = e.target.checked;
-            if (showCourse && currentCourseFile) {
-                // Re-load and display course
-                const courseFilename = currentCourseFile;
-                currentCourseFile = null;  // Reset to force reload
-                loadCourse(courseFilename);
-            } else {
-                clearCourseDisplay();
-            }
+            refreshCourseDisplay();
         });
 
         document.getElementById('show-speed-graph').addEventListener('change', (e) => {
