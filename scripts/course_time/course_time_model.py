@@ -8,7 +8,7 @@
 
 Each DAYDIR comes from fetch_race_data.py and has a hand-edited config.json.
 """
-import argparse, json, math, os, pickle, statistics as st, sys
+import argparse, json, math, os, pickle, re, statistics as st, sys
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -45,8 +45,9 @@ def leg_time(p, D, tws, twa):
             if tg < t: return tg, 'gybe'
     return t, 'reach' if twa < 150 else 'run'
 
-def turn_cost(twa_in, stbd_in, twa_out, stbd_out):
-    return C_GYBE if twa_in >= 90 and twa_out >= 90 and stbd_in != stbd_out else C_TURN
+def turn_cost(twa_in, port_in, twa_out, port_out):
+    """mark turn: a gybe if both legs are at/below a beam reach on opposite tacks"""
+    return C_GYBE if twa_in >= 90 and twa_out >= 90 and port_in != port_out else C_TURN
 
 def course_time(p, legs, tws, wfrom):
     """legs=[(metres, bearing)], wfrom=true wind-from deg. Returns (seconds, [(twa, mode, s)])"""
@@ -68,13 +69,28 @@ class Proj:
         self.lat0, self.lon0 = lat, lon; self.kx = 111320*math.cos(math.radians(lat)); self.ky = 110540
     def __call__(self, lat, lon): return ((lon-self.lon0)*self.kx, (lat-self.lat0)*self.ky)
 
+def parse_order(o, nm):
+    """port of CourseOrder.parse: 'S12313F' or 'S 1 2 10 F' -> ['S', 1, ..., 'F'], None if blank/invalid"""
+    o = (o or '').upper().strip()
+    if not o: return None
+    toks = [t for t in re.split(r'[\s,\-]+', o) if t] if re.search(r'[\s,\-]', o) else list(o)
+    seq = []
+    for t in toks:
+        if t in ('S', 'F'): seq.append(t); continue
+        if not t.isdigit() or not 1 <= int(t) <= nm: return None
+        seq.append(int(t))
+    if seq[0] != 'S': seq.insert(0, 'S')
+    if seq[-1] != 'F': seq.append('F')
+    for i, k in enumerate(seq):
+        if (k == 'F' and i != len(seq)-1) or (i and k == seq[i-1]): return None
+    return seq
+
 def course_seq(c, xy):
     """port of WebUI CourseOrder.sequence/pinLine: [(key, (x,y))] with start/finish pins at
     their line middles, plus {'S'/'F': (endA, endB)} lines"""
     nm = len(c.get('marks', []))
-    if c.get('order'):
-        ks = [k if k in 'SF' else int(k) for k in c['order']]
-    else:
+    ks = parse_order(c.get('order'), nm)
+    if not ks:
         ks = (['S'] if c.get('start') else [])+list(range(1, nm+1))+(['F'] if c.get('finish') else [])
     pt = lambda k: c['start'] if k == 'S' else c['finish'] if k == 'F' else c['marks'][k-1]
     seq = [(k, xy(pt(k)['lat'], pt(k)['lon'])) for k in ks if pt(k)]
@@ -103,7 +119,12 @@ def course_seq(c, xy):
 
 def course_legs(c, xy):
     seq, _ = course_seq(c, xy)
-    return [(dist(seq[i-1][1], seq[i][1]), brg(seq[i-1][1], seq[i][1])) for i in range(1, len(seq))], [k for k, _ in seq]
+    legs, keys = [], [seq[0][0]] if seq else []
+    for i in range(1, len(seq)):
+        d = dist(seq[i-1][1], seq[i][1])
+        if d > 0.5:    # as CourseTime.legsFromPoints
+            legs.append((d, brg(seq[i-1][1], seq[i][1]))); keys.append(seq[i][0])
+    return legs, keys
 
 def sub_courses(c):
     """the course plus any extraCourses (CourseOrder.subCourses)"""
@@ -137,6 +158,8 @@ class Day:
             c = s.get('course') or json.load(open(os.path.join(d, 'course.json')))
             self.races.append(dict(name=s['name'], a=s['start_ts'], b=s['end_ts'], course=c,
                                    gun=rc.get('gun'), pursuit=rc.get('pursuit', False)))
+        if not self.races:
+            sys.exit(f"{d}: no sublogs in {self.cfg['log_file']} match the races in config.json")
         c0 = self.races[0]['course']['start']
         self.xy = Proj(c0['lat'], c0['lon'])
         self.woff = self.cfg.get('wind_offset_deg', 0.0)
