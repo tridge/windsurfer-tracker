@@ -66,6 +66,7 @@
                 <label><input type="checkbox" id="show-heartrate-graph"> Heart Rate</label>
                 <label><input type="checkbox" id="show-accuracy-graph"> Accuracy</label>
                 <label><input type="checkbox" id="show-satellites-graph"> Satellites</label>
+                <label id="show-wind-graph" style="display:none" onclick="openWindGraph()">🌬️ Wind</label>
             </div>
         </div>
         <div class="graphs-dropdown">
@@ -407,6 +408,7 @@
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/export.js?v=e0b59685"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
+    <script src="js/wind-graph.js?v=4d538cd7"></script>
     <script src="js/flatpickr/flatpickr.min.js?v=1eeab1cb"></script>
     <script>
         // Event ID from URL parameter (default to 2)
@@ -6075,6 +6077,20 @@
 
         // Load summary (will auto-select log if URL has log param)
         loadSummary();
+    </script>
+    <script>
+        // wind graph for the selected sub-log, else the loaded log, else the whole day
+        function openWindGraph() {
+            document.getElementById('graphs-dropdown-content').classList.remove('show');
+            const r = selectedSublog ? [selectedSublog.start_ts, selectedSublog.end_ts]
+                : maxTime > minTime ? [minTime, maxTime]
+                : WindGraph.dayRange(document.getElementById('date-picker').value || getTodayInEventTz(), eventTimezone);
+            if (!r) return;
+            WindGraph.open({ base: DATA_BASE, from: r[0], to: r[1], tz: eventTimezone,
+                             cursor: () => playbackCurrentTime > rangeStartTime && playbackCurrentTime < rangeEndTime ? playbackCurrentTime : null });
+        }
+        WindGraph.attach('show-wind-graph', DATA_BASE, { tz: () => eventTimezone,
+                         date: () => document.getElementById('date-picker').value || getTodayInEventTz() });
     </script>
 </body>
 </html>

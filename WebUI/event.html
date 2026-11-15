@@ -1311,6 +1311,9 @@
                 <span>🌬️ Live wind</span>
                 <span class="menu-check" id="chkLiveWind"></span>
             </div>
+            <div class="menu-submenu-item" id="menuWindGraph" onclick="toggleMenu(); WindGraph.open({ base: DATA_BASE, live: 3, tz: currentEventInfo?.timezone })" style="display:none">
+                <span>📈 Wind graph</span>
+            </div>
         </div>
         <div class="menu-item" id="menuMapType" onclick="toggleMapSubmenu()" style="display:none">
             <span>🗺️</span>
@@ -1619,6 +1622,7 @@
     <script src="js/course-order.js?v=9da7ee55"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
     <script src="js/wind.js?v=e3592b4f"></script>
+    <script src="js/wind-graph.js?v=4d538cd7"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
     <script>
         // Initialize map centered on Auckland
@@ -2010,6 +2014,7 @@
 
         // Store event info for modal (used by modal.js)
         let currentEventInfo = null;
+        WindGraph.attach('menuWindGraph', DATA_BASE, { tz: () => currentEventInfo?.timezone });
 
         // Show/hide optional admin controls based on per-event flags (default off)
         function applyAdminFeatureFlags() {
