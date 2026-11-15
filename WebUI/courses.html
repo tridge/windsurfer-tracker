@@ -457,6 +457,7 @@
         .raceinfo-panel textarea { width: min(340px, calc(100vw - 50px)); min-height: 140px; box-sizing: border-box;
                                    font: 14px/1.4 system-ui, sans-serif; color: black; }
         .raceinfo-edit-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+        .menu-link { color: inherit; text-decoration: none; }
         .menu-check { margin-left: auto; color: #1976d2; font-weight: bold; min-width: 1em; text-align: right; }
 
         .custom-scale {
@@ -755,6 +756,10 @@
 
     <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
     <div class="menu-panel" id="menuPanel">
+        <a class="menu-item menu-link" id="menuLiveLink" href="event.html">
+            <span>📡</span>
+            <span>Live Tracking</span>
+        </a>
         <div class="menu-item" id="menuAdmin" onclick="toggleAdminMode()">
             <span>🔒</span>
             <span>Admin</span>
@@ -851,6 +856,7 @@
 
         // Update back link with eid
         document.getElementById('backLink').href = `event.html?eid=${EVENT_ID}`;
+        document.getElementById('menuLiveLink').href = `event.html?eid=${EVENT_ID}`;
 
         // Map setup
         const map = L.map('map', { zoomControl: true });
