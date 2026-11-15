@@ -14,7 +14,7 @@ Examples:
   python3 scripts/parkdale_wind.py                      # Parkdale YC, print summary
   python3 scripts/parkdale_wind.py --json               # JSON to stdout
   python3 scripts/parkdale_wind.py --output wind.json   # atomic write (for cron)
-  python3 scripts/parkdale_wind.py -o wind.json --history wind_history.jsonl
+  python3 scripts/parkdale_wind.py -o wind.json --history-dir logs   # logs/YYYY_MM_DD_wind.jsonl
   python3 scripts/parkdale_wind.py --url 'https://www.ecowitt.net/home/share?authorize=XXX&device_id=YYY'
 """
 
@@ -207,6 +207,18 @@ def append_history(path, w):
         f.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
 
+def history_file(dirpath, w):
+    """Daily history file for this reading: <dir>/YYYY_MM_DD_wind.jsonl, dated in the station's
+    timezone (one file per local day, next to that day's track log; not a track-log name)."""
+    t = w["obs_ts"] or w["fetched"]
+    try:
+        tz = ZoneInfo(w["station"].get("timezone") or "UTC")
+    except Exception:
+        tz = datetime.timezone.utc
+    day = datetime.datetime.fromtimestamp(t, tz).strftime("%Y_%m_%d")
+    return os.path.join(dirpath, f"{day}_wind.jsonl")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -214,6 +226,7 @@ def main():
     ap.add_argument("--json", action="store_true", help="print JSON to stdout")
     ap.add_argument("--output", "-o", help="write JSON atomically to this file")
     ap.add_argument("--history", help="append a compact record to this JSONL file")
+    ap.add_argument("--history-dir", help="append to a daily YYYY_MM_DD_wind.jsonl in this directory")
     ap.add_argument("--timeout", type=float, default=20, help="HTTP timeout (s)")
     args = ap.parse_args()
 
@@ -229,9 +242,11 @@ def main():
         atomic_write(args.output, w)
     if args.history:
         append_history(args.history, w)
+    if args.history_dir:
+        append_history(history_file(args.history_dir, w), w)
     if args.json:
         print(json.dumps(w, indent=1))
-    elif not args.output and not args.history:
+    elif not args.output and not args.history and not args.history_dir:
         print(f"{w['station']['name']}  obs {w['obs_local']} (age {w['age_s']}s)")
         print(f"  wind {w['speed_kn']} kn  gust {w['gust_kn']} kn  "
               f"from {w['dir_deg']:.0f}° {w['dir_compass']} "
