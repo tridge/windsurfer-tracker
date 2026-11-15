@@ -852,6 +852,7 @@
     <script src="js/map-utils.js?v=4c62e6e7"></script>
     <script src="js/wmm.js?v=b995cae3"></script>
     <script src="js/course-order.js?v=f8bb5e9b"></script>
+    <script src="js/course-time.js?v=8abf8ed5"></script>
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/wind.js?v=e3592b4f"></script>
     <script>
@@ -1192,19 +1193,6 @@
             return `${km.toFixed(decimals)} km / ${(km / 1.852).toFixed(decimals)} nm`;
         }
 
-        // Race-length benchmark: upwind leg for a wind speed, for a triangle+windward-return
-        // course; full course ≈ 5x upwind, calibrated to a ~25 minute race.
-        // => pace (m/min) = 5*upwind/25 = upwind/5
-        // Points are the old wind brackets' midpoints (3-7, 8-12, 13-17, 18-25 kn), joined by straight
-        // lines and extended past the ends, never below 300 m.
-        const WIND_UPWIND = [[5, 500], [10, 650], [15, 800], [21.5, 1000]];
-        function upwindFor(kn) {
-            const P = WIND_UPWIND;
-            let i = 1;
-            while (i < P.length - 1 && kn > P[i][0]) i++;
-            const [k0, u0] = P[i - 1], [k1, u1] = P[i];
-            return Math.max(300, u0 + (u1 - u0) * (kn - k0) / (k1 - k0));
-        }
         // remembered like mapType; an old bracket choice becomes its midpoint
         let selectedWind = (() => {
             const v = parseInt(localStorage.getItem('windKnots'), 10);
@@ -1372,10 +1360,13 @@
             alert(msg);
         }
 
-        // Approx race time for the selected wind, e.g. "Wind 12kn, 1hr 25min" ('' if none)
-        function formatCourseTime(km) {
-            if (selectedWind === null || !(km > 0)) return '';
-            const minutes = Math.round(km * 1000 / (upwindFor(selectedWind) / 5));
+        // Approx median-sailor race time for the selected wind, wind assumed down the first
+        // leg (CourseTime, js/course-time.js), e.g. "Wind 12kn, 1hr 25min" ('' if none)
+        function formatCourseTime(course) {
+            if (selectedWind === null) return '';
+            const secs = CourseTime.estimate(course, selectedWind);
+            if (!(secs > 0) || !isFinite(secs)) return '';
+            const minutes = Math.round(secs / 60);
             const h = Math.floor(minutes / 60), m = minutes % 60;
             const dur = h > 0 ? `${h}hr ${m}min` : `${m}min`;
             return `Wind ${selectedWind}kn, ${dur}`;
@@ -1608,12 +1599,12 @@
                 const length = calculateCourseLength(course);
                 show('infoMarks', `${marks(course)} + start/finish`);
                 show('infoLength', `Length: ${formatCourseLength(length, 2)}`);
-                show('infoTime', formatCourseTime(length));
+                show('infoTime', formatCourseTime(course));
                 show('infoOrder', orderSummary(course));
             } else {
                 show('infoMarks', `${subs.length} courses`);
                 show('infoLength', subs.map(s => `${s.letter}: ${marks(s.course)}, ${formatCourseLength(calculateCourseLength(s.course), 2)}`).join('\n'));
-                show('infoTime', subs.map(s => { const t = formatCourseTime(calculateCourseLength(s.course)); return t ? `${s.letter}: ${t}` : ''; }).filter(x => x).join('\n'));
+                show('infoTime', subs.map(s => { const t = formatCourseTime(s.course); return t ? `${s.letter}: ${t}` : ''; }).filter(x => x).join('\n'));
                 show('infoOrder', subs.map(s => { const o = orderSummary(s.course); return o ? `${s.letter}: ${o}` : ''; }).filter(x => x).join('\n'));
             }
             document.getElementById('courseInfoBox').style.display = 'block';
@@ -3284,11 +3275,10 @@
                 listEl.innerHTML = '';
                 names.forEach(name => {
                     const course = allCourses[name];
-                    const length = calculateCourseLength(course);
                     const item = document.createElement('div');
                     item.className = 'course-item';
                     item.dataset.name = name;
-                    const timeStr = CourseOrder.courseCount(course) > 1 ? '' : formatCourseTime(length);
+                    const timeStr = CourseOrder.courseCount(course) > 1 ? '' : formatCourseTime(course);
                     item.innerHTML = `
                         <div class="course-name">${escapeHtml(name)}</div>
                         <div class="course-meta">${courseListLength(course)}</div>
