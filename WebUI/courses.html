@@ -863,7 +863,7 @@
                     <div class="raceinfo-panel" id="raceInfoPanel" style="display:none">
                         <div class="raceinfo-head"><b>Race Information</b>
                             <button id="raceInfoEditBtn" onclick="editRaceInfo()" title="Edit">✏️ Edit</button>
-                            <button onclick="closeRaceInfo()" title="Close (Esc)" aria-label="Close">✕</button></div>
+                            <button onclick="putAwayRaceInfo()" title="Close (Esc)" aria-label="Close">✕</button></div>
                         <div class="raceinfo-text" id="raceInfoText"></div>
                         <div id="raceInfoEditor" style="display:none">
                             <textarea id="raceInfoInput"
@@ -2784,6 +2784,12 @@
             refreshRaceInfo();
         }
 
+        // closed by the user: stays closed for this tab (it opens by itself for sailors otherwise)
+        function putAwayRaceInfo() {
+            sessionStorage.setItem(`raceInfoClosed_${EVENT_ID}`, '1');
+            closeRaceInfo();
+        }
+
         function closeRaceInfo() {
             raceInfoOpen = false;
             raceInfoTarget = null;
@@ -2831,7 +2837,7 @@
 
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape' || !raceInfoOpen) return;
-            if (raceInfoTarget) cancelRaceInfoEdit(); else closeRaceInfo();
+            if (raceInfoTarget) cancelRaceInfoEdit(); else putAwayRaceInfo();
         });
 
         function resetTransform() {
@@ -3205,7 +3211,11 @@
                 lastCoursesJSON = newJSON;
                 allCourses = newCourses;
 
-                const names = Object.keys(allCourses).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                // most recently edited first (the server stamps each save), so a sailor opening the page
+                // lands on today's course; ties and files without a time alphabetically
+                const savedAt = n => (typeof allCourses[n].saved === 'number' && isFinite(allCourses[n].saved)) ? allCourses[n].saved : 0;
+                const names = Object.keys(allCourses).sort((a, b) =>
+                    savedAt(b) - savedAt(a) || a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
                 if (names.length === 0) {
                     closeTransform();
@@ -3269,6 +3279,12 @@
                 selectCourse(selectName, allCourses[selectName], false);
                 if (suppressFit) {
                     map.fitBounds = prevFitBounds;
+                }
+                // sailors (not admins) see the race information straight away, unless they put it away
+                if (!isRefresh) {
+                    const adminSoon = adminPassword && !sessionStorage.getItem(`adminOff_${EVENT_ID}`);
+                    if (!adminMode && !adminSoon && !sessionStorage.getItem(`raceInfoClosed_${EVENT_ID}`) &&
+                        courseData && typeof courseData.info === 'string' && courseData.info) openRaceInfo();
                 }
             } catch (e) {
                 console.error('Error loading courses:', e);
