@@ -455,21 +455,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestLocationPermissions() {
-        val permissions = mutableListOf(
+        val permissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        // Only request heart rate permission if enabled in settings
-        if (settings.value.heartRateEnabled) {
-            permissions.add(heartRatePermission())
-        }
-        locationPermissionRequest.launch(permissions.toTypedArray())
+        locationPermissionRequest.launch(permissions)
     }
-
-    // Android 16 (API 36) retired BODY_SENSORS in favour of the granular health permission
-    private fun heartRatePermission(): String =
-        if (Build.VERSION.SDK_INT >= 36) "android.permission.health.READ_HEART_RATE"
-        else Manifest.permission.BODY_SENSORS
 
     private fun requestBackgroundLocation() {
         backgroundLocationRequest.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
@@ -485,7 +476,6 @@ class MainActivity : ComponentActivity() {
             putExtra("role", currentSettings.role)
             putExtra("password", currentSettings.password)
             putExtra("event_id", currentSettings.eventId)
-            putExtra("heart_rate_enabled", currentSettings.heartRateEnabled)
             putExtra("tracker_beep", currentSettings.trackerBeep)
             putExtra("race_timer_enabled", currentSettings.raceTimerEnabled)
             putExtra("race_timer_minutes", currentSettings.raceTimerMinutes)

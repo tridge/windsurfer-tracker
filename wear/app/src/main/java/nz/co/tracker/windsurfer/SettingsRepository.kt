@@ -20,7 +20,6 @@ data class TrackerSettings(
     val role: String = "sailor",
     val password: String = "",
     val eventId: Int = 2,  // Default to main event
-    val heartRateEnabled: Boolean = false,  // Opt-in for health data privacy
     val trackerBeep: Boolean = true,  // Beep once per minute to remind user tracker is running
     val raceTimerEnabled: Boolean = false,  // Race countdown timer
     val raceTimerMinutes: Int = 5,  // Countdown duration (1-9 minutes)
@@ -35,7 +34,6 @@ class SettingsRepository(private val context: Context) {
         val ROLE = stringPreferencesKey("role")
         val PASSWORD = stringPreferencesKey("password")
         val EVENT_ID = intPreferencesKey("event_id")
-        val HEART_RATE_ENABLED = booleanPreferencesKey("heart_rate_enabled")
         val TRACKER_BEEP = booleanPreferencesKey("tracker_beep")
         val RACE_TIMER_ENABLED = booleanPreferencesKey("race_timer_enabled")
         val RACE_TIMER_MINUTES = intPreferencesKey("race_timer_minutes")
@@ -49,7 +47,6 @@ class SettingsRepository(private val context: Context) {
             role = prefs[PreferencesKeys.ROLE] ?: "sailor",
             password = prefs[PreferencesKeys.PASSWORD] ?: "",
             eventId = prefs[PreferencesKeys.EVENT_ID] ?: 2,
-            heartRateEnabled = prefs[PreferencesKeys.HEART_RATE_ENABLED] ?: false,
             trackerBeep = prefs[PreferencesKeys.TRACKER_BEEP] ?: true,
             raceTimerEnabled = prefs[PreferencesKeys.RACE_TIMER_ENABLED] ?: false,
             raceTimerMinutes = prefs[PreferencesKeys.RACE_TIMER_MINUTES] ?: 5,
@@ -64,7 +61,6 @@ class SettingsRepository(private val context: Context) {
             prefs[PreferencesKeys.ROLE] = settings.role
             prefs[PreferencesKeys.PASSWORD] = settings.password
             prefs[PreferencesKeys.EVENT_ID] = settings.eventId
-            prefs[PreferencesKeys.HEART_RATE_ENABLED] = settings.heartRateEnabled
             prefs[PreferencesKeys.TRACKER_BEEP] = settings.trackerBeep
             prefs[PreferencesKeys.RACE_TIMER_ENABLED] = settings.raceTimerEnabled
             prefs[PreferencesKeys.RACE_TIMER_MINUTES] = settings.raceTimerMinutes

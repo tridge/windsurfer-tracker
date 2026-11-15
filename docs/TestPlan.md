@@ -60,7 +60,7 @@ All 110+ tests should pass.
 | 2 | Start tracking, wait 60s | Single vibration buzz (connected) |
 | 3 | Disable WiFi/data, wait 60s | Double vibration buzz (no connection) |
 
-#### 1.4 Heart Rate Setting (watchOS/WearOS only)
+#### 1.4 Heart Rate Setting (watchOS only)
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Find Heart Rate toggle | Toggle present in settings |
@@ -294,8 +294,7 @@ All 110+ tests should pass.
 - HealthKit authorization always succeeds (mocked)
 
 ### WearOS
-- Heart rate default is OFF (opt-in for privacy)
-- Requires BODY_SENSORS permission for heart rate
+- Heart rate recording is temporarily unavailable; no heart rate setting or health permissions
 - Ongoing activity notification for ambient mode
 
 ### iOS
@@ -324,7 +323,8 @@ After any code changes, verify:
 - [ ] Idle heartbeats arrive at server
 - [ ] Remote start/stop/shutdown commands work from WebUI
 - [ ] Network change recovery works (WiFi toggle test)
-- [ ] Heart rate appears when enabled (watchOS/WearOS)
+- [ ] Heart rate appears when enabled (watchOS)
+- [ ] WearOS has no heart rate toggle, requests no body-sensor or health permissions, and sends no `hr` field (including after upgrading with heart rate previously enabled)
 - [ ] Version string shows correct version and git hash
 - [ ] Settings persist after app restart
 - [ ] Error messages display for auth failures

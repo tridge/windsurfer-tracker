@@ -99,7 +99,6 @@ class TrackerService : LifecycleService() {
     private var effectiveRole: String? = null  // Admin-overridden role from server
     private var password: String = ""
     private var eventId: Int = 2  // Event ID for multi-event support
-    private var heartRateEnabled: Boolean = false
     private var raceTimerEnabled: Boolean = false
     private var raceTimerMinutes: Int = 5
     private var raceTimerTapGForce: Int = 3  // 2-9g, default 3g
@@ -245,22 +244,8 @@ class TrackerService : LifecycleService() {
     private var boundNetwork: Network? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    // Heart rate sensor
+    // Sensor manager for race timer tap detection
     private var sensorManager: SensorManager? = null
-    private var heartRateSensor: Sensor? = null
-    private var lastHeartRate: Int = -1  // -1 means not available
-    private val heartRateListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent) {
-            if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
-                val hr = event.values[0].toInt()
-                if (hr > 0) {
-                    lastHeartRate = hr
-                    Log.d(TAG, "Heart rate: $hr bpm")
-                }
-            }
-        }
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    }
 
     // Tap detection for race timer (acceleration magnitude spike above gravity)
     private var accelerometer: Sensor? = null
@@ -530,7 +515,6 @@ class TrackerService : LifecycleService() {
             role = intent.getStringExtra("role") ?: "sailor"
             password = intent.getStringExtra("password") ?: ""
             eventId = intent.getIntExtra("event_id", 2)
-            heartRateEnabled = intent.getBooleanExtra("heart_rate_enabled", false)
             trackerBeepEnabled = intent.getBooleanExtra("tracker_beep", true)
             raceTimerEnabled = intent.getBooleanExtra("race_timer_enabled", false)
             raceTimerMinutes = intent.getIntExtra("race_timer_minutes", 5)
@@ -579,7 +563,6 @@ class TrackerService : LifecycleService() {
             putString("role", role)
             putString("password", password)
             putInt("event_id", eventId)
-            putBoolean("heart_rate_enabled", heartRateEnabled)
             putBoolean("tracker_beep", trackerBeepEnabled)
             putBoolean("race_timer_enabled", raceTimerEnabled)
             putInt("race_timer_minutes", raceTimerMinutes)
@@ -607,7 +590,6 @@ class TrackerService : LifecycleService() {
         role = prefs.getString("role", "sailor") ?: "sailor"
         password = savedPwd
         eventId = prefs.getInt("event_id", 2)
-        heartRateEnabled = prefs.getBoolean("heart_rate_enabled", false)
         trackerBeepEnabled = prefs.getBoolean("tracker_beep", true)
         raceTimerEnabled = prefs.getBoolean("race_timer_enabled", false)
         raceTimerMinutes = prefs.getInt("race_timer_minutes", 5)
@@ -1038,20 +1020,6 @@ class TrackerService : LifecycleService() {
         }
         Log.d(TAG, "Wake lock acquired")
 
-        // Start heart rate sensor if available and enabled
-        if (heartRateEnabled) {
-            sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-            heartRateSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
-            if (heartRateSensor != null) {
-                sensorManager?.registerListener(heartRateListener, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL)
-                Log.d(TAG, "Heart rate sensor registered")
-            } else {
-                Log.d(TAG, "Heart rate sensor not available")
-            }
-        } else {
-            Log.d(TAG, "Heart rate disabled by user preference")
-        }
-
         // Start accelerometer for tap detection if race timer is enabled
         Log.d(TAG, "Race timer enabled: $raceTimerEnabled, minutes: $raceTimerMinutes")
         if (raceTimerEnabled) {
@@ -1164,10 +1132,6 @@ class TrackerService : LifecycleService() {
 
         socket?.close()
         socket = null
-
-        // Unregister heart rate sensor
-        sensorManager?.unregisterListener(heartRateListener)
-        lastHeartRate = -1
 
         // Unregister tap listener
         sensorManager?.unregisterListener(tapListener)
@@ -1347,9 +1311,7 @@ class TrackerService : LifecycleService() {
         toneGenerator = null
 
         // Unregister sensors
-        sensorManager?.unregisterListener(heartRateListener)
         sensorManager?.unregisterListener(tapListener)
-        lastHeartRate = -1
 
         // Release tracking wake lock
         wakeLock?.let {
@@ -1579,9 +1541,6 @@ class TrackerService : LifecycleService() {
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
-            if (lastHeartRate > 0) {
-                put("hr", lastHeartRate)
-            }
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }
@@ -1720,9 +1679,6 @@ class TrackerService : LifecycleService() {
             put("ver", BuildConfig.VERSION_STRING)
             put("os", "WearOS ${android.os.Build.VERSION.RELEASE}")
             put("flg", flags)
-            if (lastHeartRate > 0) {
-                put("hr", lastHeartRate)
-            }
             if (password.isNotEmpty()) {
                 put("pwd", password)
             }

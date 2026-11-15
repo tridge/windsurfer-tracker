@@ -42,7 +42,6 @@ fun SettingsScreen(
     var serverHost by remember { mutableStateOf(settings.serverHost) }
     var sailorId by remember { mutableStateOf(settings.sailorId) }
     var password by remember { mutableStateOf(settings.password) }
-    var heartRateEnabled by remember { mutableStateOf(settings.heartRateEnabled) }
     var trackerBeep by remember { mutableStateOf(settings.trackerBeep) }
     var raceTimerEnabled by remember { mutableStateOf(settings.raceTimerEnabled) }
     var raceTimerMinutes by remember { mutableStateOf(settings.raceTimerMinutes) }
@@ -271,22 +270,6 @@ fun SettingsScreen(
                 }
             }
 
-            // Heart Rate Toggle
-            item {
-                ToggleChip(
-                    checked = heartRateEnabled,
-                    onCheckedChange = { heartRateEnabled = it },
-                    label = { Text("Heart Rate") },
-                    secondaryLabel = { Text(if (heartRateEnabled) "On" else "Off", fontSize = 10.sp) },
-                    toggleControl = {
-                        Switch(checked = heartRateEnabled)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .padding(top = 4.dp)
-                )
-            }
-
             // Tracking Buzz Toggle
             item {
                 ToggleChip(
@@ -493,7 +476,6 @@ fun SettingsScreen(
                                     role = roles[selectedRoleIndex],
                                     password = password,
                                     eventId = selectedEventId,
-                                    heartRateEnabled = heartRateEnabled,
                                     trackerBeep = trackerBeep,
                                     raceTimerEnabled = raceTimerEnabled,
                                     raceTimerMinutes = raceTimerMinutes,
