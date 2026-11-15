@@ -1561,6 +1561,11 @@
             } catch (e) { /* e.g. a file: URL: nothing to update */ }
         }
 
+        // a shared link to a renamed course follows the new name
+        function renameCourseUrl(oldName, newName) {
+            if (new URLSearchParams(location.search).get('course') === oldName) setCourseUrl(newName);
+        }
+
         // e.g. "Order: S-1-2-F", '' if no custom order
         function orderSummary(c) {
             const keys = courseOrderKeys(c);
@@ -2099,6 +2104,7 @@
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok || !d.success) { alert('Error: ' + (d.error || `HTTP ${r.status}`)); return; }
                 if (selectedCourseName === oldName) selectedCourseName = newName;
+                renameCourseUrl(oldName, newName);
                 await reloadAndReselect();
             } catch (e) {
                 alert('Error renaming course: ' + e.message);

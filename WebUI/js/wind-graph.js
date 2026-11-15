@@ -3,8 +3,9 @@
 // {"t": unix s, "s": speed kn, "g": gust kn, "d": direction from °T, "a": 10 min average °T}.
 // Shown in a floating panel.
 //
-// WindGraph.attach(itemId, base, { tz, date }): show the menu entry only while that day's file
-//   exists; tz/date may be functions (date 'YYYY-MM-DD', default today), re-checked as they change
+// WindGraph.attach(itemId, base, { tz, date, onToggle }): show the menu entry only while that day's
+//   file exists; tz/date may be functions (date 'YYYY-MM-DD', default today), re-checked as they
+//   change; onToggle(shown) after each check
 // WindGraph.open({ base, from, to, tz, live, cursor, title })
 //   from/to: unix s; live: hours back from now (adds range buttons, refreshes each minute)
 //   tz: IANA zone of the event: file dates and the time axis (default the browser's)
@@ -415,7 +416,9 @@ const WindGraph = (() => {
                 const r = await fetch(fileUrl(base, date), { headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
                 ok = r.ok;
             } catch (e) { /* hidden */ }
-            if (my === seq) item.style.display = ok ? '' : 'none';
+            if (my !== seq) return;
+            item.style.display = ok ? '' : 'none';
+            if (typeof o.onToggle === 'function') o.onToggle(ok);
         };
         check(true);
         setInterval(check, 2000);                    // date / time zone changes

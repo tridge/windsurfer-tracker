@@ -439,7 +439,7 @@
     <script src="js/zip.js?v=3ef60fa5"></script>
     <script src="js/export.js?v=e0b59685"></script>
     <script src="js/battery_cal.js?v=a78de02a"></script>
-    <script src="js/wind-graph.js?v=dce28149"></script>
+    <script src="js/wind-graph.js?v=af09b227"></script>
     <script src="js/flatpickr/flatpickr.min.js?v=1eeab1cb"></script>
     <script>
         // Event ID from URL parameter (default to 2)
@@ -576,7 +576,13 @@
             if (!confirm('Delete this race marker?')) return;
 
             try {
-                const response = await fetch(`/api/event/${EVENT_ID}/log/${logFile}/sublog/${sublogIndex}`, {
+                // say which race, so a page that's out of date can't delete a different one
+                const log = currentSummary && currentSummary.logs.find(l => l.file === logFile);
+                const sub = log && (log.sublogs || [])[sublogIndex];
+                const id = sub ? Object.fromEntries(Object.entries({ start_ts: sub.start_ts, end_ts: sub.end_ts, name: sub.name })
+                    .filter(([, v]) => v !== undefined && v !== null)) : null;
+                const q = id ? '?' + new URLSearchParams(id) : '';
+                const response = await fetch(`/api/event/${EVENT_ID}/log/${encodeURIComponent(logFile)}/sublog/${sublogIndex}${q}`, {
                     method: 'DELETE',
                     headers: { 'X-Admin-Password': getAdminPassword() }
                 });
@@ -586,6 +592,7 @@
                     // Update the current summary data
                     currentSummary = summary;
                     updateRaceList();
+                    refreshCourseDisplay();   // a deleted race's marks as laid go too
                 } else {
                     const error = await response.json();
                     alert(`Failed to delete race: ${error.error || 'Unknown error'}`);
@@ -598,7 +605,7 @@
         // Hide/unhide button for a log (subIndex null) or race, admin mode only
         function hideButtonHtml(logIndex, subIndex, hidden) {
             return `<button class="log-hide-btn" onclick="event.stopPropagation(); setLogHidden(${logIndex}, ${subIndex}, ${!hidden})" ` +
-                `title="${hidden ? 'Show to everyone again' : 'Hide from non-admin viewers'}">${hidden ? 'Unhide' : 'Hide'}</button>`;
+                `title="${hidden ? 'Show in the list for everyone again' : 'Leave out of the list for non-admins (the log data itself stays public)'}">${hidden ? 'Unhide' : 'Hide'}</button>`;
         }
 
         // POST an admin edit of a log's summary entry; the updated summary, or null after an alert
@@ -634,12 +641,12 @@
         async function setLogHidden(logIndex, subIndex, hidden) {
             const log = currentSummary && currentSummary.logs[logIndex];
             if (!log) return;
-            const body = { hidden };
+            // identity of what's being hidden, so a stale page can't hit a different log/race
+            const body = { hidden, start_ts: log.start_ts };
             if (subIndex !== null) {
                 const sub = (log.sublogs || [])[subIndex];
                 if (!sub) return;
-                body.sublog = subIndex;
-                body.start_ts = sub.start_ts;
+                Object.assign(body, { sublog: subIndex, start_ts: sub.start_ts, end_ts: sub.end_ts, name: sub.name });
             }
             const summary = await postLogAdmin(log.file, 'hidden', body, hidden ? 'hide' : 'unhide');
             if (summary) applySummaryUpdate(summary);
@@ -770,7 +777,8 @@
             const { si } = selectedSublogIndex();
             if (!markEdit || si < 0) return;
             const summary = await postLogAdmin(markEdit.logFile, `sublog/${si}/course`,
-                { course: markEdit.course, start_ts: markEdit.startTs }, 'save marks');
+                { course: markEdit.course, start_ts: markEdit.startTs, end_ts: selectedSublog.end_ts,
+                  name: selectedSublog.name }, 'save marks');
             if (!summary) return;
             markEdit = null;
             applySummaryUpdate(summary);
@@ -780,7 +788,8 @@
             const { si } = selectedSublogIndex();
             if (si < 0 || !confirm(`Show the planned course for ${selectedSublog.name} again? The marks as laid are removed.`)) return;
             const summary = await postLogAdmin(currentLogFile, `sublog/${si}/course`,
-                { course: null, start_ts: selectedSublog.start_ts }, 'reset marks');
+                { course: null, start_ts: selectedSublog.start_ts, end_ts: selectedSublog.end_ts,
+                  name: selectedSublog.name }, 'reset marks');
             if (summary) applySummaryUpdate(summary);
         }
 
@@ -3954,7 +3963,7 @@
         }
 
         // --- Wind graph: the event's wind station readings over the shown time range ---
-        let windData = [], windKey = '', windLoading = false;
+        let windData = [], windKey = '', windLoading = false, windGap = 300;
 
         // (re)load the day files covering the loaded log when that changes; redraw when they arrive
         function ensureWindData() {
@@ -3964,7 +3973,16 @@
             windKey = key;
             windLoading = true;
             WindGraph.load(DATA_BASE, minTime - 600, maxTime + 600, eventTimezone)
-                .then(d => { if (windKey === key) windData = d; })
+                .then(d => {
+                    if (windKey !== key) return;
+                    windData = d;
+                    // the line breaks where readings are further apart than usual for this station
+                    // (from the whole load, so zooming into an outage doesn't draw across it)
+                    const dts = [];
+                    for (let i = 1; i < d.length; i++) dts.push(d[i].t - d[i - 1].t);
+                    dts.sort((a, b) => a - b);
+                    windGap = Math.max(300, 3 * (dts.length ? dts[dts.length >> 1] : 60));
+                })
                 .catch(() => { if (windKey === key) windData = []; })
                 .finally(() => {
                     if (windKey !== key) return;
@@ -3974,25 +3992,21 @@
         }
 
         // readings in the shown range (plus one either side so the line reaches the edges), and the
-        // gap beyond which the line breaks
+        // gap beyond which the line breaks. A reading without a speed is kept as a break marker.
         function windVisible() {
             const pts = [];
             for (let i = 0; i < windData.length; i++) {
                 const p = windData[i];
-                if (p.s === null) continue;
                 if (p.t < rangeStartTime && !(windData[i + 1] && windData[i + 1].t >= rangeStartTime)) continue;
                 if (p.t > rangeEndTime && !(windData[i - 1] && windData[i - 1].t <= rangeEndTime)) continue;
                 pts.push(p);
             }
-            const dts = [];
-            for (let i = 1; i < pts.length; i++) dts.push(pts[i].t - pts[i - 1].t);
-            dts.sort((a, b) => a - b);
-            return { pts, gap: Math.max(300, 3 * (dts.length ? dts[dts.length >> 1] : 60)) };
+            return { pts, gap: windGap };
         }
 
         function windScale(pts) {
             let max = 0;
-            for (const p of pts) max = Math.max(max, p.s, p.g ?? 0);
+            for (const p of pts) if (p.s !== null) max = Math.max(max, p.s, p.g ?? 0);
             return max > 0 ? Math.max(10, Math.ceil((max * 1.1) / 5) * 5) : 20;
         }
 
@@ -4000,7 +4014,7 @@
         function windNearest(pts, gap, t) {
             let best = null;
             for (const p of pts) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
-            return best && Math.abs(best.t - t) <= gap / 2 ? best : null;
+            return best && best.s !== null && Math.abs(best.t - t) <= gap / 2 ? best : null;
         }
 
         function drawWindArrow(ctx, x, y, dir) {
@@ -4044,7 +4058,7 @@
                 const y = (i / 4) * height;
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
             }
-            if (!pts.length) {
+            if (!pts.some(p => p.s !== null)) {
                 ctx.fillStyle = '#7f8c8d';
                 ctx.font = '14px sans-serif';
                 ctx.textAlign = 'center';
@@ -4054,11 +4068,13 @@
             const span = rangeEndTime - rangeStartTime;
             const X = t => ((t - rangeStartTime) / span) * width;
             const Y = v => height - (v / maxS) * height;
-            // runs of readings without a gap
+            // runs of readings without a gap or a missing speed
             const runs = [];
+            let prev = null;
             for (const p of pts) {
-                const run = runs[runs.length - 1];
-                if (run && p.t - run[run.length - 1].t <= gap) run.push(p); else runs.push([p]);
+                if (p.s === null) { prev = null; continue; }
+                if (prev && p.t - prev.t <= gap) runs[runs.length - 1].push(p); else runs.push([p]);
+                prev = p;
             }
             for (const run of runs) {
                 const g = run.filter(p => p.g !== null && p.g >= p.s);
@@ -6558,7 +6574,12 @@
 
         // Wind graph option only for days with wind readings (event wind station)
         WindGraph.attach('show-wind-graph-label', DATA_BASE, { tz: () => eventTimezone,
-                         date: () => document.getElementById('date-picker').value || getTodayInEventTz() });
+                         date: () => document.getElementById('date-picker').value || getTodayInEventTz(),
+                         // a day without readings: no option, and no panel left open with no way to close it
+                         onToggle: shown => {
+                             const cb = document.getElementById('show-wind-graph');
+                             if (!shown && cb.checked) { cb.checked = false; updateGraphPositions(); }
+                         } });
     </script>
 </body>
 </html>

@@ -234,3 +234,68 @@ def test_search_skips_hidden_for_non_admin(http_client, server):
     assert [r for r in body["results"] if r["type"] == "sublog"] == []
     status, body = http_client.get(f"/api/event/{eid}/search?q=s01")
     assert {r["log_file"] for r in body["results"]} == {f"{DATE}.jsonl.1"}
+
+
+def test_stale_log_hide_refused(http_client, server):
+    """A whole-log hide names the log's start: a page from before a rotation can't hide the new log."""
+    eid = create_event(http_client, name="Stale Log", admin_password="stalelog")
+    _seed(server, eid, "stalelog")
+    hdr = {"X-Admin-Password": "stalelog"}
+    url = f"/api/event/{eid}/log/{DATE}.jsonl/hidden"
+    status, _ = http_client.post(url, data={"hidden": True, "start_ts": T0}, headers=hdr)   # .1's start
+    assert status == 409
+    status, body = http_client.post(url, data={"hidden": True, "start_ts": T0 + 7200}, headers=hdr)
+    assert status == 200 and _entry(body, f"{DATE}.jsonl")["hidden"] is True
+
+
+def test_same_start_races_told_apart(http_client, server):
+    """Two races with the same start: name/end_ts must match too, so a shifted index is refused."""
+    eid = create_event(http_client, name="Same Start", admin_password="samestart")
+    _seed(server, eid, "samestart")
+    hdr = {"X-Admin-Password": "samestart"}
+    base = f"/api/event/{eid}/log/{DATE}.jsonl"
+    for name, end in (("A", T0 + 7300), ("B", T0 + 7400)):
+        status, _ = http_client.post(base + "/sublog", data={"name": name, "start_ts": T0 + 7200, "end_ts": end},
+                                     headers=hdr)
+        assert status == 200
+    status, body = http_client.get(f"/{eid}/logs/{DATE}_summary.json")
+    names = [s["name"] for s in _entry(body, f"{DATE}.jsonl")["sublogs"]]
+    ia = names.index("A")
+    # someone deletes A (identified), then a stale page saves A's marks at A's old index
+    status, _ = http_client.delete(f"{base}/sublog/{ia}?start_ts={T0 + 7200}&end_ts={T0 + 7300}&name=A", headers=hdr)
+    assert status == 200
+    status, _ = http_client.post(f"{base}/sublog/{ia}/course",
+                                 data={"course": COURSE, "start_ts": T0 + 7200, "end_ts": T0 + 7300, "name": "A"},
+                                 headers=hdr)
+    assert status in (400, 409)
+    status, body = http_client.get(f"/{eid}/logs/{DATE}_summary.json")
+    assert all("course" not in s for s in _entry(body, f"{DATE}.jsonl")["sublogs"])
+    # a stale delete naming a race that isn't at that index is refused
+    status, _ = http_client.delete(f"{base}/sublog/0?start_ts={T0 + 7200}&end_ts={T0 + 7300}&name=A", headers=hdr)
+    assert status == 409
+
+
+def test_admin_edit_doesnt_freeze_summary(http_client, server):
+    """An admin edit rewrites the summary file; new log points must still be summarised."""
+    eid = create_event(http_client, name="No Freeze", admin_password="nofreeze")
+    log_dir = _seed(server, eid, "nofreeze")
+    hdr = {"X-Admin-Password": "nofreeze"}
+    with open(log_dir / f"{DATE}.jsonl", "a") as f:     # more points arrive...
+        f.write(json.dumps({"id": "S02", "ts": T0 + 9000, "lat": -36.8, "lon": 174.7}) + "\n")
+    status, _ = http_client.post(f"/api/event/{eid}/log/{DATE}.jsonl/hidden",   # ...then an admin edit
+                                 data={"hidden": True, "start_ts": T0 + 7200}, headers=hdr)
+    assert status == 200
+    generate_log_summaries(log_dir)
+    summ = json.loads((log_dir / f"{DATE}_summary.json").read_text())
+    e = _entry(summ, f"{DATE}.jsonl")
+    assert e["point_count"] == 11 and "S02" in e["sailors"] and e["hidden"] is True
+    assert generate_log_summaries(log_dir) == 0      # and then it's current
+
+
+def test_deeply_nested_body(http_client, server):
+    eid = create_event(http_client, name="Deep Body", admin_password="deepbody")
+    _seed(server, eid, "deepbody")
+    body = b"[" * 200000 + b"]" * 200000
+    status, _ = http_client.post(f"/api/event/{eid}/log/{DATE}.jsonl/hidden", data=body,
+                                 headers={"X-Admin-Password": "deepbody", "Content-Type": "application/json"})
+    assert status in (400, 413)

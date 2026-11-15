@@ -207,12 +207,13 @@ def append_history(path, w):
         f.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
 
-def history_file(dirpath, w):
-    """Daily history file for this reading: <dir>/YYYY_MM_DD_wind.jsonl, dated in the station's
-    timezone (one file per local day, next to that day's track log; not a track-log name)."""
+def history_file(dirpath, w, tzname=None):
+    """Daily history file for this reading: <dir>/YYYY_MM_DD_wind.jsonl, dated in tzname
+    (the event's timezone: the graphs look files up by the event's local day), else the
+    station's timezone (one file per local day, next to that day's track log; not a track-log name)."""
     t = w["obs_ts"] or w["fetched"]
     try:
-        tz = ZoneInfo(w["station"].get("timezone") or "UTC")
+        tz = ZoneInfo(tzname or w["station"].get("timezone") or "UTC")
     except Exception:
         tz = datetime.timezone.utc
     day = datetime.datetime.fromtimestamp(t, tz).strftime("%Y_%m_%d")
@@ -227,6 +228,7 @@ def main():
     ap.add_argument("--output", "-o", help="write JSON atomically to this file")
     ap.add_argument("--history", help="append a compact record to this JSONL file")
     ap.add_argument("--history-dir", help="append to a daily YYYY_MM_DD_wind.jsonl in this directory")
+    ap.add_argument("--tz", help="timezone the daily files are dated in (the event's; default the station's)")
     ap.add_argument("--timeout", type=float, default=20, help="HTTP timeout (s)")
     args = ap.parse_args()
 
@@ -243,7 +245,7 @@ def main():
     if args.history:
         append_history(args.history, w)
     if args.history_dir:
-        append_history(history_file(args.history_dir, w), w)
+        append_history(history_file(args.history_dir, w, args.tz), w)
     if args.json:
         print(json.dumps(w, indent=1))
     elif not args.output and not args.history and not args.history_dir:

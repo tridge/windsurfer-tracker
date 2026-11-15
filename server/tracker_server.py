@@ -642,6 +642,20 @@ def preserve_summary_edits(summary_file: Path, logs_data: list) -> None:
                 entry[k] = old_logs[match][k]
 
 
+def logs_signature(log_files) -> list:
+    """[[name, size, mtime_ns], ...] of a day's log files: what a summary was built from.
+    Stored in the summary, so admin edits (which rewrite the summary file) can't make a
+    stale summary look current, and any change to the logs forces regeneration."""
+    sig = []
+    for f in sorted(log_files, key=lambda p: p.name):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        sig.append([f.name, st.st_size, st.st_mtime_ns])
+    return sig
+
+
 def generate_log_summaries(log_dir: Path) -> int:
     """
     Generate summary JSON files for each day's logs.
@@ -676,14 +690,22 @@ def generate_log_summaries(log_dir: Path) -> int:
     for date_str, log_files in date_files.items():
         summary_file = log_dir / f"{date_str}_summary.json"
 
-        # Check if regeneration is needed (any log file newer than summary)
-        summary_mtime = summary_file.stat().st_mtime if summary_file.exists() else 0
-        log_mtimes = [f.stat().st_mtime for f in log_files]
-        newest_log_mtime = max(log_mtimes) if log_mtimes else 0
-
-        if summary_mtime >= newest_log_mtime and summary_file.exists():
-            # Summary is up to date
-            continue
+        # Regenerate when the logs differ from what the summary was built from. Summaries
+        # from before logs_sig existed fall back to comparing modification times.
+        sig = logs_signature(log_files)
+        if summary_file.exists():
+            try:
+                old_sig = load_json_file(summary_file, {}).get('logs_sig')
+            except Exception:
+                old_sig = None
+            if old_sig is not None:
+                if old_sig == sig:
+                    continue
+            else:
+                summary_mtime = summary_file.stat().st_mtime
+                log_mtimes = [f.stat().st_mtime for f in log_files]
+                if summary_mtime >= (max(log_mtimes) if log_mtimes else 0):
+                    continue
 
         # Generate summary for this date
         logs_data = []
@@ -819,11 +841,20 @@ def generate_log_summaries(log_dir: Path) -> int:
 
         try:
             with summary_lock(summary_file):
+                # The logs changed while being scanned (e.g. Clear Tracks rotated one):
+                # this snapshot may be partial, so don't write it or match edits to it;
+                # the next pass regenerates from a consistent set.
+                now_files = [f for f in log_dir.iterdir()
+                             if (m := date_pattern.match(f.name)) and m.group(1) == date_str]
+                if logs_signature(now_files) != sig:
+                    log(f"[SUMMARY] {date_str}: logs changed during the scan, retrying next pass")
+                    continue
                 preserve_summary_edits(summary_file, logs_data)
                 summary = {
                     'date': date_str,
                     'generated': time.time(),
                     'generated_iso': datetime.now().isoformat(),
+                    'logs_sig': sig,
                     'logs': logs_data
                 }
                 save_json_atomic(summary_file, summary)
@@ -2867,7 +2898,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return None
         try:
             data = json.loads(self.rfile.read(length).decode('utf-8'))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
             self._send_json({"error": "Invalid JSON"}, 400)
             return None
         if not isinstance(data, dict):
@@ -2909,15 +2940,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         self._send_json(summary)
 
     @staticmethod
-    def _sublog_at(entry: dict, index: int, start_ts):
-        """(sublog, None) or (None, (error, status)). start_ts, if given, must
-        match, so an index shifted by a concurrent add/delete is refused."""
+    def _sublog_at(entry: dict, index: int, start_ts, data: dict | None = None):
+        """(sublog, None) or (None, (error, status)). start_ts, and end_ts/name if sent
+        in data, must match, so an index shifted by a concurrent add/delete is refused
+        (two races may share a start time)."""
         sublogs = entry.get('sublogs') or []
         if not 0 <= index < len(sublogs):
             return None, ("Sublog index out of range", 400)
-        if start_ts is not None and sublogs[index].get('start_ts') != start_ts:
+        sl = sublogs[index]
+        expect = {'start_ts': start_ts}
+        for k in ('end_ts', 'name'):
+            if data and k in data:
+                expect[k] = data[k]
+        if any(v is not None and sl.get(k) != v for k, v in expect.items()):
             return None, ("Sublog has changed, reload and try again", 409)
-        return sublogs[index], None
+        return sl, None
 
     def do_OPTIONS(self):
         """Handle CORS preflight."""
@@ -4131,9 +4168,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             def edit(entry):
                 target = entry
                 if sub is not None:
-                    target, err = self._sublog_at(entry, sub, data.get('start_ts'))
+                    target, err = self._sublog_at(entry, sub, data.get('start_ts'), data)
                     if err:
                         return err
+                elif data.get('start_ts') is not None and entry.get('start_ts') != data.get('start_ts'):
+                    # the file now holds a different log (rotated since the page loaded)
+                    return ("Log has changed, reload and try again", 409)
                 if hidden:
                     target['hidden'] = True
                 else:
@@ -4162,7 +4202,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     return
 
             def edit(entry):
-                sublog, err = self._sublog_at(entry, sub, data.get('start_ts'))
+                sublog, err = self._sublog_at(entry, sub, data.get('start_ts'), data)
                 if err:
                     return err
                 if course is None:
@@ -4870,8 +4910,22 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid sublog index"}, 400)
                 return
 
+            # ?start_ts=&end_ts=&name= (optional): the race the page meant, refused if the
+            # index now points at a different one
+            q = parse_qs(urlparse(self.path).query)
+            ident = {}
+            try:
+                for k in ('start_ts', 'end_ts'):
+                    if k in q:
+                        ident[k] = int(q[k][0])
+            except ValueError:
+                self._send_json({"error": "Invalid sublog identity"}, 400)
+                return
+            if 'name' in q:
+                ident['name'] = q['name'][0]
+
             def edit(entry):
-                _, err = self._sublog_at(entry, sublog_index, None)
+                _, err = self._sublog_at(entry, sublog_index, ident.get('start_ts'), ident)
                 if err:
                     return err
                 removed = entry['sublogs'].pop(sublog_index)
