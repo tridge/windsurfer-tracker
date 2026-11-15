@@ -8,6 +8,7 @@ const CourseOrder = (() => {
     const rad = Math.PI / 180;
     const OFFSET_PX = 18;   // route offset from a mark
     const GAP_PX = 14;      // extra offset each time a pair of points is reused
+    const FILLET_PX = 30;   // radius of the curve after passing a mark without rounding it
 
     const unwrapLon = (lon, ref) => lon + 360 * Math.round((ref - lon) / 360);
 
@@ -363,6 +364,7 @@ const CourseOrder = (() => {
                 const left = right === ends[1] ? ends[0] : ends[1];
                 const side = shownSide(roundingAt(i)) || (turnAt(i) > 0 ? -1 : 1);
                 gate[i] = { side, mid: P[i], end: side > 0 ? left : right, alt: side > 0 ? right : left };
+                gate[i].R = gate[i].mid.distanceTo(gate[i].end);
                 P[i] = gate[i].end;  // S is never adjacent to another S, so later turnAt() is unaffected
             }
         }
@@ -378,76 +380,106 @@ const CourseOrder = (() => {
             const j = i === 0 ? 1 : i - 1;
             return j <= last && isTurn(j) ? sideAt(j) : auto === 'port' ? 1 : -1;
         };
-        const pairUse = {};
-        const legs = [];
+        // offset of each leg's turning ends; a pair of points reused goes further out
+        const pairUse = {}, legR = [];
         for (let i = 0; i + 1 < seq.length; i++) {
-            const a = P[i], b = P[i + 1];
-            const len = a.distanceTo(b);
-            const u = len > 0 ? b.subtract(a).divideBy(len) : L.point(1, 0);
-            const n = L.point(-u.y, u.x);  // right of travel in screen coords
             const ka = `${seq[i].pt.lat},${seq[i].pt.lon}`, kb = `${seq[i + 1].pt.lat},${seq[i + 1].pt.lon}`;
             const pk = ka < kb ? ka + '|' + kb : kb + '|' + ka;
             const k = pairUse[pk] = (pairUse[pk] === undefined ? 0 : pairUse[pk] + 1);
-            const r = OFFSET_PX + k * GAP_PX;
-            const sa = sideSign(i), sb = sideSign(i + 1);
-            // only turning points are offset; the start/finish ends go to the point
-            // itself (the mark, or the middle of its pin line)
-            const ra = isTurn(i) ? r : 0, rb = isTurn(i + 1) ? r : 0;
-            legs.push({ n, ra, rb, sa, sb, from: a.add(n.multiplyBy(sa * ra)), to: b.add(n.multiplyBy(sb * rb)) });
+            legR.push(OFFSET_PX + k * GAP_PX);
         }
-        // start-line crossings: the leg in goes to the middle of the line, then round the
-        // chosen end at the distance of the middle from it
-        for (const k in gate) {
-            const i = +k, g = gate[i], R = g.mid.distanceTo(g.end);
-            Object.assign(legs[i - 1], { to: g.mid, rb: R });
-            Object.assign(legs[i], { from: g.end.add(legs[i].n.multiplyBy(g.side * R)), ra: R });
+        // signed offset (>0 = right of travel) of leg j's end at point i; start/finish
+        // ends go to the point itself (the mark, or the middle of its pin line)
+        const offsetAt = (i, j) => !isTurn(i) ? 0 : sideSign(i) * (gate[i] ? gate[i].R : legR[j]);
+        // mark-to-mark turn at point i is away from its rounding side
+        const away = i => sideSign(i) * turnAt(i) > 0;
+        const angleBetween = (a, b) => Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y);
+        // common tangent from circle (c0, signed offset q0) to circle (c1, q1)
+        const tangent = (c0, q0, c1, q1) => {
+            const len = c0.distanceTo(c1);
+            const u = len > 0 ? c1.subtract(c0).divideBy(len) : L.point(1, 0);
+            const s = len > 0 ? (q1 - q0) / len : 0;
+            const sn = Math.abs(s) < 1 ? s : 0, cs = Math.sqrt(1 - sn * sn);  // too close: no tangent
+            const v = L.point(u.x * cs - u.y * sn, u.x * sn + u.y * cs);
+            const n = L.point(-v.y, v.x);  // right of travel in screen coords
+            return { v, n, from: c0.add(n.multiplyBy(q0)), to: c1.add(n.multiplyBy(q1)) };
+        };
+        // Each leg is tangent to the turn before and after it, so it carries on from
+        // where the previous rounding ended. A mark passed while turning gently away
+        // from it is left abeam, then the route curves round a point on the far side.
+        const legs = [], centre = [], fillet = [];
+        let c0 = P[0], q0 = 0;
+        for (let i = 0; i + 1 < seq.length; i++) {
+            const j = i + 1, q1 = offsetAt(j, i), sj = sideSign(j), g = gate[j];
+            let t = tangent(c0, q0, P[j], q1), gc = null;
+            if (g) {
+                // start line crossed mid-race: through the middle of the line, then round
+                // the chosen end on a circle (tangent to the leg) that keeps the end inside;
+                // crossing very obliquely, round the end itself
+                const tm = tangent(c0, q0, g.mid, 0), k = tm.n.multiplyBy(-sj), e = g.end.subtract(g.mid);
+                const ke = k.x * e.x + k.y * e.y, m = 0.3 * g.R;
+                if (ke - m > 0.05 * g.R) {
+                    const rho = Math.max(ke, (g.R * g.R - m * m) / (2 * (ke - m)));
+                    t = tm;
+                    gc = { c: g.mid.add(k.multiplyBy(rho)), q: sj * rho };
+                }
+            }
+            legs.push({ n: t.n, sa: sideSign(i), sb: sj, from: t.from, to: t.to });
+            if (j === last) break;
+            const w = tangent(t.to, 0, P[j + 1], offsetAt(j + 1, j)).v, tw = angleBetween(t.v, w);
+            if (gc) {
+                c0 = gc.c;
+                q0 = gc.q;
+            } else if (!g && !isBoth(roundingAt(j)) && away(j) && Math.abs(turnAt(j)) < Math.PI / 2 && sj * tw > 0) {
+                fillet[j] = true;
+                c0 = t.to.add(t.n.multiplyBy(sj * FILLET_PX));
+                q0 = -sj * FILLET_PX;
+            } else {
+                // leave at the offset arrived on, moving out to this leg's own offset
+                // only as far as the size of the turn leaves room for
+                const ease = Math.min(1, (tw / (Math.PI / 2)) ** 2);
+                c0 = P[j];
+                q0 = q1 + (offsetAt(j, j) - q1) * ease;
+            }
+            centre[j] = c0;
         }
 
         const route = [legs[0].from, legs[0].to];
         const dashed = [];  // [from, to] index ranges of route drawn dashed
         const forks = [];   // either-way alternatives: {c, a0, r, dir, sweep, [R]}
         for (let i = 1; i < legs.length; i++) {
-            const c = P[i], pin = legs[i - 1].to, pout = legs[i].from;
-            const rin = legs[i - 1].rb, rout = legs[i].ra;
+            const c = centre[i], pin = legs[i - 1].to, pout = legs[i].from;
+            const rin = pin.distanceTo(c), rout = pout.distanceTo(c);
             const a0 = Math.atan2(pin.y - c.y, pin.x - c.x);
             let d = Math.atan2(pout.y - c.y, pout.x - c.x) - a0;
-            // turn between the legs, screen coords (>0 = clockwise = to starboard)
-            const ui = L.point(legs[i - 1].n.y, -legs[i - 1].n.x), uo = L.point(legs[i].n.y, -legs[i].n.x);
-            const turn = Math.atan2(ui.x * uo.y - ui.y * uo.x, ui.x * uo.x + ui.y * uo.y);
-            if (!gate[i] && !isBoth(roundingAt(i)) && sideSign(i) * turn > 0 && Math.abs(turn) < Math.PI / 2) {
-                // gentle turn away from the rounding side: the mark is passed on the
-                // right side without going round it. Join the two offset lines where
-                // they cross near the mark, else taper between them.
-                const lin = legs[i - 1].from.distanceTo(pin), lout = pout.distanceTo(legs[i].to);
-                const cr = ui.x * uo.y - ui.y * uo.x, w = pout.subtract(pin);
-                const s = Math.abs(cr) > 1e-9 ? (w.x * uo.y - w.y * uo.x) / cr : NaN;
-                const t = Math.abs(cr) > 1e-9 ? (w.x * ui.y - w.y * ui.x) / cr : NaN;
-                if (s <= 0 && s >= -lin / 2 && t >= 0 && t <= lout / 2) {
-                    route[route.length - 1] = pin.add(ui.multiplyBy(s));
-                } else {
-                    const taper = Math.min(40, lin / 3, lout / 3);
-                    route[route.length - 1] = pin.subtract(ui.multiplyBy(taper));
-                    route.push(pout.add(uo.multiplyBy(taper)));
-                }
-                route.push(legs[i].to);
-                continue;
-            } else if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }   // port: anticlockwise on screen
-            else { while (d < 0) d += 2 * Math.PI; }
-            // either way round a start line: from the middle of the line, both ways round
-            // dashed for the same angle; the way drawn then carries on solid
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d <= -Math.PI) d += 2 * Math.PI;
             let theta = 0;
-            if (isBoth(roundingAt(i))) {
-                if (gate[i]) {
-                    const g = gate[i];
-                    theta = Math.min(Math.abs(d), Math.PI);
-                    forks.push({ c: g.alt, a0: Math.atan2(g.mid.y - g.alt.y, g.mid.x - g.alt.x), r: g.mid.distanceTo(g.alt),
-                                 R: g.mid.distanceTo(g.alt), dir: -Math.sign(d || 1), sweep: theta });
-                } else {
-                    forks.push({ c, a0, r: rin, dir: -Math.sign(d || 1),
-                                 sweep: Math.min(4.7, Math.max(2.6, (2 * Math.PI - Math.abs(d)) * 0.6)) });
+            if (!fillet[i]) {
+                // round in the rounding direction (port: anticlockwise on screen); only a
+                // turn away from the rounding side loops right round the mark
+                const dn = d;
+                if (sideSign(i) > 0) { while (d > 0) d -= 2 * Math.PI; }
+                else { while (d < 0) d += 2 * Math.PI; }
+                if (!away(i) && Math.abs(d) > 1.5 * Math.PI) d = dn;
+                // either way round a start line: from the middle of the line, both ways round
+                // dashed for the same angle; the way drawn then carries on solid
+                if (isBoth(roundingAt(i))) {
+                    if (gate[i]) {
+                        const g = gate[i];
+                        theta = Math.min(Math.abs(d), Math.PI);
+                        forks.push({ c: g.alt, a0: Math.atan2(g.mid.y - g.alt.y, g.mid.x - g.alt.x), r: g.mid.distanceTo(g.alt),
+                                     R: g.mid.distanceTo(g.alt), dir: -Math.sign(d || 1), sweep: theta });
+                    } else {
+                        forks.push({ c, a0, r: rin, dir: -Math.sign(d || 1),
+                                     sweep: Math.min(4.7, Math.max(2.6, (2 * Math.PI - Math.abs(d)) * 0.6)) });
+                    }
                 }
             }
-            const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.2));
+            // segments of at most 0.2 rad, but no shorter than ~3 px
+            const arcLen = Math.abs(d) * Math.max(rin, rout) + Math.abs(rout - rin);
+            const steps = Math.max(1, Math.min(Math.floor(arcLen / 3),
+                                               Math.max(Math.ceil(Math.abs(d) / 0.2), Math.ceil(Math.abs(rout - rin) / 2))));
             const fs = [];
             for (let j = 1; j < steps; j++) fs.push(j / steps);
             if (theta > 0 && theta < Math.abs(d)) fs.push(theta / Math.abs(d));
@@ -455,11 +487,12 @@ const CourseOrder = (() => {
             const dashFrom = route.length - 1;
             let dashTo = dashFrom;
             for (const f of fs) {
-                const ang = a0 + d * f, rr = rin + (rout - rin) * f;
+                // radius eased between the two legs' offsets so the ends stay tangent
+                const ang = a0 + d * f, rr = rin + (rout - rin) * f * f * (3 - 2 * f);
                 route.push(L.point(c.x + rr * Math.cos(ang), c.y + rr * Math.sin(ang)));
                 if (theta > 0 && Math.abs(d) * f <= theta + 1e-9) dashTo = route.length - 1;
             }
-            route.push(pout);
+            if (arcLen >= 1.5 || dashTo > dashFrom) route.push(pout);
             if (theta > 0 && theta >= Math.abs(d) - 1e-9) dashTo = route.length - 1;
             if (dashTo > dashFrom) dashed.push([dashFrom, dashTo]);
             route.push(legs[i].to);
