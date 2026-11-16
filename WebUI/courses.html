@@ -702,7 +702,8 @@
             </select>
             <div class="order-help">A template is placed at the map centre with its first leg into the wind
                 (the Wind menu's direction, else the live wind, else north): 1 km first leg for the
-                triangles and trapezoids, 0.1 km for slalom. Move, turn or resize it with Transform.</div>
+                triangles and trapezoids, 0.1 km for slalom; 50 m start line, 25 m finish line.
+                Move, turn or resize it with Transform.</div>
             <div class="btn-row">
                 <button class="btn-cancel" onclick="closeNewCourse()">Cancel</button>
                 <button class="btn-save" onclick="confirmNewCourse()">Create</button>
@@ -2112,6 +2113,7 @@
         // New: a dialog for the name and an optional template
         function newCourse() {
             if (importBusy()) return;
+            if (drawingMode) { alert('Finish or cancel the drawing first'); return; }
             closeTransform();
             document.getElementById('newCourseName').value = '';
             document.getElementById('newCourseTemplate').value = '';
@@ -2131,19 +2133,24 @@
                 alert(`Course "${name}" already exists. Select it to edit.`);
                 return;
             }
+            if (drawingMode || importBusy()) return;
             closeNewCourse();
             if (tpl) createFromTemplate(name, tpl); else drawNewCourse(name);
         }
 
         // Course templates, in units of the first leg (y = upwind, x = to the right looking
-        // upwind), for the starboard version; port is the mirror image. km: first leg length.
+        // upwind). base: which rounding side this layout sails (its marks auto-round that way);
+        // the other side is the mirror image, with explicit roundings and pin sides swapped.
+        // km: first leg length, sailed from the middle of the start line to the first mark.
+        // Every template has a 50 m start line and a 25 m finish line (TEMPLATE_PINS).
         // Triangle: marks 1, 2, 3 equilateral (60° corners); trapezoid: right angles.
+        const TEMPLATE_PINS = { start: 50, finish: 25 };
         const COURSE_TEMPLATES = {
-            triangle: { km: 1, order: 'S12313F', startPin: 0.08,
+            triangle: { km: 1, base: 'starboard', order: 'S12313F',
                         marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1, '#facc15']], finish: [0, -0.25] },
-            trapezoid: { km: 1, order: 'S21234F', startPin: 0.066, finishPin: 0.05,
+            trapezoid: { km: 1, base: 'starboard', order: 'S21234F',
                          marks: [[0, 0.2, '#facc15'], [0, 1], [0.9, 1], [0.9, 0.2, '#facc15']], finish: [1.1, 0.2] },
-            slalom: { km: 0.1, order: 'S123S1234F', startPin: 0.2, finishPin: 0.07,
+            slalom: { km: 0.1, base: 'port', order: 'S123S1234F',
                       marks: [[0, 1], [-0.43, 0.75, '#facc15'], [0, 0.5, null, 'starboard'], [-0.48, 0.23, '#facc15']],
                       finish: [0.07, 0.08] },
         };
@@ -2151,28 +2158,44 @@
         function templateCourse(key, centre, windFrom) {
             const [shape, side] = key.split('-');
             const T = COURSE_TEMPLATES[shape];
-            const L = T.km * 1000, mx = side === 'port' ? -1 : 1, th = windFrom * Math.PI / 180;
+            const L = T.km * 1000, mirror = side !== T.base, mx = mirror ? -1 : 1, th = windFrom * Math.PI / 180;
+            const swap = v => v === 'starboard' ? 'port' : v === 'port' ? 'starboard' : v === 'left' ? 'right' : 'left';
+            const pinSide = mirror ? swap('left') : 'left';
+            // centred on the view (template points, metres)
             const raw = [[0, 0], ...T.marks, T.finish].map(p => [p[0] * mx * L, p[1] * L]);
-            // centre the course in the view
             const cx = raw.reduce((a, p) => a + p[0], 0) / raw.length, cy = raw.reduce((a, p) => a + p[1], 0) / raw.length;
+            const kLat = 111320, kLon = 111320 * Math.cos(centre.lat * Math.PI / 180);
             const toLL = ([x, y]) => {
                 x -= cx; y -= cy;
                 const east = x * Math.cos(th) + y * Math.sin(th), north = -x * Math.sin(th) + y * Math.cos(th);
-                return { lat: centre.lat + north / 111320,
-                         lon: centre.lng + east / (111320 * Math.cos(centre.lat * Math.PI / 180)) };
+                return { lat: centre.lat + north / kLat, lon: normLon(centre.lng + east / kLon) };
+            };
+            const fromLL = p => {
+                const east = (unwrapLon(p.lon, centre.lng) - centre.lng) * kLon, north = (p.lat - centre.lat) * kLat;
+                return [east * Math.cos(th) - north * Math.sin(th) + cx, east * Math.sin(th) + north * Math.cos(th) + cy];
             };
             const pt = (p, extra = {}) => ({ ...toLL([p[0] * mx * L, p[1] * L]), ...extra });
-            const course = {
-                start: pt([0, 0], { pin: { dist: Math.round(T.startPin * L * 10) / 10, side: 'left' } }),
+            const build = start => ({
+                start: { ...toLL(start), pin: { dist: TEMPLATE_PINS.start, side: pinSide } },
                 marks: T.marks.map(m => {
                     const o = pt(m);
                     if (m[2]) o.color = m[2];
-                    if (m[3]) o.rounding = side === 'port' ? (m[3] === 'starboard' ? 'port' : 'starboard') : m[3];
+                    if (m[3]) o.rounding = mirror ? swap(m[3]) : m[3];
                     return o;
                 }),
-                finish: pt(T.finish, T.finishPin ? { pin: { dist: Math.round(T.finishPin * L * 10) / 10, side: 'left' } } : {}),
+                finish: pt(T.finish, { pin: { dist: TEMPLATE_PINS.finish, side: pinSide } }),
                 order: T.order,
-            };
+            });
+            // the first leg is sailed from the middle of the start line: move the start mark until
+            // that middle is the template's origin, so the leg runs exactly upwind at length L
+            let start = [0, 0], course = build(start);
+            for (let k = 0; k < 4; k++) {
+                const line = CourseOrder.pinLine(course, 'S');
+                if (!line) break;
+                const m = fromLL(line.mid);
+                start = [start[0] - m[0], start[1] - m[1]];
+                course = build(start);
+            }
             return course;
         }
 
@@ -2185,14 +2208,14 @@
 
         async function createFromTemplate(name, key) {
             const course = templateCourse(key, map.getCenter(), templateWindFrom());
-            selectedCourseName = name;
-            courseData = course;
+            // show it at once, so the map never shows the previous course while this one is the
+            // one being edited (e.g. a mark deleted during a slow save would come off the template)
+            selectCourse(name, course, true);
             activeSub = 'A';
+            const ref = course.start.lon;      // a course across ±180° stays compact on the map
+            const b = L.latLngBounds(coursePoints(course).map(p => [p.lat, unwrapLon(p.lon, ref)]));
+            if (b.isValid()) map.fitBounds(b.pad(0.2));
             await saveSelectedCourse('create=1');
-            if (selectedCourseName === name && courseData) {
-                const b = L.latLngBounds(coursePoints(courseData).map(p => [p.lat, p.lon]));
-                if (b.isValid()) map.fitBounds(b.pad(0.2));
-            }
         }
 
         async function drawNewCourse(name) {
@@ -3069,6 +3092,13 @@
             await saveSelectedCourse();
             refreshRaceInfo();
         }
+
+        // Escape cancels the New dialog first (before any panel behind it)
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || !document.getElementById('newCourseOverlay').classList.contains('visible')) return;
+            e.stopImmediatePropagation();
+            closeNewCourse();
+        }, true);
 
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape' || !raceInfoOpen) return;
