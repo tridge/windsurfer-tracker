@@ -2150,7 +2150,9 @@
                         marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1, '#facc15']], finish: [0, -0.25] },
             trapezoid: { km: 1, base: 'starboard', order: 'S21234F',
                          marks: [[0, 0.2, '#facc15'], [0, 1], [0.9, 1], [0.9, 0.2, '#facc15']], finish: [1.1, 0.2] },
+            // crossing the start line mid-race: either way, shown going the course's way
             slalom: { km: 0.1, base: 'port', order: 'S123S1234F', pins: { start: 15, finish: 10 },
+                      startRounding: { port: 'both-port', starboard: 'both-starboard' },
                       marks: [[0, 1], [-0.43, 0.75, '#facc15'], [0, 0.5, null, 'starboard'], [-0.48, 0.23, '#facc15']],
                       finish: [0.07, 0.08] },
         };
@@ -2176,7 +2178,8 @@
             };
             const pt = (p, extra = {}) => ({ ...toLL([p[0] * mx * L, p[1] * L]), ...extra });
             const build = start => ({
-                start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide } },
+                start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide },
+                         ...(T.startRounding ? { rounding: T.startRounding[side] } : {}) },
                 marks: T.marks.map(m => {
                     const o = pt(m);
                     if (m[2]) o.color = m[2];
