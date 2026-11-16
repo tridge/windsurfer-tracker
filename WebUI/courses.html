@@ -685,6 +685,31 @@
         </div>
     </div>
 
+    <div class="edit-user-overlay" id="newCourseOverlay" onclick="if(event.target===this)closeNewCourse()">
+        <div class="edit-user-dialog">
+            <h3>New course</h3>
+            <label for="newCourseName">Name</label>
+            <input type="text" id="newCourseName" autocomplete="off" onkeydown="if(event.key==='Enter')confirmNewCourse()">
+            <label for="newCourseTemplate">Template</label>
+            <select id="newCourseTemplate">
+                <option value="">(none: draw it on the map)</option>
+                <option value="triangle-starboard">Triangle Starboard</option>
+                <option value="triangle-port">Triangle Port</option>
+                <option value="trapezoid-starboard">Trapezoid Starboard</option>
+                <option value="trapezoid-port">Trapezoid Port</option>
+                <option value="slalom-starboard">Slalom Starboard</option>
+                <option value="slalom-port">Slalom Port</option>
+            </select>
+            <div class="order-help">A template is placed at the map centre with its first leg into the wind
+                (the Wind menu's direction, else the live wind, else north): 1 km first leg for the
+                triangles and trapezoids, 0.1 km for slalom. Move, turn or resize it with Transform.</div>
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="closeNewCourse()">Cancel</button>
+                <button class="btn-save" onclick="confirmNewCourse()">Create</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Course transform panel (no backdrop so the map preview stays usable) -->
     <div class="transform-panel" id="restorePanel">
         <h3>Restore a course</h3>
@@ -2084,15 +2109,93 @@
             }
         }
 
-        async function newCourse() {
+        // New: a dialog for the name and an optional template
+        function newCourse() {
             if (importBusy()) return;
             closeTransform();
-            const name = prompt('New course name:');
-            if (!name) return;
+            document.getElementById('newCourseName').value = '';
+            document.getElementById('newCourseTemplate').value = '';
+            document.getElementById('newCourseOverlay').classList.add('visible');
+            document.getElementById('newCourseName').focus();
+        }
+
+        function closeNewCourse() {
+            document.getElementById('newCourseOverlay').classList.remove('visible');
+        }
+
+        function confirmNewCourse() {
+            const name = document.getElementById('newCourseName').value.trim();
+            const tpl = document.getElementById('newCourseTemplate').value;
+            if (!name) { document.getElementById('newCourseName').focus(); return; }
             if (allCourses[name]) {
                 alert(`Course "${name}" already exists. Select it to edit.`);
                 return;
             }
+            closeNewCourse();
+            if (tpl) createFromTemplate(name, tpl); else drawNewCourse(name);
+        }
+
+        // Course templates, in units of the first leg (y = upwind, x = to the right looking
+        // upwind), for the starboard version; port is the mirror image. km: first leg length.
+        // Triangle: marks 1, 2, 3 equilateral (60° corners); trapezoid: right angles.
+        const COURSE_TEMPLATES = {
+            triangle: { km: 1, order: 'S12313F', startPin: 0.08,
+                        marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1, '#facc15']], finish: [0, -0.25] },
+            trapezoid: { km: 1, order: 'S21234F', startPin: 0.066, finishPin: 0.05,
+                         marks: [[0, 0.2, '#facc15'], [0, 1], [0.9, 1], [0.9, 0.2, '#facc15']], finish: [1.1, 0.2] },
+            slalom: { km: 0.1, order: 'S123S1234F', startPin: 0.2, finishPin: 0.07,
+                      marks: [[0, 1], [-0.43, 0.75, '#facc15'], [0, 0.5, null, 'starboard'], [-0.48, 0.23, '#facc15']],
+                      finish: [0.07, 0.08] },
+        };
+
+        function templateCourse(key, centre, windFrom) {
+            const [shape, side] = key.split('-');
+            const T = COURSE_TEMPLATES[shape];
+            const L = T.km * 1000, mx = side === 'port' ? -1 : 1, th = windFrom * Math.PI / 180;
+            const raw = [[0, 0], ...T.marks, T.finish].map(p => [p[0] * mx * L, p[1] * L]);
+            // centre the course in the view
+            const cx = raw.reduce((a, p) => a + p[0], 0) / raw.length, cy = raw.reduce((a, p) => a + p[1], 0) / raw.length;
+            const toLL = ([x, y]) => {
+                x -= cx; y -= cy;
+                const east = x * Math.cos(th) + y * Math.sin(th), north = -x * Math.sin(th) + y * Math.cos(th);
+                return { lat: centre.lat + north / 111320,
+                         lon: centre.lng + east / (111320 * Math.cos(centre.lat * Math.PI / 180)) };
+            };
+            const pt = (p, extra = {}) => ({ ...toLL([p[0] * mx * L, p[1] * L]), ...extra });
+            const course = {
+                start: pt([0, 0], { pin: { dist: Math.round(T.startPin * L * 10) / 10, side: 'left' } }),
+                marks: T.marks.map(m => {
+                    const o = pt(m);
+                    if (m[2]) o.color = m[2];
+                    if (m[3]) o.rounding = side === 'port' ? (m[3] === 'starboard' ? 'port' : 'starboard') : m[3];
+                    return o;
+                }),
+                finish: pt(T.finish, T.finishPin ? { pin: { dist: Math.round(T.finishPin * L * 10) / 10, side: 'left' } } : {}),
+                order: T.order,
+            };
+            return course;
+        }
+
+        // first leg into the wind: the Wind menu's direction, else the live wind, else north
+        function templateWindFrom() {
+            if (selectedWindFrom !== null) return selectedWindFrom;
+            const w = typeof WindDisplay !== 'undefined' ? WindDisplay.current() : null;
+            return w ? w.dir : 0;
+        }
+
+        async function createFromTemplate(name, key) {
+            const course = templateCourse(key, map.getCenter(), templateWindFrom());
+            selectedCourseName = name;
+            courseData = course;
+            activeSub = 'A';
+            await saveSelectedCourse('create=1');
+            if (selectedCourseName === name && courseData) {
+                const b = L.latLngBounds(coursePoints(courseData).map(p => [p.lat, p.lon]));
+                if (b.isValid()) map.fitBounds(b.pad(0.2));
+            }
+        }
+
+        async function drawNewCourse(name) {
             drawingCourseName = name;
             drawingBase = courseSig(allCourses[name]);
             drawingSub = 'A';
