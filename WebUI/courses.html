@@ -370,6 +370,10 @@
             max-height: calc(100vh - 110px); overflow-y: auto; box-sizing: border-box;
         }
         .transform-panel.visible { display: block; }
+        .tf-wind-manual { display: flex; align-items: center; gap: 3px; font-size: 12px; width: auto !important; margin-left: 4px; }
+        #tfWindDeg { width: 56px; }
+        #tfWindDeg:disabled { opacity: 0.45; }
+        .tf-wind-unit { font-size: 12px; }
         .restore-list { margin: 4px 0; }
         .restore-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #eee; font-size: 12px; }
         .restore-row .restore-text { flex: 1; min-width: 0; }
@@ -731,6 +735,11 @@
             </div>
             <div class="tf-row" id="tfWindRow" style="display:none">
                 <button class="tf-small-btn" id="tfWindBtn" onclick="tfAlignToWind()">🧭 Align to wind</button>
+                <label class="tf-wind-manual" title="Align to a direction you enter instead of the live wind">
+                    <input type="checkbox" id="tfWindManual" onchange="tfWindManualChanged()"> from</label>
+                <input type="number" id="tfWindDeg" min="0" max="359" step="1" inputmode="numeric" disabled
+                       aria-label="Wind direction to align to, degrees true the wind blows from" oninput="tfUpdateWindBtn()">
+                <span class="tf-wind-unit">°T</span>
             </div>
         </div>
         <div class="tf-section">
@@ -2823,23 +2832,57 @@
             return pts.length >= 2 ? bearingDeg(pts[0], pts[1]) : null;
         }
 
+        // the direction entered next to the button (ticked, 0-359), else null
+        function tfManualWind() {
+            if (!document.getElementById('tfWindManual').checked) return null;
+            const v = document.getElementById('tfWindDeg').value.trim(), n = Number(v);
+            return v !== '' && Number.isInteger(n) && n >= 0 && n <= 359 ? n : null;
+        }
+
+        function tfWindManualChanged() {
+            const on = document.getElementById('tfWindManual').checked, inp = document.getElementById('tfWindDeg');
+            inp.disabled = !on;
+            if (on && inp.value === '') {    // start from the Wind menu's direction, else the live wind
+                const w = typeof WindDisplay !== 'undefined' ? WindDisplay.current() : null;
+                const d = selectedWindFrom !== null ? selectedWindFrom : w ? Math.round(w.dir) % 360 : null;
+                if (d !== null) inp.value = d;
+            }
+            if (on) inp.focus();
+            tfUpdateWindBtn();
+        }
+
+        // the wind the button aligns to: the entered direction when ticked, else the live wind
+        function tfAlignWind() {
+            if (document.getElementById('tfWindManual').checked) {
+                const m = tfManualWind();
+                return m === null ? null : { dir: m, manual: true };
+            }
+            const w = typeof WindDisplay !== 'undefined' ? WindDisplay.current() : null;
+            return w ? { ...w, manual: false } : null;
+        }
+
         function tfUpdateWindBtn() {
             const row = document.getElementById('tfWindRow');
             if (!row) return;
-            const w = typeof WindDisplay !== 'undefined' ? WindDisplay.current() : null;
-            const ok = !!(w && transformActive && tfSession && tfFirstLegBearing() !== null);
+            const ok = !!(transformActive && tfSession && tfFirstLegBearing() !== null);
             row.style.display = ok ? '' : 'none';
-            if (ok) {
-                const d = String(Math.round(w.dir) % 360).padStart(3, '0');
-                const btn = document.getElementById('tfWindBtn');
-                btn.textContent = `🧭 Align to wind (${d}°T)`;
-                btn.title = `First leg into the wind: from ${d}°T` + (w.avg ? ' (10 minute average)' : '') +
-                            `, ${w.speed_kn.toFixed(1)} kn, ${Math.round(w.age / 60)} min ago`;
+            if (!ok) return;
+            const w = tfAlignWind(), btn = document.getElementById('tfWindBtn');
+            btn.disabled = !w;
+            if (!w) {
+                const manual = document.getElementById('tfWindManual').checked;
+                btn.textContent = '🧭 Align to wind';
+                btn.title = manual ? 'Enter a direction from 0 to 359' : 'No live wind: tick "from" and enter a direction';
+                return;
             }
+            const d = String(Math.round(w.dir) % 360).padStart(3, '0');
+            btn.textContent = w.manual ? `🧭 Align to ${d}°T` : `🧭 Align to wind (${d}°T)`;
+            btn.title = `First leg into the wind: from ${d}°T` + (w.manual ? ' (entered)' :
+                (w.avg ? ' (10 minute average)' : '') + `, ${w.speed_kn.toFixed(1)} kn, ${Math.round(w.age / 60)} min ago`);
         }
 
         function tfAlignToWind() {
-            const w = WindDisplay.current();
+            const w = tfAlignWind();
             const leg = tfSession ? tfFirstLegBearing() : null;
             if (!w || leg === null) { tfUpdateWindBtn(); return; }
             const rot = Math.round(((w.dir - leg) % 360 + 540) % 360 - 180);   // -180..179
