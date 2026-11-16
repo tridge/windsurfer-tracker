@@ -617,6 +617,7 @@
                     <option value="#3b82f6">Blue</option>
                     <option value="#8b5cf6">Purple</option>
                     <option value="#facc15">Yellow</option>
+                    <option value="#ec4899">Pink</option>
                 </select>
             </div>
             <div id="roundingRow">
@@ -652,6 +653,7 @@
                         <option value="#3b82f6">Blue</option>
                         <option value="#8b5cf6">Purple</option>
                         <option value="#facc15">Yellow</option>
+                        <option value="#ec4899">Pink</option>
                     </select>
                     <div class="order-help" id="pinHelp"></div>
                 </div>
@@ -2157,17 +2159,19 @@
         // the other side is the mirror image, with explicit roundings and pin sides swapped.
         // km: first leg length, sailed from the middle of the start line to the first mark.
         // Start/finish lines: 50 m / 25 m (TEMPLATE_PINS), slalom 15 m / 10 m (its own pins).
+        // Colours: marks the default orange, the start pin green, the finish and its pin blue.
         // Triangle: marks 1, 2, 3 equilateral (60° corners); trapezoid: right angles.
         const TEMPLATE_PINS = { start: 50, finish: 25 };
         const COURSE_TEMPLATES = {
             triangle: { km: 1, base: 'starboard', order: 'S12313F',
-                        marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1, '#facc15']], finish: [0, -0.25] },
+                        marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1]], finish: [0, -0.25] },
+            // finish below and inside mark 4, so 3 -> 4 -> F properly rounds 4 (as on the Parkdale course)
             trapezoid: { km: 1, base: 'starboard', order: 'S21234F',
-                         marks: [[0, 0.2, '#facc15'], [0, 1], [0.9, 1], [0.9, 0.2, '#facc15']], finish: [1.1, 0.2] },
+                         marks: [[0, 0.2], [0, 1], [0.9, 1], [0.9, 0.2]], finish: [0.77, -0.01] },
             // crossing the start line mid-race: either way, shown going the course's way
             slalom: { km: 0.1, base: 'port', order: 'S123S1234F', pins: { start: 15, finish: 10 },
                       startRounding: { port: 'both-port', starboard: 'both-starboard' },
-                      marks: [[0, 1], [-0.43, 0.75, '#facc15'], [0, 0.5, null, 'starboard'], [-0.48, 0.23, '#facc15']],
+                      marks: [[0, 1], [-0.43, 0.75], [0, 0.5, null, 'starboard'], [-0.48, 0.23]],
                       finish: [0.07, 0.08] },
         };
 
@@ -2194,7 +2198,7 @@
             // every mark's rounding is set (the base side unless the layout says otherwise): the
             // automatic side, from the net turn, can't be relied on for layouts that double back
             const build = start => ({
-                start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide },
+                start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide, color: '#22c55e' },
                          ...(T.startRounding ? { rounding: T.startRounding[side] } : {}) },
                 marks: T.marks.map(m => {
                     const o = pt(m);
@@ -2203,7 +2207,7 @@
                     o.rounding = mirror ? swap(r) : r;
                     return o;
                 }),
-                finish: pt(T.finish, { pin: { dist: (T.pins || TEMPLATE_PINS).finish, side: pinSide } }),
+                finish: pt(T.finish, { color: '#3b82f6', pin: { dist: (T.pins || TEMPLATE_PINS).finish, side: pinSide, color: '#3b82f6' } }),
                 order: T.order,
             });
             // the first leg is sailed from the middle of the start line: move the start mark until
