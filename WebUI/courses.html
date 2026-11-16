@@ -1216,10 +1216,6 @@
         let importing = false;
         let renaming = false;           // a rename is in progress: no edits until it's done
         const pendingCreates = new Map(); // name -> queued create-only save not yet answered
-        // name -> loadGen when its create-only save was refused or failed: until a reload started
-        // after that comes back, other saves of that name are refused too (else an edit to the
-        // unsaved draft would overwrite the course that took the name)
-        const refusedCreates = new Map();
         let courseDataSig = null;       // courseSig() of the file courseData was loaded or last saved as
         let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
@@ -1788,6 +1784,9 @@
             const r = await queueSave(name, data, true, query);
             if (r.error) alert(r.error);
             await reloadAndReselect();
+            // a refused create: show the course that has that name, if the reload found it
+            if (!r.saved && query.includes('create=1') && !selectedCourseName && allCourses[name])
+                selectCourse(name, allCourses[name], false);
             return r.saved;
         }
 
@@ -1805,13 +1804,12 @@
             const creating = pendingCreates.get(name);
             const isCreate = query.includes('create=1');
             const run = saveChain.then(async () => {
-                if (!isCreate && ((creating && !(await creating).saved) || refusedCreates.has(name)))
+                if (!isCreate && creating && !(await creating).saved) {
+                    if (allCourses[name] === snap) delete allCourses[name];   // an edit of the refused draft
                     return { saved: false, error: `Not saved: course "${name}" couldn't be created` };
-                const r = await postCourse(name, snap, live, query);
-                if (isCreate && !r.saved) {
-                    refusedCreates.set(name, loadGen);
-                    if (allCourses[name] === snap) delete allCourses[name];   // the draft isn't a course
                 }
+                const r = await postCourse(name, snap, live, query);
+                if (isCreate && !r.saved) abandonDraft(name);
                 return r;
             });
             saveChain = run;
@@ -1823,6 +1821,26 @@
                 if (pendingSaves.get(name) === entry) pendingSaves.delete(name);
                 return r;
             });
+        }
+
+        // A create-only save was refused (the name is taken) or failed: the new course doesn't
+        // exist, so drop it from the editor at once: nothing left to edit can then be saved over
+        // the course that has the name. The reload that follows shows that one, if there is one.
+        function abandonDraft(name) {
+            if (allCourses[name] && pendingSaves.has(name)) delete allCourses[name];
+            pendingSaves.delete(name);
+            if (selectedCourseName !== name) return;
+            closeTransform();
+            closeMarkOrder();
+            cancelMoveMark();
+            closeEditMark();
+            if (drawingMode && drawingCourseName === name) cancelDrawing();
+            selectedCourseName = null;
+            courseData = null;
+            clearCourseDisplay();
+            document.getElementById('courseInfoBox').style.display = 'none';
+            setCourseUrl(null);
+            refreshRaceInfo();
         }
 
         async function postCourse(name, data, live, query = '') {
@@ -3495,8 +3513,6 @@
                 appliedGen = myGen;
                 const newCourses = data.courses;
                 for (const [n, p] of pendingSaves) newCourses[n] = p.data;
-                // the server's view after a refused create: that name is the server's course again
-                for (const [n, g] of refusedCreates) if (myGen > g) refusedCreates.delete(n);
 
                 // Skip UI rebuild if nothing has changed
                 const newJSON = JSON.stringify(newCourses);
