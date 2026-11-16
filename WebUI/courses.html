@@ -297,6 +297,8 @@
             padding: 20px;
             width: 300px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-height: calc(100vh - 60px);   /* short screens: scroll to the buttons (+40px padding) */
+            overflow-y: auto;
         }
         .edit-user-dialog h3 { margin: 0 0 16px 0; font-size: 16px; }
         .edit-user-dialog label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
@@ -1208,6 +1210,10 @@
         let importing = false;
         let renaming = false;           // a rename is in progress: no edits until it's done
         const pendingCreates = new Map(); // name -> queued create-only save not yet answered
+        // name -> loadGen when its create-only save was refused or failed: until a reload started
+        // after that comes back, other saves of that name are refused too (else an edit to the
+        // unsaved draft would overwrite the course that took the name)
+        const refusedCreates = new Map();
         let courseDataSig = null;       // courseSig() of the file courseData was loaded or last saved as
         let loadGen = 0, appliedGen = 0; // course reloads started / newest one applied          // an import is being saved
         let drawingBase = null;         // courseSig() of the file when Draw started, to spot changes
@@ -1791,10 +1797,16 @@
             // a create still waiting on the server holds later saves of that name; if it was
             // refused (the name exists), they would overwrite someone else's course, so drop them
             const creating = pendingCreates.get(name);
+            const isCreate = query.includes('create=1');
             const run = saveChain.then(async () => {
-                if (creating && !query.includes('create=1') && !(await creating).saved)
+                if (!isCreate && ((creating && !(await creating).saved) || refusedCreates.has(name)))
                     return { saved: false, error: `Not saved: course "${name}" couldn't be created` };
-                return postCourse(name, snap, live, query);
+                const r = await postCourse(name, snap, live, query);
+                if (isCreate && !r.saved) {
+                    refusedCreates.set(name, loadGen);
+                    if (allCourses[name] === snap) delete allCourses[name];   // the draft isn't a course
+                }
+                return r;
             });
             saveChain = run;
             if (query.includes('create=1')) {
@@ -2115,6 +2127,8 @@
             if (importBusy()) return;
             if (drawingMode) { alert('Finish or cancel the drawing first'); return; }
             closeTransform();
+            closeRestore();
+            closeMarkOrder();
             document.getElementById('newCourseName').value = '';
             document.getElementById('newCourseTemplate').value = '';
             document.getElementById('newCourseOverlay').classList.add('visible');
@@ -2177,13 +2191,16 @@
                 return [east * Math.cos(th) - north * Math.sin(th) + cx, east * Math.sin(th) + north * Math.cos(th) + cy];
             };
             const pt = (p, extra = {}) => ({ ...toLL([p[0] * mx * L, p[1] * L]), ...extra });
+            // every mark's rounding is set (the base side unless the layout says otherwise): the
+            // automatic side, from the net turn, can't be relied on for layouts that double back
             const build = start => ({
                 start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide },
                          ...(T.startRounding ? { rounding: T.startRounding[side] } : {}) },
                 marks: T.marks.map(m => {
                     const o = pt(m);
                     if (m[2]) o.color = m[2];
-                    if (m[3]) o.rounding = mirror ? swap(m[3]) : m[3];
+                    const r = m[3] || T.base;
+                    o.rounding = mirror ? swap(r) : r;
                     return o;
                 }),
                 finish: pt(T.finish, { pin: { dist: (T.pins || TEMPLATE_PINS).finish, side: pinSide } }),
@@ -3470,6 +3487,8 @@
                 appliedGen = myGen;
                 const newCourses = data.courses;
                 for (const [n, p] of pendingSaves) newCourses[n] = p.data;
+                // the server's view after a refused create: that name is the server's course again
+                for (const [n, g] of refusedCreates) if (myGen > g) refusedCreates.delete(n);
 
                 // Skip UI rebuild if nothing has changed
                 const newJSON = JSON.stringify(newCourses);
