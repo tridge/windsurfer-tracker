@@ -702,7 +702,7 @@
             </select>
             <div class="order-help">A template is placed at the map centre with its first leg into the wind
                 (the Wind menu's direction, else the live wind, else north): 1 km first leg for the
-                triangles and trapezoids, 0.1 km for slalom; 50 m start line, 25 m finish line.
+                triangles and trapezoids, 0.1 km for slalom; start/finish lines 50/25 m (slalom 15/10 m).
                 Move, turn or resize it with Transform.</div>
             <div class="btn-row">
                 <button class="btn-cancel" onclick="closeNewCourse()">Cancel</button>
@@ -2142,7 +2142,7 @@
         // upwind). base: which rounding side this layout sails (its marks auto-round that way);
         // the other side is the mirror image, with explicit roundings and pin sides swapped.
         // km: first leg length, sailed from the middle of the start line to the first mark.
-        // Every template has a 50 m start line and a 25 m finish line (TEMPLATE_PINS).
+        // Start/finish lines: 50 m / 25 m (TEMPLATE_PINS), slalom 15 m / 10 m (its own pins).
         // Triangle: marks 1, 2, 3 equilateral (60° corners); trapezoid: right angles.
         const TEMPLATE_PINS = { start: 50, finish: 25 };
         const COURSE_TEMPLATES = {
@@ -2150,7 +2150,7 @@
                         marks: [[0, 1], [0.45 * Math.sqrt(3), 0.55], [0, 0.1, '#facc15']], finish: [0, -0.25] },
             trapezoid: { km: 1, base: 'starboard', order: 'S21234F',
                          marks: [[0, 0.2, '#facc15'], [0, 1], [0.9, 1], [0.9, 0.2, '#facc15']], finish: [1.1, 0.2] },
-            slalom: { km: 0.1, base: 'port', order: 'S123S1234F',
+            slalom: { km: 0.1, base: 'port', order: 'S123S1234F', pins: { start: 15, finish: 10 },
                       marks: [[0, 1], [-0.43, 0.75, '#facc15'], [0, 0.5, null, 'starboard'], [-0.48, 0.23, '#facc15']],
                       finish: [0.07, 0.08] },
         };
@@ -2176,14 +2176,14 @@
             };
             const pt = (p, extra = {}) => ({ ...toLL([p[0] * mx * L, p[1] * L]), ...extra });
             const build = start => ({
-                start: { ...toLL(start), pin: { dist: TEMPLATE_PINS.start, side: pinSide } },
+                start: { ...toLL(start), pin: { dist: (T.pins || TEMPLATE_PINS).start, side: pinSide } },
                 marks: T.marks.map(m => {
                     const o = pt(m);
                     if (m[2]) o.color = m[2];
                     if (m[3]) o.rounding = mirror ? swap(m[3]) : m[3];
                     return o;
                 }),
-                finish: pt(T.finish, { pin: { dist: TEMPLATE_PINS.finish, side: pinSide } }),
+                finish: pt(T.finish, { pin: { dist: (T.pins || TEMPLATE_PINS).finish, side: pinSide } }),
                 order: T.order,
             });
             // the first leg is sailed from the middle of the start line: move the start mark until
