@@ -22,3 +22,5 @@ sitl_wstrplmn.*
 snap*-asan
 __pycache__/
 .sitl-run/
+flash_template.zip
+*.flash.zip

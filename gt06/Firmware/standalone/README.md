@@ -23,7 +23,7 @@ descriptor `+0x14` with `r0` = a resident symbol-resolver, the sAPI dispatch tab
 ```
 make            # standalone_fw.bin           (OTA-loadable, XOR-padded)
 make flashimg   # customer_app_standalone.bin (partition body, padded to 0x30000)
-make usb-debug  # dedicated USB-debug flash zip + B53-named FOTA image
+make usb-debug FLASH_TEMPLATE=<vendor flash zip>  # USB-debug flash zip + B53-named FOTA image
 make test-usb-debug
 ```
 

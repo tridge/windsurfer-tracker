@@ -45,8 +45,15 @@ customer_app_usb_debug.bin: usb_debug_fw.bin
 body=d[:8+clen]; assert len(body)<=0x30000; \
 open('$@','wb').write(body+b'\0'*(0x30000-len(body))); print('$@',len(body),'->',0x30000)"
 
-customer_app_usb_debug.bin.flash.zip: customer_app_usb_debug.bin customer_app_standalone.bin.flash.zip
-	python3 -c "import zipfile; src=zipfile.ZipFile('customer_app_standalone.bin.flash.zip'); \
+# The SIMCom/ASR USB flash package (preboot/flasher loaders, partition tables) is vendor tooling and is not
+# in the repo: point FLASH_TEMPLATE at a flash zip for the unit; only its fw_image.bin is replaced.
+FLASH_TEMPLATE ?= flash_template.zip
+
+$(FLASH_TEMPLATE):
+	@echo "usb-debug needs the vendor flash package: set FLASH_TEMPLATE=<flash zip>" >&2; exit 1
+
+customer_app_usb_debug.bin.flash.zip: customer_app_usb_debug.bin $(FLASH_TEMPLATE)
+	python3 -c "import zipfile; src=zipfile.ZipFile('$(FLASH_TEMPLATE)'); \
 dst=zipfile.ZipFile('$@','w',zipfile.ZIP_DEFLATED); \
 [dst.writestr(i,open('$<','rb').read() if i.filename=='fw_image.bin' else src.read(i.filename)) for i in src.infolist()]; \
 dst.close(); src.close(); print('$@')"
